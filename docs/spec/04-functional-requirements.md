@@ -12,6 +12,22 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 
 **AC:** create an investigation, add a node and import a file, zip the folder, unzip it on the other OS and open it: all nodes, calculations, files and history are present, and no absolute paths are needed.
 
+## FR-SYNC · Versions and sync (D71)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-SYNC-01 | Opening an investigation saved by a newer app version (a schema revision this app does not know) stops before anything is written and says to update the app, with the commands. | D71 | after 5 |
+| FR-SYNC-02 | An open investigation can be linked to an empty Git repository by its address. The app writes `.gitignore` (lock file, journal, `backups/`) and `.gitattributes` (no line-ending conversion), commits and pushes. A repository that is not empty is refused. | D71 | after 5 |
+| FR-SYNC-03 | "Open from GitHub" clones a linked investigation into a new folder and opens it. | D71 | after 5 |
+| FR-SYNC-04 | Opening a linked investigation pulls first (fast-forward only) and pushes anything left unpushed. Without a connection it opens anyway and says so. | D71 | after 5 |
+| FR-SYNC-05 | Closing the investigation, the Sync button and stopping the app commit everything and push. The header shows the sync state: up to date, not pushed, newer on GitHub, both changed, or not reachable. | D71 | after 5 |
+| FR-SYNC-06 | When both this computer and GitHub have changes, nothing is merged. The user sees when and where each copy was last changed and keeps one; the other is saved (database in `backups/`, commits in the history or on a `set-aside/…` branch). | D71 | after 5 |
+| FR-SYNC-07 | Before a schema upgrade of a linked investigation, the app asks for confirmation. | D71 | after 5 |
+| FR-SYNC-08 | Sign-in is left to git's credential helper; the app stores no credentials, and a missing sign-in fails at once with a message saying how to sign in. | D71 | after 5 |
+| FR-SYNC-09 | The import preview warns when a file over 100 MB is imported into a linked investigation. | D71 | after 5 |
+
+**AC:** link an investigation to an empty bare repository, clone it into a second folder, change it there and sync, then open the first copy: it shows the change. Change both copies and sync: nothing is merged, the chosen copy is kept, and the other is saved.
+
 ## FR-NODE · Nodes and geometry
 
 | ID | Requirement | Trace | Phase |

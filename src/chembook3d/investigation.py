@@ -47,6 +47,31 @@ class InvestigationLocked(InvestigationError):
         )
 
 
+UPDATE_COMMANDS = "git pull, uv sync, then uv run python scripts/build_frontend.py"
+
+
+class InvestigationTooNew(InvestigationError):
+    """The database has a schema revision this app does not know (D71, FR-SYNC-01)."""
+
+    def __init__(self, revision: str, head: str):
+        self.revision = revision
+        self.head = head
+        super().__init__(
+            "This investigation was saved by a newer version of Chembook3D (database version "
+            f"{revision}; this app knows up to {head}). Update the app on this computer, then "
+            f"open it again. In the Chembook3D folder: {UPDATE_COMMANDS}."
+        )
+
+
+class NeedsUpgrade(InvestigationError):
+    """Opening would upgrade the schema, and the caller asked to confirm that first (D71c)."""
+
+    def __init__(self, revision: str, head: str):
+        self.revision = revision
+        self.head = head
+        super().__init__(f"opening upgrades the database from {revision} to {head}")
+
+
 def _alembic_config(connection) -> Config:
     config = Config()
     config.set_main_option("script_location", "chembook3d:migrations")
@@ -138,14 +163,21 @@ def _write_lock(folder: Path) -> None:
     (folder / LOCK_NAME).write_text(json.dumps(lock), encoding="utf-8")
 
 
-def _migrate(engine: Engine, db_path: Path) -> str | None:
+def _migrate(engine: Engine, db_path: Path, allow_upgrade: bool = True) -> str | None:
     """Bring the schema to the latest revision. Before changing an existing database, copy
-    it to backups/ (NFR-DATA-03). Returns the backup path, or None when nothing changed."""
+    it to backups/ (NFR-DATA-03). Returns the backup path, or None when nothing changed.
+    A revision this app does not know was written by a newer app: nothing is changed (D71)."""
     with engine.connect() as connection:
         current = MigrationContext.configure(connection).get_current_revision()
-        head = ScriptDirectory.from_config(_alembic_config(connection)).get_current_head()
+        scripts = ScriptDirectory.from_config(_alembic_config(connection))
+        head = scripts.get_current_head()
+        known = {script.revision for script in scripts.walk_revisions()}
     if current == head:
         return None
+    if current is not None and current not in known:
+        raise InvestigationTooNew(current, head)
+    if current is not None and not allow_upgrade:
+        raise NeedsUpgrade(current, head)
 
     backup = None
     if current is not None:
@@ -206,22 +238,35 @@ def create_investigation(folder: Path, name: str) -> Investigation:
     return Investigation(folder, engine, sessions)
 
 
-def open_investigation(folder: Path, force: bool = False) -> Investigation:
-    """Open an existing investigation. Raises InvestigationLocked if another running app
-    holds the lock, unless force=True (the user chose to open it anyway)."""
+def check_lock(folder: Path, force: bool = False) -> None:
+    """Raise InvestigationLocked if another running app holds the lock, unless force=True
+    (the user chose to open it anyway)."""
     folder = Path(folder)
-    db_path = folder / DB_NAME
-    if not db_path.is_file():
+    if not (folder / DB_NAME).is_file():
         raise InvestigationError(f"{folder} does not contain an investigation")
-
     lock = _read_lock(folder)
     if lock and not force and not _lock_is_stale(lock):
         mine = lock.get("host") == socket.gethostname() and lock.get("pid") == os.getpid()
         if not mine:
             raise InvestigationLocked(lock)
 
+
+def open_investigation(
+    folder: Path, force: bool = False, allow_upgrade: bool = True
+) -> Investigation:
+    """Open an existing investigation. Raises InvestigationLocked if another running app
+    holds the lock (see check_lock), InvestigationTooNew if a newer app saved it, and
+    NeedsUpgrade if it needs a migration and allow_upgrade is False."""
+    folder = Path(folder)
+    db_path = folder / DB_NAME
+    check_lock(folder, force)
+
     engine = _make_engine(db_path)
-    _migrate(engine, db_path)
+    try:
+        _migrate(engine, db_path, allow_upgrade)
+    except BaseException:
+        engine.dispose()  # Windows keeps a file open until its connections are closed
+        raise
     (folder / FILES_DIR).mkdir(exist_ok=True)
     _remove_orphaned_copies(folder, engine)
     _write_lock(folder)

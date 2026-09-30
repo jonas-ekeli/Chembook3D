@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from chembook3d import __version__
 from chembook3d.api.energies import router as energy_router
 from chembook3d.api.pathway import router as pathway_router
-from chembook3d.api.routes import router
+from chembook3d.api.routes import close_and_push, router
 from chembook3d.services.imports import Staging
 from chembook3d.services.records import RecordError, RecordNotFound
 
@@ -38,6 +38,9 @@ uv run chembook3d</pre>
 """
 
 
+SHUTDOWN_PUSH_TIMEOUT = 20  # seconds
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.investigation = None
@@ -45,7 +48,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     app.state.staging.clear()  # previewed but not imported files (FR-IMP-05)
     if app.state.investigation is not None:  # release the lock file on shutdown (P22)
-        app.state.investigation.close()
+        # A linked investigation is also pushed, with a short time limit (FR-SYNC-05);
+        # what does not get through is pushed when it is next opened (FR-SYNC-04).
+        status = close_and_push(app.state.investigation, timeout=SHUTDOWN_PUSH_TIMEOUT)
+        if status is not None:
+            print(f"Chembook3D sync: {status.message}", flush=True)
 
 
 def create_app() -> FastAPI:

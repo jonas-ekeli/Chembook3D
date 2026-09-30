@@ -5,6 +5,7 @@ import {
   ApiError,
   energyTypeName,
   STATUSES,
+  SYNC_PROBLEMS,
   type Canvas,
   type EnergyOptions,
   type EnergyType,
@@ -15,6 +16,8 @@ import {
   type Investigation,
   type Node,
   type Settings,
+  type SyncConflict,
+  type SyncStatus,
 } from './api'
 import { NO_FILTERS, type Filters, type Selection, type ViewMode } from './canvasView'
 import { CanvasPane, type CanvasEnergy } from './components/Canvas'
@@ -27,6 +30,13 @@ import { NodeInspector } from './components/NodeInspector'
 import { Outline } from './components/Outline'
 import { Overview } from './components/Overview'
 import { recordNames } from './names'
+import {
+  CloneDialog,
+  ConflictDialog,
+  LinkDialog,
+  SyncButton,
+  UpgradeDialog,
+} from './components/SyncDialogs'
 import { BranchInspector, GroupInspector, SelectionInspector, TransitionInspector } from './components/PathwayInspectors'
 
 type LockPrompt = { folder: string; host?: string; openedAt?: string }
@@ -144,6 +154,13 @@ function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // Git sync (D71)
+  const [sync, setSync] = useState<SyncStatus | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [linking, setLinking] = useState(false)
+  const [cloning, setCloning] = useState<{ url: string; name: string } | 'address' | null>(null)
+  const [conflict, setConflict] = useState<SyncConflict | null>(null)
+  const [upgrade, setUpgrade] = useState<{ folder: string } | null>(null)
 
   const [view, setView] = useState<'canvas' | 'history'>('canvas')
   const [canvas, setCanvas] = useState<Canvas>(EMPTY_CANVAS)
@@ -240,12 +257,18 @@ function App() {
     [shownView, shownType, edgeEnergies, referenceId, settings],
   )
 
-  const opened = (inv: Investigation) => {
+  /** fresh: the investigation was closed in between (to resolve a sync conflict), so it is
+   * shown anew even if it is the one this render still has. */
+  const opened = (inv: Investigation, fresh = false) => {
+    if (inv.sync) setSync(inv.sync)
+    else if (!inv.linked) setSync(null)
+    // Opened, but the pull did not get through (FR-SYNC-04): say why.
+    const syncProblem = inv.sync && SYNC_PROBLEMS.includes(inv.sync.state) ? `Sync: ${inv.sync.message}` : null
     // Opening the investigation already shown keeps the canvas and selection: resetting them when
     // the answer arrives would drop whatever was clicked in the meantime.
-    if (investigation && investigation.folder === inv.folder) {
+    if (!fresh && investigation && investigation.folder === inv.folder) {
       setError(null)
-      setNotice(null)
+      setNotice(syncProblem)
       setView('canvas')
       return
     }
@@ -259,21 +282,70 @@ function App() {
     setExpanded(new Set())
     setInvestigation(inv)
     setError(null)
-    setNotice(null)
+    setNotice(syncProblem)
     setView('canvas')
     api.settings().then(setSettings, () => undefined)
   }
 
-  const openFolder = (folder: string, force = false) => {
+  const openFailed = (folder: string) => (err: unknown) => {
+    if (err instanceof ApiError && err.lock) {
+      setLockPrompt({ folder, host: err.lock.host, openedAt: err.lock.opened_at })
+    } else if (err instanceof ApiError && err.syncConflict) {
+      setConflict(err.syncConflict)
+    } else if (err instanceof ApiError && err.needsUpgrade) {
+      setUpgrade({ folder })
+    } else {
+      setError(errorText(err))
+    }
+  }
+
+  const openFolder = (folder: string, force = false, upgradeConfirmed = false) => {
     setPicker(null)
     setLockPrompt(null)
-    api.openInvestigation(folder, force).then(opened, (err: unknown) => {
-      if (err instanceof ApiError && err.lock) {
-        setLockPrompt({ folder, host: err.lock.host, openedAt: err.lock.opened_at })
-      } else {
+    setUpgrade(null)
+    api.openInvestigation(folder, force, upgradeConfirmed).then(opened, openFailed(folder))
+  }
+
+  const cloneInto = (url: string, folder: string) => {
+    setCloning(null)
+    setNotice(null)
+    setError(null)
+    api.cloneInvestigation(url, folder).then(opened, openFailed(folder))
+  }
+
+  const syncNow = () => {
+    if (!investigation) return
+    setSyncing(true)
+    api.syncNow().then(
+      (status) => {
+        setSyncing(false)
+        setSync(status)
+        if (status.state === 'diverged') setConflict({ ...status, folder: investigation.folder })
+        else if (SYNC_PROBLEMS.includes(status.state)) setError(`Sync: ${status.message}`)
+        else setNotice(`Sync: ${status.message}`)
+      },
+      (err: unknown) => {
+        setSyncing(false)
         setError(errorText(err))
-      }
-    })
+      },
+    )
+  }
+
+  const keepCopy = (keep: 'this' | 'github') => {
+    if (!conflict) return
+    const folder = conflict.folder
+    // The backend closes the investigation to resolve; it is opened again afterwards.
+    if (investigation && investigation.folder === folder) setInvestigation(null)
+    api.resolveSync(folder, keep).then(
+      () => {
+        setConflict(null)
+        api.openInvestigation(folder).then((inv) => opened(inv, true), openFailed(folder))
+      },
+      (err: unknown) => {
+        setConflict(null)
+        setError(errorText(err))
+      },
+    )
   }
 
   const createAt = (folder: string, name: string) => {
@@ -282,8 +354,13 @@ function App() {
   }
 
   const close = () => {
-    api.closeInvestigation().then(() => {
+    const folder = investigation?.folder
+    api.closeInvestigation().then((status) => {
       setInvestigation(null)
+      setSync(null)
+      // Closing pushes a linked investigation (FR-SYNC-05).
+      if (status && folder && status.state === 'diverged') setConflict({ ...status, folder })
+      else if (status && SYNC_PROBLEMS.includes(status.state)) setError(`Sync: ${status.message}`)
       api.settings().then(setSettings, () => undefined)
     })
   }
@@ -393,6 +470,38 @@ function App() {
           onChoose={(folder, name) => (picker === 'open' ? openFolder(folder) : createAt(folder, name))}
         />
       )}
+      {cloning === 'address' && (
+        <CloneDialog onCancel={() => setCloning(null)} onNext={(url, name) => setCloning({ url, name })} />
+      )}
+      {cloning && cloning !== 'address' && (
+        <FolderPicker
+          mode="create"
+          title="Where to put the investigation"
+          chooseLabel="Copy from GitHub"
+          initialName={cloning.name}
+          onCancel={() => setCloning(null)}
+          onChoose={(folder) => cloneInto(cloning.url, folder)}
+        />
+      )}
+      {linking && (
+        <LinkDialog
+          onCancel={() => setLinking(false)}
+          onLinked={(status) => {
+            setLinking(false)
+            setSync(status)
+            if (investigation) setInvestigation({ ...investigation, linked: true, sync: status })
+            setNotice(`Sync: ${status.message}`)
+          }}
+        />
+      )}
+      {conflict && <ConflictDialog conflict={conflict} onCancel={() => setConflict(null)} onKeep={keepCopy} />}
+      {upgrade && (
+        <UpgradeDialog
+          folder={upgrade.folder}
+          onCancel={() => setUpgrade(null)}
+          onUpgrade={() => openFolder(upgrade.folder, false, true)}
+        />
+      )}
       {lockPrompt && (
         <Modal
           title="Investigation may be open elsewhere"
@@ -491,6 +600,7 @@ function App() {
           target={[...canvas.nodes, ...canvas.species].find((n) => n.id === importRequest.targetId) ?? null}
           nodes={[...canvas.nodes, ...canvas.species]}
           asSpecies={importRequest.species ?? false}
+          linked={investigation.linked}
           energyUnit={settings?.energy_unit ?? 'kcal/mol'}
           energyFactor={settings ? (settings.energy_factors[settings.energy_unit] ?? 1) : 627.5094740631}
           queued={Math.max(0, importRequest.files.length - 1)}
@@ -526,6 +636,7 @@ function App() {
             New investigation…
           </button>
           <button onClick={() => setPicker('open')}>Open investigation…</button>
+          <button onClick={() => setCloning('address')}>Open from GitHub…</button>
         </div>
         {settings && settings.recent.length > 0 && (
           <section>
@@ -749,6 +860,11 @@ function App() {
           </>
         )}
         <span className="spacer" />
+        {investigation.linked ? (
+          <SyncButton status={sync} busy={syncing} onSync={syncNow} />
+        ) : (
+          <button onClick={() => setLinking(true)}>Sync with GitHub…</button>
+        )}
         <button onClick={() => setPicker('open')}>Open…</button>
         <button onClick={() => setPicker('create')}>New…</button>
         <button onClick={close}>Close</button>

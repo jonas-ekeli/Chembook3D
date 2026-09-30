@@ -65,6 +65,36 @@ uv run python scripts/make_demo.py demo-investigation
 
 Then import an output file with **Import file…** (or drop it on the node list). Sample outputs are in `tests/fixtures/`. In WSL, the folder and file pickers show the WSL file system; Windows drives are under `/mnt/c`, `/mnt/d` and so on.
 
+## Sync investigations between computers
+
+An investigation can be synced through a private GitHub repository, so you can work on it on
+several computers. Git must be installed (on Windows, [Git for Windows](https://gitforwindows.org)).
+
+1. Create an **empty private** repository on GitHub (no README).
+2. Open the investigation, press **Sync with GitHub…** and paste the repository's address.
+3. On another computer, choose **Open from GitHub…** on the start screen.
+
+The app pulls when it opens a linked investigation, and pushes when you close it, press **Sync**,
+or stop the app. If both computers changed it since the last sync, it cannot be merged: the app
+asks which copy to keep and saves the other.
+
+The app never asks for a password or token; Git signs in. On Windows, Git for Windows opens a
+GitHub sign-in in the browser the first time. On Linux or WSL, sign in once with the GitHub CLI:
+
+```sh
+gh auth login
+gh auth setup-git
+```
+
+Use the same Chembook3D version on every computer. When one computer has upgraded an
+investigation, an older version refuses to open it and asks you to update. To update:
+
+```sh
+git pull
+uv sync
+uv run python scripts/build_frontend.py
+```
+
 ## Develop
 
 ```sh

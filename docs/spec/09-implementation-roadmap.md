@@ -42,8 +42,12 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. The phase order is confirm
 
 **First version (v1) = phases 1–5.**
 
+## After v1 · Git sync (D71)
+- FR-SYNC-01…09
+- **Tests:** T-SYNC-01…07
+
 ## Phase 6 · Later (not designed)
-Internet hosting, login, collaboration and sync (X2, X4). These need their own discovery round. The phase 1–5 architecture keeps them possible by putting all rules in the backend API (06 §2).
+Internet hosting, login and collaboration (X2, X4). These need their own discovery round. The phase 1–5 architecture keeps them possible by putting all rules in the backend API (06 §2).
 
 ## Dependencies
 

@@ -10,8 +10,8 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Confirmed items are marked
 | C2 | Windows and Linux | D10 |
 | C3 | Python backend | D22 |
 | C4 | Direction B: Python backend (FastAPI, SQLite) with a TypeScript web interface (React Flow canvas, 3Dmol.js viewer) | D38 |
-| C5 | One self-contained folder per investigation; backup is the user's job | D21 |
-| C6 | No cloud services required; hosting kept possible for later | D42 |
+| C5 | One self-contained folder per investigation; backup is the user's job, optionally through Git sync (D71) | D21, D71 |
+| C6 | No cloud services required (Git sync is optional, D71); hosting kept possible for later | D42, D71 |
 | C7 | Never launches or monitors calculations | D9 |
 
 ## 2. Component view
@@ -47,6 +47,8 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Confirmed items are marked
 
 **Risk:** SQLite files in cloud-synced folders (Dropbox, OneDrive) can be corrupted if two machines open the investigation at once. Mitigation (P22): a lock file in the folder while it is open, with a warning when opening an investigation that is locked elsewhere.
 
+**Git sync (D71):** a linked investigation is a Git repository whose remote is a private repository. The app calls the installed `git` (`src/chembook3d/sync.py`); pushing an open investigation first takes SQLite's write lock so no transaction is half-written in the commit. The database is never merged. Git is needed only for linked investigations.
+
 ## 4. Packaging and deployment
 
 | Item | Status |
@@ -68,6 +70,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Confirmed items are marked
 | NFR-DATA-04 | Crashes or kills during import leave no partial records. Orphaned copied files are cleaned up on next open. | P26 |
 | NFR-SEC-01 | The backend listens on the loopback interface only and has no remote access. | D42 |
 | NFR-SEC-02 | Imported files are parsed as data only. Nothing in them is executed. | — |
+| NFR-SEC-03 | The app stores no passwords or tokens. Git sync signs in through the credential helper of the `git` installed on the computer, never through the app. | D71 |
 | NFR-PERF-01 | **No numerical performance targets are set.** Jonas has not confirmed any. The implementer should report load and render times on the reference example and on a stress case (see [07](07-validation-and-test-plan.md)) so targets can be set later. | HANDOFF |
 | NFR-UX-01 | Every destructive action (delete node, remove group member, delete step) asks for confirmation and lists what is affected. | P3 |
 | NFR-LIC-01 | Third-party libraries must allow use and redistribution in a tool Jonas may share (P27: permissive licences preferred; React Flow MIT, 3Dmol.js BSD, cclib BSD, FastAPI MIT). | D6 |
