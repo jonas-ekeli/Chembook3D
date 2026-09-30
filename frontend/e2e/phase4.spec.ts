@@ -71,6 +71,33 @@ test('energy view: one level and type, ΔG on edges, energy mode', async ({ page
   expect(await (await page.request.get('/api/canvas')).json()).toEqual(before)
 })
 
+test('a free species on one edge counts on every node card after it', async ({ page }) => {
+  // T-SPC-06, D72: node cards use the balance along the route from the reference.
+  await openDemo(page)
+  const canvas = await (await page.request.get('/api/canvas')).json()
+  const id = (label: string) => canvas.nodes.find((n: { label: string }) => n.label === label).id
+  const edge = canvas.transitions.find(
+    (t: { source_id: string; target_id: string }) => t.source_id === id('T-S0') && t.target_id === id('A-S1'),
+  )
+  // A species with no energies: every card after the edge it joins on has no balanced value.
+  const species = await (await page.request.post('/api/nodes', { data: { label: 'substrate', kind: 'species' } })).json()
+  try {
+    await page.request.put(`/api/transitions/${edge.id}/species`, {
+      data: { species_id: species.id, direction: 'joins', count: 1 },
+    })
+    await page.reload()
+    await expect(canvasNode(page, 'T-S0')).toBeVisible()
+    await page.getByRole('button', { name: 'Energy', exact: true }).click()
+    await canvasNode(page, 'T-S0').click()
+    await page.getByLabel('Node inspector').getByRole('button', { name: 'Use as energy reference' }).click()
+    await expect(canvasNode(page, 'T-S0')).toContainText('ΔG 0.00')
+    for (const label of ['A-S1', 'A-S2', 'A-S3']) await expect(canvasNode(page, label)).toContainText('ΔG n/a')
+    await expect(canvasNode(page, 'B-S3')).toContainText('ΔG -6.00')
+  } finally {
+    await page.request.delete(`/api/nodes/${species.id}`)
+  }
+})
+
 test('a line between collapsed groups shows the energy of the edge between their representatives', async ({ page }) => {
   // T-EN-14, D70, A24
   await openDemo(page)

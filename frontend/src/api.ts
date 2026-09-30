@@ -154,6 +154,15 @@ export function speciesChip(entry: { direction: SpeciesDirection; count: number;
   return `${entry.direction === 'joins' ? '+' : '−'} ${entry.count > 1 ? `${entry.count} × ` : ''}${entry.label}`
 }
 
+/** The species that balance a point, "+ ethylene − 2 × styrene" (D69). */
+export function balanceText(species: SpeciesCount[]): string {
+  return species
+    .map((s) => `${s.count > 0 ? '+' : '−'} ${Math.abs(s.count) > 1 ? `${Math.abs(s.count)} × ` : ''}${s.label}`)
+    .join(' ')
+}
+
+export type SpeciesCount = { species_id: string; label: string; count: number }
+
 export type TransitionSpecies = {
   species_id: string
   label: string
@@ -351,6 +360,9 @@ export type EnergyView = {
   type: EnergyType
   values: Record<string, EnergyValue>
   edges: Record<string, { delta: number | null; direct: boolean; message?: string | null }>
+  reference_id: string | null
+  /** ΔX of each node and group from the reference, with the species that balance it (D72). */
+  relative: Record<string, { value: number | null; species: SpeciesCount[]; message: string | null; joined: boolean }>
 }
 
 export type PathChoice = { transition_id: string; node_id: string; label: string; status: string }
@@ -367,7 +379,7 @@ export type ProfilePoint = EnergyValue & {
   branch_id: string | null
   relative: number | null
   /** D69: free species added (count > 0) or subtracted (count < 0) to balance this point. */
-  species: { species_id: string; label: string; count: number }[]
+  species: SpeciesCount[]
   species_message: string | null
 }
 
@@ -732,8 +744,12 @@ export const api = {
   deleteGroup: (id: string) => request<unknown>('DELETE', `/groups/${id}`),
 
   energyOptions: () => request<EnergyOptions>('GET', '/energies/options'),
-  energyView: (level: string, type: EnergyType) =>
-    request<EnergyView>('GET', `/energies/view?level=${encodeURIComponent(level)}&type=${type}`),
+  energyView: (level: string, type: EnergyType, reference: string | null) =>
+    request<EnergyView>(
+      'GET',
+      `/energies/view?level=${encodeURIComponent(level)}&type=${type}` +
+        (reference ? `&reference=${encodeURIComponent(reference)}` : ''),
+    ),
   extendPathway: (path: string[], branchId?: string | null) =>
     request<Pathway>('POST', '/pathways/extend', { path, branch_id: branchId ?? null }),
   branchPathway: (branchId: string) => request<Pathway>('GET', `/branches/${branchId}/pathway`),
