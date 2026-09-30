@@ -4,7 +4,6 @@ import {
   api,
   ApiError,
   energyTypeName,
-  STATUSES,
   SYNC_PROBLEMS,
   type Canvas,
   type EnergyOptions,
@@ -21,7 +20,9 @@ import {
 } from './api'
 import { NO_FILTERS, type Filters, type Selection, type ViewMode } from './canvasView'
 import { CanvasPane, type CanvasEnergy } from './components/Canvas'
-import { EnergyDrawer } from './components/EnergyDrawer'
+import { EnergyDrawer, type DrawerPath } from './components/EnergyDrawer'
+import { download } from './util'
+import { FilterMenu } from './components/FilterMenu'
 import { FolderPicker } from './components/FolderPicker'
 import { HistoryList } from './components/HistoryList'
 import { ImportDialog } from './components/ImportDialog'
@@ -97,56 +98,6 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-/** FR-CAN-05: filters by branch, status and step. They hide items and never change data. */
-function FilterMenu({ canvas, filters, onChange }: { canvas: Canvas; filters: Filters; onChange: (f: Filters) => void }) {
-  const [open, setOpen] = useState(false)
-  const count = filters.branches.length + filters.statuses.length + filters.steps.length
-  const toggle = (key: keyof Filters, value: string) => {
-    const list = filters[key]
-    onChange({ ...filters, [key]: list.includes(value) ? list.filter((v) => v !== value) : [...list, value] })
-  }
-  const box = (key: keyof Filters, value: string, label: string, colour?: string) => (
-    <label key={value} className="check">
-      <input type="checkbox" checked={!filters[key].includes(value)} onChange={() => toggle(key, value)} />
-      {colour && <span className="swatch" style={{ background: colour }} />}
-      <span>{label}</span>
-    </label>
-  )
-  return (
-    <div className="menu">
-      <button aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>
-        Filters{count ? ` (${count} hidden)` : ''} ▾
-      </button>
-      {open && (
-        <div className="menu-list filters" role="dialog" aria-label="Filters">
-          <fieldset>
-            <legend>Branch</legend>
-            {canvas.branches.map((b) => box('branches', b.id, b.name || 'Unnamed branch', b.colour))}
-            {box('branches', 'none', 'No branch', '#98a2b3')}
-          </fieldset>
-          <fieldset>
-            <legend>Status</legend>
-            {STATUSES.map((s) => box('statuses', s.value, s.label))}
-          </fieldset>
-          <fieldset>
-            <legend>Step</legend>
-            {canvas.steps.map((s) => box('steps', s.id, s.name || 'Unnamed step'))}
-            {box('steps', 'none', 'No step')}
-          </fieldset>
-          <div className="buttons">
-            <button className="small" onClick={() => onChange(NO_FILTERS)} disabled={!count}>
-              Show all
-            </button>
-            <button className="small" onClick={() => setOpen(false)}>
-              Close
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 function App() {
   const [investigation, setInvestigation] = useState<Investigation | null | undefined>(undefined)
   const [settings, setSettings] = useState<Settings | null>(null)
@@ -188,6 +139,10 @@ function App() {
   const [edgeEnergies, setEdgeEnergies] = useState(true)
   const [referenceId, setReferenceId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // D79: the read-only copy exports the drawer's pathways, or one per branch (A30).
+  const [drawerPaths, setDrawerPaths] = useState<DrawerPath[]>([])
+  const [sharing, setSharing] = useState<'ask' | 'saving' | null>(null)
+  const [shareError, setShareError] = useState<string | null>(null)
   const resizing = useRef<{ x: number; width: number } | null>(null)
 
   useEffect(() => {
@@ -452,6 +407,24 @@ function App() {
     }
   }
 
+  const saveSnapshot = () => {
+    setSharing('saving')
+    setShareError(null)
+    api.exportSnapshot(drawerPaths, referenceId).then(
+      ({ blob, name }) => {
+        const url = URL.createObjectURL(blob)
+        download(url, name)
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+        setSharing(null)
+        setNotice(`Saved “${name}”. It opens in a browser, offline, and cannot be edited.`)
+      },
+      (err: unknown) => {
+        setSharing('ask')
+        setShareError(errorText(err))
+      },
+    )
+  }
+
   const labels = useMemo(
     () => new Map([...canvas.nodes, ...canvas.species].map((n) => [n.id, n.label])),
     [canvas.nodes, canvas.species],
@@ -611,6 +584,37 @@ function App() {
             Applies to the 3D views and the structure cards. “Hide those bonded to carbon” keeps hydrides, O–H and N–H,
             and C–H hydrogens also close to a metal (agostic).
           </p>
+        </Modal>
+      )}
+      {sharing && (
+        <Modal
+          title="Share a read-only copy"
+          onClose={() => setSharing(null)}
+          actions={
+            <>
+              <button onClick={() => setSharing(null)}>Cancel</button>
+              <button className="primary" disabled={sharing === 'saving'} onClick={saveSnapshot}>
+                {sharing === 'saving' ? 'Saving…' : 'Save file'}
+              </button>
+            </>
+          }
+        >
+          <p>
+            Saves this investigation as one HTML file that opens in a current browser, offline, with nothing to install.
+            Send it to a supervisor or co-author: they can look around but cannot change anything.
+          </p>
+          <p>
+            It holds the canvas, notes, calculations and their results, the 3D structures and the energies at every level.
+            Energy profiles and the table show{' '}
+            {drawerPaths.length
+              ? `the ${drawerPaths.length === 1 ? 'pathway' : `${drawerPaths.length} pathways`} in “Profile and table”.`
+              : 'one pathway per branch. To choose others, add them under “Profile and table” first.'}
+          </p>
+          <p className="muted small">
+            Left out: the folders and file paths on this computer, the output files themselves, and the change history.
+            Notes are included as written.
+          </p>
+          {shareError && <p role="alert">{shareError}</p>}
         </Modal>
       )}
       {importRequest && investigation && (
@@ -889,6 +893,15 @@ function App() {
           <button onClick={() => setPicker('open')}>Open…</button>
           <button onClick={() => setPicker('create')}>New…</button>
           <button onClick={close}>Close</button>
+          <button
+            onClick={() => {
+              setShareError(null)
+              setSharing('ask')
+            }}
+            title="Save a read-only HTML file to send to others (D79)"
+          >
+            Share read-only copy…
+          </button>
           <button onClick={() => setShowSettings(true)}>Settings</button>
         </header>
         {(error || notice) && (
@@ -982,6 +995,7 @@ function App() {
                 selectedId={selection && selection.kind !== 'edge' && selection.kind !== 'branch' ? selection.id : null}
                 refreshKey={refreshKey}
                 onReference={setReferenceId}
+                onPathsChange={setDrawerPaths}
                 onSelectNode={(id) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id, true))}
               />
             </div>

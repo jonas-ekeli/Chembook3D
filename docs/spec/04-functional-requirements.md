@@ -183,6 +183,17 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-3D-05 | No geometry editing in the viewer. | X3 | — |
 | FR-3D-06 | Copy xyz to the clipboard and save a .xyz file from the node inspector. | D39 | 1 |
 
+## FR-SHARE · Read-only copy to share (D79)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-SHARE-01 | "Share read-only copy…" saves the open investigation as one self-contained HTML file that opens offline in a browser, with no server or install. | D79 | after 5 |
+| FR-SHARE-02 | The file shows the canvas with its view modes and filters, the details, notes and calculations of every record, the 3D view with measuring and the included vibrations, and the energies, profile and table at every level and energy type (A30). | D79, A30 | after 5 |
+| FR-SHARE-03 | Nothing in the file can be edited, and it makes no network request. | D79 | after 5 |
+| FR-SHARE-04 | The file holds no local paths (investigation folder, original paths and devices of imported files), no copied output files and no change history. | D79 | after 5 |
+
+**AC:** export the demo investigation, open the file with the server stopped: the canvas, a node's calculations and 3D view, and a profile at another level show, nothing can be edited, and the file contains no folder path.
+
 ## FR-HIST / FR-OV · History and overview
 
 | ID | Requirement | Trace | Phase |
