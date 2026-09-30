@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from chembook3d import settings
 from chembook3d.models import Calculation, Node, SourceFile
 from chembook3d.services import imports
 from tests import gaussian_text as g
@@ -502,3 +503,19 @@ def test_records_in_database(open_client):
         assert len(stored.calculations) == 2
         assert session.query(SourceFile).count() == 1
         assert all(c.source_file_id for c in session.query(Calculation))
+
+
+def test_file_browser_starts_in_the_last_import_folder(open_client, tmp_path):
+    # D78: picking a file remembers its folder for the next import, app-wide
+    assert open_client.get("/api/settings").json()["last_import_folder"] == ""
+    original = tmp_path / "cluster" / TS
+    original.parent.mkdir()
+    original.write_bytes((FIXTURES / TS).read_bytes())
+    open_client.post("/api/imports/from-path", json={"path": str(original)})
+    folder = str(original.parent.resolve())
+    assert open_client.get("/api/settings").json()["last_import_folder"] == folder
+    assert settings.load().last_import_folder == folder
+    # a folder that has gone is not offered, so the browser starts in the home folder
+    original.unlink()
+    original.parent.rmdir()
+    assert open_client.get("/api/settings").json()["last_import_folder"] == ""

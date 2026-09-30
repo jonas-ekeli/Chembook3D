@@ -33,10 +33,12 @@ const DESTINATIONS: Record<string, string> = {
 }
 
 /** Browse the local disk through the backend (a browser page cannot read paths itself), so
- * the file's own path is kept as its origin path (FR-FILE-02). */
+ * the file's own path is kept as its origin path (FR-FILE-02). It starts in the folder a file
+ * was last picked from, and the filter shows only names containing its text (D78). */
 function FileBrowser({ onPick }: { onPick: (path: string) => void }) {
   const [listing, setListing] = useState<FolderListing | null>(null)
   const [path, setPath] = useState('')
+  const [filter, setFilter] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const go = useCallback((target?: string) => {
@@ -44,13 +46,22 @@ function FileBrowser({ onPick }: { onPick: (path: string) => void }) {
       (result) => {
         setListing(result)
         setPath(result.path)
+        setFilter('')
         setError(null)
       },
       (err: unknown) => setError(errorText(err)),
     )
   }, [])
 
-  useEffect(() => go(), [go])
+  useEffect(() => {
+    api.settings().then(
+      (settings) => go(settings.last_import_folder || undefined),
+      () => go(),
+    )
+  }, [go])
+
+  const needle = filter.trim().toLowerCase()
+  const entries = listing?.entries.filter((entry) => entry.name.toLowerCase().includes(needle)) ?? []
 
   return (
     <div className="file-browser">
@@ -59,9 +70,23 @@ function FileBrowser({ onPick }: { onPick: (path: string) => void }) {
         <button onClick={() => go(path)}>Go</button>
         {listing?.parent && <button onClick={() => go(listing.parent!)}>Up</button>}
       </div>
+      <input
+        type="search"
+        aria-label="Filter by name"
+        placeholder="Filter by name, e.g. SPQZ"
+        value={filter}
+        onChange={(event) => setFilter(event.target.value)}
+        onKeyDown={(event) => {
+          // Escape clears the filter first rather than closing the dialog.
+          if (event.key === 'Escape' && filter) {
+            event.stopPropagation()
+            setFilter('')
+          }
+        }}
+      />
       {error && <p role="alert">{error}</p>}
       <ul className="folder-list" aria-label="Files">
-        {listing?.entries.map((entry) => (
+        {entries.map((entry) => (
           <li key={entry.path}>
             {entry.is_file ? (
               <button className="folder file-entry" onClick={() => onPick(entry.path)}>
@@ -75,6 +100,7 @@ function FileBrowser({ onPick }: { onPick: (path: string) => void }) {
             )}
           </li>
         ))}
+        {listing && needle && entries.length === 0 && <li className="muted">No names here contain “{filter.trim()}”.</li>}
       </ul>
     </div>
   )
