@@ -5,8 +5,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.types import Scope
 
 from chembook3d import __version__
 from chembook3d.api.energies import router as energy_router
@@ -24,6 +25,18 @@ def static_dir() -> Path | None:
         if (candidate / "index.html").is_file():
             return candidate
     return None
+
+
+class InterfaceFiles(StaticFiles):
+    """The built interface. Its HTML page names the current bundle, so the browser must check
+    it on every load (no-cache: it still gets a quick "not modified" answer). Without this a
+    browser could keep showing the old interface for hours after a rebuild."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.media_type == "text/html":
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 NOT_BUILT_PAGE = """<!doctype html>
@@ -78,7 +91,7 @@ def create_app() -> FastAPI:
 
     static = static_dir()
     if static is not None:
-        app.mount("/", StaticFiles(directory=static, html=True), name="ui")
+        app.mount("/", InterfaceFiles(directory=static, html=True), name="ui")
     else:
 
         @app.get("/", include_in_schema=False)
