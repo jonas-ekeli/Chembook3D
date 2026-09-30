@@ -1,0 +1,17 @@
+************* Job completed ***************
+Parameters used: 
+	- Temperature was set to 298.15 K
+	- Cutoff frequency was set to  100 cm-1
+
+Calculated properties: 
+E(SCF) = -2091.04905931 H
+E(SCF) = -1312153.095447758 kcal/mol
+ZPE (calculated) = 0.7896441227559987 H
+ZPE (from Gaussian) = 0.789644 H
+H = -2090.213471532447 H
+H corr. (from temp.) = 0.8355877775529734 H
+T*S = 0.1142497909753261 H
+G = -2090.3277213234223 H
+G = -1311700.449027179 kcal/mol
+Thermic correction = 0.7213379865775096 H
+Thermic correction = 452.6464205789885 kcal/mol

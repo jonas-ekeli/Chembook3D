@@ -1,0 +1,858 @@
+import { ReactFlowProvider } from '@xyflow/react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  api,
+  ApiError,
+  energyTypeName,
+  STATUSES,
+  type Canvas,
+  type EnergyOptions,
+  type EnergyType,
+  type EnergyView,
+  type Group,
+  type GroupLayout,
+  type HistoryEntry,
+  type Investigation,
+  type Node,
+  type Settings,
+} from './api'
+import { NO_FILTERS, type Filters, type Selection, type ViewMode } from './canvasView'
+import { CanvasPane, type CanvasEnergy } from './components/Canvas'
+import { EnergyDrawer } from './components/EnergyDrawer'
+import { FolderPicker } from './components/FolderPicker'
+import { HistoryList } from './components/HistoryList'
+import { ImportDialog } from './components/ImportDialog'
+import { Modal } from './components/Modal'
+import { NodeInspector } from './components/NodeInspector'
+import { Outline } from './components/Outline'
+import { Overview } from './components/Overview'
+import { recordNames } from './names'
+import { BranchInspector, GroupInspector, SelectionInspector, TransitionInspector } from './components/PathwayInspectors'
+
+type LockPrompt = { folder: string; host?: string; openedAt?: string }
+
+/** One import dialog at a time; dropped files wait in a queue (WF-04: one or more files). */
+type ImportRequest = {
+  targetId: string | null
+  files: File[]
+  position: { x: number; y: number } | null
+  /** Create a free species rather than a node (D69). */
+  species?: boolean
+}
+
+type InspectorSelection = Selection | { kind: 'branch'; id: string }
+
+const EMPTY_CANVAS: Canvas = { nodes: [], species: [], steps: [], branches: [], transitions: [], groups: [] }
+
+function readMode(): ViewMode {
+  try {
+    const stored = localStorage.getItem('chembook3d.mode')
+    return stored === 'structure' || stored === 'energy' ? stored : 'compact'
+  } catch {
+    return 'compact'
+  }
+}
+
+function NumberSetting({
+  label,
+  value,
+  onSave,
+  allowZero = false,
+}: {
+  label: string
+  value: number
+  onSave: (value: number) => void
+  allowZero?: boolean
+}) {
+  const [draft, setDraft] = useState(String(value))
+  const parsed = Number(draft)
+  const valid = draft.trim() !== '' && Number.isFinite(parsed) && (allowZero ? parsed >= 0 : parsed > 0)
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input
+        aria-label={label}
+        inputMode="decimal"
+        value={draft}
+        aria-invalid={!valid}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => valid && parsed !== value && onSave(parsed)}
+      />
+    </label>
+  )
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/** FR-CAN-05: filters by branch, status and step. They hide items and never change data. */
+function FilterMenu({ canvas, filters, onChange }: { canvas: Canvas; filters: Filters; onChange: (f: Filters) => void }) {
+  const [open, setOpen] = useState(false)
+  const count = filters.branches.length + filters.statuses.length + filters.steps.length
+  const toggle = (key: keyof Filters, value: string) => {
+    const list = filters[key]
+    onChange({ ...filters, [key]: list.includes(value) ? list.filter((v) => v !== value) : [...list, value] })
+  }
+  const box = (key: keyof Filters, value: string, label: string, colour?: string) => (
+    <label key={value} className="check">
+      <input type="checkbox" checked={!filters[key].includes(value)} onChange={() => toggle(key, value)} />
+      {colour && <span className="swatch" style={{ background: colour }} />}
+      <span>{label}</span>
+    </label>
+  )
+  return (
+    <div className="menu">
+      <button aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>
+        Filters{count ? ` (${count} hidden)` : ''} ▾
+      </button>
+      {open && (
+        <div className="menu-list filters" role="dialog" aria-label="Filters">
+          <fieldset>
+            <legend>Branch</legend>
+            {canvas.branches.map((b) => box('branches', b.id, b.name || 'Unnamed branch', b.colour))}
+            {box('branches', 'none', 'No branch', '#98a2b3')}
+          </fieldset>
+          <fieldset>
+            <legend>Status</legend>
+            {STATUSES.map((s) => box('statuses', s.value, s.label))}
+          </fieldset>
+          <fieldset>
+            <legend>Step</legend>
+            {canvas.steps.map((s) => box('steps', s.id, s.name || 'Unnamed step'))}
+            {box('steps', 'none', 'No step')}
+          </fieldset>
+          <div className="buttons">
+            <button className="small" onClick={() => onChange(NO_FILTERS)} disabled={!count}>
+              Show all
+            </button>
+            <button className="small" onClick={() => setOpen(false)}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function App() {
+  const [investigation, setInvestigation] = useState<Investigation | null | undefined>(undefined)
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [picker, setPicker] = useState<'open' | 'create' | null>(null)
+  const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null)
+  const [showSettings, setShowSettings] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  const [view, setView] = useState<'canvas' | 'history'>('canvas')
+  const [canvas, setCanvas] = useState<Canvas>(EMPTY_CANVAS)
+  const [selection, setSelection] = useState<InspectorSelection>(null)
+  const [multi, setMulti] = useState<string[]>([])
+  // One thing is shown in the inspector; choosing it ends any multi-selection.
+  const choose = (next: InspectorSelection) => {
+    setSelection(next)
+    setMulti([])
+  }
+  const [focus, setFocus] = useState<{ id: string; n: number } | null>(null)
+  const [mode, setMode] = useState<ViewMode>(readMode)
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [importRequest, setImportRequest] = useState<ImportRequest | null>(null)
+  const [inspectorWidth, setInspectorWidth] = useState(520)
+  // Energies (FR-EN-01): one level and one energy type for the whole view (EN-2, INV-5).
+  const [energyOptions, setEnergyOptions] = useState<EnergyOptions | null>(null)
+  const [energyLevel, setEnergyLevel] = useState<string | null>(null)
+  const [energyType, setEnergyType] = useState<EnergyType>('G')
+  const [energyView, setEnergyView] = useState<EnergyView | null>(null)
+  const [edgeEnergies, setEdgeEnergies] = useState(true)
+  const [referenceId, setReferenceId] = useState<string | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const resizing = useRef<{ x: number; width: number } | null>(null)
+
+  useEffect(() => {
+    api.currentInvestigation().then(setInvestigation, (err: unknown) => {
+      setInvestigation(null)
+      setError(`Backend not reachable: ${errorText(err)}`)
+    })
+    api.settings().then(setSettings, () => undefined)
+  }, [])
+
+  // Answers to earlier fetches can arrive after later ones (slow runners, a large import); only
+  // the latest is shown, or a stale canvas without a just-created node would drop its inspector.
+  const fetched = useRef(0)
+  const fetchRecords = useCallback(() => {
+    if (!investigation) return
+    const n = ++fetched.current
+    const latest =
+      <T,>(set: (value: T) => void) =>
+      (value: T) => {
+        if (n === fetched.current) set(value)
+      }
+    const failed = (err: unknown) => n === fetched.current && setError(errorText(err))
+    api.canvas().then(latest(setCanvas), failed)
+    api.history().then(latest(setHistory), failed)
+    api.energyOptions().then(latest(setEnergyOptions), failed)
+  }, [investigation])
+
+  useEffect(fetchRecords, [fetchRecords])
+
+  const reload = () => {
+    fetchRecords()
+    setRefreshKey((k) => k + 1)
+  }
+
+  // The chosen level, or else the first with G (D32: free energy preferred), or else the first.
+  const levelOption =
+    energyOptions?.levels.find((l) => l.key === energyLevel) ??
+    energyOptions?.levels.find((l) => l.types.includes('G')) ??
+    energyOptions?.levels[0] ??
+    null
+  const shownType: EnergyType = levelOption
+    ? levelOption.types.includes(energyType)
+      ? energyType
+      : levelOption.types.includes('G')
+        ? 'G'
+        : levelOption.types[0]
+    : energyType
+  const levelKey = levelOption?.key ?? null
+  // Only a view that matches the current selection is shown (INV-5).
+  const shownView =
+    energyView && levelKey && energyView.level === levelKey && energyView.type === shownType ? energyView : null
+
+  useEffect(() => {
+    if (!levelKey) return
+    let current = true
+    api.energyView(levelKey, shownType).then(
+      (found) => current && setEnergyView(found),
+      (err: unknown) => current && setError(errorText(err)),
+    )
+    return () => {
+      current = false
+    }
+  }, [levelKey, shownType, energyOptions, refreshKey])
+
+  // Stable between renders, so the canvas only rebuilds its nodes when energies change.
+  const canvasEnergy: CanvasEnergy = useMemo(
+    () => ({ view: shownView, type: shownType, showEdges: edgeEnergies, referenceId, settings }),
+    [shownView, shownType, edgeEnergies, referenceId, settings],
+  )
+
+  const opened = (inv: Investigation) => {
+    // Opening the investigation already shown keeps the canvas and selection: resetting them when
+    // the answer arrives would drop whatever was clicked in the meantime.
+    if (investigation && investigation.folder === inv.folder) {
+      setError(null)
+      setNotice(null)
+      setView('canvas')
+      return
+    }
+    setCanvas(EMPTY_CANVAS)
+    setHistory([])
+    setEnergyOptions(null)
+    setEnergyLevel(null)
+    setReferenceId(null)
+    choose(null)
+    setFilters(NO_FILTERS)
+    setExpanded(new Set())
+    setInvestigation(inv)
+    setError(null)
+    setNotice(null)
+    setView('canvas')
+    api.settings().then(setSettings, () => undefined)
+  }
+
+  const openFolder = (folder: string, force = false) => {
+    setPicker(null)
+    setLockPrompt(null)
+    api.openInvestigation(folder, force).then(opened, (err: unknown) => {
+      if (err instanceof ApiError && err.lock) {
+        setLockPrompt({ folder, host: err.lock.host, openedAt: err.lock.opened_at })
+      } else {
+        setError(errorText(err))
+      }
+    })
+  }
+
+  const createAt = (folder: string, name: string) => {
+    setPicker(null)
+    api.createInvestigation(folder, name).then(opened, (err: unknown) => setError(errorText(err)))
+  }
+
+  const close = () => {
+    api.closeInvestigation().then(() => {
+      setInvestigation(null)
+      api.settings().then(setSettings, () => undefined)
+    })
+  }
+
+  const selectNode = (id: string, centre = false) => {
+    setNotice(null)
+    choose({ kind: 'node', id })
+    setView('canvas')
+    // A free species is not on the canvas, so there is nothing to centre (D69).
+    const onCanvas = canvas.nodes.find((n) => n.id === id)
+    if (centre && onCanvas) setFocus({ id: onCanvas.group_id ?? id, n: Date.now() })
+  }
+
+  const addSpecies = () =>
+    api.createNode({ kind: 'species', label: `Species ${canvas.species.length + 1}` }).then(
+      (node) => {
+        reload()
+        choose({ kind: 'node', id: node.id })
+        setView('canvas')
+      },
+      (err: unknown) => setError(errorText(err)),
+    )
+
+  const addNode = (position?: { x: number; y: number }) => {
+    const spot = position ?? {
+      x: canvas.nodes.reduce((max, n) => Math.max(max, n.pos_x), -220) + 220,
+      y: 0,
+    }
+    api.createNode({ pos_x: spot.x, pos_y: spot.y }).then(
+      (node) => {
+        reload()
+        choose({ kind: 'node', id: node.id })
+        setView('canvas')
+        if (!position) setFocus({ id: node.id, n: Date.now() })
+      },
+      (err: unknown) => setError(errorText(err)),
+    )
+  }
+
+  const nextImport = () =>
+    setImportRequest((current) =>
+      current && current.files.length > 1
+        ? {
+            ...current,
+            files: current.files.slice(1),
+            position: current.position && { x: current.position.x, y: current.position.y + 90 },
+          }
+        : null,
+    )
+
+  const changed = (node: Node, message?: string) => {
+    setNotice(message ?? null)
+    choose({ kind: 'node', id: node.id })
+    reload()
+  }
+
+  const savePositions = (positions: Record<string, { x: number; y: number }>) => {
+    // Shown at once; saved in the background. Positions are layout, not history.
+    setCanvas((current) => ({
+      ...current,
+      nodes: current.nodes.map((n) => (positions[n.id] ? { ...n, pos_x: positions[n.id].x, pos_y: positions[n.id].y } : n)),
+      groups: current.groups.map((g) => (positions[g.id] ? { ...g, pos_x: positions[g.id].x, pos_y: positions[g.id].y } : g)),
+    }))
+    api.savePositions(positions).catch((err: unknown) => setError(errorText(err)))
+  }
+
+  const setGroupLayout = useCallback((id: string, layout: GroupLayout) => {
+    // Shown at once; saved in the background, like positions (A21).
+    setCanvas((current) => ({ ...current, groups: current.groups.map((g) => (g.id === id ? { ...g, layout } : g)) }))
+    api.updateGroup(id, { layout }).catch((err: unknown) => setError(errorText(err)))
+  }, [])
+
+  const toggleGroup = useCallback((id: string) => {
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const chooseMode = (next: ViewMode) => {
+    setMode(next)
+    try {
+      localStorage.setItem('chembook3d.mode', next)
+    } catch {
+      // per-browser convenience only
+    }
+  }
+
+  const labels = useMemo(
+    () => new Map([...canvas.nodes, ...canvas.species].map((n) => [n.id, n.label])),
+    [canvas.nodes, canvas.species],
+  )
+  const names = useMemo(() => recordNames(canvas), [canvas])
+
+  const canvasSelection: Selection = selection && selection.kind !== 'branch' ? selection : null
+  const multiNodes = multi.map((id) => canvas.nodes.find((n) => n.id === id)).filter((n): n is Node => !!n)
+  const multiGroups = multi.map((id) => canvas.groups.find((g) => g.id === id)).filter((g): g is Group => !!g)
+
+  const dialogs = (
+    <>
+      {picker && (
+        <FolderPicker
+          mode={picker}
+          onCancel={() => setPicker(null)}
+          onChoose={(folder, name) => (picker === 'open' ? openFolder(folder) : createAt(folder, name))}
+        />
+      )}
+      {lockPrompt && (
+        <Modal
+          title="Investigation may be open elsewhere"
+          onClose={() => setLockPrompt(null)}
+          actions={
+            <>
+              <button onClick={() => setLockPrompt(null)}>Cancel</button>
+              <button className="danger" onClick={() => openFolder(lockPrompt.folder, true)}>
+                Open anyway
+              </button>
+            </>
+          }
+        >
+          <p>
+            <code>{lockPrompt.folder}</code> was opened on <strong>{lockPrompt.host ?? 'another computer'}</strong>
+            {lockPrompt.openedAt && <> at {new Date(lockPrompt.openedAt + 'Z').toLocaleString()}</>} and has
+            not been closed.
+          </p>
+          <p>
+            If it is really open there, changes from both places can damage the database, especially in a
+            synced folder. Open it anyway only if you are sure it is closed (for example after a crash).
+          </p>
+        </Modal>
+      )}
+      {showSettings && settings && (
+        <Modal
+          title="Settings"
+          onClose={() => setShowSettings(false)}
+          actions={<button onClick={() => setShowSettings(false)}>Done</button>}
+        >
+          <label className="field">
+            <span>Energy unit</span>
+            <select
+              aria-label="Energy unit"
+              value={settings.energy_unit}
+              onChange={(event) => api.saveSettings({ energy_unit: event.target.value }).then(setSettings)}
+            >
+              {settings.energy_units.map((unit) => (
+                <option key={unit}>{unit}</option>
+              ))}
+            </select>
+          </label>
+          <p className="muted">Relative energies use this unit; absolute energies are shown in hartree.</p>
+          <h3>Geometry tolerances (RMSD after alignment, Å)</h3>
+          <NumberSetting
+            label="Same geometry"
+            value={settings.geometry_tolerance}
+            onSave={(geometry_tolerance) => api.saveSettings({ geometry_tolerance }).then(setSettings)}
+          />
+          <p className="muted small">A job step's results attach to a node only within this RMSD (ID-7).</p>
+          <NumberSetting
+            label="Possible duplicate"
+            value={settings.duplicate_tolerance}
+            onSave={(duplicate_tolerance) => api.saveSettings({ duplicate_tolerance }).then(setSettings)}
+          />
+          <p className="muted small">An import this close to another node is flagged as a possible duplicate (ID-8).</p>
+          <h3>Quasi-harmonic free energy (G_qh)</h3>
+          <NumberSetting
+            label="Temperature (K)"
+            value={settings.qh_temperature}
+            onSave={(qh_temperature) =>
+              api.saveSettings({ qh_temperature }).then((s) => {
+                setSettings(s)
+                reload()
+              })
+            }
+          />
+          <NumberSetting
+            label="Cutoff (cm⁻¹)"
+            value={settings.qh_cutoff}
+            allowZero
+            onSave={(qh_cutoff) =>
+              api.saveSettings({ qh_cutoff }).then((s) => {
+                setSettings(s)
+                reload()
+              })
+            }
+          />
+          <p className="muted small">
+            Frequencies below the cutoff are raised to it for the vibrational entropy only (Truhlar), as in the
+            reference script. Every G_qh value is shown with these two numbers.
+          </p>
+          <h3>CREST ensembles</h3>
+          <NumberSetting
+            label="Conformers kept on import"
+            value={settings.crest_count}
+            onSave={(count) => api.saveSettings({ crest_count: Math.max(1, Math.round(count)) }).then(setSettings)}
+          />
+          <p className="muted small">The lowest this many conformers are ticked in the import preview (D34).</p>
+        </Modal>
+      )}
+      {importRequest && investigation && (
+        <ImportDialog
+          key={`${importRequest.targetId}-${importRequest.files.length}-${importRequest.files[0]?.name ?? ''}`}
+          file={importRequest.files[0] ?? null}
+          target={[...canvas.nodes, ...canvas.species].find((n) => n.id === importRequest.targetId) ?? null}
+          nodes={[...canvas.nodes, ...canvas.species]}
+          asSpecies={importRequest.species ?? false}
+          energyUnit={settings?.energy_unit ?? 'kcal/mol'}
+          energyFactor={settings ? (settings.energy_factors[settings.energy_unit] ?? 1) : 627.5094740631}
+          queued={Math.max(0, importRequest.files.length - 1)}
+          position={importRequest.position}
+          onClose={nextImport}
+          onImported={(imported, message) => {
+            setNotice(message)
+            choose(imported)
+            if (imported.kind === 'group') setFocus({ id: imported.id, n: Date.now() })
+            setView('canvas')
+            reload()
+            nextImport()
+          }}
+        />
+      )}
+    </>
+  )
+
+  if (investigation === undefined) return <p className="loading">Connecting to backend…</p>
+
+  if (investigation === null) {
+    return (
+      <main className="start">
+        <h1>Chembook3D</h1>
+        <p className="muted">A notebook for computational chemistry mechanism investigations.</p>
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+        <div className="buttons">
+          <button className="primary" onClick={() => setPicker('create')}>
+            New investigation…
+          </button>
+          <button onClick={() => setPicker('open')}>Open investigation…</button>
+        </div>
+        {settings && settings.recent.length > 0 && (
+          <section>
+            <h2>Recently opened</h2>
+            <ul className="recent" aria-label="Recently opened">
+              {settings.recent.map((folder) => (
+                <li key={folder}>
+                  <button className="link" onClick={() => openFolder(folder)}>
+                    {folder}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {dialogs}
+      </main>
+    )
+  }
+
+  const selectedNode =
+    selection?.kind === 'node'
+      ? (canvas.nodes.find((n) => n.id === selection.id) ?? canvas.species.find((n) => n.id === selection.id))
+      : undefined
+  const selectedGroup = selection?.kind === 'group' ? canvas.groups.find((g) => g.id === selection.id) : undefined
+  const selectedEdge = selection?.kind === 'edge' ? canvas.transitions.find((t) => t.id === selection.id) : undefined
+  const selectedBranch = selection?.kind === 'branch' ? canvas.branches.find((b) => b.id === selection.id) : undefined
+  const selectGroup = (id: string) => {
+    choose({ kind: 'group', id })
+    setFocus({ id, n: Date.now() })
+  }
+  const toggleNode = (id: string) =>
+    setMulti((current) => {
+      const base = current.length
+        ? current
+        : selection?.kind === 'node' || selection?.kind === 'group'
+          ? [selection.id]
+          : []
+      return base.includes(id) ? base.filter((x) => x !== id) : [...base, id]
+    })
+  const selectBranch = (id: string) => choose({ kind: 'branch', id })
+  const selectEdge = (id: string) => choose({ kind: 'edge', id })
+  const cleared = () => {
+    choose(null)
+    reload()
+  }
+
+  let inspector
+  if (multiNodes.length + multiGroups.length >= 2) {
+    inspector = (
+      <SelectionInspector
+        nodes={multiNodes}
+        groups={multiGroups}
+        canvas={canvas}
+        onChanged={reload}
+        onGroupCreated={(group) => {
+          choose({ kind: 'group', id: group.id })
+          reload()
+        }}
+      />
+    )
+  } else if (selectedNode) {
+    inspector = (
+      <NodeInspector
+        key={selectedNode.id}
+        node={selectedNode}
+        canvas={canvas}
+        refreshKey={refreshKey}
+        onChanged={changed}
+        onSelect={(id) => selectNode(id, true)}
+        onSelectGroup={selectGroup}
+        onSelectBranch={selectBranch}
+        onSelectTransition={selectEdge}
+        onDeleted={cleared}
+        onImport={() => setImportRequest({ targetId: selectedNode.id, files: [], position: null })}
+        onDropFiles={(files) => setImportRequest({ targetId: selectedNode.id, files, position: null })}
+        onRefresh={fetchRecords}
+        isReference={referenceId === selectedNode.id}
+        onUseAsReference={() => setReferenceId(selectedNode.id)}
+      />
+    )
+  } else if (selectedGroup) {
+    inspector = (
+      <GroupInspector
+        key={selectedGroup.id}
+        group={selectedGroup}
+        canvas={canvas}
+        onChanged={reload}
+        onRemoved={cleared}
+        onSelectNode={(id) => selectNode(id, true)}
+        onSelectBranch={selectBranch}
+        energy={{ view: shownView, typeName: shownType, settings }}
+      />
+    )
+  } else if (selectedEdge) {
+    inspector = (
+      <TransitionInspector
+        key={selectedEdge.id}
+        transition={selectedEdge}
+        canvas={canvas}
+        onChanged={reload}
+        onDeleted={cleared}
+        onSelectNode={(id) => selectNode(id, true)}
+        onSelectGroup={selectGroup}
+      />
+    )
+  } else if (selectedBranch) {
+    inspector = (
+      <BranchInspector
+        key={selectedBranch.id}
+        branch={selectedBranch}
+        canvas={canvas}
+        onChanged={reload}
+        onDeleted={cleared}
+        onSelectNode={(id) => selectNode(id, true)}
+        onSelectBranch={selectBranch}
+        onArranged={() => {
+          reload()
+          const first = canvas.nodes.find((n) => n.branch_id === selectedBranch.id)
+          if (first) setFocus({ id: first.id, n: Date.now() })
+        }}
+      />
+    )
+  } else {
+    // WF-10: with nothing selected, the side panel shows the resume overview.
+    inspector = (
+      <Overview
+        canvas={canvas}
+        refreshKey={refreshKey}
+        labels={labels}
+        names={names}
+        onSelectNode={(id) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id, true))}
+        onSelectTransition={(id) => {
+          selectEdge(id)
+          const edge = canvas.transitions.find((t) => t.id === id)
+          const source = edge && canvas.nodes.find((n) => n.id === edge.source_id)
+          if (edge) setFocus({ id: source?.group_id ?? edge.source_id, n: Date.now() })
+        }}
+        onSelectBranch={selectBranch}
+      />
+    )
+  }
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <strong className="brand">Chembook3D</strong>
+        <span className="investigation" title={investigation.folder}>
+          {investigation.name}
+        </span>
+        <nav className="tabs" aria-label="Views">
+          <button aria-pressed={view === 'canvas'} onClick={() => setView('canvas')}>
+            Canvas
+          </button>
+          <button aria-pressed={view === 'history'} onClick={() => setView('history')}>
+            History
+          </button>
+          <button
+            aria-pressed={view === 'canvas' && selection === null && multi.length === 0}
+            title="Where the investigation stands: branches, open items, recent changes, step notes"
+            onClick={() => {
+              choose(null)
+              setView('canvas')
+            }}
+          >
+            Overview
+          </button>
+        </nav>
+        {view === 'canvas' && (
+          <>
+            <div className="segmented" role="group" aria-label="Node view">
+              <button aria-pressed={mode === 'compact'} onClick={() => chooseMode('compact')}>
+                Compact
+              </button>
+              <button aria-pressed={mode === 'energy'} onClick={() => chooseMode('energy')}>
+                Energy
+              </button>
+              <button aria-pressed={mode === 'structure'} onClick={() => chooseMode('structure')}>
+                Structure
+              </button>
+            </div>
+            <FilterMenu canvas={canvas} filters={filters} onChange={setFilters} />
+            <div className="energy-select" role="group" aria-label="Energy view">
+              <select
+                aria-label="Level of theory"
+                value={levelKey ?? ''}
+                disabled={!levelOption}
+                onChange={(event) => setEnergyLevel(event.target.value)}
+              >
+                {!levelOption && <option value="">No energies yet</option>}
+                {energyOptions?.levels.map((l) => (
+                  <option key={l.key} value={l.key}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Energy type"
+                value={shownType}
+                disabled={!levelOption}
+                onChange={(event) => setEnergyType(event.target.value as EnergyType)}
+              >
+                {(levelOption?.types ?? []).map((t) => (
+                  <option key={t} value={t}>
+                    {energyTypeName(t, energyOptions?.temperature, energyOptions?.cutoff)}
+                  </option>
+                ))}
+              </select>
+              <label className="check" title="Show ΔX on transitions (FR-CAN-03)">
+                <input
+                  type="checkbox"
+                  checked={edgeEnergies}
+                  onChange={(event) => setEdgeEnergies(event.target.checked)}
+                />
+                <span>Energies on edges</span>
+              </label>
+            </div>
+            <button aria-pressed={drawerOpen} onClick={() => setDrawerOpen(!drawerOpen)}>
+              Profile and table
+            </button>
+          </>
+        )}
+        <span className="spacer" />
+        <button onClick={() => setPicker('open')}>Open…</button>
+        <button onClick={() => setPicker('create')}>New…</button>
+        <button onClick={close}>Close</button>
+        <button onClick={() => setShowSettings(true)}>Settings</button>
+      </header>
+      {(error || notice) && (
+        <div className={error ? 'banner error' : 'banner'} role={error ? 'alert' : 'status'}>
+          {error ?? notice}
+          <button className="link" onClick={() => (error ? setError(null) : setNotice(null))}>
+            Dismiss
+          </button>
+        </div>
+      )}
+      {view === 'canvas' ? (
+        <div className="work-column">
+          <div className="workspace">
+            <Outline
+              canvas={canvas}
+              selectedNodeId={selection?.kind === 'node' ? selection.id : null}
+              selectedBranchId={selection?.kind === 'branch' ? selection.id : null}
+              onSelectNode={(id) => selectNode(id, true)}
+              onToggleNode={toggleNode}
+              selectedNodeIds={multi}
+              onSelectBranch={selectBranch}
+              onAdd={() => addNode()}
+              onImport={() => setImportRequest({ targetId: null, files: [], position: null })}
+              onAddSpecies={addSpecies}
+              onImportSpecies={() => setImportRequest({ targetId: null, files: [], position: null, species: true })}
+              onChanged={(branchId) => {
+                reload()
+                if (branchId) selectBranch(branchId)
+              }}
+            />
+            <ReactFlowProvider>
+              <CanvasPane
+                data={canvas}
+                mode={mode}
+                energy={canvasEnergy}
+                filters={filters}
+                selection={canvasSelection}
+                multi={multi}
+                focus={focus}
+                expanded={expanded}
+                onToggleGroup={toggleGroup}
+                onGroupLayout={setGroupLayout}
+                onSelect={(next) => {
+                  setNotice(null)
+                  choose(next)
+                }}
+                onMultiSelect={setMulti}
+                onToggleNode={toggleNode}
+                onConnect={(source, target) =>
+                  api.createTransition(source, target).then(reload, (err: unknown) => setError(errorText(err)))
+                }
+                onAddNode={addNode}
+                onDropFiles={(files, targetId, position) => setImportRequest({ targetId, files, position })}
+                onPositions={savePositions}
+                onError={setError}
+              />
+            </ReactFlowProvider>
+            <div
+              className="splitter"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize inspector"
+              onPointerDown={(event) => {
+                resizing.current = { x: event.clientX, width: inspectorWidth }
+                event.currentTarget.setPointerCapture(event.pointerId)
+              }}
+              onPointerMove={(event) => {
+                if (!resizing.current) return
+                const width = resizing.current.width - (event.clientX - resizing.current.x)
+                setInspectorWidth(Math.min(1100, Math.max(340, width)))
+              }}
+              onPointerUp={() => (resizing.current = null)}
+            />
+            <main className="side" style={{ width: inspectorWidth }}>
+              {inspector}
+            </main>
+          </div>
+          <div hidden={!drawerOpen}>
+            <EnergyDrawer
+              canvas={canvas}
+              settings={settings}
+              level={levelKey}
+              levelLabel={levelOption?.label ?? ''}
+              type={shownType}
+              referenceId={referenceId}
+              selectedId={selection && selection.kind !== 'edge' && selection.kind !== 'branch' ? selection.id : null}
+              refreshKey={refreshKey}
+              onReference={setReferenceId}
+              onSelectNode={(id) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id, true))}
+            />
+          </div>
+        </div>
+      ) : (
+        <main className="main history-view">
+          <h2>Investigation history</h2>
+          <HistoryList entries={history} labels={labels} names={names} onSelect={(id) => selectNode(id, true)} />
+        </main>
+      )}
+      {dialogs}
+    </div>
+  )
+}
+
+export default App
