@@ -332,6 +332,7 @@ class SettingsOut(BaseModel):
     energy_factors: dict[str, float]
     recent: list[str]
     last_device: str
+    last_import_folder: str
     geometry_tolerance: float
     duplicate_tolerance: float
     energy_decimals: dict[str, int]
@@ -789,6 +790,7 @@ def get_settings():
         energy_factors=units.HARTREE_IN,
         recent=s.recent,
         last_device=s.last_device,
+        last_import_folder=app_settings.import_folder(s),
         geometry_tolerance=s.geometry_tolerance,
         duplicate_tolerance=s.duplicate_tolerance,
         energy_decimals=units.DECIMALS,
@@ -880,6 +882,7 @@ def import_from_path(body: ImportFromPathIn, request: Request, session: DbSessio
     except OSError as exc:
         raise HTTPException(422, f"Cannot read {path}") from exc
     staged = _stage(request, data, path.name, str(path.resolve()))
+    app_settings.remember_import_folder(path.resolve().parent)  # D77
     return _plan(session, staged, imports.ImportOptions(target_node_id=body.node_id))
 
 

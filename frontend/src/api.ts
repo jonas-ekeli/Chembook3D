@@ -264,6 +264,8 @@ export type Settings = {
   energy_factors: Record<string, number>
   recent: string[]
   last_device: string
+  /** D77: the folder a file was last picked from in the import dialog ("" when none or gone). */
+  last_import_folder: string
   geometry_tolerance: number
   duplicate_tolerance: number
   energy_decimals: Record<string, number>

@@ -112,3 +112,40 @@ test('a late preview answer does not undo a name given after it', async ({ page 
   await expect(steps.getByRole('row').nth(5)).toContainText('Gaussian PBEPBE-GD3MBJ/modDZ', { timeout: 1000 })
   await dialog.getByRole('button', { name: 'Cancel' }).click()
 })
+
+test('the file browser starts where the last file was picked and filters by name', async ({ page }) => {
+  // D77
+  await newInvestigation(page, 'Browser test')
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  const dialog = page.getByRole('dialog')
+  const path = dialog.getByLabel('Folder path')
+  const files = dialog.getByRole('list', { name: 'Files' })
+  // wait for the first listing, so it cannot replace the folder typed below
+  await expect(path).not.toHaveValue('')
+  await path.fill(CUSTOM)
+  await dialog.getByRole('button', { name: 'Go' }).click()
+  await expect(files.getByRole('listitem')).toHaveCount(3)
+
+  const filter = dialog.getByLabel('Filter by name')
+  await filter.fill('qz')
+  await expect(files.getByRole('listitem')).toHaveCount(1)
+  await expect(files).toContainText('MeI_TS_QZ.out')
+  await filter.fill('SPQZ')
+  await expect(files).toContainText('No names here contain “SPQZ”.')
+  // Escape clears the filter and leaves the dialog open
+  await filter.press('Escape')
+  await expect(filter).toHaveValue('')
+  await expect(files.getByRole('listitem')).toHaveCount(3)
+
+  await filter.fill('QZ')
+  await files.getByRole('button', { name: /MeI_TS_QZ\.out/ }).click()
+  await expect(dialog.getByLabel('Import preview')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+
+  // Opened again, it starts in that folder with an empty filter.
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  await expect(path).toHaveValue(CUSTOM)
+  await expect(filter).toHaveValue('')
+  await expect(files.getByRole('listitem')).toHaveCount(3)
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+})

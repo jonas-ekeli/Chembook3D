@@ -33,6 +33,8 @@ class Settings:
     energy_unit: str = "kcal/mol"
     recent: list[str] = field(default_factory=list)
     last_device: str = ""  # FR-FILE-02: origin device defaults to the last one used
+    # D77: the import file browser starts in the folder a file was last picked from
+    last_import_folder: str = ""
     geometry_tolerance: float = GEOMETRY_TOLERANCE
     duplicate_tolerance: float = DUPLICATE_TOLERANCE
     # D58: G_qh temperature (K) and cutoff (cm⁻¹); every G_qh value is shown with them.
@@ -56,8 +58,9 @@ def load() -> Settings:
         settings.energy_unit = data["energy_unit"]
     if isinstance(data.get("recent"), list):
         settings.recent = [p for p in data["recent"] if isinstance(p, str)][:MAX_RECENT]
-    if isinstance(data.get("last_device"), str):
-        settings.last_device = data["last_device"]
+    for key in ("last_device", "last_import_folder"):
+        if isinstance(data.get(key), str):
+            setattr(settings, key, data[key])
     for key in ("geometry_tolerance", "duplicate_tolerance", "qh_temperature"):
         value = data.get(key)
         if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
@@ -84,3 +87,16 @@ def remember_recent(folder: Path) -> None:
     settings.recent = [path] + [p for p in settings.recent if p != path]
     settings.recent = settings.recent[:MAX_RECENT]
     save(settings)
+
+
+def remember_import_folder(folder: Path) -> None:
+    settings = load()
+    settings.last_import_folder = str(folder)
+    save(settings)
+
+
+def import_folder(settings: Settings) -> str:
+    """The folder to start the import file browser in, or "" (the home folder) when none was
+    used yet or it no longer exists (D77)."""
+    folder = settings.last_import_folder
+    return folder if folder and Path(folder).is_dir() else ""

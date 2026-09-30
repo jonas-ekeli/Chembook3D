@@ -703,6 +703,10 @@ table.conflict td {
   display: grid;
   gap: 0.75rem;
 }
+.file-browser {
+  display: grid;
+  gap: 0.5rem;
+}
 .file-entry {
   display: flex;
   justify-content: space-between;
