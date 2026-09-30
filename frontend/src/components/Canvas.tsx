@@ -140,7 +140,7 @@ const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<
       </div>
       {mode === 'structure' && <MoleculeSketch xyz={node.xyz} width={NODE_WIDTH - 16} height={120} />}
       {energy && (
-        <div className="cnode-energy" title={energy.title}>
+        <div className={`cnode-energy${mode === 'structure' ? ' below-structure' : ''}`} title={energy.title}>
           {energy.text}
         </div>
       )}
@@ -212,7 +212,7 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
         <MoleculeSketch xyz={representativeXyz} width={NODE_WIDTH - 16} height={120} />
       )}
       {!expanded && energy && (
-        <div className="cnode-energy" title={energy.title}>
+        <div className={`cnode-energy${mode === 'structure' ? ' below-structure' : ''}`} title={energy.title}>
           {energy.text}
         </div>
       )}
@@ -351,10 +351,12 @@ function CanvasView({
   const colours = useMemo(() => new Map(data.branches.map((b) => [b.id, b.colour])), [data.branches])
   const stepNames = useMemo(() => new Map(data.steps.map((s) => [s.id, s.name || 'Unnamed step'])), [data.steps])
 
-  // Nodes show energies only in energy mode, so only then do energy changes rebuild them.
-  // Rebuilding every node when the energy view arrives, just after the canvas loaded, left
-  // React Flow re-measuring nodes and occasionally dropping edges or a click.
-  const nodeEnergySource = mode === 'energy' ? energy : null
+  // Nodes show energies only in energy mode, and in structure mode once a reference is chosen
+  // (D73, ΔX below the structure), so only then do energy changes rebuild them. Rebuilding
+  // every node when the energy view arrives, just after the canvas loaded, left React Flow
+  // re-measuring nodes and occasionally dropping edges or a click.
+  const nodeEnergySource =
+    mode === 'energy' || (mode === 'structure' && energy.referenceId) ? energy : null
 
   const { flowNodes, flowEdges: plainEdges } = useMemo(() => {
     // D43: in energy mode a node shows ΔX from the reference node, never an absolute value.

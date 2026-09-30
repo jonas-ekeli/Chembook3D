@@ -1147,6 +1147,11 @@ table.members input {
   font-weight: 600;
   margin: 0.15rem 0;
 }
+
+/* D73: ΔX centred under the structure, as in a figure. */
+.cnode-energy.below-structure {
+  text-align: center;
+}
 .edge-energy,
 .edge-count {
   background: var(--panel);

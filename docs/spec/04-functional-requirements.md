@@ -167,7 +167,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-CAN-01 | Infinite pan and zoom canvas. Node positions persist per investigation. | D2 | 3 |
 | FR-CAN-02 | Nodes and edges are drawn in their branch colour, with status badges and warning icons. | D33 | 3 |
 | FR-CAN-03 | Energy labels on edges can be shown or hidden. | D33 | 4 |
-| FR-CAN-04 | View modes: compact, energy, structure. | D40, D43 | 3 (energy mode in 4) |
+| FR-CAN-04 | View modes: compact, energy, structure. Structure mode shows ΔX below each structure once a reference is chosen. | D40, D43, D73 | 3 (energy mode in 4) |
 | FR-CAN-05 | Filters by branch, status and step. Filtering never alters data. | D33 | 3 |
 | FR-CAN-06 | "Arrange branch" lays out one branch left to right in step order. Other positions are unchanged. | D33 | 3 |
 | FR-CAN-07 | Export a canvas image (viewport or full canvas). | D39 | 3 |

@@ -53,12 +53,23 @@ test('energy view: one level and type, ΔG on edges, energy mode', async ({ page
   await view.getByLabel('Energies on edges').check()
 
   // D43: energy mode shows ΔX from the reference node the user picks.
+  // Without a reference, structure mode shows no energies at all.
+  await page.getByRole('button', { name: 'Structure', exact: true }).click()
+  await expect(canvasNode(page, 'A-S2').getByRole('img', { name: 'Structure' })).toBeVisible()
+  await expect(canvasNode(page, 'A-S2').locator('.cnode-energy')).toHaveCount(0)
   await page.getByRole('button', { name: 'Energy', exact: true }).click()
   await expect(canvasNode(page, 'A-S2')).toContainText('ΔG: no reference')
   await canvasNode(page, 'T-S0').click()
   await page.getByLabel('Node inspector').getByRole('button', { name: 'Use as energy reference' }).click()
   await expect(canvasNode(page, 'A-S2')).toContainText('ΔG 14.80')
   await expect(canvasNode(page, 'B-S3')).toContainText('ΔG -6.00')
+
+  // D73: structure mode shows the same ΔX below each structure, once a reference is chosen.
+  await page.getByRole('button', { name: 'Structure', exact: true }).click()
+  await expect(canvasNode(page, 'A-S2').getByRole('img', { name: 'Structure' })).toBeVisible()
+  await expect(canvasNode(page, 'A-S2').locator('.cnode-energy')).toHaveText('ΔG 14.80')
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT })
+  await page.getByRole('button', { name: 'Energy', exact: true }).click()
 
   // T-EN-06: the unit changes what is shown, not what is stored.
   await setUnit(page, 'kJ/mol')
