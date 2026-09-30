@@ -3,6 +3,7 @@ import {
   api,
   ApiError,
   CALCULATION_TYPES,
+  LARGE_FILE,
   ROLES,
   STATUSES,
   type EnsemblePlan,
@@ -247,6 +248,7 @@ export function ImportDialog({
   queued,
   position = null,
   asSpecies = false,
+  linked = false,
   onClose,
   onImported,
 }: {
@@ -261,6 +263,8 @@ export function ImportDialog({
   queued: number
   /** Where a new node goes on the canvas (the drop point), WF-04. */
   position?: { x: number; y: number } | null
+  /** The investigation syncs through Git, whose host refuses large files (FR-SYNC-09). */
+  linked?: boolean
   onClose: () => void
   onImported: (imported: { kind: 'node' | 'group'; id: string }, notice: string) => void
 }) {
@@ -405,6 +409,12 @@ export function ImportDialog({
               ? `${plan.ensemble.conformers.length} conformers`
               : `${plan.steps.length} job step${plan.steps.length === 1 ? '' : 's'}`}
           </p>
+          {linked && plan.size > LARGE_FILE && (
+            <p className="notice warn" role="status">
+              This file is larger than 100 MB. GitHub refuses files that large, so this investigation cannot be pushed
+              once it is imported. Consider keeping only the relevant part of the output.
+            </p>
+          )}
           {plan.already_imported.map((entry) => (
             <p key={entry.imported_at} className="notice" role="status">
               This file was already imported as “{entry.original_name}” on{' '}

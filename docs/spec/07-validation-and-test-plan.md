@@ -114,6 +114,13 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-OPS-03 | Open an investigation already open elsewhere | A lock warning (P22) |
 | T-OPS-04 | Open an investigation from an older schema | A backup is made, then the migration runs (NFR-DATA-03) |
 | T-OPS-05 | Backend reachable from another machine? | No (NFR-SEC-01) |
+| T-SYNC-01 | Open an investigation saved by a newer schema | The newer-version message; no backup, migration or lock (FR-SYNC-01) |
+| T-SYNC-02 | Link to an empty bare repository, then to one that is not empty | Pushed without the lock file or `backups/`; the second is refused (FR-SYNC-02) |
+| T-SYNC-03 | Clone into a second folder, change and sync there, open the first | The first shows the change (FR-SYNC-03, 04, 05) |
+| T-SYNC-04 | Change both copies, sync, keep either copy | Nothing merged; the other copy is saved (FR-SYNC-06) |
+| T-SYNC-05 | Clone with `core.autocrlf=true` | Copied output files are byte for byte identical (D71) |
+| T-SYNC-06 | Remote unreachable | Opens anyway and reports it; the next sync pushes (FR-SYNC-04) |
+| T-SYNC-07 | Open a linked investigation from an older schema | Asks before upgrading (FR-SYNC-07) |
 | T-UI-01 | Resume overview on the example | Branch statuses, open items, recent changes and step notes all shown; clicking navigates (FR-OV-01) |
 | T-UI-02 | View modes and filters | Switching modes and filters never changes stored data |
 | T-UI-03 | 3D | Rotate, measure, animate the imaginary mode, overlay two nodes, copy xyz |

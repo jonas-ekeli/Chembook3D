@@ -15,12 +15,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from chembook3d import settings as app_settings
-from chembook3d import thermochem, units, xyz
+from chembook3d import sync, thermochem, units, xyz
 from chembook3d.investigation import (
     DB_NAME,
     Investigation,
     InvestigationError,
     InvestigationLocked,
+    NeedsUpgrade,
+    check_lock,
     create_investigation,
     open_investigation,
 )
@@ -52,9 +54,26 @@ UtcDatetime = Annotated[
 ]
 
 
+class CommitOut(BaseModel):
+    when: str
+    summary: str
+
+
+class SyncOut(BaseModel):
+    """Git sync state of an investigation (D71, FR-SYNC-05)."""
+
+    state: str
+    message: str
+    remote: str | None = None
+    local: CommitOut | None = None
+    upstream: CommitOut | None = None
+
+
 class InvestigationOut(BaseModel):
     name: str
     folder: str
+    linked: bool = False
+    sync: SyncOut | None = None  # the outcome of the pull on open, if linked
 
 
 class CreateInvestigationIn(BaseModel):
@@ -65,6 +84,21 @@ class CreateInvestigationIn(BaseModel):
 class OpenInvestigationIn(BaseModel):
     folder: str
     force: bool = False
+    upgrade: bool = False  # the user confirmed upgrading a linked investigation (D71c)
+
+
+class CloneInvestigationIn(BaseModel):
+    url: str
+    folder: str
+
+
+class LinkIn(BaseModel):
+    url: str
+
+
+class ResolveIn(BaseModel):
+    folder: str
+    keep: str  # "this" or "github"
 
 
 class WarningOut(BaseModel):
@@ -396,14 +430,40 @@ def _staging(request: Request) -> imports.Staging:
     return request.app.state.staging
 
 
-def _set_open(request: Request, investigation: Investigation) -> InvestigationOut:
+def _sync_out(status: sync.SyncStatus | None) -> SyncOut | None:
+    return None if status is None else SyncOut.model_validate(status, from_attributes=True)
+
+
+def _investigation_out(investigation: Investigation, status=None) -> InvestigationOut:
+    return InvestigationOut(
+        name=investigation.name,
+        folder=str(investigation.folder),
+        linked=sync.is_linked(investigation.folder),
+        sync=_sync_out(status),
+    )
+
+
+def close_and_push(
+    investigation: Investigation, timeout: float = sync.NETWORK_TIMEOUT
+) -> sync.SyncStatus | None:
+    """Close an investigation, then commit and push it if it is linked (FR-SYNC-05)."""
+    investigation.close()
+    if not sync.is_linked(investigation.folder):
+        return None
+    try:
+        return sync.push(investigation.folder, open_db=False, timeout=timeout)
+    except sync.SyncError as exc:
+        return sync.SyncStatus("error", str(exc))
+
+
+def _set_open(request: Request, investigation: Investigation, status=None) -> InvestigationOut:
     current = getattr(request.app.state, "investigation", None)
     if current is not None:
-        current.close()
+        close_and_push(current)
     _staging(request).clear()
     request.app.state.investigation = investigation
     app_settings.remember_recent(investigation.folder)
-    return InvestigationOut(name=investigation.name, folder=str(investigation.folder))
+    return _investigation_out(investigation, status)
 
 
 # ---------- investigations ----------
@@ -414,7 +474,7 @@ def current_investigation(request: Request):
     investigation = getattr(request.app.state, "investigation", None)
     if investigation is None:
         return None
-    return InvestigationOut(name=investigation.name, folder=str(investigation.folder))
+    return _investigation_out(investigation)
 
 
 @router.post("/investigations", response_model=InvestigationOut)
@@ -426,27 +486,117 @@ def create(body: CreateInvestigationIn, request: Request):
     return _set_open(request, investigation)
 
 
-@router.post("/investigations/open", response_model=InvestigationOut)
-def open_(body: OpenInvestigationIn, request: Request):
+def _conflict(folder: Path, status: sync.SyncStatus) -> HTTPException:
+    out = _sync_out(status)
+    assert out is not None
+    return HTTPException(409, {"sync_conflict": {**out.model_dump(), "folder": str(folder)}})
+
+
+def _open_folder(request: Request, folder: Path, force: bool, upgrade: bool) -> InvestigationOut:
     current = getattr(request.app.state, "investigation", None)
-    if current is not None and Path(body.folder).resolve() == current.folder.resolve():
-        return InvestigationOut(name=current.name, folder=str(current.folder))
+    if current is not None and folder.resolve() == current.folder.resolve():
+        return _investigation_out(current)
     try:
-        investigation = open_investigation(Path(body.folder), force=body.force)
+        check_lock(folder, force)
     except InvestigationLocked as exc:
         raise HTTPException(409, {"locked": exc.lock, "message": str(exc)}) from exc
     except InvestigationError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return _set_open(request, investigation)
+    status = None
+    if sync.is_linked(folder):
+        # FR-SYNC-04: pull first. Without a connection the investigation opens anyway.
+        try:
+            status = sync.pull(folder)
+        except sync.SyncError as exc:
+            status = sync.SyncStatus("error", str(exc))
+        if status.state == "diverged":
+            raise _conflict(folder, status)
+    try:
+        investigation = open_investigation(
+            folder, force=force, allow_upgrade=upgrade or status is None
+        )
+    except InvestigationLocked as exc:
+        raise HTTPException(409, {"locked": exc.lock, "message": str(exc)}) from exc
+    except NeedsUpgrade as exc:
+        raise HTTPException(
+            409,
+            {"needs_upgrade": {"from": exc.revision, "to": exc.head}, "message": str(exc)},
+        ) from exc
+    except InvestigationError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _set_open(request, investigation, status)
 
 
-@router.post("/investigations/close", status_code=204)
+@router.post("/investigations/open", response_model=InvestigationOut)
+def open_(body: OpenInvestigationIn, request: Request):
+    return _open_folder(request, Path(body.folder), body.force, body.upgrade)
+
+
+@router.post("/investigations/clone", response_model=InvestigationOut)
+def clone(body: CloneInvestigationIn, request: Request):
+    """FR-SYNC-03: Open from GitHub."""
+    folder = Path(body.folder).expanduser()
+    try:
+        sync.clone(body.url, folder)
+    except sync.SyncError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _open_folder(request, folder, force=False, upgrade=False)
+
+
+@router.post("/investigations/close", response_model=SyncOut | None)
 def close(request: Request):
     investigation = getattr(request.app.state, "investigation", None)
+    status = None
     if investigation is not None:
-        investigation.close()
         request.app.state.investigation = None
+        status = close_and_push(investigation)
     _staging(request).clear()
+    return _sync_out(status)
+
+
+# ---------- sync (D71) ----------
+
+
+@router.get("/sync", response_model=SyncOut)
+def sync_status(request: Request, fetch: bool = True):
+    try:
+        return _sync_out(sync.status(_investigation(request).folder, fetch=fetch))
+    except sync.SyncError as exc:
+        return SyncOut(state="error", message=str(exc))
+
+
+@router.post("/sync", response_model=SyncOut)
+def sync_now(request: Request):
+    """The Sync button: commit and push while the investigation stays open."""
+    try:
+        return _sync_out(sync.push(_investigation(request).folder, open_db=True))
+    except sync.SyncError as exc:
+        return SyncOut(state="error", message=str(exc))
+
+
+@router.post("/sync/link", response_model=SyncOut)
+def sync_link(body: LinkIn, request: Request):
+    investigation = _investigation(request)
+    try:
+        return _sync_out(sync.link(investigation.folder, body.url, investigation.name))
+    except sync.SyncError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/sync/resolve", response_model=SyncOut)
+def sync_resolve(body: ResolveIn, request: Request):
+    """FR-SYNC-06: keep one copy. The investigation is closed first if it is open; the
+    interface opens it again afterwards."""
+    folder = Path(body.folder)
+    current = getattr(request.app.state, "investigation", None)
+    if current is not None and folder.resolve() == current.folder.resolve():
+        request.app.state.investigation = None
+        current.close()
+        _staging(request).clear()
+    try:
+        return _sync_out(sync.resolve(folder, body.keep))
+    except sync.SyncError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 def _is_investigation(folder: Path) -> bool:

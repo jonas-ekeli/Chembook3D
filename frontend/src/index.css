@@ -663,6 +663,35 @@ label.inline input {
   border-radius: var(--radius);
   padding: 0.4rem 0.6rem;
 }
+.notice.warn {
+  background: #fffaeb;
+  border: 1px solid #fedf89;
+}
+/* Git sync (D71): the header button shows the last known state. */
+.sync-button.up_to_date {
+  border-color: #75e0a7;
+}
+.sync-button.not_pushed,
+.sync-button.behind {
+  border-color: #fedf89;
+  background: #fffaeb;
+}
+.sync-button.diverged,
+.sync-button.unreachable,
+.sync-button.error,
+.sync-button.no_git {
+  border-color: #fda29b;
+  background: #fef3f2;
+}
+table.conflict {
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+table.conflict th,
+table.conflict td {
+  text-align: left;
+  padding: 0.25rem 0.75rem 0.25rem 0;
+}
 .blockers {
   margin: 0;
   color: var(--danger);

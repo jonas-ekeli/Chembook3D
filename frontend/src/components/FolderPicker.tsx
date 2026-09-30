@@ -13,14 +13,21 @@ export function FolderPicker({
   mode,
   onCancel,
   onChoose,
+  title,
+  chooseLabel,
+  initialName = '',
 }: {
   mode: 'open' | 'create'
   onCancel: () => void
   onChoose: (folder: string, name: string) => void
+  /** For other uses of a new folder, such as Open from GitHub (D71). */
+  title?: string
+  chooseLabel?: string
+  initialName?: string
 }) {
   const [listing, setListing] = useState<FolderListing | null>(null)
   const [pathInput, setPathInput] = useState('')
-  const [name, setName] = useState('')
+  const [name, setName] = useState(initialName)
   const [error, setError] = useState<string | null>(null)
 
   // Only the latest request may update the dialog: listing the home folder can finish after
@@ -57,13 +64,13 @@ export function FolderPicker({
 
   return (
     <Modal
-      title={mode === 'open' ? 'Open investigation' : 'New investigation'}
+      title={title ?? (mode === 'open' ? 'Open investigation' : 'New investigation')}
       onClose={onCancel}
       actions={
         <>
           <button onClick={onCancel}>Cancel</button>
           <button className="primary" disabled={!canChoose} onClick={choose}>
-            {mode === 'open' ? 'Open' : 'Create'}
+            {chooseLabel ?? (mode === 'open' ? 'Open' : 'Create')}
           </button>
         </>
       }

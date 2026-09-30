@@ -19,7 +19,41 @@ export const ROLES: { value: Role; label: string }[] = [
   { value: 'transition_state', label: 'Transition state' },
 ]
 
-export type Investigation = { name: string; folder: string }
+export type SyncState =
+  | 'not_linked'
+  | 'no_git'
+  | 'up_to_date'
+  | 'not_pushed'
+  | 'behind'
+  | 'diverged'
+  | 'unreachable'
+  | 'error'
+
+/** Git sync state of an investigation (D71). */
+export type SyncStatus = {
+  state: SyncState
+  message: string
+  remote: string | null
+  local: { when: string; summary: string } | null
+  upstream: { when: string; summary: string } | null
+}
+
+export type SyncConflict = SyncStatus & { folder: string }
+
+/** States in which a sync did not get through; the app says why. */
+export const SYNC_PROBLEMS: SyncState[] = ['no_git', 'unreachable', 'error']
+
+/** GitHub refuses files over 100 MB (FR-SYNC-09). */
+export const LARGE_FILE = 100 * 1024 * 1024
+
+export type Investigation = {
+  name: string
+  folder: string
+  /** Linked to a Git repository (D71). */
+  linked: boolean
+  /** What the pull on open found, when linked. */
+  sync: SyncStatus | null
+}
 
 export type CalculationType =
   | 'optimization'
@@ -540,6 +574,16 @@ export class ApiError extends Error {
     const detail = this.detail as { locked?: { host?: string; opened_at?: string } } | null
     return this.status === 409 && detail && detail.locked ? detail.locked : null
   }
+
+  get syncConflict(): SyncConflict | null {
+    const detail = this.detail as { sync_conflict?: SyncConflict } | null
+    return this.status === 409 && detail && detail.sync_conflict ? detail.sync_conflict : null
+  }
+
+  get needsUpgrade(): { from: string; to: string } | null {
+    const detail = this.detail as { needs_upgrade?: { from: string; to: string } } | null
+    return this.status === 409 && detail && detail.needs_upgrade ? detail.needs_upgrade : null
+  }
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -569,9 +613,17 @@ export const api = {
   currentInvestigation: () => request<Investigation | null>('GET', '/investigation'),
   createInvestigation: (folder: string, name: string) =>
     request<Investigation>('POST', '/investigations', { folder, name }),
-  openInvestigation: (folder: string, force = false) =>
-    request<Investigation>('POST', '/investigations/open', { folder, force }),
-  closeInvestigation: () => request<void>('POST', '/investigations/close'),
+  openInvestigation: (folder: string, force = false, upgrade = false) =>
+    request<Investigation>('POST', '/investigations/open', { folder, force, upgrade }),
+  cloneInvestigation: (url: string, folder: string) =>
+    request<Investigation>('POST', '/investigations/clone', { url, folder }),
+  /** Closing a linked investigation also pushes it; the answer is the sync state (D71). */
+  closeInvestigation: () => request<SyncStatus | null>('POST', '/investigations/close'),
+  syncStatus: () => request<SyncStatus>('GET', '/sync'),
+  syncNow: () => request<SyncStatus>('POST', '/sync'),
+  linkRepository: (url: string) => request<SyncStatus>('POST', '/sync/link', { url }),
+  resolveSync: (folder: string, keep: 'this' | 'github') =>
+    request<SyncStatus>('POST', '/sync/resolve', { folder, keep }),
   folders: (path?: string, files = false) => {
     const query = new URLSearchParams()
     if (path) query.set('path', path)
