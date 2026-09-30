@@ -5,6 +5,7 @@
 - A transition where neither end is a transition-state node is a direct connection, shown
   as "no TS" (D53, FR-EDGE-03). Group nodes are not TS nodes, so an edge into a reconnection
   without a TS is a direct connection too (D14).
+- Each end is drawn on one side of its box (D76); the sides are layout, not history (A29).
 """
 
 from typing import Any
@@ -17,6 +18,15 @@ from chembook3d.services import history
 from chembook3d.services.records import RecordError, get, status_value, text_value
 
 Endpoint = Node | GroupNode
+
+SIDES = ("top", "right", "bottom", "left")
+SIDE_FIELDS = ("source_side", "target_side")
+
+
+def side_value(field: str, value: Any) -> str:
+    if value not in SIDES:
+        raise RecordError(f"{field} must be one of {', '.join(SIDES)}")
+    return value
 
 
 def snapshot(transition: Transition) -> dict[str, Any]:
@@ -115,6 +125,8 @@ def create(session: Session, fields: dict[str, Any]) -> Transition:
     transition = Transition(
         status=status_value(fields.get("status", "planned")),
         notes=text_value("notes", fields.get("notes", "")),
+        source_side=side_value("source_side", fields.get("source_side", "right")),
+        target_side=side_value("target_side", fields.get("target_side", "left")),
     )
     if isinstance(source, Node):
         transition.source_node_id = source.id
@@ -133,6 +145,10 @@ def create(session: Session, fields: dict[str, Any]) -> Transition:
 def update(session: Session, transition_id: str, changes: dict[str, Any]) -> Transition:
     transition = get(session, Transition, transition_id, "Transition")
     for field, value in changes.items():
+        if field in SIDE_FIELDS:
+            # A29: where the arrow is drawn is layout, like a position, so it has no history.
+            setattr(transition, field, side_value(field, value))
+            continue
         if field == "status":
             value = status_value(value)
         elif field == "notes":

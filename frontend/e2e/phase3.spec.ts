@@ -90,8 +90,8 @@ test('build steps, branches and transitions on the canvas', async ({ page }) => 
   // Drag from one node's handle to the other's: a transition. Neither end is a TS, so it is a
   // direct connection marked "no TS" (D53).
   await canvasNode(page, 'T-S0')
-    .locator('.react-flow__handle.source')
-    .dragTo(canvasNode(page, 'T-S1').locator('.react-flow__handle.target'))
+    .locator('.react-flow__handle-right')
+    .dragTo(canvasNode(page, 'T-S1').locator('.react-flow__handle-left'))
   await expect(page.locator('.edge-label .no-ts')).toHaveCount(1)
   await canvasNode(page, 'T-S1').click()
   await inspector.getByLabel('Role').selectOption('transition_state')
@@ -106,6 +106,47 @@ test('build steps, branches and transitions on the canvas', async ({ page }) => 
   await branchList.getByRole('button', { name: /T1/ }).click()
   await expect(branchInspector.getByLabel('Lineage')).toContainText('T1 → T')
   await expect(branchInspector.getByLabel('Lineage')).toContainText('Split from T-S0')
+})
+
+test('an arrow can leave from and arrive at any side of a node', async ({ page }) => {
+  // D76, A29
+  await newInvestigation(page, 'Sides test')
+  const inspector = page.getByLabel('Node inspector')
+  for (const [label, x, y] of [['Upper', 200, 200], ['Lower', 480, 200]] as const) {
+    await page.locator('.react-flow__pane').dblclick({ position: { x, y } })
+    await expect(inspector.getByRole('heading', { name: 'Untitled node' })).toBeVisible()
+    await inspector.getByLabel('Label').fill(label)
+    await inspector.getByLabel('Label').press('Enter')
+    await expect(canvasNode(page, label)).toBeVisible()
+  }
+  const sides = async () => {
+    const [t] = (await canvasRecords(page)).transitions
+    return t ? `${t.source_side}>${t.target_side}` : null
+  }
+
+  // Drag from the bottom of one node to the top of the other.
+  await canvasNode(page, 'Upper')
+    .locator('.react-flow__handle-bottom')
+    .dragTo(canvasNode(page, 'Lower').locator('.react-flow__handle-top'))
+  await expect.poll(sides).toBe('bottom>top')
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1)
+
+  // Drag the arrow's end to another side of the same node.
+  const end = (await page.locator('.react-flow__edgeupdater-target').boundingBox())!
+  const left = (await canvasNode(page, 'Lower').locator('.react-flow__handle-left').boundingBox())!
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(left.x + left.width / 2, left.y + left.height / 2, { steps: 10 })
+  await page.mouse.up()
+  await expect.poll(sides).toBe('bottom>left')
+
+  // Or choose the sides in the transition's panel.
+  await canvasNode(page, 'Lower').click()
+  await inspector.getByRole('region', { name: 'Transitions' }).getByRole('button', { name: 'from Upper' }).click()
+  const panel = page.getByLabel('Transition inspector')
+  await expect(panel.getByLabel('Arrow arrives at')).toHaveValue('left')
+  await panel.getByLabel('Arrow leaves from').selectOption('right')
+  await expect.poll(sides).toBe('right>left')
 })
 
 test('reconnect branches as a group, pick a representative, see its structure, then dissolve it', async ({ page }) => {

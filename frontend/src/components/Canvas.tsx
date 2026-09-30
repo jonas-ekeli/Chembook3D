@@ -2,6 +2,7 @@ import {
   applyNodeChanges,
   Background,
   BaseEdge,
+  ConnectionMode,
   Controls,
   EdgeLabelRenderer,
   getBezierPath,
@@ -15,6 +16,7 @@ import {
   ReactFlow,
   useReactFlow,
   useUpdateNodeInternals,
+  type Connection,
   type Edge,
   type EdgeProps,
   type Node as FlowNode,
@@ -36,7 +38,11 @@ import {
   type GroupLayout,
   type Node,
   type Settings,
+  SIDES,
+  isSide,
+  type Side,
   type Transition,
+  type TransitionSides,
 } from '../api'
 import { MoleculeSketch } from './MoleculeSketch'
 
@@ -52,6 +58,25 @@ function speciesChips(t: Transition): TransitionData['species'] {
     title: `${s.label}${s.formula ? ` (${s.formula})` : ''} ${s.direction} here`,
   }))
 }
+const POSITION: Record<Side, Position> = {
+  top: Position.Top,
+  right: Position.Right,
+  bottom: Position.Bottom,
+  left: Position.Left,
+}
+
+/** D76: a handle on each side of a box; an arrow can leave from or arrive at any of them. The
+ * canvas connects in loose mode, so every handle is both a start and an end. */
+function SideHandles() {
+  return (
+    <>
+      {SIDES.map((side) => (
+        <Handle key={side} id={side} type="source" position={POSITION[side]} />
+      ))}
+    </>
+  )
+}
+
 const NODE_WIDTH = 176
 const MEMBER_CELL = { compact: { w: 196, h: 86 }, energy: { w: 196, h: 86 }, structure: { w: 196, h: 196 } }
 
@@ -122,7 +147,7 @@ const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<
       style={{ ['--branch' as string]: colour }}
       data-testid="canvas-node"
     >
-      <Handle type="target" position={Position.Left} />
+      <SideHandles />
       <div className="cnode-head">
         {node.role === 'transition_state' && (
           <span className="ts-mark" title="Transition state">
@@ -153,7 +178,6 @@ const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<
         <span className={`status status-${node.status}`}>{STATUS_LABEL[node.status]}</span>
         {stepName && <span className="cnode-step">{stepName}</span>}
       </div>
-      <Handle type="source" position={Position.Right} />
     </div>
   )
 })
@@ -179,7 +203,7 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
       style={{ ['--branch' as string]: colour }}
       data-testid="canvas-group"
     >
-      <Handle type="target" position={Position.Left} />
+      <SideHandles />
       <div className="cgroup-head">
         {ts && (
           <span className="ts-mark" title="Transition states">
@@ -230,7 +254,6 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
           {stepName && <span className="cnode-step">{stepName}</span>}
         </div>
       )}
-      <Handle type="source" position={Position.Right} />
     </div>
   )
 })
@@ -240,7 +263,8 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
     props
   let [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
   const dx = targetX - sourceX
-  if (Math.abs(dx) > 200 && Math.abs(targetY - sourceY) < 60) {
+  const sideways = sourcePosition === Position.Right && targetPosition === Position.Left
+  if (sideways && Math.abs(dx) > 200 && Math.abs(targetY - sourceY) < 60) {
     // An edge that skips a column (e.g. a direct connection past a TS) arcs over the nodes
     // in between instead of running behind them.
     const lift = Math.min(160, Math.abs(dx) * 0.25)
@@ -302,6 +326,14 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
 const nodeTypes = { structure: StructureNode, cgroup: GroupBox }
 const edgeTypes = { transition: TransitionEdge }
 
+/** The sides a new or moved connection uses (D76); a handle without one is left to the default. */
+function sides(connection: Connection): TransitionSides {
+  return {
+    ...(isSide(connection.sourceHandle) ? { source_side: connection.sourceHandle } : {}),
+    ...(isSide(connection.targetHandle) ? { target_side: connection.targetHandle } : {}),
+  }
+}
+
 function download(url: string, name: string) {
   const link = document.createElement('a')
   link.href = url
@@ -324,6 +356,7 @@ function CanvasView({
   onMultiSelect,
   onToggleNode,
   onConnect,
+  onMoveEnds,
   onAddNode,
   onDropFiles,
   onPositions,
@@ -342,7 +375,8 @@ function CanvasView({
   onSelect: (selection: Selection) => void
   onMultiSelect: (nodeIds: string[]) => void
   onToggleNode: (id: string) => void
-  onConnect: (source: string, target: string) => void
+  onConnect: (source: string, target: string, sides: TransitionSides) => void
+  onMoveEnds: (transitionIds: string[], sides: TransitionSides) => void
   onAddNode: (position: { x: number; y: number }) => void
   onDropFiles: (files: File[], targetId: string | null, position: { x: number; y: number }) => void
   onPositions: (positions: Record<string, { x: number; y: number }>) => void
@@ -563,6 +597,9 @@ function CanvasView({
         id: t.id,
         source,
         target,
+        // D76, A24: a line standing for several transitions uses the first one's sides.
+        sourceHandle: t.source_side,
+        targetHandle: t.target_side,
         type: 'transition',
         ariaLabel: `Transition${t.direct ? ' (no TS)' : ''}`,
         selected,
@@ -751,8 +788,20 @@ function CanvasView({
             .map((n) => n.id)
           if (ids.length) onMultiSelect(ids)
         }}
+        connectionMode={ConnectionMode.Loose}
+        isValidConnection={(connection) => connection.source !== connection.target}
         onConnect={(connection) => {
-          if (connection.source && connection.target) onConnect(connection.source, connection.target)
+          if (connection.source && connection.target) onConnect(connection.source, connection.target, sides(connection))
+        }}
+        onReconnect={(old, connection) => {
+          // A29: dragging an arrow's end moves it to another side of the same box. Moving it to
+          // another box would make it a different transition, so that is refused.
+          if (connection.source !== old.source || connection.target !== old.target) {
+            onError("An arrow's end can only move to another side of the same box. To join other boxes, draw a new transition.")
+            return
+          }
+          const ids = (old.data as TransitionData | undefined)?.ids ?? [old.id]
+          onMoveEnds(ids, sides(connection))
         }}
         onNodeDragStop={(_, __, dragged) => {
           const moved: Record<string, { x: number; y: number }> = {}

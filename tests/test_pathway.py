@@ -266,6 +266,30 @@ def test_transition_rules(open_client):
     assert kinds == ["delete", "update", "create"]
 
 
+def test_transition_sides(open_client, example):
+    # D76, A29: an arrow may use any side of either box; left to right unless chosen.
+    a, b = node(open_client, label="a"), node(open_client, label="b")
+    plain = edge(open_client, a["id"], b["id"])
+    assert (plain["source_side"], plain["target_side"]) == ("right", "left")
+    down = edge(open_client, b["id"], a["id"], source_side="bottom", target_side="top")
+    assert (down["source_side"], down["target_side"]) == ("bottom", "top")
+    body = {"source_id": a["id"], "target_id": example.nodes["A1-S1"], "source_side": "middle"}
+    post(open_client, "/transitions", body, status=422)
+
+    moved = patch(open_client, f"/transitions/{plain['id']}", {"target_side": "bottom"})
+    assert (moved["source_side"], moved["target_side"]) == ("right", "bottom")
+    patch(open_client, f"/transitions/{plain['id']}", {"source_side": "front"}, status=422)
+    listed = {t["id"]: t for t in get(open_client, "/transitions")}
+    assert listed[plain["id"]]["target_side"] == "bottom"
+    # Layout, like a position: the history has only the creation.
+    assert [e["action"] for e in history(open_client, plain["id"])] == ["create"]
+
+    # A group box has the same four sides.
+    group = reconnect_g6(open_client, example)
+    to_group = edge(open_client, a["id"], group["id"], target_side="top")
+    assert to_group["target_kind"] == "group" and to_group["target_side"] == "top"
+
+
 def test_superseded_ts_keeps_both_candidates_and_edges(open_client, example):
     # T-BR-11: a second TS candidate for A2 at S2; the first one is marked superseded.
     second = node(

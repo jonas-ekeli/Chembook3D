@@ -937,8 +937,13 @@ function App() {
                   }}
                   onMultiSelect={setMulti}
                   onToggleNode={toggleNode}
-                  onConnect={(source, target) =>
-                    api.createTransition(source, target).then(reload, (err: unknown) => setError(errorText(err)))
+                  onConnect={(source, target, sides) =>
+                    api.createTransition(source, target, sides).then(reload, (err: unknown) => setError(errorText(err)))
+                  }
+                  onMoveEnds={(ids, sides) =>
+                    Promise.all(ids.map((id) => api.updateTransition(id, sides))).then(reload, (err: unknown) =>
+                      setError(errorText(err)),
+                    )
                   }
                   onAddNode={addNode}
                   onDropFiles={(files, targetId, position) => setImportRequest({ targetId, files, position })}

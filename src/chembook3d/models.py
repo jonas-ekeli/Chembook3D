@@ -397,6 +397,9 @@ class Transition(Base):
     )
     status: Mapped[str] = mapped_column(String(32), default=Status.PLANNED)
     notes: Mapped[str] = mapped_column(Text, default="")
+    # D76: the side of each box the arrow leaves from and arrives at; display only.
+    source_side: Mapped[str] = mapped_column(String(8), default="right", server_default="right")
+    target_side: Mapped[str] = mapped_column(String(8), default="left", server_default="left")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     species: Mapped[list["TransitionSpecies"]] = relationship(

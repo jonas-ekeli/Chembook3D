@@ -154,13 +154,23 @@ export type Transition = {
   notes: string
   direct: boolean
   cross_branch: boolean
+  /** D76: the side of each box the arrow leaves from and arrives at. */
+  source_side: Side
+  target_side: Side
   /** D69: free species that join or leave on this transition. */
   species: TransitionSpecies[]
   /** W-BALANCE when the atoms or the charge do not balance. */
   warnings: Finding[]
 }
 
+export type TransitionSides = Partial<Pick<Transition, 'source_side' | 'target_side'>>
+
 export type SpeciesDirection = 'joins' | 'leaves'
+
+/** D76: the four sides of a node or group box an arrow can use. */
+export const SIDES = ['top', 'right', 'bottom', 'left'] as const
+export type Side = (typeof SIDES)[number]
+export const isSide = (value: unknown): value is Side => SIDES.includes(value as Side)
 
 /** Chip text for a species on an edge: "+ propene" joins, "− 2 × C₂H₄" leaves (D69). */
 export function speciesChip(entry: { direction: SpeciesDirection; count: number; label: string }): string {
@@ -741,9 +751,9 @@ export const api = {
   splitNode: (id: string, branches: { name: string; colour?: string }[]) =>
     request<Branch[]>('POST', `/nodes/${id}/split`, { branches }),
 
-  createTransition: (source_id: string, target_id: string) =>
-    request<Transition>('POST', '/transitions', { source_id, target_id }),
-  updateTransition: (id: string, fields: Partial<Pick<Transition, 'status' | 'notes'>>) =>
+  createTransition: (source_id: string, target_id: string, sides?: TransitionSides) =>
+    request<Transition>('POST', '/transitions', { source_id, target_id, ...sides }),
+  updateTransition: (id: string, fields: Partial<Pick<Transition, 'status' | 'notes' | 'source_side' | 'target_side'>>) =>
     request<Transition>('PATCH', `/transitions/${id}`, fields),
   deleteTransition: (id: string) => request<void>('DELETE', `/transitions/${id}`),
   attachSpecies: (id: string, species_id: string, direction: SpeciesDirection, count: number) =>
