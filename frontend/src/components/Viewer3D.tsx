@@ -1,10 +1,14 @@
-import { useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { defaultRotation, hiddenAtoms, measure, parseXyz, type HydrogenMode, type Rotation } from '../chem'
 import { HydrogenDisplay } from '../display'
 
 type Viewer = import('3dmol').GLViewer
 
-export type ViewerModel = { xyz: string; colour?: string }
+export type ViewerModel = { xyz: string; colour?: string; hidden?: boolean }
+
+/** D80: clicking atoms of the first model adds them to (or takes them out of) a list, in
+ * order, instead of measuring. */
+export type AtomPicking = { atoms: number[]; onToggle: (index: number) => void }
 
 const PICK_COLOURS = ['#f59f00', '#1c7ed6', '#e03131', '#2f9e44']
 
@@ -27,17 +31,24 @@ function hideHydrogens(model: import('3dmol').GLModel, xyz: string, mode: Hydrog
  *
  * The view opens turned by `rotation` (the node's saved orientation) or, without one, by the
  * default orientation its structure card uses. With `onSaveRotation`, the current orientation
- * can be saved for the card, or cleared back to the default. */
+ * can be saved for the card, or cleared back to the default.
+ *
+ * For overlays (D80), a model can be hidden without losing the view, `picking` collects
+ * alignment atoms, and `imageRef` is given a function returning the view as a PNG data URL. */
 export function Viewer3D({
   models,
   vibration = null,
   rotation = null,
   onSaveRotation,
+  picking,
+  imageRef,
 }: {
   models: ViewerModel[]
   vibration?: { xyz: string; amplitude?: number } | null
   rotation?: Rotation | null
   onSaveRotation?: (rotation: Rotation | null) => void
+  picking?: AtomPicking
+  imageRef?: MutableRefObject<(() => string) | null>
 }) {
   const hydrogens = useContext(HydrogenDisplay)
   const host = useRef<HTMLDivElement>(null)
@@ -47,7 +58,12 @@ export function Viewer3D({
   const [picks, setPicks] = useState<number[]>([])
   const [typed, setTyped] = useState('')
 
-  const key = models.map((m) => `${m.colour ?? ''}:${m.xyz}`).join('\n')
+  const structures = models.map((m) => m.xyz).join('\n')
+  const key = models.map((m) => `${m.colour ?? ''}:${m.hidden ? 'hidden' : ''}:${m.xyz}`).join('\n')
+  const built = useRef<string | null>(null)
+  // The click handler is made once per build; it reads the current picking through this.
+  const pickingRef = useRef(picking)
+  pickingRef.current = picking
   const atoms = useMemo(() => (models[0] ? parseXyz(models[0].xyz) : []), [models])
   const empty = models.length === 0
   // The orientation to show: applied when the structure or the saved orientation changes,
@@ -65,6 +81,9 @@ export function Viewer3D({
         if (cancelled || !host.current) return
         if (!viewer.current) viewer.current = $3Dmol.createViewer(host.current, { backgroundColor: 'white' })
         const v = viewer.current
+        // Showing or hiding a structure keeps the user's view; new structures are zoomed to.
+        const kept = !vibration && built.current === structures ? v.getView() : null
+        built.current = vibration ? null : structures
         v.stopAnimate()
         v.clear()
         if (vibration) {
@@ -76,6 +95,10 @@ export function Viewer3D({
         } else {
           models.forEach((m, index) => {
             const model = v.addModel(m.xyz, 'xyz')
+            if (m.hidden) {
+              model.setStyle({}, {})
+              return
+            }
             const colour = m.colour ? { color: m.colour } : {}
             model.setStyle({}, { stick: { radius: index ? 0.1 : 0.14, ...colour }, sphere: { scale: index ? 0.18 : 0.25, ...colour } })
             hideHydrogens(model, m.xyz, hydrogens)
@@ -83,10 +106,15 @@ export function Viewer3D({
           v.setClickable({ model: 0 }, true, (atom: { serial?: number; index?: number }) => {
             const index = atom.serial ?? atom.index
             if (index === undefined) return
+            if (pickingRef.current) {
+              pickingRef.current.onToggle(index)
+              return
+            }
             setPicks((current) => (current.length >= 4 ? [index] : current.includes(index) ? current : [...current, index]))
           })
         }
-        v.zoomTo()
+        if (kept) v.setView(kept)
+        else v.zoomTo()
         v.render()
         setError(null)
         setReady((n) => n + 1)
@@ -125,12 +153,38 @@ export function Viewer3D({
     onSaveRotation(q)
   }
 
-  // Picked atoms: highlighted, joined by dashed lines and numbered.
+  useEffect(() => {
+    if (!imageRef) return
+    imageRef.current = () => viewer.current?.pngURI() ?? ''
+    return () => {
+      imageRef.current = null
+    }
+  }, [imageRef])
+
+  // Picked atoms: highlighted, joined by dashed lines and numbered. Alignment atoms being
+  // picked (D80) are numbered in their order, without lines.
+  const aligning = picking?.atoms
   useEffect(() => {
     const v = viewer.current
     if (!v || !ready) return
     v.removeAllShapes()
     v.removeAllLabels()
+    if (aligning) {
+      aligning.forEach((index, i) => {
+        const atom = atoms[index]
+        if (!atom) return
+        const center = { x: atom.x, y: atom.y, z: atom.z }
+        v.addSphere({ center, radius: 0.45, color: PICK_COLOURS[0], alpha: 0.55 })
+        v.addLabel(`${i + 1}: ${atom.element}${index + 1}`, {
+          position: center,
+          fontSize: 11,
+          backgroundColor: PICK_COLOURS[0],
+          backgroundOpacity: 0.8,
+        })
+      })
+      v.render()
+      return
+    }
     picks.forEach((index, i) => {
       const atom = atoms[index]
       if (!atom) return
@@ -148,7 +202,7 @@ export function Viewer3D({
       }
     })
     v.render()
-  }, [picks, atoms, ready])
+  }, [picks, aligning, atoms, ready])
 
   useEffect(() => {
     const element = host.current
@@ -179,7 +233,7 @@ export function Viewer3D({
         <div ref={host} className="viewer-canvas" data-testid="viewer3d" hidden={empty} />
         {empty && <p className="muted viewer-empty">No coordinates yet.</p>}
       </div>
-      {!empty && !vibration && (
+      {!empty && !vibration && !picking && (
         <div className="measure" aria-label="Measure">
           <span className="muted small">Click 2–4 atoms, or type their numbers:</span>
           <input

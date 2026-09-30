@@ -243,7 +243,35 @@ export type GroupDeletePreview = {
 
 export type Modes = { xyz: string; frequencies: number[]; order: number[]; modes: number[][][] }
 
-export type Overlay = { reference_xyz: string; moving_xyz: string; rmsd: number | null; aligned: boolean }
+/** D80: all atoms (when they correspond), chosen atoms, or the stored coordinates. */
+export type OverlayAlign = 'all' | 'atoms' | 'none'
+
+export type OverlayRequest = {
+  node_ids: string[]
+  reference_id?: string | null
+  align: OverlayAlign
+  /** 1-based atom numbers of the full structure, per node, paired in order. */
+  atoms?: Record<string, number[]>
+  allow_mirror?: boolean
+}
+
+export type OverlayStructure = {
+  node_id: string
+  label: string
+  /** As placed on the reference. */
+  xyz: string
+  reference: boolean
+  /** False when only the centres were matched, or nothing was moved. */
+  rotated: boolean
+  rmsd_atoms: number | null
+  rmsd_all: number | null
+  mirrored: boolean
+}
+
+export type Overlay = { align: OverlayAlign; structures: OverlayStructure[] }
+
+/** FR-3D-07: a named list of alignment atoms per node. */
+export type AlignmentSet = { id: string; name: string; atoms: Record<string, number[]> }
 
 export type HistoryEntry = {
   id: number
@@ -795,11 +823,13 @@ export const api = {
   },
 
   modes: (calculationId: string) => request<Modes>('GET', `/calculations/${calculationId}/modes`),
-  overlay: (reference: string, moving: string) =>
-    request<Overlay>(
-      'GET',
-      `/overlay?reference=${encodeURIComponent(reference)}&moving=${encodeURIComponent(moving)}`,
-    ),
+  overlay: (body: OverlayRequest) => request<Overlay>('POST', '/overlay', body),
+  alignmentSets: () => request<AlignmentSet[]>('GET', '/alignment-sets'),
+  createAlignmentSet: (name: string, atoms: Record<string, number[]>) =>
+    request<AlignmentSet>('POST', '/alignment-sets', { name, atoms }),
+  updateAlignmentSet: (id: string, fields: { name?: string; atoms?: Record<string, number[] | null> }) =>
+    request<AlignmentSet>('PATCH', `/alignment-sets/${id}`, fields),
+  deleteAlignmentSet: (id: string) => request<void>('DELETE', `/alignment-sets/${id}`),
 }
 
 export const STATUS_LABEL: Record<string, string> = Object.fromEntries(

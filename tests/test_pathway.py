@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from tests.conftest import WATER
 from tests.test_gaussian_parser import TS
 from tests.test_import import calculations, commit, fixture, import_ts, named, upload
 
@@ -589,27 +588,7 @@ def test_arrange_branch_lays_out_by_step_and_leaves_others(open_client, example)
     assert {k: after[k] for k in others} == others
 
 
-# ---------- 3D (FR-3D-03, FR-3D-04) ----------
-
-
-def test_overlay_aligns_the_second_geometry(open_client):
-    rotated = """3
-water turned
-O 0.117300 0.000000 1.000000
-H -0.469200 0.757200 1.000000
-H -0.469200 -0.757200 1.000000
-"""
-    a = node(open_client, label="a", xyz=WATER)
-    b = node(open_client, label="b", xyz=rotated)
-    result = get(open_client, f"/overlay?reference={a['id']}&moving={b['id']}")
-    assert result["aligned"] is True and result["rmsd"] < 1e-6
-    first_atom = result["moving_xyz"].splitlines()[2].split()
-    assert first_atom[0] == "O"
-    assert [float(v) for v in first_atom[1:]] == pytest.approx([0.0, 0.0, 0.1173], abs=1e-6)
-
-    other = node(open_client, label="c", xyz="2\n\nH 0 0 0\nH 0 0 0.74\n")
-    unaligned = get(open_client, f"/overlay?reference={a['id']}&moving={other['id']}")
-    assert unaligned["aligned"] is False and unaligned["rmsd"] is None
+# ---------- 3D (FR-3D-03; overlays are in test_overlay.py) ----------
 
 
 def test_normal_modes_list_the_imaginary_mode_first(open_client):

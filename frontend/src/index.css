@@ -1148,9 +1148,39 @@ table.members input {
   gap: 0.35rem;
   margin-top: 0.35rem;
 }
-.overlay-legend {
+.overlay-options,
+.overlay-set {
   display: flex;
-  gap: 1.25rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+.overlay-options .field select,
+.overlay-set .field select {
+  width: auto;
+  max-width: 18rem;
+}
+.overlay-set input {
+  width: 12rem;
+}
+.overlay-atoms {
+  margin: 0.5rem 0;
+}
+.overlay-lists td {
+  padding: 0.15rem 0.35rem 0.15rem 0;
+}
+.overlay-lists input {
+  width: 16rem;
+}
+table.overlay-legend {
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+  font-size: 13px;
+}
+table.overlay-legend th,
+table.overlay-legend td {
+  text-align: left;
+  padding: 0.15rem 0.6rem 0.15rem 0;
 }
 .overlay-viewer .viewer {
   height: 420px;

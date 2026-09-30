@@ -21,16 +21,25 @@ from chembook3d.api.routes import (
     _history_out,
     _node_out,
 )
-from chembook3d.models import Branch, Calculation, GroupNode, Node, ReactionStep, Transition
+from chembook3d.models import (
+    AlignmentSet,
+    Branch,
+    Calculation,
+    GroupNode,
+    Node,
+    ReactionStep,
+    Transition,
+)
+from chembook3d.services import alignment as alignment_service
 from chembook3d.services import branches as branch_service
-from chembook3d.services import geometry, layout
 from chembook3d.services import groups as group_service
+from chembook3d.services import layout
 from chembook3d.services import nodes as node_service
 from chembook3d.services import overview as overview_service
 from chembook3d.services import species as species_service
 from chembook3d.services import steps as step_service
 from chembook3d.services import transitions as transition_service
-from chembook3d.services.records import RecordNotFound, get
+from chembook3d.services.records import get
 
 router = APIRouter(prefix="/api")
 
@@ -196,11 +205,40 @@ class ModesOut(BaseModel):
     modes: list[list[list[float]]]  # [mode][atom][dx, dy, dz]
 
 
+class OverlayIn(BaseModel):
+    node_ids: list[str]
+    reference_id: str | None = None
+    align: str = "all"  # all | atoms | none (D80)
+    atoms: dict[str, list[int]] = Field(default_factory=dict)  # 1-based, per node
+    allow_mirror: bool = False
+
+
+class OverlayStructureOut(BaseModel):
+    node_id: str
+    label: str
+    xyz: str  # as placed on the reference
+    reference: bool
+    rotated: bool
+    rmsd_atoms: float | None
+    rmsd_all: float | None
+    mirrored: bool
+
+
 class OverlayOut(BaseModel):
-    reference_xyz: str
-    moving_xyz: str
-    rmsd: float | None
-    aligned: bool
+    align: str
+    structures: list[OverlayStructureOut]
+
+
+class AlignmentSetOut(BaseModel):
+    id: str
+    name: str
+    atoms: dict[str, list[int]]  # node id → 1-based atom numbers, paired in order
+
+
+class AlignmentSetIn(BaseModel):
+    name: str | None = None
+    # A list sets a node's atoms; null takes the node out of the set.
+    atoms: dict[str, list[int] | None] | None = None
 
 
 # ---------- helpers ----------
@@ -564,22 +602,73 @@ def calculation_modes(calculation_id: str, session: DbSession):
     )
 
 
-@router.get("/overlay", response_model=OverlayOut)
-def overlay(reference: str, moving: str, session: DbSession):
-    """FR-3D-04: the second node's geometry superposed on the first one's."""
-    try:
-        first = node_service.get(session, reference)
-        second = node_service.get(session, moving)
-    except node_service.NodeNotFound as exc:
-        raise RecordNotFound("Node not found") from exc
-    if not first.geometry or not second.geometry:
-        raise HTTPException(422, "Both nodes need coordinates to overlay them")
-    placed, rmsd = geometry.superpose(first.geometry, second.geometry)
-    return OverlayOut(
-        reference_xyz=node_service.to_xyz(first),
-        moving_xyz=xyz.format_xyz(
-            [xyz.Atom(e, x, y, z) for e, x, y, z in placed], comment=second.label
-        ),
-        rmsd=rmsd,
-        aligned=rmsd is not None,
+@router.post("/overlay", response_model=OverlayOut)
+def overlay(body: OverlayIn, session: DbSession):
+    """FR-3D-04, D80: the nodes' geometries placed on the reference's."""
+    items = alignment_service.overlay(
+        session, body.node_ids, body.reference_id, body.align, body.atoms, body.allow_mirror
     )
+    structures = []
+    for item in items:
+        label = item.node.label or "Untitled node"
+        if item.placed is None:
+            structures.append(
+                OverlayStructureOut(
+                    node_id=item.node.id,
+                    label=label,
+                    xyz=node_service.to_xyz(item.node),
+                    reference=True,
+                    rotated=False,
+                    rmsd_atoms=None,
+                    rmsd_all=None,
+                    mirrored=False,
+                )
+            )
+            continue
+        atoms = [xyz.Atom(e, x, y, z) for e, x, y, z in item.placed.rows]
+        structures.append(
+            OverlayStructureOut(
+                node_id=item.node.id,
+                label=label,
+                xyz=xyz.format_xyz(atoms, comment=item.node.label),
+                reference=False,
+                rotated=item.placed.rotated,
+                rmsd_atoms=item.placed.rmsd_atoms,
+                rmsd_all=item.placed.rmsd_all,
+                mirrored=item.placed.mirrored,
+            )
+        )
+    return OverlayOut(align=body.align, structures=structures)
+
+
+# ---------- alignment sets (FR-3D-07, D80) ----------
+
+
+def _alignment_set_out(alignment_set: AlignmentSet) -> AlignmentSetOut:
+    return AlignmentSetOut(
+        id=alignment_set.id,
+        name=alignment_set.name,
+        atoms=alignment_service.atoms_of(alignment_set),
+    )
+
+
+@router.get("/alignment-sets", response_model=list[AlignmentSetOut])
+def list_alignment_sets(session: DbSession):
+    return [_alignment_set_out(s) for s in alignment_service.list_sets(session)]
+
+
+@router.post("/alignment-sets", response_model=AlignmentSetOut, status_code=201)
+def create_alignment_set(body: AlignmentSetIn, session: DbSession):
+    created = alignment_service.create_set(session, body.name or "", body.atoms or {})
+    return _alignment_set_out(created)
+
+
+@router.patch("/alignment-sets/{set_id}", response_model=AlignmentSetOut)
+def update_alignment_set(set_id: str, body: AlignmentSetIn, session: DbSession):
+    changes = body.model_dump(exclude_unset=True)
+    return _alignment_set_out(alignment_service.update_set(session, set_id, changes))
+
+
+@router.delete("/alignment-sets/{set_id}", status_code=204)
+def delete_alignment_set(set_id: str, session: DbSession):
+    alignment_service.delete_set(session, set_id)

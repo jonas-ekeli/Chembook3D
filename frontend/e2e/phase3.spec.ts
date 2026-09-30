@@ -481,7 +481,7 @@ test('3D: measure atoms, animate the imaginary mode, overlay two nodes', async (
   await canvasNode(page, 'MeI_TS').click({ modifiers: ['Control'] })
   await page.getByLabel('Selection inspector').getByRole('button', { name: 'Overlay in 3D' }).click()
   const overlay = page.getByRole('dialog', { name: 'Overlay in 3D' })
-  await expect(overlay.getByLabel('Overlay result')).toHaveText('Aligned: RMSD 0.000 Å')
+  await expect(overlay.getByLabel('Overlay legend')).toContainText('0.000 Å')
   await expect(overlay.getByTestId('viewer3d').locator('canvas')).toBeVisible()
 })
 

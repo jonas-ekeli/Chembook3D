@@ -458,3 +458,36 @@ class HistoryEntry(Base):
     old_value: Mapped[Any] = mapped_column(JSON, nullable=True, default=None)
     new_value: Mapped[Any] = mapped_column(JSON, nullable=True, default=None)
     source: Mapped[str] = mapped_column(String(16), default="manual")  # manual | import
+
+
+class AlignmentSet(Base):
+    """D80, FR-3D-07: a named set of alignment atoms ("Ru–CAAC core"), one list per node, for
+    overlays. Layout-like data: saved in the investigation but not in the history (A31)."""
+
+    __tablename__ = "alignment_sets"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    entries: Mapped[list["AlignmentSetAtoms"]] = relationship(
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by=lambda: (AlignmentSetAtoms.created_at, AlignmentSetAtoms.node_id),
+    )
+
+
+class AlignmentSetAtoms(Base):
+    """One node's alignment atoms in a set: 1-based numbers of the full structure, paired in
+    order with the other nodes' lists. Deleting the node removes it from the set."""
+
+    __tablename__ = "alignment_set_atoms"
+
+    set_id: Mapped[str] = mapped_column(
+        ForeignKey("alignment_sets.id", ondelete="CASCADE"), primary_key=True
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    atoms: Mapped[list[Any]] = mapped_column(default=list)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)

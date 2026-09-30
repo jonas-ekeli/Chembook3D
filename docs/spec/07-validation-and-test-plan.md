@@ -59,6 +59,9 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-ID-05 | Import a geometry within tolerance of an existing node | The possible-duplicate prompt; nothing is merged without the user's choice (ID-8) |
 | T-ID-06 | Same file imported twice | A checksum notice |
 | T-ID-07 | Invalid xyz line | The error names the line; no save |
+| T-OVL-01 | Overlay a structure and its rotated, translated copy with extra atoms, on chosen atoms | RMSD over the chosen atoms 0; paired atoms of different elements, fewer than three atoms or numbers out of range are refused with the reason (FR-3D-04) |
+| T-OVL-02 | Overlay a structure and its mirror image, with and without "Allow mirror image" | Without: RMSD above 0, not mirrored; with: RMSD 0 and marked mirrored |
+| T-OVL-03 | Save an alignment set, reopen the investigation, add a node, delete a node | The set keeps each node's atoms, gains the new one, loses the deleted one, and writes no history (FR-3D-07, A31) |
 
 ## 5. Import and parsing tests
 
@@ -124,7 +127,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-SYNC-07 | Open a linked investigation from an older schema | Asks before upgrading (FR-SYNC-07) |
 | T-UI-01 | Resume overview on the example | Branch statuses, open items, recent changes and step notes all shown; clicking navigates (FR-OV-01) |
 | T-UI-02 | View modes and filters | Switching modes and filters never changes stored data |
-| T-UI-03 | 3D | Rotate, measure, animate the imaginary mode, overlay two nodes, copy xyz |
+| T-UI-03 | 3D | Rotate, measure, animate the imaginary mode, overlay two nodes, overlay three on typed atoms and save the set, copy xyz |
 | T-UI-04 | Canvas and profile image export | Files are produced and open in a standard viewer |
 
 ## 8. Performance observation (no targets)

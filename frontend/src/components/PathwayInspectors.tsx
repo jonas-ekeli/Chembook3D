@@ -12,7 +12,6 @@ import {
   type GroupDeletePreview,
   type Node,
   type NodeDeletePreview,
-  type Overlay,
   type Settings,
   type Side,
   type SpeciesDirection,
@@ -21,7 +20,7 @@ import {
 } from '../api'
 import { Modal } from './Modal'
 import { Notes, TextField } from './Fields'
-import { Viewer3D } from './Viewer3D'
+import { MAX_OVERLAY, OverlayDialog } from './OverlayDialog'
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -618,6 +617,7 @@ export function GroupInspector({
   const [removing, setRemoving] = useState(false)
   const [removingMember, setRemovingMember] = useState<Node | null>(null)
   const [sorted, setSorted] = useState(false)
+  const [overlay, setOverlay] = useState(false)
   const update = (fields: Parameters<typeof api.updateGroup>[1]) =>
     api.updateGroup(group.id, fields).then(onChanged, (err: unknown) => setError(errorText(err)))
   const byId = new Map(canvas.branches.map((b) => [b.id, b]))
@@ -627,6 +627,10 @@ export function GroupInspector({
   const valueOf = (id: string) => energy.view?.values[id]?.value ?? null
   const known = listed.map((m) => valueOf(m.id)).filter((v): v is number => v !== null)
   const lowest = known.length ? Math.min(...known) : null
+  // D80: the members with coordinates, the representative first so it is the reference.
+  const shapes = listed
+    .filter((n) => n.xyz)
+    .sort((a, b) => Number(b.id === group.representative_id) - Number(a.id === group.representative_id))
   const members =
     sorted && energy.view
       ? [...listed].sort((a, b) => (valueOf(a.id) ?? Infinity) - (valueOf(b.id) ?? Infinity))
@@ -761,8 +765,23 @@ export function GroupInspector({
             ))}
           </tbody>
         </table>
+        <div className="buttons">
+          <button
+            disabled={shapes.length < 2 || shapes.length > MAX_OVERLAY}
+            onClick={() => setOverlay(true)}
+            title={`Superpose the members with coordinates, on the representative if there is one (FR-3D-04)`}
+          >
+            Overlay members
+          </button>
+        </div>
+        {shapes.length > MAX_OVERLAY && (
+          <p className="muted small">
+            An overlay holds up to {MAX_OVERLAY} structures. Select up to {MAX_OVERLAY} members on the canvas and use Overlay in 3D.
+          </p>
+        )}
       </section>
       <Notes key={group.notes} notes={group.notes} onSave={(notes) => update({ notes })} />
+      {overlay && <OverlayDialog nodes={shapes} onClose={() => setOverlay(false)} />}
       {removing && <RemoveGroupDialog group={group} onClose={() => setRemoving(false)} onDone={onRemoved} />}
       {removingMember && (
         <RemoveMemberDialog
@@ -848,40 +867,6 @@ function ReconnectDialog({
   )
 }
 
-/** FR-3D-04, WF-09: the second node superposed on the first after alignment. */
-export function OverlayDialog({ first, second, onClose }: { first: Node; second: Node; onClose: () => void }) {
-  const [overlay, setOverlay] = useState<Overlay | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    api.overlay(first.id, second.id).then(setOverlay, (err: unknown) => setError(errorText(err)))
-  }, [first.id, second.id])
-  return (
-    <Modal title="Overlay in 3D" onClose={onClose} actions={<button onClick={onClose}>Close</button>}>
-      <p className="overlay-legend">
-        <span>
-          <span className="swatch" style={{ background: '#707070' }} /> {nodeName(first)} (element colours)
-        </span>
-        <span>
-          <span className="swatch" style={{ background: '#d6336c' }} /> {nodeName(second)}
-        </span>
-      </p>
-      {overlay && (
-        <>
-          <p aria-label="Overlay result">
-            {overlay.aligned
-              ? `Aligned: RMSD ${overlay.rmsd!.toFixed(3)} Å`
-              : 'The atoms differ in element or order, so the structures are only centred on each other, not rotated.'}
-          </p>
-          <div className="overlay-viewer">
-            <Viewer3D models={[{ xyz: overlay.reference_xyz }, { xyz: overlay.moving_xyz, colour: '#d6336c' }]} />
-          </div>
-        </>
-      )}
-      {error && <p role="alert">{error}</p>}
-    </Modal>
-  )
-}
-
 /** FR-GRP-06, A20: add the selected nodes to an existing group. */
 function AddToGroupDialog({
   group,
@@ -941,7 +926,7 @@ function describeSelection(nodes: Node[], groups: Group[]): string {
   return `${parts.join(' and ')} selected`
 }
 
-/** Actions on several selected nodes: assign step or branch, reconnect, overlay two, or add
+/** Actions on several selected nodes: assign step or branch, reconnect, overlay up to 12, or add
  * them to a group selected with them (A20). */
 export function SelectionInspector({
   nodes,
@@ -1036,7 +1021,11 @@ export function SelectionInspector({
         >
           Reconnect as group…
         </button>
-        <button disabled={nodes.length !== 2 || nodes.some((n) => !n.xyz)} onClick={() => setOverlay(true)}>
+        <button
+          disabled={nodes.length < 2 || nodes.length > MAX_OVERLAY || nodes.some((n) => !n.xyz)}
+          onClick={() => setOverlay(true)}
+          title={`2 to ${MAX_OVERLAY} nodes with coordinates (FR-3D-04)`}
+        >
           Overlay in 3D
         </button>
       </div>
@@ -1071,7 +1060,7 @@ export function SelectionInspector({
           }}
         />
       )}
-      {overlay && nodes.length === 2 && <OverlayDialog first={nodes[0]} second={nodes[1]} onClose={() => setOverlay(false)} />}
+      {overlay && nodes.length >= 2 && <OverlayDialog nodes={nodes} onClose={() => setOverlay(false)} />}
     </div>
   )
 }
