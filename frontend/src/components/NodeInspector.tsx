@@ -390,7 +390,12 @@ export function NodeInspector({
           <Notes key={node.notes} notes={node.notes} onSave={(notes) => update({ notes })} />
         </div>
         <div className="column">
-          <Viewer3D models={node.xyz ? [{ xyz: node.xyz }] : []} vibration={vibration} />
+          <Viewer3D
+            models={node.xyz ? [{ xyz: node.xyz }] : []}
+            vibration={vibration}
+            rotation={node.view_rotation}
+            onSaveRotation={isSpecies ? undefined : (view_rotation) => update({ view_rotation })}
+          />
           <Vibrations nodeId={node.id} refreshKey={refreshKey} onChange={setVibration} />
           <XyzEditor
             key={node.xyz ?? ''}

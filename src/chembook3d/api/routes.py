@@ -129,6 +129,7 @@ class NodeOut(BaseModel):
     origin_branch_id: str | None
     pos_x: float
     pos_y: float
+    view_rotation: list[float] | None
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
@@ -146,6 +147,7 @@ class NodeIn(BaseModel):
     branch_id: str | None = None
     pos_x: float | None = None
     pos_y: float | None = None
+    view_rotation: list[float] | None = None
     xyz: str | None = None
 
 
@@ -336,6 +338,8 @@ class SettingsOut(BaseModel):
     qh_temperature: float
     qh_cutoff: float
     crest_count: int
+    hydrogens: str
+    hydrogen_modes: list[str]
 
 
 class SettingsIn(BaseModel):
@@ -346,6 +350,7 @@ class SettingsIn(BaseModel):
     qh_temperature: float | None = None
     qh_cutoff: float | None = None
     crest_count: int | None = None
+    hydrogens: str | None = None
 
 
 class FolderEntry(BaseModel):
@@ -411,6 +416,7 @@ def _node_out(session: Session, node: Node) -> NodeOut:
         origin_branch_id=node.origin_branch_id,
         pos_x=node.pos_x,
         pos_y=node.pos_y,
+        view_rotation=node.view_rotation,
         created_at=node.created_at,
         updated_at=node.updated_at,
     )
@@ -789,6 +795,8 @@ def get_settings():
         qh_temperature=s.qh_temperature,
         qh_cutoff=s.qh_cutoff,
         crest_count=s.crest_count,
+        hydrogens=s.hydrogens,
+        hydrogen_modes=list(app_settings.HYDROGEN_MODES),
     )
 
 
@@ -819,6 +827,10 @@ def put_settings(body: SettingsIn):
         if body.crest_count < 1:
             raise HTTPException(422, "The number of CREST conformers must be at least 1")
         s.crest_count = body.crest_count
+    if body.hydrogens is not None:
+        if body.hydrogens not in app_settings.HYDROGEN_MODES:
+            raise HTTPException(422, f"Unknown hydrogen display '{body.hydrogens}'")
+        s.hydrogens = body.hydrogens
     app_settings.save(s)
     return get_settings()
 

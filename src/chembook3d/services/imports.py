@@ -1015,6 +1015,7 @@ def _new_node(
         # Like a coordinate edit (ID-5), the derived node keeps its place in the mechanism.
         node.step_id = derived_from.step_id
         node.branch_id = derived_from.branch_id
+        node.view_rotation = derived_from.view_rotation
     elif fields.get("pos_x") is not None and fields.get("pos_y") is not None:
         node.pos_x, node.pos_y = fields["pos_x"], fields["pos_y"]
     session.add(node)

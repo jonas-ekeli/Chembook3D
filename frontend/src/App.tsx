@@ -30,6 +30,7 @@ import { NodeInspector } from './components/NodeInspector'
 import { Outline } from './components/Outline'
 import { Overview } from './components/Overview'
 import { recordNames } from './names'
+import { HydrogenDisplay } from './display'
 import {
   CloneDialog,
   ConflictDialog,
@@ -591,6 +592,25 @@ function App() {
             onSave={(count) => api.saveSettings({ crest_count: Math.max(1, Math.round(count)) }).then(setSettings)}
           />
           <p className="muted small">The lowest this many conformers are ticked in the import preview (D34).</p>
+          <h3>Structures</h3>
+          <label className="field">
+            <span>Hydrogens</span>
+            <select
+              aria-label="Hydrogens"
+              value={settings.hydrogens}
+              onChange={(event) =>
+                api.saveSettings({ hydrogens: event.target.value as Settings['hydrogens'] }).then(setSettings)
+              }
+            >
+              <option value="all">Show all</option>
+              <option value="polar">Hide those bonded to carbon</option>
+              <option value="none">Hide all</option>
+            </select>
+          </label>
+          <p className="muted small">
+            Applies to the 3D views and the structure cards. “Hide those bonded to carbon” keeps hydrides, O–H and N–H,
+            and C–H hydrogens also close to a metal (agostic).
+          </p>
         </Modal>
       )}
       {importRequest && investigation && (
@@ -781,193 +801,195 @@ function App() {
   }
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <strong className="brand">Chembook3D</strong>
-        <span className="investigation" title={investigation.folder}>
-          {investigation.name}
-        </span>
-        <nav className="tabs" aria-label="Views">
-          <button aria-pressed={view === 'canvas'} onClick={() => setView('canvas')}>
-            Canvas
-          </button>
-          <button aria-pressed={view === 'history'} onClick={() => setView('history')}>
-            History
-          </button>
-          <button
-            aria-pressed={view === 'canvas' && selection === null && multi.length === 0}
-            title="Where the investigation stands: branches, open items, recent changes, step notes"
-            onClick={() => {
-              choose(null)
-              setView('canvas')
-            }}
-          >
-            Overview
-          </button>
-        </nav>
-        {view === 'canvas' && (
-          <>
-            <div className="segmented" role="group" aria-label="Node view">
-              <button aria-pressed={mode === 'compact'} onClick={() => chooseMode('compact')}>
-                Compact
-              </button>
-              <button aria-pressed={mode === 'energy'} onClick={() => chooseMode('energy')}>
-                Energy
-              </button>
-              <button aria-pressed={mode === 'structure'} onClick={() => chooseMode('structure')}>
-                Structure
-              </button>
-            </div>
-            <FilterMenu canvas={canvas} filters={filters} onChange={setFilters} />
-            <div className="energy-select" role="group" aria-label="Energy view">
-              <select
-                aria-label="Level of theory"
-                value={levelKey ?? ''}
-                disabled={!levelOption}
-                onChange={(event) => setEnergyLevel(event.target.value)}
-              >
-                {!levelOption && <option value="">No energies yet</option>}
-                {energyOptions?.levels.map((l) => (
-                  <option key={l.key} value={l.key}>
-                    {l.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="Energy type"
-                value={shownType}
-                disabled={!levelOption}
-                onChange={(event) => setEnergyType(event.target.value as EnergyType)}
-              >
-                {(levelOption?.types ?? []).map((t) => (
-                  <option key={t} value={t}>
-                    {energyTypeName(t, energyOptions?.temperature, energyOptions?.cutoff)}
-                  </option>
-                ))}
-              </select>
-              <label className="check" title="Show ΔX on transitions (FR-CAN-03)">
-                <input
-                  type="checkbox"
-                  checked={edgeEnergies}
-                  onChange={(event) => setEdgeEnergies(event.target.checked)}
-                />
-                <span>Energies on edges</span>
-              </label>
-            </div>
-            <button aria-pressed={drawerOpen} onClick={() => setDrawerOpen(!drawerOpen)}>
-              Profile and table
+    <HydrogenDisplay value={settings?.hydrogens ?? 'all'}>
+      <div className="app">
+        <header className="topbar">
+          <strong className="brand">Chembook3D</strong>
+          <span className="investigation" title={investigation.folder}>
+            {investigation.name}
+          </span>
+          <nav className="tabs" aria-label="Views">
+            <button aria-pressed={view === 'canvas'} onClick={() => setView('canvas')}>
+              Canvas
             </button>
-          </>
-        )}
-        <span className="spacer" />
-        {investigation.linked ? (
-          <SyncButton status={sync} busy={syncing} onSync={syncNow} />
-        ) : (
-          <button onClick={() => setLinking(true)}>Sync with GitHub…</button>
-        )}
-        <button onClick={() => setPicker('open')}>Open…</button>
-        <button onClick={() => setPicker('create')}>New…</button>
-        <button onClick={close}>Close</button>
-        <button onClick={() => setShowSettings(true)}>Settings</button>
-      </header>
-      {(error || notice) && (
-        <div className={error ? 'banner error' : 'banner'} role={error ? 'alert' : 'status'}>
-          {error ?? notice}
-          <button className="link" onClick={() => (error ? setError(null) : setNotice(null))}>
-            Dismiss
-          </button>
-        </div>
-      )}
-      {view === 'canvas' ? (
-        <div className="work-column">
-          <div className="workspace">
-            <Outline
-              canvas={canvas}
-              selectedNodeId={selection?.kind === 'node' ? selection.id : null}
-              selectedBranchId={selection?.kind === 'branch' ? selection.id : null}
-              onSelectNode={(id) => selectNode(id, true)}
-              onToggleNode={toggleNode}
-              selectedNodeIds={multi}
-              onSelectBranch={selectBranch}
-              onAdd={() => addNode()}
-              onImport={() => setImportRequest({ targetId: null, files: [], position: null })}
-              onAddSpecies={addSpecies}
-              onImportSpecies={() => setImportRequest({ targetId: null, files: [], position: null, species: true })}
-              onChanged={(branchId) => {
-                reload()
-                if (branchId) selectBranch(branchId)
+            <button aria-pressed={view === 'history'} onClick={() => setView('history')}>
+              History
+            </button>
+            <button
+              aria-pressed={view === 'canvas' && selection === null && multi.length === 0}
+              title="Where the investigation stands: branches, open items, recent changes, step notes"
+              onClick={() => {
+                choose(null)
+                setView('canvas')
               }}
-            />
-            <ReactFlowProvider>
-              <CanvasPane
-                data={canvas}
-                mode={mode}
-                energy={canvasEnergy}
-                filters={filters}
-                selection={canvasSelection}
-                multi={multi}
-                focus={focus}
-                expanded={expanded}
-                onToggleGroup={toggleGroup}
-                onGroupLayout={setGroupLayout}
-                onSelect={(next) => {
-                  setNotice(null)
-                  choose(next)
-                }}
-                onMultiSelect={setMulti}
+            >
+              Overview
+            </button>
+          </nav>
+          {view === 'canvas' && (
+            <>
+              <div className="segmented" role="group" aria-label="Node view">
+                <button aria-pressed={mode === 'compact'} onClick={() => chooseMode('compact')}>
+                  Compact
+                </button>
+                <button aria-pressed={mode === 'energy'} onClick={() => chooseMode('energy')}>
+                  Energy
+                </button>
+                <button aria-pressed={mode === 'structure'} onClick={() => chooseMode('structure')}>
+                  Structure
+                </button>
+              </div>
+              <FilterMenu canvas={canvas} filters={filters} onChange={setFilters} />
+              <div className="energy-select" role="group" aria-label="Energy view">
+                <select
+                  aria-label="Level of theory"
+                  value={levelKey ?? ''}
+                  disabled={!levelOption}
+                  onChange={(event) => setEnergyLevel(event.target.value)}
+                >
+                  {!levelOption && <option value="">No energies yet</option>}
+                  {energyOptions?.levels.map((l) => (
+                    <option key={l.key} value={l.key}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Energy type"
+                  value={shownType}
+                  disabled={!levelOption}
+                  onChange={(event) => setEnergyType(event.target.value as EnergyType)}
+                >
+                  {(levelOption?.types ?? []).map((t) => (
+                    <option key={t} value={t}>
+                      {energyTypeName(t, energyOptions?.temperature, energyOptions?.cutoff)}
+                    </option>
+                  ))}
+                </select>
+                <label className="check" title="Show ΔX on transitions (FR-CAN-03)">
+                  <input
+                    type="checkbox"
+                    checked={edgeEnergies}
+                    onChange={(event) => setEdgeEnergies(event.target.checked)}
+                  />
+                  <span>Energies on edges</span>
+                </label>
+              </div>
+              <button aria-pressed={drawerOpen} onClick={() => setDrawerOpen(!drawerOpen)}>
+                Profile and table
+              </button>
+            </>
+          )}
+          <span className="spacer" />
+          {investigation.linked ? (
+            <SyncButton status={sync} busy={syncing} onSync={syncNow} />
+          ) : (
+            <button onClick={() => setLinking(true)}>Sync with GitHub…</button>
+          )}
+          <button onClick={() => setPicker('open')}>Open…</button>
+          <button onClick={() => setPicker('create')}>New…</button>
+          <button onClick={close}>Close</button>
+          <button onClick={() => setShowSettings(true)}>Settings</button>
+        </header>
+        {(error || notice) && (
+          <div className={error ? 'banner error' : 'banner'} role={error ? 'alert' : 'status'}>
+            {error ?? notice}
+            <button className="link" onClick={() => (error ? setError(null) : setNotice(null))}>
+              Dismiss
+            </button>
+          </div>
+        )}
+        {view === 'canvas' ? (
+          <div className="work-column">
+            <div className="workspace">
+              <Outline
+                canvas={canvas}
+                selectedNodeId={selection?.kind === 'node' ? selection.id : null}
+                selectedBranchId={selection?.kind === 'branch' ? selection.id : null}
+                onSelectNode={(id) => selectNode(id, true)}
                 onToggleNode={toggleNode}
-                onConnect={(source, target) =>
-                  api.createTransition(source, target).then(reload, (err: unknown) => setError(errorText(err)))
-                }
-                onAddNode={addNode}
-                onDropFiles={(files, targetId, position) => setImportRequest({ targetId, files, position })}
-                onPositions={savePositions}
-                onError={setError}
+                selectedNodeIds={multi}
+                onSelectBranch={selectBranch}
+                onAdd={() => addNode()}
+                onImport={() => setImportRequest({ targetId: null, files: [], position: null })}
+                onAddSpecies={addSpecies}
+                onImportSpecies={() => setImportRequest({ targetId: null, files: [], position: null, species: true })}
+                onChanged={(branchId) => {
+                  reload()
+                  if (branchId) selectBranch(branchId)
+                }}
               />
-            </ReactFlowProvider>
-            <div
-              className="splitter"
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize inspector"
-              onPointerDown={(event) => {
-                resizing.current = { x: event.clientX, width: inspectorWidth }
-                event.currentTarget.setPointerCapture(event.pointerId)
-              }}
-              onPointerMove={(event) => {
-                if (!resizing.current) return
-                const width = resizing.current.width - (event.clientX - resizing.current.x)
-                setInspectorWidth(Math.min(1100, Math.max(340, width)))
-              }}
-              onPointerUp={() => (resizing.current = null)}
-            />
-            <main className="side" style={{ width: inspectorWidth }}>
-              {inspector}
-            </main>
+              <ReactFlowProvider>
+                <CanvasPane
+                  data={canvas}
+                  mode={mode}
+                  energy={canvasEnergy}
+                  filters={filters}
+                  selection={canvasSelection}
+                  multi={multi}
+                  focus={focus}
+                  expanded={expanded}
+                  onToggleGroup={toggleGroup}
+                  onGroupLayout={setGroupLayout}
+                  onSelect={(next) => {
+                    setNotice(null)
+                    choose(next)
+                  }}
+                  onMultiSelect={setMulti}
+                  onToggleNode={toggleNode}
+                  onConnect={(source, target) =>
+                    api.createTransition(source, target).then(reload, (err: unknown) => setError(errorText(err)))
+                  }
+                  onAddNode={addNode}
+                  onDropFiles={(files, targetId, position) => setImportRequest({ targetId, files, position })}
+                  onPositions={savePositions}
+                  onError={setError}
+                />
+              </ReactFlowProvider>
+              <div
+                className="splitter"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize inspector"
+                onPointerDown={(event) => {
+                  resizing.current = { x: event.clientX, width: inspectorWidth }
+                  event.currentTarget.setPointerCapture(event.pointerId)
+                }}
+                onPointerMove={(event) => {
+                  if (!resizing.current) return
+                  const width = resizing.current.width - (event.clientX - resizing.current.x)
+                  setInspectorWidth(Math.min(1100, Math.max(340, width)))
+                }}
+                onPointerUp={() => (resizing.current = null)}
+              />
+              <main className="side" style={{ width: inspectorWidth }}>
+                {inspector}
+              </main>
+            </div>
+            <div hidden={!drawerOpen}>
+              <EnergyDrawer
+                canvas={canvas}
+                settings={settings}
+                level={levelKey}
+                levelLabel={levelOption?.label ?? ''}
+                type={shownType}
+                referenceId={referenceId}
+                selectedId={selection && selection.kind !== 'edge' && selection.kind !== 'branch' ? selection.id : null}
+                refreshKey={refreshKey}
+                onReference={setReferenceId}
+                onSelectNode={(id) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id, true))}
+              />
+            </div>
           </div>
-          <div hidden={!drawerOpen}>
-            <EnergyDrawer
-              canvas={canvas}
-              settings={settings}
-              level={levelKey}
-              levelLabel={levelOption?.label ?? ''}
-              type={shownType}
-              referenceId={referenceId}
-              selectedId={selection && selection.kind !== 'edge' && selection.kind !== 'branch' ? selection.id : null}
-              refreshKey={refreshKey}
-              onReference={setReferenceId}
-              onSelectNode={(id) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id, true))}
-            />
-          </div>
-        </div>
-      ) : (
-        <main className="main history-view">
-          <h2>Investigation history</h2>
-          <HistoryList entries={history} labels={labels} names={names} onSelect={(id) => selectNode(id, true)} />
-        </main>
-      )}
-      {dialogs}
-    </div>
+        ) : (
+          <main className="main history-view">
+            <h2>Investigation history</h2>
+            <HistoryList entries={history} labels={labels} names={names} onSelect={(id) => selectNode(id, true)} />
+          </main>
+        )}
+        {dialogs}
+      </div>
+    </HydrogenDisplay>
   )
 }
 

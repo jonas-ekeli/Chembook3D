@@ -167,7 +167,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-CAN-01 | Infinite pan and zoom canvas. Node positions persist per investigation. | D2 | 3 |
 | FR-CAN-02 | Nodes and edges are drawn in their branch colour, with status badges and warning icons. | D33 | 3 |
 | FR-CAN-03 | Energy labels on edges can be shown or hidden. | D33 | 4 |
-| FR-CAN-04 | View modes: compact, energy, structure. Structure mode shows ΔX below each structure once a reference is chosen. | D40, D43, D73 | 3 (energy mode in 4) |
+| FR-CAN-04 | View modes: compact, energy, structure. Structure mode shows ΔX below each structure once a reference is chosen, and draws each structure in the orientation saved from its 3D view. | D40, D43, D73, D74 | 3 (energy mode in 4) |
 | FR-CAN-05 | Filters by branch, status and step. Filtering never alters data. | D33 | 3 |
 | FR-CAN-06 | "Arrange branch" lays out one branch left to right in step order. Other positions are unchanged. | D33 | 3 |
 | FR-CAN-07 | Export a canvas image (viewport or full canvas). | D39 | 3 |
@@ -176,7 +176,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 
 | ID | Requirement | Trace | Phase |
 |---|---|---|---|
-| FR-3D-01 | Show the selected node's geometry with rotate, zoom and pan. | D20 | 1 |
+| FR-3D-01 | Show the selected node's geometry with rotate, zoom and pan; save the orientation for the structure card; hide hydrogens by a setting. | D20, D74, D75 | 1 |
 | FR-3D-02 | Measure distances and angles between picked atoms. | D20 | 3 |
 | FR-3D-03 | Animate any vibrational mode from a frequency calculation, with imaginary modes listed first. | D20 | 3 |
 | FR-3D-04 | Overlay two selected geometries after alignment. | D20 | 3 |

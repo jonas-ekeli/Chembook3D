@@ -99,9 +99,12 @@ function principalAxes(m: number[][]): Vec[] {
 
 export type Projected = { element: string; x: number; y: number; depth: number }
 
-/** Atoms turned so the molecule's two longest directions lie in the picture plane. */
-export function project(atoms: Atom[]): Projected[] {
-  if (atoms.length === 0) return []
+/** A unit quaternion [x, y, z, w] turning coordinates (about their centre) into the picture:
+ * x right, y up, z towards the viewer. It is 3Dmol's view rotation, so a card drawn with the
+ * quaternion saved from the 3D view shows the molecule as it was seen there. */
+export type Rotation = [number, number, number, number]
+
+function centred(atoms: Atom[]): Vec[] {
   const n = atoms.length
   const centre = [0, 0, 0]
   for (const a of atoms) {
@@ -109,11 +112,79 @@ export function project(atoms: Atom[]): Projected[] {
     centre[1] += a.y / n
     centre[2] += a.z / n
   }
-  const pts = atoms.map((a) => [a.x - centre[0], a.y - centre[1], a.z - centre[2]])
+  return atoms.map((a) => [a.x - centre[0], a.y - centre[1], a.z - centre[2]])
+}
+
+/** The quaternion of the rotation matrix whose rows are the picture's x, y and z axes. */
+function quaternionOf(rows: [Vec, Vec, Vec]): Rotation {
+  const [[m00, m01, m02], [m10, m11, m12], [m20, m21, m22]] = rows
+  const trace = m00 + m11 + m22
+  let q: Rotation
+  if (trace > 0) {
+    const s = 0.5 / Math.sqrt(trace + 1)
+    q = [(m21 - m12) * s, (m02 - m20) * s, (m10 - m01) * s, 0.25 / s]
+  } else if (m00 > m11 && m00 > m22) {
+    const s = 2 * Math.sqrt(1 + m00 - m11 - m22)
+    q = [0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s]
+  } else if (m11 > m22) {
+    const s = 2 * Math.sqrt(1 + m11 - m00 - m22)
+    q = [(m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s]
+  } else {
+    const s = 2 * Math.sqrt(1 + m22 - m00 - m11)
+    q = [(m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s]
+  }
+  const length = Math.hypot(...q)
+  return q.map((v) => v / length) as Rotation
+}
+
+/** The default orientation: the molecule's two longest directions in the picture plane. The
+ * third axis is their cross product, so the view is a rotation (never a mirror image) and
+ * depth points at the viewer. */
+export function defaultRotation(atoms: Atom[]): Rotation {
+  if (atoms.length === 0) return [0, 0, 0, 1]
+  const pts = centred(atoms)
   const cov = [0, 1, 2].map((i) => [0, 1, 2].map((j) => pts.reduce((sum, p) => sum + p[i] * p[j], 0)))
-  const [u, w, d] = principalAxes(cov)
-  const dot = (p: number[], axis: Vec) => p[0] * axis[0] + p[1] * axis[1] + p[2] * axis[2]
-  return atoms.map((a, i) => ({ element: a.element, x: dot(pts[i], u), y: dot(pts[i], w), depth: dot(pts[i], d) }))
+  const [u, w] = principalAxes(cov)
+  return quaternionOf([u, w, cross(u, w)])
+}
+
+function rotate(q: Rotation, p: Vec): Vec {
+  // p' = p + 2w (q × p) + 2 q × (q × p), with q the vector part.
+  const v: Vec = [q[0], q[1], q[2]]
+  const t = cross(v, p).map((c) => 2 * c) as Vec
+  const u = cross(v, t)
+  return [p[0] + q[3] * t[0] + u[0], p[1] + q[3] * t[1] + u[1], p[2] + q[3] * t[2] + u[2]]
+}
+
+/** Atoms turned into the picture by `rotation`, or by the default orientation. */
+export function project(atoms: Atom[], rotation: Rotation | null = null): Projected[] {
+  if (atoms.length === 0) return []
+  const q = rotation ?? defaultRotation(atoms)
+  return centred(atoms).map((p, i) => {
+    const [x, y, depth] = rotate(q, p)
+    return { element: atoms[i].element, x, y, depth }
+  })
+}
+
+/** How many hydrogens the 3D views and structure cards draw (a setting). */
+export type HydrogenMode = 'all' | 'polar' | 'none'
+
+/** Indices of the atoms not drawn under `mode`: every hydrogen for "none"; for "polar", the
+ * hydrogens bonded only to carbon, so hydrides, O–H, N–H and agostic C–H···M stay. */
+export function hiddenAtoms(atoms: Atom[], mode: HydrogenMode, pairs: [number, number][] = bonds(atoms)): Set<number> {
+  const hidden = new Set<number>()
+  if (mode === 'all') return hidden
+  if (mode === 'none') {
+    atoms.forEach((a, i) => a.element === 'H' && hidden.add(i))
+    return hidden
+  }
+  const partners = new Map<number, string[]>()
+  for (const [i, j] of pairs) {
+    if (atoms[i].element === 'H') partners.set(i, [...(partners.get(i) ?? []), atoms[j].element])
+    if (atoms[j].element === 'H') partners.set(j, [...(partners.get(j) ?? []), atoms[i].element])
+  }
+  partners.forEach((elements, i) => elements.every((e) => e === 'C') && hidden.add(i))
+  return hidden
 }
 
 function sub(a: Atom, b: Atom): Vec {

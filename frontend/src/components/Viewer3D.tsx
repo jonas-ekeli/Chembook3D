@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { measure, parseXyz } from '../chem'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { defaultRotation, hiddenAtoms, measure, parseXyz, type HydrogenMode, type Rotation } from '../chem'
+import { HydrogenDisplay } from '../display'
 
 type Viewer = import('3dmol').GLViewer
 
@@ -14,17 +15,31 @@ function describe(result: ReturnType<typeof measure>): string | null {
   return `Dihedral ${result.value.toFixed(1)}°`
 }
 
+function hideHydrogens(model: import('3dmol').GLModel, xyz: string, mode: HydrogenMode) {
+  const hidden = hiddenAtoms(parseXyz(xyz), mode)
+  if (hidden.size > 0) model.setStyle({ index: [...hidden] }, {})
+}
+
 /** View-only 3D structure (FR-3D-01…04, D20): rotate, zoom and pan with the mouse; click up to
  * four atoms of the first model to measure a distance, angle or dihedral (or type their
  * numbers); animate a vibration; show a second, aligned model in its own colour. There is
- * no geometry editing here (X3). 3Dmol.js is loaded on first use. */
+ * no geometry editing here (X3). 3Dmol.js is loaded on first use.
+ *
+ * The view opens turned by `rotation` (the node's saved orientation) or, without one, by the
+ * default orientation its structure card uses. With `onSaveRotation`, the current orientation
+ * can be saved for the card, or cleared back to the default. */
 export function Viewer3D({
   models,
   vibration = null,
+  rotation = null,
+  onSaveRotation,
 }: {
   models: ViewerModel[]
   vibration?: { xyz: string; amplitude?: number } | null
+  rotation?: Rotation | null
+  onSaveRotation?: (rotation: Rotation | null) => void
 }) {
+  const hydrogens = useContext(HydrogenDisplay)
   const host = useRef<HTMLDivElement>(null)
   const viewer = useRef<Viewer | null>(null)
   const [ready, setReady] = useState(0)
@@ -35,6 +50,10 @@ export function Viewer3D({
   const key = models.map((m) => `${m.colour ?? ''}:${m.xyz}`).join('\n')
   const atoms = useMemo(() => (models[0] ? parseXyz(models[0].xyz) : []), [models])
   const empty = models.length === 0
+  // The orientation to show: applied when the structure or the saved orientation changes,
+  // not when a vibration starts or stops, so the user's own turning is kept then.
+  const orientation = rotation ? rotation.join(',') : `default:${models[0]?.xyz ?? ''}`
+  const applied = useRef<string | null>(null)
 
   // Models: rebuilt only when the structures or the vibration change.
   useEffect(() => {
@@ -51,6 +70,7 @@ export function Viewer3D({
         if (vibration) {
           const model = v.addModel(vibration.xyz, 'xyz')
           model.setStyle({}, { stick: { radius: 0.14 }, sphere: { scale: 0.25 } })
+          hideHydrogens(model, vibration.xyz, hydrogens)
           model.vibrate(12, vibration.amplitude ?? 1, true)
           v.animate({ loop: 'backAndForth', reps: 0, interval: 40 })
         } else {
@@ -58,6 +78,7 @@ export function Viewer3D({
             const model = v.addModel(m.xyz, 'xyz')
             const colour = m.colour ? { color: m.colour } : {}
             model.setStyle({}, { stick: { radius: index ? 0.1 : 0.14, ...colour }, sphere: { scale: index ? 0.18 : 0.25, ...colour } })
+            hideHydrogens(model, m.xyz, hydrogens)
           })
           v.setClickable({ model: 0 }, true, (atom: { serial?: number; index?: number }) => {
             const index = atom.serial ?? atom.index
@@ -78,7 +99,31 @@ export function Viewer3D({
     }
     // `key` stands for `models`, which is a new array on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, vibration, empty])
+  }, [key, vibration, empty, hydrogens])
+
+  // Orientation: the saved one, or the default the structure card uses.
+  useEffect(() => {
+    const v = viewer.current
+    if (!v || !ready || applied.current === orientation) return
+    const q = rotation ?? defaultRotation(atoms)
+    const view = v.getView()
+    view.splice(4, 4, ...q)
+    v.setView(view)
+    applied.current = orientation
+    // `orientation` stands for `rotation` and the first model's atoms.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, orientation])
+
+  const saveRotation = () => {
+    const v = viewer.current
+    if (!v || !onSaveRotation) return
+    const [x, y, z, w] = v.getView().slice(4, 8)
+    const length = Math.hypot(x, y, z, w) || 1
+    const q: Rotation = [x / length, y / length, z / length, w / length]
+    // The view already shows it; don't turn it again when the saved value comes back.
+    applied.current = q.join(',')
+    onSaveRotation(q)
+  }
 
   // Picked atoms: highlighted, joined by dashed lines and numbered.
   useEffect(() => {
@@ -160,6 +205,27 @@ export function Viewer3D({
               </>
             )}
           </span>
+        </div>
+      )}
+      {!empty && !vibration && onSaveRotation && (
+        <div className="viewer-orientation" aria-label="Card orientation">
+          <button
+            className="small"
+            onClick={saveRotation}
+            title="Draw this node's structure card the way it is turned here"
+          >
+            Save orientation for card
+          </button>
+          {rotation && (
+            <button
+              className="small"
+              onClick={() => onSaveRotation(null)}
+              title="Forget the saved orientation; the card and this view use the default again"
+            >
+              Reset to default
+            </button>
+          )}
+          <span className="muted small">{rotation ? 'The card uses the saved orientation.' : 'The card uses the default orientation.'}</span>
         </div>
       )}
       {error && <p role="alert">{error}</p>}

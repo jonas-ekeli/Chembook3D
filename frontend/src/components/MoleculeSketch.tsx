@@ -1,24 +1,35 @@
-import { memo, useMemo } from 'react'
-import { bonds, elementColour, parseXyz, project } from '../chem'
+import { memo, useContext, useMemo } from 'react'
+import { bonds, elementColour, hiddenAtoms, parseXyz, project, type Rotation } from '../chem'
+import { HydrogenDisplay } from '../display'
 
 /** Structure view mode (D43): a small ball-and-stick picture of a node's geometry, drawn as
- * SVG so hundreds of nodes stay cheap and the canvas image export includes it. */
+ * SVG so hundreds of nodes stay cheap and the canvas image export includes it. It is turned
+ * the way the node's 3D view was saved (`rotation`), or by the default orientation, and
+ * leaves out the hydrogens the hydrogens setting hides. */
 export const MoleculeSketch = memo(function MoleculeSketch({
   xyz,
+  rotation = null,
   width = 150,
   height = 110,
 }: {
   xyz: string | null
+  rotation?: Rotation | null
   width?: number
   height?: number
 }) {
+  const hydrogens = useContext(HydrogenDisplay)
   const drawing = useMemo(() => {
     if (!xyz) return null
     const atoms = parseXyz(xyz)
     if (atoms.length === 0) return null
-    const points = project(atoms)
-    const xs = points.map((p) => p.x)
-    const ys = points.map((p) => p.y)
+    // The orientation comes from all atoms, so hiding hydrogens does not turn the picture.
+    const points = project(atoms, rotation)
+    const allPairs = bonds(atoms)
+    const hidden = hiddenAtoms(atoms, hydrogens, allPairs)
+    const shown = atoms.map((_, i) => i).filter((i) => !hidden.has(i))
+    if (shown.length === 0) return null
+    const xs = shown.map((i) => points[i].x)
+    const ys = shown.map((i) => points[i].y)
     const spanX = Math.max(...xs) - Math.min(...xs) || 1
     const spanY = Math.max(...ys) - Math.min(...ys) || 1
     const margin = 8
@@ -30,9 +41,10 @@ export const MoleculeSketch = memo(function MoleculeSketch({
       y: height / 2 - (points[i].y - cy) * scale,
     })
     const radius = Math.max(1.2, Math.min(5, scale * 0.28))
-    const order = points.map((_, i) => i).sort((a, b) => points[a].depth - points[b].depth)
-    return { atoms, points, at, radius, order, pairs: bonds(atoms) }
-  }, [xyz, width, height])
+    const order = shown.sort((a, b) => points[a].depth - points[b].depth)
+    const pairs = allPairs.filter(([i, j]) => !hidden.has(i) && !hidden.has(j))
+    return { atoms, points, at, radius, order, pairs }
+  }, [xyz, rotation, hydrogens, width, height])
 
   if (!drawing) {
     return (

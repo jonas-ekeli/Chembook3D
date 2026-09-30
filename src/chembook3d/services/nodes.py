@@ -2,6 +2,7 @@
 only while a node has no calculations (ID-4), otherwise an edit creates a derived node
 (ID-5, D23). Every change is written to the history in the same transaction."""
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,7 +34,8 @@ EDITABLE_FIELDS = (
     "step_id",
     "branch_id",
 )
-LAYOUT_FIELDS = ("pos_x", "pos_y")  # canvas positions; not recorded in history
+# Canvas positions and the saved 3D orientation: how a node is shown, not recorded in history.
+LAYOUT_FIELDS = ("pos_x", "pos_y", "view_rotation")
 DERIVED_NODE_OFFSET = 60.0
 
 
@@ -118,11 +120,30 @@ def _validate(field: str, value: Any) -> Any:
         if not isinstance(value, list) or not all(isinstance(t, str) and t for t in value):
             raise NodeError("tags must be a list of non-empty text labels")
         return list(dict.fromkeys(t.strip() for t in value))  # unique, in order
+    if field == "view_rotation":
+        return _rotation(value)
     if field in LAYOUT_FIELDS:
         if not isinstance(value, int | float) or isinstance(value, bool):
             raise NodeError(f"{field} must be a number")
         return float(value)
     raise NodeError(f"'{field}' cannot be edited")
+
+
+def _rotation(value: Any) -> list[float] | None:
+    """A unit quaternion [x, y, z, w], normalised here, or None for the default orientation."""
+    if value is None:
+        return None
+    if (
+        not isinstance(value, list)
+        or len(value) != 4
+        or not all(isinstance(v, int | float) and not isinstance(v, bool) for v in value)
+        or not all(math.isfinite(v) for v in value)
+    ):
+        raise NodeError("view_rotation must be a quaternion [x, y, z, w]")
+    length = math.sqrt(sum(v * v for v in value))
+    if length < 1e-9:
+        raise NodeError("view_rotation must not be zero")
+    return [float(v) / length for v in value]
 
 
 def get(session: Session, node_id: str) -> Node:
@@ -217,6 +238,7 @@ def set_geometry(session: Session, node_id: str, xyz_text: str) -> GeometryResul
         branch_id=node.branch_id,
         pos_x=node.pos_x + DERIVED_NODE_OFFSET,
         pos_y=node.pos_y + DERIVED_NODE_OFFSET,
+        view_rotation=node.view_rotation,
     )
     session.add(derived)
     session.flush()
