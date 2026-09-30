@@ -103,6 +103,8 @@ class TransitionOut(BaseModel):
     notes: str
     direct: bool  # D53: no TS at either end
     cross_branch: bool  # P9: drawn dashed
+    source_side: str  # D76: the side of each box the arrow leaves from and arrives at
+    target_side: str
     species: list[TransitionSpeciesOut]  # D69: free species that join or leave
     warnings: list[WarningOut]  # W-BALANCE
 
@@ -118,6 +120,8 @@ class TransitionIn(BaseModel):
     target_id: str | None = None
     status: str | None = None
     notes: str | None = None
+    source_side: str | None = None
+    target_side: str | None = None
 
 
 class GroupOut(BaseModel):
@@ -242,6 +246,8 @@ def _transition_out(session: Session, transition: Transition) -> TransitionOut:
         target_kind="node" if transition.target_node_id else "group",
         status=transition.status,
         notes=transition.notes,
+        source_side=transition.source_side,
+        target_side=transition.target_side,
         species=[
             TransitionSpeciesOut(
                 species_id=e.species_id,

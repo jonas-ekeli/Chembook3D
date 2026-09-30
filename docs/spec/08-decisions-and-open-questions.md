@@ -83,6 +83,7 @@ Rationale: D1–D5 come from HANDOFF.MD. Every other decision was confirmed by J
 | D73 | **Structure mode shows ΔX below each structure** once a reference node is chosen, the same value and tooltip as the node card in energy mode (the D72 balance at the selected level and energy type), centred under the drawing as in a figure. A collapsed group shows it below its representative's structure (D68). With no reference chosen, structure mode shows no energies. | Jonas, 2026-09-30; amends D43, FR-CAN-04 |
 | D74 | **The 3D view can save its orientation for the node's structure card.** "Save orientation for card" stores the current rotation with the node; the structure-mode card, and a collapsed group whose representative it is (D68), are then drawn turned the same way, and the 3D view opens that way. "Reset to default" forgets it. | Jonas, 2026-09-30; amends D43, FR-CAN-04, FR-3D-01 |
 | D75 | **A setting hides hydrogens for clarity** in the 3D views and on structure cards. Atom numbers for measuring stay those of the full structure. | Jonas, 2026-09-30; amends FR-3D-01, FR-CAN-04 |
+| D76 | **An arrow can leave from and arrive at any of the four sides of a node or group box.** Dragging from a side's handle to a side of another box creates the transition with those sides; dragging an arrow's end onto another side of the same box moves it there, and the transition panel can change both sides too. | Jonas, 2026-09-30; amends FR-EDGE-01, FR-CAN-01 |
 
 ## 2. Assumptions in use
 
@@ -136,6 +137,7 @@ Groups spanning several branches (D66), defaults picked while building, awaiting
 | A26 | Dissolving a group (P4) keeps each member's branch, or clears all of them, by the user's choice. "Arrange branch" places a group where its members on that branch would go, and leaves the members inside it | Only the dissolve choice and the layout change |
 | A27 | D74: the orientation is saved in the investigation (so it syncs and survives a reload) but is display only, not in the history. A node derived from it keeps it. Without a saved orientation, the card and the 3D view both use the default: the molecule's two longest directions in the picture plane | Only where the orientation is kept |
 | A28 | D75: the setting is app-wide and remembered, with three choices: show all (the default), hide the hydrogens bonded only to carbon (so hydrides, O–H, N–H and agostic C–H···M stay), or hide all | Only the choices offered |
+| A29 | D76: the sides are saved with the transition (so they sync and survive a reload) but are layout, not history, like positions. Existing and imported transitions, and ones made without choosing, leave on the right and arrive on the left as before. Dragging an arrow's end onto a different box does not move the transition to that box; that would change the chemistry, so it is refused, and a new transition is drawn instead. A line standing for several transitions (A24) uses the sides of the first; moving its end moves them all | Only where the sides are kept, or what dragging an end may do |
 
 ## 3. Proposals (all confirmed, D51)
 

@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import text
 
 from chembook3d import investigation as inv
-from chembook3d.models import Calculation, Node
+from chembook3d.models import Calculation, Node, Transition
 from tests.conftest import WATER
 
 
@@ -92,7 +92,7 @@ def test_schema_upgrade_backs_up_the_database_first(tmp_path, monkeypatch):
 
     assert upgrades == ["head"]
     backups = list((folder / inv.BACKUP_DIR).iterdir())
-    assert len(backups) == 1 and backups[0].name.startswith("investigation.sqlite.0007.")
+    assert len(backups) == 1 and backups[0].name.startswith("investigation.sqlite.0008.")
     assert b"keep me" in backups[0].read_bytes()
 
 
@@ -186,6 +186,36 @@ def test_nodes_stay_pathway_nodes_on_upgrade_to_free_species(tmp_path):
     try:
         with investigation.sessions() as session:
             assert session.get(Node, "n1").kind == "node"
+    finally:
+        investigation.close()
+
+
+def test_transitions_keep_left_to_right_on_upgrade_to_sides(tmp_path):
+    # A29: a transition made before D76 still leaves on the right and arrives on the left.
+    folder = tmp_path / "pre-d76"
+    folder.mkdir()
+    engine = inv._make_engine(folder / inv.DB_NAME)
+    with engine.begin() as connection:
+        inv.command.upgrade(inv._alembic_config(connection), "0007")
+        sql = connection.exec_driver_sql
+        sql("INSERT INTO investigation_info VALUES (1, 'Old', '2026-09-30')")
+        for node_id in ("n1", "n2"):
+            sql(
+                "INSERT INTO nodes (id, seq, label, role, status, tags, notes, pos_x, pos_y,"
+                f" created_at, updated_at, kind) VALUES ('{node_id}', 1, '{node_id}', 'minimum',"
+                " 'done', '[]', '', 0, 0, '2026-09-30', '2026-09-30', 'node')"
+            )
+        sql(
+            "INSERT INTO transitions (id, seq, source_node_id, target_node_id, status, notes,"
+            " created_at) VALUES ('t1', 1, 'n1', 'n2', 'planned', '', '2026-09-30')"
+        )
+    engine.dispose()
+
+    investigation = inv.open_investigation(folder)
+    try:
+        with investigation.sessions() as session:
+            transition = session.get(Transition, "t1")
+            assert (transition.source_side, transition.target_side) == ("right", "left")
     finally:
         investigation.close()
 

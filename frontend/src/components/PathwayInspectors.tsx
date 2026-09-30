@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   api,
   formatDelta,
+  SIDES,
   speciesChip,
   STATUSES,
   type Branch,
@@ -13,6 +14,7 @@ import {
   type NodeDeletePreview,
   type Overlay,
   type Settings,
+  type Side,
   type SpeciesDirection,
   type Status,
   type Transition,
@@ -36,6 +38,22 @@ function StatusField({ value, onChange }: { value: Status; onChange: (status: St
         {STATUSES.map((s) => (
           <option key={s.value} value={s.value}>
             {s.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+/** D76: which side of a box an arrow's end is drawn on. */
+function SideField({ label, value, onChange }: { label: string; value: Side; onChange: (side: Side) => void }) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value as Side)}>
+        {SIDES.map((side) => (
+          <option key={side} value={side}>
+            {side[0].toUpperCase() + side.slice(1)}
           </option>
         ))}
       </select>
@@ -220,7 +238,7 @@ export function TransitionInspector({
 }) {
   const [error, setError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState(false)
-  const update = (fields: Partial<Pick<Transition, 'status' | 'notes'>>) =>
+  const update = (fields: Partial<Pick<Transition, 'status' | 'notes' | 'source_side' | 'target_side'>>) =>
     api.updateTransition(transition.id, fields).then(onChanged, (err: unknown) => setError(errorText(err)))
   const ends = { canvas, onSelectNode, onSelectGroup }
   return (
@@ -247,6 +265,16 @@ export function TransitionInspector({
       </div>
       <section className="fields">
         <StatusField value={transition.status} onChange={(status) => update({ status })} />
+        <SideField
+          label="Arrow leaves from"
+          value={transition.source_side}
+          onChange={(source_side) => update({ source_side })}
+        />
+        <SideField
+          label="Arrow arrives at"
+          value={transition.target_side}
+          onChange={(target_side) => update({ target_side })}
+        />
       </section>
       <TransitionSpeciesSection
         transition={transition}

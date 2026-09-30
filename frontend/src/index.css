@@ -1045,6 +1045,24 @@ legend {
   border: none;
   background: none;
 }
+/* D76: a handle on every side; they grow on hover so a side is easy to hit */
+.cnode .react-flow__handle,
+.cgroup .react-flow__handle {
+  width: 7px;
+  height: 7px;
+  min-width: 0;
+  min-height: 0;
+  background: var(--muted);
+  border: 1px solid var(--panel);
+}
+.react-flow__node:hover > .cnode > .react-flow__handle,
+.react-flow__node:hover > .cgroup > .react-flow__handle,
+.cnode .react-flow__handle.connectingto,
+.cgroup .react-flow__handle.connectingto {
+  width: 11px;
+  height: 11px;
+  background: var(--accent);
+}
 
 /* Inspectors for branches, groups, transitions, selections */
 .transition-ends {
