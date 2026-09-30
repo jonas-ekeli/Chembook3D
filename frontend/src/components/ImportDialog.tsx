@@ -34,7 +34,7 @@ const DESTINATIONS: Record<string, string> = {
 
 /** Browse the local disk through the backend (a browser page cannot read paths itself), so
  * the file's own path is kept as its origin path (FR-FILE-02). It starts in the folder a file
- * was last picked from, and the filter shows only names containing its text (D77). */
+ * was last picked from, and the filter shows only names containing its text (D78). */
 function FileBrowser({ onPick }: { onPick: (path: string) => void }) {
   const [listing, setListing] = useState<FolderListing | null>(null)
   const [path, setPath] = useState('')

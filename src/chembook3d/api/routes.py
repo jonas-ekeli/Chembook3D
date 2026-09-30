@@ -882,7 +882,7 @@ def import_from_path(body: ImportFromPathIn, request: Request, session: DbSessio
     except OSError as exc:
         raise HTTPException(422, f"Cannot read {path}") from exc
     staged = _stage(request, data, path.name, str(path.resolve()))
-    app_settings.remember_import_folder(path.resolve().parent)  # D77
+    app_settings.remember_import_folder(path.resolve().parent)  # D78
     return _plan(session, staged, imports.ImportOptions(target_node_id=body.node_id))
 
 

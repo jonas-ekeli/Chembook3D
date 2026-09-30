@@ -506,7 +506,7 @@ def test_records_in_database(open_client):
 
 
 def test_file_browser_starts_in_the_last_import_folder(open_client, tmp_path):
-    # D77: picking a file remembers its folder for the next import, app-wide
+    # D78: picking a file remembers its folder for the next import, app-wide
     assert open_client.get("/api/settings").json()["last_import_folder"] == ""
     original = tmp_path / "cluster" / TS
     original.parent.mkdir()

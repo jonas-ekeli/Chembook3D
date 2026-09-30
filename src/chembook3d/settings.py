@@ -33,7 +33,7 @@ class Settings:
     energy_unit: str = "kcal/mol"
     recent: list[str] = field(default_factory=list)
     last_device: str = ""  # FR-FILE-02: origin device defaults to the last one used
-    # D77: the import file browser starts in the folder a file was last picked from
+    # D78: the import file browser starts in the folder a file was last picked from
     last_import_folder: str = ""
     geometry_tolerance: float = GEOMETRY_TOLERANCE
     duplicate_tolerance: float = DUPLICATE_TOLERANCE
@@ -97,6 +97,6 @@ def remember_import_folder(folder: Path) -> None:
 
 def import_folder(settings: Settings) -> str:
     """The folder to start the import file browser in, or "" (the home folder) when none was
-    used yet or it no longer exists (D77)."""
+    used yet or it no longer exists (D78)."""
     folder = settings.last_import_folder
     return folder if folder and Path(folder).is_dir() else ""
