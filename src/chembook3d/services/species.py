@@ -8,12 +8,17 @@
 - The balance of a point on a pathway is what must be added to its energy so it has the
   atoms of the reference: walking from the reference, a species that leaves is added and one
   that joins is subtracted. The same change applies to the difference along one edge.
+- Every node and group joined to the reference by transitions has one balance, found along
+  the route from the reference with the fewest transitions walked backwards, then the fewest
+  transitions (D72). Node cards in energy mode use it, and so does a pathway that does not
+  pass through the reference, from its first point with a balance.
 - W-BALANCE: when both ends and every attached species have coordinates, the atoms and the
   charge before an edge (source + joining species) must equal those after it (target +
   leaving species).
 """
 
-from collections import Counter
+import heapq
+from collections import Counter, defaultdict
 from typing import Any
 
 from sqlalchemy import select
@@ -173,6 +178,34 @@ def energy(
             return None, f"free species “{name}”: {value.message or 'no value at this level'}"
         total += count * value.value
     return total, None
+
+
+def balances_from(session: Session, reference_id: str) -> dict[str, Balance]:
+    """D72: the balance of every node and group joined to the reference, whatever its
+    distance. Following transitions forward is preferred to walking them backwards, so in a
+    catalytic cycle the points after the reference are balanced forward from it and only the
+    points before it (a precatalyst) backwards. A group and its members share one balance."""
+    links: dict[str, list[tuple[str, Balance, int]]] = defaultdict(list)
+    for t in session.scalars(select(Transition).order_by(Transition.seq)):
+        links[t.source_id].append((t.target_id, change(t, forward=True), 0))
+        links[t.target_id].append((t.source_id, change(t, forward=False), 1))
+    for member in session.scalars(select(Node).where(Node.group_id.is_not(None))):
+        links[member.group_id].append((member.id, {}, 0))
+        links[member.id].append((member.group_id, {}, 0))
+    found: dict[str, Balance] = {}
+    order = 0  # ties go to the transition created first
+    queue: list[tuple[int, int, int, str, Balance]] = [(0, 0, order, reference_id, {})]
+    while queue:
+        backward, steps, _, record_id, balance = heapq.heappop(queue)
+        if record_id in found:
+            continue
+        found[record_id] = balance
+        for other, step, back in links[record_id]:
+            if other not in found:
+                order += 1
+                entry = (backward + back, steps + 1, order, other, combine(balance, step))
+                heapq.heappush(queue, entry)
+    return found
 
 
 def describe(session: Session, balance: Balance) -> list[dict[str, Any]]:

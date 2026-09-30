@@ -13,7 +13,8 @@
 - Free species that join or leave on the transitions between the reference and a point are
   added to or subtracted from its value, so every point has the reference's atoms (D69). A
   pathway that does not pass through the reference is balanced from the first point it shares
-  with one that does, or else from its own first point.
+  with one that does, or else from its first point joined to the reference by transitions,
+  with that point's balance on the canvas (D72).
 """
 
 from dataclasses import dataclass
@@ -212,12 +213,23 @@ def _balances(
     """D69: the free-species balance of every point of every pathway."""
     known: dict[str, species_service.Balance] = {reference_id: {}}
     found: list[list[species_service.Balance]] = [[] for _ in paths]
+    graph: dict[str, species_service.Balance] | None = None
     # Pathways through the reference first, so the others can start from a shared point.
     for i in sorted(range(len(paths)), key=lambda i: reference_id not in paths[i]):
         path, segments = paths[i], resolve(session, paths[i])
-        start = next((j for j, record_id in enumerate(path) if record_id in known), 0)
+        start = next((j for j, record_id in enumerate(path) if record_id in known), None)
+        anchor = known
+        if start is None:
+            # D72: no point shared with a pathway through the reference, so start from the
+            # first point the reference reaches along transitions (the same balance as its
+            # node card).
+            graph = (
+                graph if graph is not None else species_service.balances_from(session, reference_id)
+            )
+            start = next((j for j, record_id in enumerate(path) if record_id in graph), 0)
+            anchor = graph
         balance: list[species_service.Balance] = [{} for _ in path]
-        balance[start] = dict(known.get(path[start], {}))
+        balance[start] = dict(anchor.get(path[start], {}))
         for j in range(start, len(path) - 1):
             step = species_service.change(segments[j].transition, segments[j].forward)
             balance[j + 1] = species_service.combine(balance[j], step)

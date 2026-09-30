@@ -226,6 +226,73 @@ def test_closed_cycle_ends_at_the_reaction_energy(open_client, cycle):
     ]
 
 
+def relative_view(client, reference_id: str) -> dict:
+    return get(client, f"/energies/view?level={svp(client)}&type=E&reference={reference_id}")
+
+
+def test_node_cards_carry_the_species_along_the_path(open_client, cycle):
+    # T-SPC-06, D72: a node card's ΔX keeps every species that joined or left between the
+    # reference and the node, not only the one on the edge into it.
+    cycle.energies()
+    relative = relative_view(open_client, cycle.ids["A"])["relative"]
+    assert relative[cycle.ids["A"]]["value"] == 0.0
+    assert relative[cycle.ids["B"]]["value"] == pytest.approx(E["B"] - E["A"] - E["propene"])
+    assert relative[cycle.ids["TS"]]["value"] == pytest.approx(E["TS"] - E["A"] - E["propene"])
+    c = relative[cycle.ids["C"]]
+    assert c["value"] == pytest.approx(E["C"] + E["ethylene"] - E["A"] - E["propene"])
+    assert [(s["label"], s["count"]) for s in c["species"]] == [("propene", -1), ("ethylene", 1)]
+    assert c["joined"] is True
+
+    # The same numbers as the profile along the pathway.
+    points = profile(open_client, [cycle.path("A", "B", "TS", "C")], cycle.ids["A"])
+    for point in points["profiles"][0]["points"]:
+        assert relative[point["id"]]["value"] == pytest.approx(point["relative"])
+
+    # From a reference in the middle, the points before it are balanced backwards.
+    relative = relative_view(open_client, cycle.ids["C"])["relative"]
+    assert relative[cycle.ids["A"]]["value"] == pytest.approx(
+        E["A"] + E["propene"] - E["ethylene"] - E["C"]
+    )
+    assert relative[cycle.ids["TS"]]["value"] == pytest.approx(E["TS"] - E["ethylene"] - E["C"])
+
+
+def test_node_cards_in_a_closed_cycle_follow_it_forward(open_client, cycle):
+    # D72: with the cycle closed, the points after the reference are balanced forward from it
+    # (not backwards through the closing edge), and the reference itself stays at zero.
+    cycle.edges[("C", "A")] = edge(open_client, cycle.ids["C"], cycle.ids["A"])["id"]
+    cycle.attach(("C", "A"), "propene", "joins")
+    cycle.attach(("C", "A"), "butene", "leaves")
+    cycle.energies()
+    relative = relative_view(open_client, cycle.ids["A"])["relative"]
+    assert relative[cycle.ids["A"]]["value"] == 0.0
+    assert relative[cycle.ids["C"]]["value"] == pytest.approx(
+        E["C"] + E["ethylene"] - E["A"] - E["propene"]
+    )
+
+
+def test_node_cards_without_a_species_value_or_a_route(open_client, cycle):
+    # EN-3: no fallback for a species; a node not joined to the reference counts no species.
+    cycle.energies("A", "B", "TS", "C", "propene")
+    loose = node(open_client, label="loose", xyz=xyz(*RU_CH2))["id"]
+    add_energies(open_client, loose, -99.0)
+    relative = relative_view(open_client, cycle.ids["A"])["relative"]
+    assert relative[cycle.ids["TS"]]["value"] == pytest.approx(E["TS"] - E["A"] - E["propene"])
+    assert relative[cycle.ids["C"]]["value"] is None
+    assert "ethylene" in relative[cycle.ids["C"]]["message"]
+    assert relative[loose]["joined"] is False
+    assert relative[loose]["value"] == pytest.approx(-99.0 - E["A"])
+
+
+def test_pathway_apart_from_the_reference_starts_from_its_balance(open_client, cycle):
+    # D72: a pathway that shares no point with one through the reference keeps the species
+    # that joined or left before its first point.
+    cycle.energies()
+    found = profile(open_client, [cycle.path("A", "B"), cycle.path("TS", "C")], cycle.ids["A"])
+    ts, c = found["profiles"][1]["points"]
+    assert ts["relative"] == pytest.approx(E["TS"] - E["A"] - E["propene"])
+    assert c["relative"] == pytest.approx(E["C"] + E["ethylene"] - E["A"] - E["propene"])
+
+
 def test_unbalanced_edge_is_flagged(open_client):
     # T-SPC-05, W-BALANCE: a forgotten leaving ethylene, then a charge mismatch.
     cycle = Cycle(open_client)

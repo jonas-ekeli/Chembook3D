@@ -47,11 +47,29 @@ class EdgeValueOut(BaseModel):
     message: str | None = None  # why delta is missing, when a free species has no value
 
 
+class SpeciesCountOut(BaseModel):
+    species_id: str
+    label: str
+    count: int  # added this many times; negative: subtracted
+
+
+class RelativeOut(BaseModel):
+    """ΔX from the reference for a node card, with the free species that keep its atoms
+    equal to the reference's (D69, D72)."""
+
+    value: float | None
+    species: list[SpeciesCountOut]
+    message: str | None  # why value is missing
+    joined: bool  # joined to the reference by transitions; if not, no species are counted
+
+
 class EnergyViewOut(BaseModel):
     level: str
     type: str
     values: dict[str, ValueOut]  # nodes and group nodes by id
     edges: dict[str, EdgeValueOut]
+    reference_id: str | None = None
+    relative: dict[str, RelativeOut] = {}  # by id, when a reference is given
 
 
 class PathIn(BaseModel):
@@ -107,8 +125,10 @@ def energy_options(session: DbSession):
 
 
 @router.get("/energies/view", response_model=EnergyViewOut)
-def energy_view(level: str, type: str, session: DbSession):
-    """Every node's and group's value at one selection, and ΔX on every edge (FR-EN-02)."""
+def energy_view(level: str, type: str, session: DbSession, reference: str | None = None):
+    """Every node's and group's value at one selection, and ΔX on every edge (FR-EN-02).
+    With a reference, also every node's and group's ΔX from it, balanced by the free species
+    along the route from the reference (D72)."""
     key = _key(level)
     energies = Energies(session)
     values = {
@@ -129,7 +149,34 @@ def energy_view(level: str, type: str, session: DbSession):
             direct=transition_service.describe(session, transition)["direct"],
             message=message,
         )
-    return EnergyViewOut(level=level, type=type, values=values, edges=edges)
+    relative = {}
+    if reference is not None:
+        # A reference deleted meanwhile leaves every card without a value, not an error.
+        base = values[reference].value if reference in values else None
+        balances = species_service.balances_from(session, reference) if reference in values else {}
+        for record_id, own in values.items():
+            balance = balances.get(record_id, {})
+            added, message = species_service.energy(session, energies, balance, key, type)
+            if own.value is None:
+                message = own.message or "no value at this level"
+            elif reference not in values:
+                message = "the reference is no longer on the canvas"
+            elif base is None:
+                message = "the reference has no value at this level"
+            relative[record_id] = RelativeOut(
+                value=own.value + added - base if message is None else None,
+                species=[SpeciesCountOut(**s) for s in species_service.describe(session, balance)],
+                message=message,
+                joined=record_id in balances,
+            )
+    return EnergyViewOut(
+        level=level,
+        type=type,
+        values=values,
+        edges=edges,
+        reference_id=reference,
+        relative=relative,
+    )
 
 
 @router.post("/pathways/extend", response_model=PathOut)

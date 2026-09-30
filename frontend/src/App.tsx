@@ -242,14 +242,14 @@ function App() {
   useEffect(() => {
     if (!levelKey) return
     let current = true
-    api.energyView(levelKey, shownType).then(
+    api.energyView(levelKey, shownType, referenceId).then(
       (found) => current && setEnergyView(found),
       (err: unknown) => current && setError(errorText(err)),
     )
     return () => {
       current = false
     }
-  }, [levelKey, shownType, energyOptions, refreshKey])
+  }, [levelKey, shownType, referenceId, energyOptions, refreshKey])
 
   // Stable between renders, so the canvas only rebuilds its nodes when energies change.
   const canvasEnergy: CanvasEnergy = useMemo(

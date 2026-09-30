@@ -104,6 +104,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-SPC-03 | A species lacks the selected level | The point and the edge are "n/a" with the species named |
 | T-SPC-04 | Cycle closed back to A with "+ propene, − butene" | The closing point is the reaction energy; the table lists A twice |
 | T-SPC-05 | Edge missing a leaving ethylene, then a charge change | W-BALANCE names C2H4, then the charges |
+| T-SPC-06 | Energy mode with reference A, propene joining on A → B and ethylene leaving on TS → C; then the cycle closed; then a pathway TS → C shown apart from A → B | Every card after an edge keeps its species and matches the profile; A stays at zero in the closed cycle; the separate pathway starts from TS's balance (D72) |
 
 ## 7. Portability, data safety and UI
 

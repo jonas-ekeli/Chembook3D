@@ -152,7 +152,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-SPC-03 | A transition lists free species that join or leave on it, each with a count, shown as chips on the edge ("+ propene", "− C₂H₄"). Changes are recorded in the history. | D69 | after 5 |
 | FR-SPC-04 | A node with no transitions and no group can be turned into a free species (it leaves its step and branch), and a species on no transition back into a node. | D69 | after 5 |
 | FR-SPC-05 | The import dialog can create a free species instead of a node. A node derived from a species is a species. | D69 | after 5 |
-| FR-SPC-06 | Profiles, the energy table and ΔX on edges add the energy of leaving species and subtract that of joining species along the pathway from the reference (EN-3, EN-8). The table has a "Free species" column. A species without a value at the selected level makes the point or edge "n/a" with the reason. | D69 | after 5 |
+| FR-SPC-06 | Profiles, the energy table, node cards in energy mode (along the route in D72) and ΔX on edges add the energy of leaving species and subtract that of joining species along the pathway from the reference (EN-3, EN-8). The table has a "Free species" column. A species without a value at the selected level makes the point, card or edge "n/a" with the reason. | D69, D72 | after 5 |
 | FR-SPC-07 | W-BALANCE flags a transition whose atoms or total charge do not balance. | D69 | after 5 |
 
 **AC:**

@@ -104,7 +104,7 @@ Notes:
 | EN-5 | G_qh = E(single point) + [G − E]_qh. The quasi-harmonic correction is recomputed from the frequency step's parsed data following Jonas's reference script (`thermochem_corr_G16`): real frequencies only; ZPE and vibrational thermal energy from the **unmodified** frequencies; vibrational **entropy** with every frequency below the cutoff raised to the cutoff (Truhlar); plus translational, rotational and electronic terms and PV (D41, D49, D56). |
 | EN-6 | G_qh uses a temperature and a cutoff that are parameters, defaulting to 298.15 K and 100 cm⁻¹, and stored with each computed value. The job-printed G keeps the job's own T and P. No concentration or standard-state correction is applied: translational entropy is for an ideal gas at 1 atm (D57, D58). |
 | EN-7 | A group node's energy for edges is its representative's energy. With no representative, its edges show "n/a". |
-| EN-8 | A profile is relative to a user-chosen reference node on the pathway: value(n) = X(n) − X(ref), plus X of every free species that left and minus X of every one that joined between the reference and n (D69). |
+| EN-8 | A profile is relative to a user-chosen reference node on the pathway: value(n) = X(n) − X(ref), plus X of every free species that left and minus X of every one that joined between the reference and n (D69). Node cards in energy mode use the same balance, along the route from the reference that D72 defines. |
 | EN-9 | Units: stored in hartree, displayed in kcal/mol by default, configurable (D28). |
 | EN-10 | Energies may be sorted and displayed, but never used by the app to pick nodes, representatives or pathways (D4, X5). |
 

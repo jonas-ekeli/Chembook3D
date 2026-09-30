@@ -25,6 +25,7 @@ import '@xyflow/react/dist/style.css'
 import { toPng, toSvg } from 'html-to-image'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
 import {
+  balanceText,
   FADED_STATUSES,
   formatDelta,
   speciesChip,
@@ -356,18 +357,23 @@ function CanvasView({
   const nodeEnergySource = mode === 'energy' ? energy : null
 
   const { flowNodes, flowEdges: plainEdges } = useMemo(() => {
-    const values = nodeEnergySource?.view?.values ?? {}
-    const reference = nodeEnergySource?.referenceId ? values[nodeEnergySource.referenceId] : undefined
     // D43: in energy mode a node shows ΔX from the reference node, never an absolute value.
+    // D72: the server balances it with every free species that joined or left between the
+    // reference and the node, so it matches the profile along that route.
     const nodeEnergy = (id: string): EnergyText | null => {
       const energy = nodeEnergySource
       if (!energy?.view) return null
-      const own = values[id]
       if (!energy.referenceId) return { text: `Δ${energy.type}: no reference`, title: 'Choose a reference node' }
+      if (energy.view.reference_id !== energy.referenceId) return { text: `Δ${energy.type} …`, title: 'Updating' }
+      const own = energy.view.relative[id]
       if (own?.value == null) return { text: `Δ${energy.type} n/a`, title: own?.message ?? 'no value' }
-      if (reference?.value == null) return { text: `Δ${energy.type} n/a`, title: 'the reference has no value' }
       const unit = energy.settings?.energy_unit ?? 'kcal/mol'
-      return { text: `Δ${energy.type} ${formatDelta(own.value - reference.value, energy.settings)}`, title: unit }
+      const title = own.species.length
+        ? `${unit}, balanced with ${balanceText(own.species)}`
+        : own.joined
+          ? unit
+          : `${unit}; not joined to the reference by transitions, so no free species are counted`
+      return { text: `Δ${energy.type} ${formatDelta(own.value, energy.settings)}`, title }
     }
     const hidden = {
       branches: new Set(filters.branches),

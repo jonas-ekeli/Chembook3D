@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import {
   api,
+  balanceText,
   energyTypeName,
   formatDelta,
   type Canvas,
@@ -260,9 +261,7 @@ function ProfileChart({
                   {point.species.length > 0 && (
                     <title>
                       {/* D69: the free species added or subtracted to balance this point */}
-                      {`${point.label} ${point.species
-                        .map((s) => `${s.count > 0 ? '+' : '−'} ${Math.abs(s.count) > 1 ? `${Math.abs(s.count)} × ` : ''}${s.label}`)
-                        .join(' ')}`}
+                      {`${point.label} ${balanceText(point.species)}`}
                     </title>
                   )}
                 </line>
