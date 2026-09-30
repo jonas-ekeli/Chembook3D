@@ -103,7 +103,7 @@ export function LinkDialog({ onCancel, onLinked }: { onCancel: () => void; onLin
 }
 
 function repositoryName(url: string): string {
-  const last = url.trim().replace(/\/+$/, '').split(/[/:]/).pop() ?? ''
+  const last = url.trim().replace(/[/\\]+$/, '').split(/[/\\:]/).pop() ?? ''
   return last.replace(/\.git$/, '')
 }
 
