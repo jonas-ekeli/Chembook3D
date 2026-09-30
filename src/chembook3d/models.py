@@ -110,6 +110,10 @@ class Node(Base):
     )
     pos_x: Mapped[float] = mapped_column(default=0.0)
     pos_y: Mapped[float] = mapped_column(default=0.0)
+    # The orientation saved from the 3D view as a unit quaternion [x, y, z, w] turning the
+    # coordinates (about their centre) into the picture: x right, y up, z towards the viewer.
+    # Structure-mode cards draw the node this way; None means the default (principal axes).
+    view_rotation: Mapped[list[Any] | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 

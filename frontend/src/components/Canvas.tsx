@@ -41,6 +41,7 @@ import {
 import { MoleculeSketch } from './MoleculeSketch'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
+import type { Rotation } from '../chem'
 
 const NO_BRANCH = '#98a2b3'
 
@@ -86,6 +87,8 @@ type GroupData = {
   representativeLabel: string | null
   /** The representative's geometry, drawn on the collapsed group in structure mode (D68). */
   representativeXyz: string | null
+  /** The representative's saved 3D orientation, so the group draws it as its own card does. */
+  representativeRotation: Rotation | null
   mode: ViewMode
   ts: boolean
   expanded: boolean
@@ -138,7 +141,9 @@ const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<
           </span>
         )}
       </div>
-      {mode === 'structure' && <MoleculeSketch xyz={node.xyz} width={NODE_WIDTH - 16} height={120} />}
+      {mode === 'structure' && (
+        <MoleculeSketch xyz={node.xyz} rotation={node.view_rotation} width={NODE_WIDTH - 16} height={120} />
+      )}
       {energy && (
         <div className={`cnode-energy${mode === 'structure' ? ' below-structure' : ''}`} title={energy.title}>
           {energy.text}
@@ -161,7 +166,8 @@ const LAYOUT_BUTTON: Record<GroupLayout, { label: string; icon: string }> = {
 }
 
 const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<GroupData>>) {
-  const { group, colour, stepName, memberCount, representativeLabel, representativeXyz, mode, ts, expanded } = data
+  const { group, colour, stepName, memberCount, representativeLabel, mode, ts, expanded } = data
+  const { representativeXyz, representativeRotation } = data
   const { onToggle, onLayout, energy } = data
   // A21: the button cycles grid (a new group's layout), vertical line, horizontal line, grid.
   const next: GroupLayout =
@@ -209,7 +215,7 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
         </button>
       </div>
       {!expanded && mode === 'structure' && representativeXyz && (
-        <MoleculeSketch xyz={representativeXyz} width={NODE_WIDTH - 16} height={120} />
+        <MoleculeSketch xyz={representativeXyz} rotation={representativeRotation} width={NODE_WIDTH - 16} height={120} />
       )}
       {!expanded && energy && (
         <div className={`cnode-energy${mode === 'structure' ? ' below-structure' : ''}`} title={energy.title}>
@@ -462,6 +468,7 @@ function CanvasView({
           memberCount: members.length,
           representativeLabel: representative ? representative.label || 'Untitled node' : null,
           representativeXyz: representative?.xyz ?? null,
+          representativeRotation: representative?.view_rotation ?? null,
           mode,
           // A25: a group of transition states is marked like one.
           ts: members.length > 0 && members.every((m) => m.role === 'transition_state'),

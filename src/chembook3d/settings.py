@@ -18,6 +18,9 @@ MAX_RECENT = 10
 GEOMETRY_TOLERANCE = 0.001
 DUPLICATE_TOLERANCE = 0.05
 CREST_COUNT = 10  # D34: the lowest N conformers of a CREST ensemble are ticked (A16)
+# Hydrogens drawn in the 3D views and on structure-mode cards: all of them, only those not
+# bonded to carbon (hydrides, O–H, N–H), or none.
+HYDROGEN_MODES = ("all", "polar", "none")
 
 
 def config_dir() -> Path:
@@ -36,6 +39,7 @@ class Settings:
     qh_temperature: float = DEFAULT_TEMPERATURE
     qh_cutoff: float = DEFAULT_CUTOFF
     crest_count: int = CREST_COUNT
+    hydrogens: str = "all"
 
 
 def _path() -> Path:
@@ -61,6 +65,8 @@ def load() -> Settings:
     count = data.get("crest_count")
     if isinstance(count, int) and not isinstance(count, bool) and count >= 1:
         settings.crest_count = count
+    if data.get("hydrogens") in HYDROGEN_MODES:
+        settings.hydrogens = data["hydrogens"]
     cutoff = data.get("qh_cutoff")
     if isinstance(cutoff, int | float) and not isinstance(cutoff, bool) and cutoff >= 0:
         settings.qh_cutoff = float(cutoff)

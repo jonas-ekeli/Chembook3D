@@ -1,5 +1,6 @@
 """Node behaviour through the API: FR-NODE-*, FR-HIST-*, identity rules ID-4 and ID-5."""
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -175,3 +176,39 @@ def test_a_change_is_committed_before_the_answer_is_sent(open_client):
     response = TestClient(recording).post("/api/nodes", json={"label": "fresh"})
     assert response.status_code == 201
     assert seen == [1]
+
+
+def test_saved_orientation_is_kept_normalised_and_not_in_history(open_client):
+    node = _create(open_client, xyz=WATER)
+    assert node["view_rotation"] is None
+    response = open_client.patch(f"/api/nodes/{node['id']}", json={"view_rotation": [0, 0, 2, 0]})
+    assert response.status_code == 200
+    assert response.json()["view_rotation"] == [0.0, 0.0, 1.0, 0.0]
+    assert all(e["field"] != "view_rotation" for e in _history(open_client, node["id"]))
+
+    for bad in ([0, 0, 0, 0], [1, 2, 3], ["a", 0, 0, 1]):
+        response = open_client.patch(f"/api/nodes/{node['id']}", json={"view_rotation": bad})
+        assert response.status_code == 422, bad
+
+    cleared = open_client.patch(f"/api/nodes/{node['id']}", json={"view_rotation": None})
+    assert cleared.json()["view_rotation"] is None
+
+
+def test_derived_node_keeps_the_saved_orientation(open_client):
+    node = _create(open_client, xyz=WATER)
+    open_client.patch(f"/api/nodes/{node['id']}", json={"view_rotation": [0, 1, 0, 1]})
+    investigation = open_client.app.state.investigation
+    with investigation.sessions.begin() as session:
+        session.add(Calculation(node_id=node["id"], type="single_point", program="Gaussian"))
+    response = open_client.put(f"/api/nodes/{node['id']}/geometry", json={"xyz": MOVED_WATER})
+    derived = response.json()["node"]
+    assert derived["id"] != node["id"]
+    assert derived["view_rotation"] == pytest.approx([0, 0.70710678, 0, 0.70710678])
+
+
+def test_hydrogen_display_setting(open_client):
+    assert open_client.get("/api/settings").json()["hydrogens"] == "all"
+    response = open_client.put("/api/settings", json={"hydrogens": "polar"})
+    assert response.json()["hydrogens"] == "polar"
+    assert open_client.get("/api/settings").json()["hydrogens"] == "polar"
+    assert open_client.put("/api/settings", json={"hydrogens": "some"}).status_code == 422

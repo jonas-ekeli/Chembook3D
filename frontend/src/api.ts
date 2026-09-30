@@ -1,6 +1,8 @@
 // Thin client for the local backend API (src/chembook3d/api/routes.py). All rules live in
 // the backend; the UI only shows what it returns.
 
+import type { HydrogenMode, Rotation } from './chem'
+
 export type Status = 'planned' | 'running_externally' | 'done' | 'failed' | 'rejected' | 'superseded'
 export type Role = 'minimum' | 'transition_state' | 'unspecified'
 
@@ -100,6 +102,8 @@ export type Node = {
   origin_branch_id: string | null
   pos_x: number
   pos_y: number
+  /** The orientation saved from the 3D view, used by the structure-mode card. */
+  view_rotation: Rotation | null
   created_at: string
   updated_at: string
 }
@@ -107,7 +111,16 @@ export type Node = {
 export type NodeFields = Partial<
   Pick<
     Node,
-    'label' | 'role' | 'charge' | 'multiplicity' | 'status' | 'tags' | 'notes' | 'step_id' | 'branch_id'
+    | 'label'
+    | 'role'
+    | 'charge'
+    | 'multiplicity'
+    | 'status'
+    | 'tags'
+    | 'notes'
+    | 'step_id'
+    | 'branch_id'
+    | 'view_rotation'
   >
 >
 
@@ -248,6 +261,9 @@ export type Settings = {
   qh_cutoff: number
   /** D34: how many of the lowest CREST conformers are ticked on import. */
   crest_count: number
+  /** Hydrogens drawn in the 3D views and on structure cards. */
+  hydrogens: HydrogenMode
+  hydrogen_modes: HydrogenMode[]
 }
 
 export type Level = {
@@ -676,6 +692,7 @@ export const api = {
         | 'qh_temperature'
         | 'qh_cutoff'
         | 'crest_count'
+        | 'hydrogens'
       >
     >,
   ) => request<Settings>('PUT', '/settings', fields),
