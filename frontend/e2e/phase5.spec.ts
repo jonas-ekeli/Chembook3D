@@ -100,12 +100,20 @@ test('import a CREST ensemble as a group and remove a member', async ({ page }) 
   await expect(group.getByRole('heading', { name: 'ens' })).toBeVisible()
   await expect(group.getByRole('heading', { name: 'Members (3)' })).toBeVisible()
 
-  // Removing a member deletes its node, after a confirmation.
-  await group
-    .getByRole('button', { name: /^Remove ens-\d+ from the group$/ })
-    .first()
-    .click()
-  await expect(page.getByRole('dialog')).toContainText('is removed from the group and deleted, with its 1 calculation.')
-  await page.getByRole('dialog').getByRole('button', { name: 'Remove and delete' }).click()
+  // D88: a member can leave the group and stay as a node.
+  const removeButtons = group.getByRole('button', { name: /^Remove ens-\d+ from the group$/ })
+  const kept = ((await removeButtons.first().getAttribute('aria-label')) ?? '').match(/ens-\d+/)![0]
+  const keptOnCanvas = page.getByRole('group', { name: `Node ${kept}`, exact: true })
+  await expect(keptOnCanvas).toHaveCount(0) // drawn inside the group card, not on its own
+  await removeButtons.first().click()
+  await expect(page.getByRole('dialog')).toContainText(`Keep as a node: “${kept}” leaves the group`)
+  await page.getByRole('dialog').getByRole('button', { name: 'Keep as a node' }).click()
   await expect(group.getByRole('heading', { name: 'Members (2)' })).toBeVisible()
+  await expect(keptOnCanvas).toBeVisible()
+
+  // FR-IMP-11: or be deleted, after a confirmation.
+  await removeButtons.first().click()
+  await expect(page.getByRole('dialog')).toContainText('Remove and delete: it is deleted, with its 1 calculation.')
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove and delete' }).click()
+  await expect(group.getByRole('heading', { name: 'Members (1)' })).toBeVisible()
 })

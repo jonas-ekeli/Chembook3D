@@ -75,7 +75,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-IMP-08 | Importing onto a node that has calculations: if the imported geometry does not match the node's (same atom order and elements, coordinates within tolerance), show W-GEOM and offer "create derived node" or cancel. | ID-7 | 2 |
 | FR-IMP-09 | Duplicate check: if a new import matches an existing node's composition, charge and multiplicity, and its geometry is within the configurable tolerance after alignment, show "possible duplicate", with attach, new or cancel. Never merge automatically. | D47, Q32 | 2 |
 | FR-IMP-10 | Import a CREST conformer ensemble. The preview lists conformers with energies. The lowest N are pre-selected (N from settings) and the user can untick any. The result is a group node with one member node per kept conformer and no representative. | D34, D46 | 5 |
-| FR-IMP-11 | Members can be removed from a group node after import. Removal deletes the member node after confirmation. | D34 | 5 |
+| FR-IMP-11 | Members can be removed from a group node after import. Removal either keeps the member as a node (FR-GRP-10) or deletes it after confirmation. | D34, D88 | 5 |
 | FR-IMP-12 | Importing onto a planned node with no calculations replaces its geometry, and the old geometry is kept in history. | D24, ID-6 | 2 |
 | FR-IMP-13 | A frequency job can be imported onto an existing node at any time. If the file contains other steps, the preview lists every step with its geometry: steps matching the node's geometry are attached as calculations; from the first step that changes the geometry, the app offers a derived node. The preview flags a freq whose level differs from the node's geometry level. | D52, ID-7, EN-4 | 2 |
 
@@ -119,6 +119,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-GRP-07 | A button in an expanded group cycles its members through a grid, a vertical line and a horizontal line; the choice is kept with the group (A21). | D65, A21 | after 5 |
 | FR-GRP-08 | Group members keep their branch, so a group can hold members from several branches; a group left with one member by the filters is drawn as that node (D66). | D66, A22–A26 | after 5 |
 | FR-GRP-09 | In the structure view mode, a collapsed group shows its representative's structure; with no representative it shows none (D68). | D68 | after 5 |
+| FR-GRP-10 | A member can be taken out of its group and kept as a node beside the group, with its calculations and edges and its branch (or the branch it came from). If it was the representative, the group has none until the user picks one. The group's last member cannot be taken out; the group is dissolved instead (D88). | D88 | after 5 |
 
 **AC (lineage):** build the §6 example of [02](02-domain-model.md). A1's inspector shows lineage A1 → A → T, and R shows parents A1, A2, B1, B2. Adding the A-S3↔B-S3 rotation transitions leaves every node's branch unchanged. There is no action in the UI that creates a path across steps without edges.
 

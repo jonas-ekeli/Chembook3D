@@ -47,6 +47,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-BR-17 | Groups IM1, TS1, IM2 with one conformer per branch 1 and 2, joined conformer to conformer; collapse them, then filter to branch 1 | Collapsed: one line between each pair of groups. Filtered: IM1-1, TS1-1 and IM2-1 drawn as plain nodes at the groups' places, joined by their own edges with their own ΔG; branch 1's profile is IM1-1 → TS1-1 → IM2-1 (D66, A23, A24) |
 | T-BR-18 | Open an investigation made before D66 with a reconnection | Members are back in the branches they came from (A22) |
 | T-BR-19 | Collapse a group, switch to the structure view mode, then pick a representative | No structure on the group until a representative is picked, then the representative's structure; none in compact mode (D68) |
+| T-BR-20 | Take B2-S6, the representative of G6 with an edge into G6, out of the group; then try to take out the last member of a two-member group after removing one | B2-S6 stays a node on B2 beside G6 with its edges; G6 has 3 members, no representative, and B2 is no longer an incoming branch (R keeps B2 as a parent); one history entry; the last member is refused (D88) |
 
 ## 4. Identity and geometry tests
 

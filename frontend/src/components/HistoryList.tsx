@@ -121,6 +121,12 @@ function describeStructure(entry: HistoryEntry, names: Names): string | null {
     const added = ((value.member_ids as string[]) ?? []).filter((id) => !before.has(id))
     return `Added ${added.length} node${added.length === 1 ? '' : 's'} to group “${title || 'Group'}” (${named(names, added)})`
   }
+  if (entry.action === 'remove_member' && value) {
+    const after = new Set((value.member_ids as string[]) ?? [])
+    const before = ((entry.old_value as Record<string, unknown> | null)?.member_ids as string[]) ?? []
+    const removed = before.filter((id) => !after.has(id))
+    return `Took ${named(names, removed)} out of group “${title || 'Group'}”`
+  }
   if (entry.action === 'dissolve') return `Dissolved group “${title || 'Group'}”`
   if (entry.action === 'create') return `Created ${kind}${title ? ` “${title}”` : ''}`
   if (entry.action === 'delete') return `Deleted ${kind}${title ? ` “${title}”` : ''}`

@@ -546,6 +546,12 @@ def add_group_members(group_id: str, body: AddMembersIn, session: DbSession):
     return _group_out(session, group_service.add_members(session, group_id, body.node_ids))
 
 
+@router.delete("/groups/{group_id}/members/{node_id}", response_model=GroupOut)
+def remove_group_member(group_id: str, node_id: str, session: DbSession):
+    """D88: the node leaves the group and stays, with its calculations and edges."""
+    return _group_out(session, group_service.remove_member(session, group_id, node_id))
+
+
 @router.patch("/groups/{group_id}", response_model=GroupOut)
 def update_group(group_id: str, body: GroupIn, session: DbSession):
     group = group_service.update(session, group_id, body.model_dump(exclude_unset=True))
