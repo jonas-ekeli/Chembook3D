@@ -482,7 +482,7 @@ function App() {
   const notedNode = notedNodeId ? canvas.nodes.find((n) => n.id === notedNodeId) : undefined
 
   const dialogs = (
-    <>
+    <StericColourSetting value={stericColours}>
       {notedNode && (
         <NoteEditor
           note={editedNote ?? null}
