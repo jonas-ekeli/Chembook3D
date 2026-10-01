@@ -52,6 +52,8 @@ Investigation
  ├── AlignmentSet ── per node: atom numbers   (D80; layout-like, no history)
  ├── StericProfile ── settings; per node: centre, orientation, left-out atoms, last result
  │                    (D81; layout-like, no history)
+ ├── Selectivity ── settings (level, energy type, temperature, conformers); outcomes:
+ │                  [name, TS Node|GroupNode[1..n], experimental amount][2..n]   (D83; in the history)
  ├── LevelOfTheory registry, named custom basis sets
  └── ChangeHistory entries
 ```

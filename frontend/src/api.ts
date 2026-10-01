@@ -448,6 +448,72 @@ export type QuasiHarmonic = {
 
 export type EnergyType = 'E' | 'H' | 'G' | 'G_qh'
 
+/** D83: a saved selectivity. Members are node ids (one TS) or group ids (all members). */
+export type SelectivityOutcome = { id?: string; name: string; members: string[]; experimental: number | null }
+
+export type Selectivity = {
+  id: string
+  name: string
+  /** A composite level key, or null until one is chosen. */
+  level: string | null
+  energy_type: EnergyType
+  /** K; null follows the G_qh temperature setting. */
+  temperature: number | null
+  conformers: 'boltzmann' | 'lowest'
+  excess: 'ee' | 'de' | 'none'
+  notes: string
+  outcomes: SelectivityOutcome[]
+}
+
+export type SelectivityFields = Partial<Omit<Selectivity, 'id'>>
+
+export type SelectivityMemberResult = {
+  node_id: string
+  label: string
+  group_id: string | null
+  group_label: string | null
+  role: Role
+  /** Absolute, hartree. */
+  value: number | null
+  /** From the lowest TS of all outcomes, hartree. */
+  relative: number | null
+  /** Percent of all TSs, and of this outcome's. */
+  share: number | null
+  share_in_outcome: number | null
+  message: string | null
+}
+
+export type SelectivityOutcomeResult = {
+  id: string
+  name: string
+  experimental: number | null
+  members: SelectivityMemberResult[]
+  /** ΔΔG‡ in hartree from the lowest outcome, and the predicted percentage, both ways (S2). */
+  boltzmann_ddg: number | null
+  boltzmann_percent: number | null
+  lowest_ddg: number | null
+  lowest_percent: number | null
+  experimental_percent: number | null
+  experimental_ddg: number | null
+}
+
+export type Excess = { value: number; major: string } | null
+
+export type SelectivityResult = {
+  status: 'ok' | 'n/a' | 'refused' | 'incomplete'
+  message: string | null
+  level: string | null
+  level_label: string | null
+  energy_type: EnergyType
+  temperature: number
+  temperature_from_settings: boolean
+  cutoff: number
+  conformers: 'boltzmann' | 'lowest'
+  outcomes: SelectivityOutcomeResult[]
+  excess: { label: 'ee' | 'de'; boltzmann: Excess; lowest: Excess; experimental: Excess } | null
+  notes: string[]
+}
+
 /** FR-EN-01: a composite level and the energy types that have at least one value there. */
 export type EnergyOptions = {
   levels: { key: string; label: string; types: EnergyType[] }[]
@@ -911,6 +977,13 @@ export const api = {
   updateAlignmentSet: (id: string, fields: { name?: string; atoms?: Record<string, number[] | null> }) =>
     request<AlignmentSet>('PATCH', `/alignment-sets/${id}`, fields),
   deleteAlignmentSet: (id: string) => request<void>('DELETE', `/alignment-sets/${id}`),
+  selectivities: () => request<Selectivity[]>('GET', '/selectivities'),
+  createSelectivity: (fields: SelectivityFields & { name: string }) =>
+    request<Selectivity>('POST', '/selectivities', fields),
+  updateSelectivity: (id: string, fields: SelectivityFields) =>
+    request<Selectivity>('PATCH', `/selectivities/${id}`, fields),
+  deleteSelectivity: (id: string) => request<void>('DELETE', `/selectivities/${id}`),
+  selectivityResult: (id: string) => request<SelectivityResult>('GET', `/selectivities/${id}/result`),
   stericProfiles: () => request<StericProfile[]>('GET', '/steric-profiles'),
   createStericProfile: (fields: StericProfileFields) => request<StericProfile>('POST', '/steric-profiles', fields),
   updateStericProfile: (id: string, fields: StericProfileFields) =>

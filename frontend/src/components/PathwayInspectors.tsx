@@ -963,12 +963,15 @@ export function SelectionInspector({
   canvas,
   onChanged,
   onGroupCreated,
+  onSelectivity,
 }: {
   nodes: Node[]
   groups: Group[]
   canvas: Canvas
   onChanged: () => void
   onGroupCreated: (group: Group) => void
+  /** D83: compare the selected items as the outcomes of a new selectivity. */
+  onSelectivity: () => void
 }) {
   const [error, setError] = useState<string | null>(null)
   const [reconnecting, setReconnecting] = useState(false)
@@ -1064,6 +1067,12 @@ export function SelectionInspector({
           title="Buried volume and steric maps of the selected nodes (D81)"
         >
           Compare sterics
+        </button>
+        <button
+          onClick={onSelectivity}
+          title="ΔΔG‡ and the predicted ratio, with each selected TS or group as one outcome (D83)"
+        >
+          Selectivity…
         </button>
       </div>
       {groups.length === 0 && free.length !== nodes.length && (

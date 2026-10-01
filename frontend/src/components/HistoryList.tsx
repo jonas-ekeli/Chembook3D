@@ -40,6 +40,13 @@ function show(field: string | null, value: unknown, names: Names = new Map()): s
       .join(', ')
   }
   if (field && ID_FIELDS.has(field)) return named(names, value)
+  if (field === 'outcomes') {
+    // D83: a selectivity's outcomes, by name
+    const outcomes = value as { name: string }[]
+    return outcomes.length ? outcomes.map((o) => o.name).join(', ') : 'none'
+  }
+  if (field === 'conformers') return value === 'lowest' ? 'lowest TS only' : 'Boltzmann sum'
+  if (field === 'temperature') return `${String(value)} K`
   if (field === 'notes') {
     const text = String(value)
     return text.length > 60 ? `“${text.slice(0, 60)}…”` : `“${text}”`
@@ -70,6 +77,12 @@ const STRUCTURE_FIELDS: Record<string, string> = {
   outgoing_branch_id: 'Outgoing branch',
   incoming_branch_ids: 'Incoming branches',
   species: 'Free species',
+  level: 'Level of theory',
+  energy_type: 'Energy',
+  temperature: 'Temperature',
+  conformers: 'Conformers',
+  excess: 'Shown for two outcomes',
+  outcomes: 'Outcomes',
 }
 
 const STRUCTURE_TYPES: Record<string, string> = {
@@ -77,6 +90,7 @@ const STRUCTURE_TYPES: Record<string, string> = {
   branch: 'branch',
   transition: 'transition',
   group: 'group',
+  selectivity: 'selectivity',
 }
 
 function describeStructure(entry: HistoryEntry, names: Names): string | null {
@@ -102,7 +116,12 @@ function describeStructure(entry: HistoryEntry, names: Names): string | null {
   if (entry.action === 'delete') return `Deleted ${kind}${title ? ` “${title}”` : ''}`
   const field = entry.field ?? ''
   const label = STRUCTURE_FIELDS[field] ?? field
-  if (field === 'notes') return `${label} of the ${kind} changed`
+  if (field === 'notes' || field === 'level') return `${label} of the ${kind} changed`
+  if (field === 'outcomes' && show(field, entry.old_value) === show(field, entry.new_value)) {
+    return `Outcomes ${show(field, entry.new_value)}: transition states or experiment changed`
+  }
+  if (field === 'temperature' && entry.new_value === null) return 'Temperature: back to the G_qh setting'
+  if (field === 'temperature' && entry.old_value === null) return `Temperature: G_qh setting → ${show(field, entry.new_value)}`
   return `${label}: ${show(field, entry.old_value, names)} → ${show(field, entry.new_value, names)}`
 }
 

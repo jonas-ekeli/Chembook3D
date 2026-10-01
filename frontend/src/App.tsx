@@ -30,6 +30,7 @@ import { Modal } from './components/Modal'
 import { NodeInspector } from './components/NodeInspector'
 import { Outline } from './components/Outline'
 import { Overview } from './components/Overview'
+import { AnalysesView } from './components/Analyses'
 import { recordNames } from './names'
 import { HydrogenDisplay } from './display'
 import {
@@ -114,7 +115,9 @@ function App() {
   const [conflict, setConflict] = useState<SyncConflict | null>(null)
   const [upgrade, setUpgrade] = useState<{ folder: string } | null>(null)
 
-  const [view, setView] = useState<'canvas' | 'history'>('canvas')
+  const [view, setView] = useState<'canvas' | 'history' | 'analyses'>('canvas')
+  // D83: the selectivity to show when the Analyses view opens
+  const [openAnalysis, setOpenAnalysis] = useState<string | null>(null)
   const [canvas, setCanvas] = useState<Canvas>(EMPTY_CANVAS)
   const [selection, setSelection] = useState<InspectorSelection>(null)
   const [multi, setMulti] = useState<string[]>([])
@@ -708,6 +711,34 @@ function App() {
     reload()
   }
 
+  // D83: one outcome per selected TS or group, named after it; the user renames them later.
+  const newSelectivity = (nodes: Node[], groups: Group[]) => {
+    const used = new Set<string>()
+    const outcomes = [...groups, ...nodes].map((item) => {
+      const base = ('kind' in item ? item.label || 'Untitled node' : item.label || 'Group').trim()
+      let name = base
+      for (let n = 2; used.has(name); n++) name = `${base} (${n})`
+      used.add(name)
+      return { name, members: [item.id], experimental: null }
+    })
+    api
+      .selectivities()
+      .then((existing) => {
+        const taken = new Set(existing.map((s) => s.name))
+        let n = existing.length + 1
+        while (taken.has(`Selectivity ${n}`)) n++
+        return api.createSelectivity({ name: `Selectivity ${n}`, level: levelKey, outcomes })
+      })
+      .then(
+        (created) => {
+          setOpenAnalysis(created.id)
+          setView('analyses')
+          reload()
+        },
+        (err: unknown) => setError(errorText(err)),
+      )
+  }
+
   let inspector
   if (multiNodes.length + multiGroups.length >= 2) {
     inspector = (
@@ -720,6 +751,7 @@ function App() {
           choose({ kind: 'group', id: group.id })
           reload()
         }}
+        onSelectivity={() => newSelectivity(multiNodes, multiGroups)}
       />
     )
   } else if (selectedNode) {
@@ -818,6 +850,13 @@ function App() {
             </button>
             <button aria-pressed={view === 'history'} onClick={() => setView('history')}>
               History
+            </button>
+            <button
+              aria-pressed={view === 'analyses'}
+              title="Selectivities: ΔΔG‡ and predicted ratios from competing transition states"
+              onClick={() => setView('analyses')}
+            >
+              Analyses
             </button>
             <button
               aria-pressed={view === 'canvas' && selection === null && multi.length === 0}
@@ -1000,6 +1039,18 @@ function App() {
               />
             </div>
           </div>
+        ) : view === 'analyses' ? (
+          <AnalysesView
+            key={openAnalysis ?? ''}
+            canvas={canvas}
+            settings={settings}
+            energyOptions={energyOptions}
+            defaultLevel={levelKey}
+            refreshKey={refreshKey}
+            openId={openAnalysis}
+            onSelectNode={(id) => selectNode(id, true)}
+            onChanged={reload}
+          />
         ) : (
           <main className="main history-view">
             <h2>Investigation history</h2>

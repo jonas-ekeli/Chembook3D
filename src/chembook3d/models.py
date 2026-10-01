@@ -539,3 +539,76 @@ class StericProfileAtoms(Base):
     result_inputs: Mapped[dict[str, Any] | None] = mapped_column(default=None)
     computed_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class Selectivity(Base):
+    """D83, FR-SEL-01: a saved selectivity: two or more named outcomes, each realised by one
+    or more transition states, compared at one composite level and energy type. Unlike
+    alignment sets and steric profiles it is in the history (S7)."""
+
+    __tablename__ = "selectivities"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    seq: Mapped[int] = mapped_column(
+        Integer, default=text("(SELECT COALESCE(MAX(seq), 0) + 1 FROM selectivities)")
+    )
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    # A composite level key `levelId~geometryLevelId`; None until one is chosen.
+    level: Mapped[str | None] = mapped_column(String(80), default=None)
+    energy_type: Mapped[str] = mapped_column(String(8), default="G_qh")
+    # K; None follows the app's G_qh temperature setting.
+    temperature: Mapped[float | None] = mapped_column(default=None)
+    # "boltzmann": every TS of an outcome counts (Curtin–Hammett); "lowest": only its lowest.
+    conformers: Mapped[str] = mapped_column(String(16), default="boltzmann")
+    excess: Mapped[str] = mapped_column(String(8), default="ee")  # ee | de | none
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    outcomes: Mapped[list["SelectivityOutcome"]] = relationship(
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by=lambda: SelectivityOutcome.position,
+    )
+
+
+class SelectivityOutcome(Base):
+    """One outcome ("R", "Z") of a selectivity, with an optional experimental amount on any
+    scale (the amounts of all outcomes are normalised to a ratio)."""
+
+    __tablename__ = "selectivity_outcomes"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    selectivity_id: Mapped[str] = mapped_column(
+        ForeignKey("selectivities.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    name: Mapped[str] = mapped_column(String(200), default="")
+    experimental: Mapped[float | None] = mapped_column(default=None)
+
+    members: Mapped[list["SelectivityMember"]] = relationship(
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by=lambda: SelectivityMember.position,
+    )
+
+
+class SelectivityMember(Base):
+    """A node (one TS) or a group (all its members) in an outcome. Deleting the node or
+    group takes it out of the outcome."""
+
+    __tablename__ = "selectivity_members"
+    __table_args__ = (
+        CheckConstraint("(node_id IS NULL) != (group_id IS NULL)", name="one_member"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    outcome_id: Mapped[str] = mapped_column(
+        ForeignKey("selectivity_outcomes.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    node_id: Mapped[str | None] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), default=None, index=True
+    )
+    group_id: Mapped[str | None] = mapped_column(
+        ForeignKey("group_nodes.id", ondelete="CASCADE"), default=None, index=True
+    )
