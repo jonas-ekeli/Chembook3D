@@ -514,6 +514,67 @@ export type SelectivityResult = {
   notes: string[]
 }
 
+/** D86: a saved turnover, the TOF of one closed cycle (A13) from the energetic-span model. */
+export type Turnover = {
+  id: string
+  name: string
+  /** Node and group ids; the last returns to an earlier one. Empty until one is chosen. */
+  path: string[]
+  level: string | null
+  energy_type: EnergyType
+  /** K; null follows the G_qh temperature setting. */
+  temperature: number | null
+  compare_id: string | null
+  notes: string
+}
+
+export type TurnoverFields = Partial<Omit<Turnover, 'id'>>
+
+export type TurnoverPoint = {
+  id: string
+  label: string
+  kind: 'node' | 'group'
+  is_ts: boolean
+  /** From the cycle's first node, balanced by the free species, hartree. */
+  relative: number | null
+  /** Degree of TOF control, 0 to 1. */
+  control: number | null
+}
+
+export type TurnoverResult = {
+  status: 'ok' | 'n/a' | 'refused' | 'incomplete'
+  message: string | null
+  level: string | null
+  level_label: string | null
+  energy_type: EnergyType
+  temperature: number
+  temperature_from_settings: boolean
+  cutoff: number
+  unit: string
+  cycle: string[]
+  points: TurnoverPoint[]
+  /** ΔG_r and δE in hartree; TOF in 1/s. */
+  reaction: number | null
+  tof: number | null
+  tof_span: number | null
+  span: number | null
+  /** Indices into points. */
+  tdts: number | null
+  tdi: number | null
+  profile: Profiles | null
+  table: EnergyTable | null
+  comparison: {
+    id: string
+    name: string
+    tof: number | null
+    ratio: number | null
+    percent: number | null
+    ddg: number | null
+    message: string | null
+  } | null
+  notes: string[]
+}
+
 /** FR-EN-01: a composite level and the energy types that have at least one value there. */
 export type EnergyOptions = {
   levels: { key: string; label: string; types: EnergyType[] }[]
@@ -984,6 +1045,11 @@ export const api = {
     request<Selectivity>('PATCH', `/selectivities/${id}`, fields),
   deleteSelectivity: (id: string) => request<void>('DELETE', `/selectivities/${id}`),
   selectivityResult: (id: string) => request<SelectivityResult>('GET', `/selectivities/${id}/result`),
+  turnovers: () => request<Turnover[]>('GET', '/turnovers'),
+  createTurnover: (fields: TurnoverFields & { name: string }) => request<Turnover>('POST', '/turnovers', fields),
+  updateTurnover: (id: string, fields: TurnoverFields) => request<Turnover>('PATCH', `/turnovers/${id}`, fields),
+  deleteTurnover: (id: string) => request<void>('DELETE', `/turnovers/${id}`),
+  turnoverResult: (id: string) => request<TurnoverResult>('GET', `/turnovers/${id}/result`),
   stericProfiles: () => request<StericProfile[]>('GET', '/steric-profiles'),
   createStericProfile: (fields: StericProfileFields) => request<StericProfile>('POST', '/steric-profiles', fields),
   updateStericProfile: (id: string, fields: StericProfileFields) =>

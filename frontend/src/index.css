@@ -1581,3 +1581,16 @@ table.outcomes td:nth-child(3) input {
 table.selectivity-table {
   margin-top: 0.6rem;
 }
+
+/* D86: turnovers in the Analyses view */
+.turnover-chart {
+  overflow-x: auto;
+  margin: 0.6rem 0;
+}
+.turnover-chart svg {
+  max-width: 100%;
+  height: auto;
+}
+.energy-table tr.determining td {
+  font-weight: 600;
+}

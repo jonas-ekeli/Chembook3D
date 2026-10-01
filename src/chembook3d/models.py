@@ -612,3 +612,32 @@ class SelectivityMember(Base):
     group_id: Mapped[str | None] = mapped_column(
         ForeignKey("group_nodes.id", ondelete="CASCADE"), default=None, index=True
     )
+
+
+class Turnover(Base):
+    """D86, FR-TOF-01: a saved turnover: the TOF of a closed catalytic cycle (A13) from the
+    energetic-span model, at one composite level and energy type. Like selectivities it is in
+    the history (S7)."""
+
+    __tablename__ = "turnovers"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    seq: Mapped[int] = mapped_column(
+        Integer, default=text("(SELECT COALESCE(MAX(seq), 0) + 1 FROM turnovers)")
+    )
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    # Node and group ids along the pathway, in order; the last returns to an earlier one,
+    # closing the cycle (A13). Empty until a pathway is chosen. A deleted node stays listed,
+    # so the result can say the pathway lost it.
+    path: Mapped[list[Any]] = mapped_column(default=list)
+    # A composite level key `levelId~geometryLevelId`; None until one is chosen.
+    level: Mapped[str | None] = mapped_column(String(80), default=None)
+    energy_type: Mapped[str] = mapped_column(String(8), default="G_qh")
+    # K; None follows the app's G_qh temperature setting.
+    temperature: Mapped[float | None] = mapped_column(default=None)
+    # T5: another turnover to compare with; deleting it clears the comparison.
+    compare_id: Mapped[str | None] = mapped_column(
+        ForeignKey("turnovers.id", ondelete="SET NULL"), default=None
+    )
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)

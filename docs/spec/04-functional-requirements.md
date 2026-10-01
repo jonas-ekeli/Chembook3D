@@ -205,6 +205,16 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-SEL-05 | The result shows each outcome's ΔΔG‡ and predicted percentage, the ee or de for two outcomes, each TS's ΔG and share, and an optional experimental ratio with its ΔΔG‡. | D83, A34 | after 5 |
 | FR-SEL-06 | An Analyses view lists the selectivities; one is made there or from a canvas selection. Creating, changing and deleting one is recorded in the history. | D83, A34 | after 5 |
 
+## FR-TOF · Turnover (D86)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-TOF-01 | Saved turnovers hold one closed pathway (A13); the cycle runs from the node the pathway returns to, and points before it are left out with a note. | D86, A36 | after 5 |
+| FR-TOF-02 | Every point is valued at one composite level and energy type with no fallback, relative to the cycle's first node and balanced by its free species, so the closing point is ΔG_r; a missing value makes the result n/a with the reason. | D86, EN-3, D69 | after 5 |
+| FR-TOF-03 | The TOF comes from the full energetic-span formula; each TS's and intermediate's degree of TOF control is given, the TDTS and TDI are the largest, and δE is reported. A TS is a node (or a group's representative) marked as one; a "no TS" connection makes the TOF an upper bound, with a note. | D86, A36 | after 5 |
+| FR-TOF-04 | The temperature is the G_qh setting or the turnover's own, with G_qh recomputed at it. The result shows the TOF (s⁻¹, h⁻¹), δE, ΔG_r, the cycle's profile with the TDTS and TDI marked, and the degree-of-control table with a CSV export. | D86, A36 | after 5 |
+| FR-TOF-05 | A turnover can be compared with another at the same level, energy type and temperature, as percentages and an effective ΔΔG‡. Turnovers are listed in the Analyses view and made there or from a closed pathway in the energy drawer; creating, changing and deleting one is recorded in the history. | D86, A36 | after 5 |
+
 ## FR-SHARE · Read-only copy to share (D79)
 
 | ID | Requirement | Trace | Phase |

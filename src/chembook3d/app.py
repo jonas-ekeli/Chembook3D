@@ -16,6 +16,7 @@ from chembook3d.api.routes import close_and_push, router
 from chembook3d.api.selectivity import router as selectivity_router
 from chembook3d.api.snapshot import router as snapshot_router
 from chembook3d.api.sterics import router as steric_router
+from chembook3d.api.turnover import router as turnover_router
 from chembook3d.services.imports import Staging
 from chembook3d.services.records import RecordError, RecordNotFound
 
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
     app.include_router(snapshot_router)
     app.include_router(steric_router)
     app.include_router(selectivity_router)
+    app.include_router(turnover_router)
 
     static = static_dir()
     if static is not None:

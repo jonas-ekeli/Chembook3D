@@ -116,7 +116,7 @@ function App() {
   const [upgrade, setUpgrade] = useState<{ folder: string } | null>(null)
 
   const [view, setView] = useState<'canvas' | 'history' | 'analyses'>('canvas')
-  // D83: the selectivity to show when the Analyses view opens
+  // D83, D86: the selectivity or turnover to show when the Analyses view opens
   const [openAnalysis, setOpenAnalysis] = useState<string | null>(null)
   const [canvas, setCanvas] = useState<Canvas>(EMPTY_CANVAS)
   const [selection, setSelection] = useState<InspectorSelection>(null)
@@ -739,6 +739,26 @@ function App() {
       )
   }
 
+  // D86: a turnover of a closed pathway from the drawer, named after the pathway.
+  const newTurnover = (path: string[], name: string) => {
+    api
+      .turnovers()
+      .then((existing) => {
+        const taken = new Set(existing.map((t) => t.name))
+        let unique = name
+        for (let n = 2; taken.has(unique); n++) unique = `${name} (${n})`
+        return api.createTurnover({ name: unique, path, level: levelKey })
+      })
+      .then(
+        (created) => {
+          setOpenAnalysis(created.id)
+          setView('analyses')
+          reload()
+        },
+        (err: unknown) => setError(errorText(err)),
+      )
+  }
+
   let inspector
   if (multiNodes.length + multiGroups.length >= 2) {
     inspector = (
@@ -1035,6 +1055,7 @@ function App() {
                 refreshKey={refreshKey}
                 onReference={setReferenceId}
                 onPathsChange={setDrawerPaths}
+                onTurnover={newTurnover}
                 onSelectNode={(id) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id, true))}
               />
             </div>

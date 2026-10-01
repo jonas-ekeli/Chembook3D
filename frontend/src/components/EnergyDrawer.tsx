@@ -27,6 +27,8 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+const MARK = { fontWeight: 700, fill: '#b42318' } as const
+
 /** Round numbers for the y axis. */
 function ticks(min: number, max: number, count = 5): number[] {
   const span = max - min || 1
@@ -46,12 +48,15 @@ export function ProfileChart({
   names,
   settings,
   svgRef,
+  marks,
 }: {
   data: Profiles
   colours: string[]
   names: string[]
   settings: Settings | null
   svgRef: RefObject<SVGSVGElement | null>
+  /** Short tags after a point's name, keyed `profile:point`, such as the TDTS and TDI (D86). */
+  marks?: Map<string, string>
 }) {
   const unit = settings?.energy_unit ?? 'kcal/mol'
   const factor = settings?.energy_factors[unit] ?? 1
@@ -241,6 +246,7 @@ export function ProfileChart({
             }
             const label = labels.get(`${pi}:${i}`)
             const [value, name] = label ? label.text.split('|') : ['', '']
+            const mark = marks?.get(`${pi}:${i}`)
             return (
               <g key={i}>
                 <line
@@ -263,6 +269,7 @@ export function ProfileChart({
                   <text x={label.x} y={label.y} fontSize={10.5} textAnchor="start">
                     <tspan fill={colours[pi]}>{value}</tspan>
                     <tspan fill="#667085"> {name}</tspan>
+                    {mark && <tspan {...MARK}> {mark}</tspan>}
                   </text>
                 )}
                 {label && !label.beside && (
@@ -272,6 +279,7 @@ export function ProfileChart({
                     </text>
                     <text x={label.x} y={label.y + 15} fontSize={10} textAnchor="middle" fill="#667085">
                       {name}
+                      {mark && <tspan {...MARK}> {mark}</tspan>}
                     </text>
                   </>
                 )}
@@ -297,6 +305,7 @@ export function EnergyDrawer({
   onReference,
   onSelectNode,
   onPathsChange,
+  onTurnover,
 }: {
   canvas: Canvas
   settings: Settings | null
@@ -310,6 +319,8 @@ export function EnergyDrawer({
   onSelectNode: (id: string) => void
   /** The pathways shown, for the read-only copy (D79). */
   onPathsChange?: (paths: DrawerPath[]) => void
+  /** D86: a saved turnover from a closed pathway, opened in the Analyses view. */
+  onTurnover?: (ids: string[], name: string) => void
 }) {
   const [tab, setTab] = useState<'profile' | 'table'>('profile')
   const [paths, setPaths] = useState<Path[]>([])
@@ -494,6 +505,15 @@ export function EnergyDrawer({
                 >
                   Undo step
                 </button>
+                {onTurnover && closesCycle(path.ids) && (
+                  <button
+                    className="small"
+                    onClick={() => onTurnover(path.ids, names[index])}
+                    title="TOF of this closed cycle from the energetic-span model (D86)"
+                  >
+                    Turnover
+                  </button>
+                )}
                 <button
                   className="small"
                   onClick={() => setSterics(path.ids)}
