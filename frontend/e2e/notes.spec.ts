@@ -38,6 +38,16 @@ function canvasNode(page: Page, label: string): Locator {
   return page.getByRole('group', { name: `Node ${label}`, exact: true })
 }
 
+/** Which corner of the card its note sits outside of, from where both are drawn. */
+async function corner(page: Page, label: string): Promise<string> {
+  const card = await canvasNode(page, label).locator('.cnode').boundingBox()
+  const box = await canvasNode(page, label).getByTestId('canvas-note').boundingBox()
+  if (!card || !box) return 'not drawn'
+  const vertical = box.y + box.height < card.y + 20 ? 'top' : box.y > card.y + card.height - 20 ? 'bottom' : 'middle'
+  const horizontal = box.x > card.x + card.width - 20 ? 'right' : box.x + box.width < card.x + 20 ? 'left' : 'inside'
+  return `${vertical}-${horizontal}`
+}
+
 /** Paste as the browser would, with the given clipboard contents. */
 async function paste(target: Locator, data: Record<string, string>) {
   await target.evaluate((element, entries) => {
@@ -53,6 +63,11 @@ async function loaded(images: Locator, count: number) {
     await expect.poll(() => images.nth(i).evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBeGreaterThan(0)
   }
 }
+
+// Later tests start with no investigation open, even when this one fails.
+test.afterEach(async ({ request }) => {
+  await request.post('/api/investigations/close')
+})
 
 test('a note pinned to a node card, with text and pictures', async ({ page, context }) => {
   await openDemo(page)
@@ -95,10 +110,7 @@ test('a note pinned to a node card, with text and pictures', async ({ page, cont
   await expect(note).toContainText('CAAC rotamer.')
   await expect(note).toContainText('see SI')
   await loaded(note.locator('img'), 2)
-  const card = await canvasNode(page, 'A-S2').locator('.cnode').boundingBox()
-  const box = await note.boundingBox()
-  expect(box!.x).toBeGreaterThan(card!.x + card!.width - 20)
-  expect(box!.y + box!.height).toBeLessThan(card!.y + 20)
+  await expect.poll(() => corner(page, 'A-S2')).toBe('top-right')
   expect(await page.evaluate(() => [(window as { svgRan?: number }).svgRan, (window as { htmlRan?: number }).htmlRan])).toEqual([
     undefined,
     undefined,
@@ -124,10 +136,8 @@ test('a note pinned to a node card, with text and pictures', async ({ page, cont
   await edit.getByLabel('Corner').selectOption('bottom-left')
   await edit.getByRole('button', { name: 'Save note' }).click()
   await expect(edit).toHaveCount(0)
-  const moved = await canvasNode(page, 'A-S2').getByTestId('canvas-note').boundingBox()
-  const cardNow = await canvasNode(page, 'A-S2').locator('.cnode').boundingBox()
-  expect(moved!.x + moved!.width).toBeLessThan(cardNow!.x + 20)
-  expect(moved!.y).toBeGreaterThan(cardNow!.y + cardNow!.height - 20)
+  // The canvas draws the move once its new data arrives, so wait for it.
+  await expect.poll(() => corner(page, 'A-S2')).toBe('bottom-left')
 
   // The node's history shows it; the panel reads it in full.
   await canvasNode(page, 'A-S2').click()
@@ -161,6 +171,4 @@ test('a note pinned to a node card, with text and pictures', async ({ page, cont
   await expect(canvasNode(page, 'A-S2').getByTestId('canvas-note')).toHaveCount(0)
   await expect(history).toContainText('Deleted the pinned note “Rotamer check”')
 
-  // Later tests start with no investigation open.
-  expect((await page.request.post('/api/investigations/close')).ok()).toBe(true)
 })
