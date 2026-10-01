@@ -69,6 +69,13 @@ test('a read-only copy opens from disk with no server and changes nothing', asyn
   await expect(inspector.getByRole('button', { name: /Delete|Import|Edit/ })).toHaveCount(0)
   await expect(inspector.getByRole('combobox')).toHaveCount(0)
   await expect(inspector.getByTestId('viewer3d')).toBeVisible()
+  // The 3D view pops out and goes back as in the app (D82).
+  await inspector.getByRole('button', { name: 'Pop out the 3D view' }).click()
+  const popout = shared.getByRole('dialog', { name: '3D view window' })
+  await expect(popout.getByTestId('viewer3d')).toBeVisible()
+  await popout.getByRole('button', { name: 'Put back', exact: true }).click()
+  await expect(popout).toHaveCount(0)
+  await expect(inspector.getByTestId('viewer3d')).toBeVisible()
   await expect(inspector.getByRole('list', { name: 'Calculations' }).getByRole('listitem')).toHaveCount(2)
   await inspector.getByRole('list', { name: 'Calculations' }).getByRole('button').first().click()
   await expect(inspector).toContainText('E(SCF)')

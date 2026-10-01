@@ -14,6 +14,8 @@ import {
 } from '../api'
 import { CalculationList } from './CalculationList'
 import { Notes, TextField } from './Fields'
+import { PopOut, PopOutButton } from './PopOut'
+import { usePopOut } from '../popOut'
 import { HistoryList } from './HistoryList'
 import { Modal } from './Modal'
 import { SplitDialog } from './PathwayInspectors'
@@ -138,6 +140,7 @@ export function NodeInspector({
   const [confirmDelete, setConfirmDelete] = useState<NodeDeletePreview | null>(null)
   const [splitting, setSplitting] = useState(false)
   const [vibration, setVibration] = useState<{ xyz: string } | null>(null)
+  const [poppedOut, setPoppedOut] = usePopOut()
 
   useEffect(() => {
     api.history(node.id).then(setHistory, (err: unknown) => setError(String(err)))
@@ -390,12 +393,15 @@ export function NodeInspector({
           <Notes key={node.notes} notes={node.notes} onSave={(notes) => update({ notes })} />
         </div>
         <div className="column">
-          <Viewer3D
-            models={node.xyz ? [{ xyz: node.xyz }] : []}
-            vibration={vibration}
-            rotation={node.view_rotation}
-            onSaveRotation={isSpecies ? undefined : (view_rotation) => update({ view_rotation })}
-          />
+          <PopOut popped={poppedOut} title={`3D view: ${name(node)}`} onDock={() => setPoppedOut(false)}>
+            <Viewer3D
+              models={node.xyz ? [{ xyz: node.xyz }] : []}
+              vibration={vibration}
+              rotation={node.view_rotation}
+              onSaveRotation={isSpecies ? undefined : (view_rotation) => update({ view_rotation })}
+              corner={<PopOutButton popped={poppedOut} onClick={() => setPoppedOut(!poppedOut)} />}
+            />
+          </PopOut>
           <Vibrations nodeId={node.id} refreshKey={refreshKey} onChange={setVibration} />
           <XyzEditor
             key={node.xyz ?? ''}

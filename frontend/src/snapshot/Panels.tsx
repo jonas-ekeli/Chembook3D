@@ -19,6 +19,8 @@ import {
 } from '../api'
 import { ResultValues } from '../components/CalculationList'
 import { OverviewSections } from '../components/Overview'
+import { PopOut, PopOutButton } from '../components/PopOut'
+import { usePopOut } from '../popOut'
 import { Viewer3D } from '../components/Viewer3D'
 import { download, hartree, withDisplacements } from '../util'
 import type { SharedCalculation, SnapshotData } from './data'
@@ -209,6 +211,7 @@ export function NodePanel({
   onUseAsReference: () => void
 }) {
   const [vibration, setVibration] = useState<{ xyz: string } | null>(null)
+  const [poppedOut, setPoppedOut] = usePopOut()
   const canvas = data.canvas
   const isSpecies = node.kind === 'species'
   const nodes = [...canvas.nodes, ...canvas.species]
@@ -346,7 +349,14 @@ export function NodePanel({
           <NotesView notes={node.notes} />
         </div>
         <div className="column">
-          <Viewer3D models={node.xyz ? [{ xyz: node.xyz }] : []} vibration={vibration} rotation={node.view_rotation} />
+          <PopOut popped={poppedOut} title={`3D view: ${nodeName(node)}`} onDock={() => setPoppedOut(false)}>
+            <Viewer3D
+              models={node.xyz ? [{ xyz: node.xyz }] : []}
+              vibration={vibration}
+              rotation={node.view_rotation}
+              corner={<PopOutButton popped={poppedOut} onClick={() => setPoppedOut(!poppedOut)} />}
+            />
+          </PopOut>
           <SharedVibrations key={node.id} calculations={calculations} modes={data.modes} onChange={setVibration} />
           {node.xyz && (
             <details className="xyz-text">
