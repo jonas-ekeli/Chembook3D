@@ -1582,6 +1582,228 @@ table.selectivity-table {
   margin-top: 0.6rem;
 }
 
+/* D85: notes pinned to a corner of a node's card, stacked outward from that corner. */
+.cnode {
+  position: relative;
+}
+.react-flow__node.has-notes:hover,
+.react-flow__node.has-notes:focus-within {
+  z-index: 2000 !important;
+}
+.note-yellow {
+  --note-bg: #fff8c5;
+  --note-edge: #e9c46a;
+}
+.note-blue {
+  --note-bg: #e3efff;
+  --note-edge: #8fb3e8;
+}
+.note-green {
+  --note-bg: #e3f6e8;
+  --note-edge: #86c99a;
+}
+.note-pink {
+  --note-bg: #fde7ef;
+  --note-edge: #e7a1b9;
+}
+.note-grey {
+  --note-bg: #f2f4f7;
+  --note-edge: #b9c0cb;
+}
+.cnotes {
+  position: absolute;
+  display: flex;
+  gap: 4px;
+  z-index: 5;
+  cursor: default;
+}
+.cnotes-top-right {
+  bottom: calc(100% - 8px);
+  left: calc(100% - 8px);
+  flex-direction: column-reverse;
+  align-items: flex-start;
+}
+.cnotes-top-left {
+  bottom: calc(100% - 8px);
+  right: calc(100% - 8px);
+  flex-direction: column-reverse;
+  align-items: flex-end;
+}
+.cnotes-bottom-right {
+  top: calc(100% - 8px);
+  left: calc(100% - 8px);
+  flex-direction: column;
+  align-items: flex-start;
+}
+.cnotes-bottom-left {
+  top: calc(100% - 8px);
+  right: calc(100% - 8px);
+  flex-direction: column;
+  align-items: flex-end;
+}
+.cnote {
+  background: var(--note-bg);
+  border: 1px solid var(--note-edge);
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgb(16 24 40 / 14%);
+  font-size: 12px;
+  text-align: left;
+}
+.cnote.collapsed {
+  max-width: 200px;
+}
+.cnote-head {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.3rem;
+}
+.cnote:not(.collapsed) .cnote-head {
+  border-bottom: 1px solid var(--note-edge);
+}
+.cnote-pin {
+  font-size: 11px;
+}
+.cnote-title {
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cnote-head button.small {
+  padding: 0 0.35rem;
+  line-height: 1.2;
+  background: transparent;
+}
+.cnote-body {
+  max-height: 260px;
+  overflow: auto;
+  padding: 0.3rem 0.45rem;
+  user-select: text;
+}
+.note-body {
+  overflow-wrap: anywhere;
+}
+.note-body > :first-child {
+  margin-top: 0;
+}
+.note-body > :last-child {
+  margin-bottom: 0;
+}
+.note-body p,
+.note-body ul,
+.note-body ol,
+.note-body blockquote,
+.note-body pre {
+  margin: 0.25rem 0;
+}
+.note-body ul,
+.note-body ol {
+  padding-left: 1.2rem;
+}
+.note-body img,
+.note-editor img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.25rem 0;
+  background: white;
+}
+.note-count {
+  font-size: 11px;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: #fff8c5;
+  border: 1px solid #e9c46a;
+}
+.pinned-notes {
+  display: grid;
+  gap: 0.5rem;
+}
+.pinned-note {
+  background: var(--note-bg);
+  border: 1px solid var(--note-edge);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.6rem;
+}
+.pinned-note-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+.pinned-note-head strong {
+  flex: 1;
+}
+.note-settings {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr auto;
+  gap: 0.6rem;
+  align-items: end;
+}
+.note-swatches {
+  display: flex;
+  gap: 0.3rem;
+}
+.note-swatch {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  background: var(--note-bg);
+  border: 1px solid var(--note-edge);
+}
+.note-swatch[aria-checked='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.note-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.note-toolbar .tool-bold {
+  font-weight: 700;
+}
+.note-toolbar .tool-italic {
+  font-style: italic;
+}
+.note-toolbar .tool-underline {
+  text-decoration: underline;
+}
+.note-toolbar .tool-strike {
+  text-decoration: line-through;
+}
+.button-like.small {
+  font-size: 12px;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  cursor: pointer;
+}
+.button-like.small:hover {
+  border-color: var(--accent);
+}
+.note-editor {
+  min-height: 12rem;
+  max-height: 50vh;
+  overflow: auto;
+  padding: 0.5rem 0.7rem;
+  background: var(--note-bg);
+  border: 1px solid var(--note-edge);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+.note-editor:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.note-editor ul,
+.note-editor ol {
+  padding-left: 1.2rem;
+}
+
 /* D86: turnovers in the Analyses view */
 .turnover-chart {
   overflow-x: auto;

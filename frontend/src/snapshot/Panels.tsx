@@ -19,6 +19,7 @@ import {
 } from '../api'
 import { ResultValues } from '../components/CalculationList'
 import { OverviewSections } from '../components/Overview'
+import { PinnedNotesSection } from '../components/NoteContent'
 import { PopOut, PopOutButton } from '../components/PopOut'
 import { usePopOut } from '../popOut'
 import { Viewer3D } from '../components/Viewer3D'
@@ -347,6 +348,7 @@ export function NodePanel({
             </Fact>
           </dl>
           <NotesView notes={node.notes} />
+          <PinnedNotesSection notes={canvas.notes.filter((n) => n.node_id === node.id)} />
         </div>
         <div className="column">
           <PopOut popped={poppedOut} title={`3D view: ${nodeName(node)}`} onDock={() => setPoppedOut(false)}>

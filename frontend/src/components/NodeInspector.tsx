@@ -18,6 +18,7 @@ import { PopOut, PopOutButton } from './PopOut'
 import { usePopOut } from '../popOut'
 import { HistoryList } from './HistoryList'
 import { Modal } from './Modal'
+import { PinnedNotesSection } from './NoteContent'
 import { SplitDialog } from './PathwayInspectors'
 import { StericsSection } from './Sterics'
 import { recordNames } from '../names'
@@ -116,6 +117,7 @@ export function NodeInspector({
   onRefresh,
   isReference,
   onUseAsReference,
+  onEditNote,
 }: {
   node: Node
   canvas: Canvas
@@ -131,6 +133,8 @@ export function NodeInspector({
   onRefresh: () => void
   isReference: boolean
   onUseAsReference: () => void
+  /** D85: write a pinned note; null for a new one. */
+  onEditNote: (noteId: string | null) => void
 }) {
   const nodes = [...canvas.nodes, ...canvas.species]
   // D69: a free species has no step, branch, group or edges; transitions list it instead.
@@ -413,6 +417,14 @@ export function NodeInspector({
           />
         </div>
       </div>
+
+      {!isSpecies && (
+        <PinnedNotesSection
+          notes={canvas.notes.filter((n) => n.node_id === node.id)}
+          onAdd={() => onEditNote(null)}
+          onEdit={onEditNote}
+        />
+      )}
 
       {isSpecies ? (
         <section aria-label="Transitions">

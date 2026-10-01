@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from chembook3d import xyz
+from chembook3d.api.notes import NoteOut, note_out
 from chembook3d.api.routes import (
     DbSession,
     HistoryOut,
@@ -35,6 +36,7 @@ from chembook3d.services import branches as branch_service
 from chembook3d.services import groups as group_service
 from chembook3d.services import layout
 from chembook3d.services import nodes as node_service
+from chembook3d.services import notes as note_service
 from chembook3d.services import overview as overview_service
 from chembook3d.services import species as species_service
 from chembook3d.services import steps as step_service
@@ -192,6 +194,7 @@ class CanvasOut(BaseModel):
     branches: list[BranchOut]
     transitions: list[TransitionOut]
     groups: list[GroupOut]
+    notes: list[NoteOut]  # pinned to node cards (D85)
 
 
 class PositionsIn(BaseModel):
@@ -381,6 +384,7 @@ def canvas(session: DbSession):
             _transition_out(session, t) for t in transition_service.list_transitions(session)
         ],
         groups=[_group_out(session, g) for g in group_service.list_groups(session)],
+        notes=[note_out(n) for n in note_service.list_all(session)],
     )
 
 

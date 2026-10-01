@@ -215,6 +215,16 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-TOF-04 | The temperature is the G_qh setting or the turnover's own, with G_qh recomputed at it. The result shows the TOF (s⁻¹, h⁻¹), δE, ΔG_r, the cycle's profile with the TDTS and TDI marked, and the degree-of-control table with a CSV export. | D86, A36 | after 5 |
 | FR-TOF-05 | A turnover can be compared with another at the same level, energy type and temperature, as percentages and an effective ΔΔG‡. Turnovers are listed in the Analyses view and made there or from a closed pathway in the energy drawer; creating, changing and deleting one is recorded in the history. | D86, A36 | after 5 |
 
+## FR-NOTE · Notes pinned to node cards (D85)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-NOTE-01 | A node can carry several notes, each pinned to one corner of its card that the user picks; a note moves with the node, can be collapsed to its title, and has a colour and a width. | D85, A35 | after 5 |
+| FR-NOTE-02 | A note's text can be formatted (bold, italic, underline, strikethrough, sub- and superscript, lists, links); anything else pasted in keeps only its text. | D85 | after 5 |
+| FR-NOTE-03 | Pictures (PNG, JPEG, GIF, WebP, SVG) are pasted, dropped or chosen into a note. SVG, also SVG markup pasted as text, is stored as SVG without scripts, event handlers, embedded documents or outside links; nothing in a note runs when shown. A paste with nothing a browser can read says how to bring a ChemDraw drawing in. | D85, A35 | after 5 |
+| FR-NOTE-04 | Creating and deleting a note and changing its text, title, corner or colour are recorded in the node's history. | D85, A35 | after 5 |
+| FR-NOTE-05 | Notes show in full in the node's side panel, and on the canvas, in the side panel and with their pictures in the read-only copy. | D85, D79 | after 5 |
+
 ## FR-SHARE · Read-only copy to share (D79)
 
 | ID | Requirement | Trace | Phase |
