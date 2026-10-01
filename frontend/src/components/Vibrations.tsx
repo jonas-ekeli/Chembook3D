@@ -1,18 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type Calculation, type Modes } from '../api'
-
-/** Build xyz text with a displacement vector per atom, which 3Dmol animates (FR-3D-03). */
-function withDisplacements(xyz: string, mode: number[][]): string {
-  const lines = xyz.split(/\r?\n/)
-  let atom = 0
-  return lines
-    .map((line, i) => {
-      if (i < 2 || !line.trim()) return line
-      const d = mode[atom++]
-      return d ? `${line} ${d[0].toFixed(5)} ${d[1].toFixed(5)} ${d[2].toFixed(5)}` : line
-    })
-    .join('\n')
-}
+import { withDisplacements } from '../util'
 
 /** Pick a vibrational mode of one of the node's frequency calculations; imaginary modes are
  * listed first (FR-3D-03). */

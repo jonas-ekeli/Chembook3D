@@ -11,23 +11,15 @@ import {
   type ProfileRequest,
   type Settings,
 } from '../api'
+import { closesCycle, download } from '../util'
 
 const NO_BRANCH = '#98a2b3'
 const FALLBACK = ['#2459c6', '#c4320a', '#079455', '#6938ef', '#b54708']
 
 type Path = { ids: string[]; choices: { node_id: string; label: string; status: string }[]; branchId: string | null }
 
-// A13: a pathway may end at a node it visited earlier, closing a catalytic cycle once.
-function closesCycle(ids: string[]): boolean {
-  return ids.slice(0, -1).includes(ids[ids.length - 1])
-}
-
-function download(url: string, name: string) {
-  const link = document.createElement('a')
-  link.href = url
-  link.download = name
-  link.click()
-}
+/** A pathway as the read-only copy exports it (D79, A30). */
+export type DrawerPath = { ids: string[]; branch_id: string | null }
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -46,7 +38,7 @@ function ticks(min: number, max: number, count = 5): number[] {
 
 /** FR-EN-05, FR-EN-09: X(n) − X(ref) along each pathway, overlaid in branch colours. A direct
  * connection is a dotted connector labelled "no TS", never a barrier (D53, INV-8). */
-function ProfileChart({
+export function ProfileChart({
   data,
   colours,
   names,
@@ -302,6 +294,7 @@ export function EnergyDrawer({
   refreshKey,
   onReference,
   onSelectNode,
+  onPathsChange,
 }: {
   canvas: Canvas
   settings: Settings | null
@@ -313,6 +306,8 @@ export function EnergyDrawer({
   refreshKey: number
   onReference: (id: string | null) => void
   onSelectNode: (id: string) => void
+  /** The pathways shown, for the read-only copy (D79). */
+  onPathsChange?: (paths: DrawerPath[]) => void
 }) {
   const [tab, setTab] = useState<'profile' | 'table'>('profile')
   const [paths, setPaths] = useState<Path[]>([])
@@ -343,6 +338,11 @@ export function EnergyDrawer({
     const branch = p.branchId ? branches.get(p.branchId) : undefined
     return branch ? `${branch.name || 'Unnamed branch'}` : `${labels.get(p.ids[0])} → ${labels.get(p.ids.at(-1)!)}`
   })
+
+  const pathsKey = JSON.stringify(livePaths.map((p) => ({ ids: p.ids, branch_id: p.branchId })))
+  useEffect(() => {
+    onPathsChange?.(JSON.parse(pathsKey) as DrawerPath[])
+  }, [pathsKey, onPathsChange])
 
   const request: ProfileRequest | null =
     level && livePaths.length

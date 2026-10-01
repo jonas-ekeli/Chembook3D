@@ -361,6 +361,7 @@ function CanvasView({
   onDropFiles,
   onPositions,
   onError,
+  readOnly = false,
 }: {
   data: CanvasData
   mode: ViewMode
@@ -381,6 +382,8 @@ function CanvasView({
   onDropFiles: (files: File[], targetId: string | null, position: { x: number; y: number }) => void
   onPositions: (positions: Record<string, { x: number; y: number }>) => void
   onError: (message: string) => void
+  /** The shared read-only copy (D79): nothing can be moved, connected, added or dropped. */
+  readOnly?: boolean
 }) {
   const flow = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
@@ -745,13 +748,14 @@ function CanvasView({
   return (
     <div
       ref={wrapper}
-      className={`canvas${dragging ? ' dragging' : ''}`}
+      className={`canvas${dragging ? ' dragging' : ''}${readOnly ? ' read-only' : ''}`}
       aria-label="Canvas"
       onDoubleClick={(event: MouseEvent) => {
+        if (readOnly) return
         if ((event.target as HTMLElement).classList.contains('react-flow__pane')) onAddNode(position(event))
       }}
       onDragOver={(event) => {
-        if (!event.dataTransfer.types.includes('Files')) return
+        if (readOnly || !event.dataTransfer.types.includes('Files')) return
         event.preventDefault()
         setDragging(true)
       }}
@@ -759,6 +763,7 @@ function CanvasView({
       onDrop={(event) => {
         event.preventDefault()
         setDragging(false)
+        if (readOnly) return
         const files = Array.from(event.dataTransfer.files)
         if (files.length) onDropFiles(files, dropTarget(event), position(event))
       }}
@@ -788,6 +793,9 @@ function CanvasView({
             .map((n) => n.id)
           if (ids.length) onMultiSelect(ids)
         }}
+        nodesDraggable={!readOnly}
+        nodesConnectable={!readOnly}
+        edgesReconnectable={!readOnly}
         connectionMode={ConnectionMode.Loose}
         isValidConnection={(connection) => connection.source !== connection.target}
         onConnect={(connection) => {
@@ -852,7 +860,7 @@ function CanvasView({
         </Panel>
         {data.nodes.length === 0 && data.groups.length === 0 && (
           <Panel position="top-center" className="canvas-empty muted">
-            Double-click to add a node, or drop output files here.
+            {readOnly ? 'This investigation has no nodes.' : 'Double-click to add a node, or drop output files here.'}
           </Panel>
         )}
       </ReactFlow>
