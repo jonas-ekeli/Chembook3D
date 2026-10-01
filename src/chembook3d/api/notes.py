@@ -28,6 +28,10 @@ class NoteOut(BaseModel):
     body: str  # cleaned HTML; pictures are <img data-note-image="…">
     collapsed: bool
     width: int
+    placement: str  # D87: "corner", or floating with a "line" to it or "free"
+    offset_x: int  # px outward from the card's corner to the note's corner facing it
+    offset_y: int
+    height: int | None  # None: fits its text
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
@@ -39,6 +43,10 @@ class NoteIn(BaseModel):
     body: str | None = None
     collapsed: bool | None = None
     width: int | None = None
+    placement: str | None = None
+    offset_x: int | None = None
+    offset_y: int | None = None
+    height: int | None = None  # sent as null: fit the text again
 
 
 class NoteImageOut(BaseModel):
@@ -57,6 +65,10 @@ def note_out(note: NodeNote) -> NoteOut:
         body=note.body,
         collapsed=note.collapsed,
         width=note.width,
+        placement=note.placement,
+        offset_x=note.offset_x,
+        offset_y=note.offset_y,
+        height=note.height,
         created_at=note.created_at,
         updated_at=note.updated_at,
     )

@@ -90,6 +90,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-NOTE-03 | Pictures stored twice; PDF and an over-large file; a note naming a picture not stored; a note on a free species; a corner or colour not offered | Stored once and served with a policy forbidding scripts; the rest refused with the reason (FR-NOTE-01, FR-NOTE-03) |
 | T-NOTE-04 | Create two notes, change text and corner, collapse, set a width out of range, save without change, delete one, delete the node | History entries for text, corner, create and delete only; width clamped; the node's notes go with it (FR-NOTE-01, FR-NOTE-04) |
 | T-NOTE-05 | Export a copy with a note holding an SVG, with an unused picture in the investigation | The note and its picture as a data URL are in the copy, the unused picture is not (FR-NOTE-05) |
+| T-NOTE-06 | Set a note floating with a line, offsets and a size beyond the limits, then free with its height cleared; send an unknown placement and non-whole numbers | Placement, offsets (clamped to ±5000) and size (clamped) are kept, the height is cleared, the bad values are refused, and none of it is in the node's history (FR-NOTE-06, A37) |
 
 ## 5. Import and parsing tests
 
@@ -163,6 +164,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-06 | Selectivity | Select the demo's two TSs, "Selectivity…": 98.6 : 1.4, ee 97.1 %, ΔΔG‡ 2.50 kcal/mol; rename outcomes; 233.15 K gives 99.5 : 0.5; only the lowest TS; experiment 90 : 10 gives 1.30 kcal/mol; history; delete (FR-SEL-01…06) |
 | T-UI-07 | Turnover | Close the demo's branch B back to T-S0, "Turnover" in the drawer; with G: δE 23.30 kcal/mol, TDTS B-S2, TDI B-S3 (the TS before the TDI), ΔG_r 0 so TOF 0 with a note; TDTS and TDI marked on the profile; the degree-of-control table; a second turnover from the branch, compared; a branch that does not close is refused; history; delete (FR-TOF-01…05) |
 | T-UI-08 | Pinned notes | Add a note to A-S2 with bold text, SVG pasted as text and a PNG chosen; an empty paste shows the ChemDraw advice; HTML with a script keeps only its italics; the note sits at the top right corner with both pictures and nothing ran; collapse survives a reload; double-click, move it to the bottom left; history; the read-only copy shows it with its pictures; delete (FR-NOTE-01…05) |
+| T-UI-09 | Floating notes | On T-S0, detach a note with its pin: a line joins it to the corner; drag its head up and right and resize it from its outer corner, and both are saved; in the dialog choose "Floating, no line" (the line goes) and then "On the corner" with the height fitting the text; the history shows only the note's creation (FR-NOTE-06) |
 
 ## 8. Performance observation (no targets)
 

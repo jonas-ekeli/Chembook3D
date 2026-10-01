@@ -225,6 +225,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-NOTE-03 | Pictures (PNG, JPEG, GIF, WebP, SVG) are pasted, dropped or chosen into a note. SVG, also SVG markup pasted as text, is stored as SVG without scripts, event handlers, embedded documents or outside links; nothing in a note runs when shown. A paste with nothing a browser can read says how to bring a ChemDraw drawing in. | D85, A35 | after 5 |
 | FR-NOTE-04 | Creating and deleting a note and changing its text, title, corner or colour are recorded in the node's history. | D85, A35 | after 5 |
 | FR-NOTE-05 | Notes show in full in the node's side panel, and on the canvas, in the side panel and with their pictures in the read-only copy. | D85, D79 | after 5 |
+| FR-NOTE-06 | A note can be detached to float apart from the card, joined to its corner by a line or not, moving with the card; it is dragged by its head and put back on its corner with its pin. An expanded note is resized from its outer corner. | D87, A37 | after 5 |
 
 ## FR-SHARE · Read-only copy to share (D79)
 

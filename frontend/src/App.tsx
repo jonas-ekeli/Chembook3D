@@ -14,6 +14,7 @@ import {
   type HistoryEntry,
   type Investigation,
   type Node,
+  type NoteLayout,
   type Settings,
   type SyncConflict,
   type SyncStatus,
@@ -425,9 +426,9 @@ function App() {
   }, [])
 
   const openNote = useCallback((noteId: string) => setNoteEditing({ noteId }), [])
-  const collapseNote = useCallback(
-    (noteId: string, collapsed: boolean) =>
-      void api.updateNote(noteId, { collapsed }).then(fetchRecords, (err: unknown) => setError(errorText(err))),
+  const layoutNote = useCallback(
+    (noteId: string, layout: Partial<NoteLayout>) =>
+      void api.updateNote(noteId, layout).then(fetchRecords, (err: unknown) => setError(errorText(err))),
     [fetchRecords],
   )
 
@@ -1083,7 +1084,7 @@ function App() {
                   onPositions={savePositions}
                   onError={setError}
                   onOpenNote={openNote}
-                  onCollapseNote={collapseNote}
+                  onLayoutNote={layoutNote}
                 />
               </ReactFlowProvider>
               <div

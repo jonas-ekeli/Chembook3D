@@ -38,7 +38,7 @@ import {
   type GroupLayout,
   type Node,
   type Note,
-  NOTE_CORNERS,
+  type NoteLayout,
   type Settings,
   SIDES,
   isSide,
@@ -47,7 +47,7 @@ import {
   type TransitionSides,
 } from '../api'
 import { MoleculeSketch } from './MoleculeSketch'
-import { NoteBody } from './NoteContent'
+import { CardNotes, type NoteActions } from './CanvasNotes'
 import { noteTitle } from '../notes'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
@@ -107,16 +107,11 @@ type StructureData = {
   energy: EnergyText | null
   /** The group this node is drawn in place of, when the filters leave it alone (A23). */
   standsFor?: string
-  /** D85: notes pinned to the card's corners. */
+  /** D85, D87: the notes on the card, on its corners or floating. */
   notes: Note[]
   noteActions: NoteActions
 }
 
-/** D85: what a pinned note can do; in the read-only copy nothing is saved. */
-export type NoteActions = {
-  onOpen?: (noteId: string) => void
-  onCollapse?: (noteId: string, collapsed: boolean) => void
-}
 const NO_NOTES: Note[] = []
 type GroupData = {
   group: Group
@@ -152,97 +147,6 @@ type TransitionData = {
   species: { text: string; direction: string; title: string }[]
   /** W-BALANCE messages, when the atoms or charge do not balance. */
   warnings: string[]
-}
-
-function PinnedNote({
-  note,
-  collapsed,
-  onToggle,
-  onOpen,
-}: {
-  note: Note
-  collapsed: boolean
-  onToggle: () => void
-  onOpen?: () => void
-}) {
-  const title = noteTitle(note)
-  return (
-    <div
-      className={`cnote note-${note.colour}${collapsed ? ' collapsed' : ''}`}
-      style={collapsed ? undefined : { width: note.width }}
-      data-testid="canvas-note"
-      role="note"
-      aria-label={`Note ${title}`}
-      title={onOpen ? 'Double-click to edit' : undefined}
-      onDoubleClick={(event) => {
-        if (!onOpen) return
-        event.stopPropagation()
-        onOpen()
-      }}
-    >
-      <div className="cnote-head">
-        <span className="cnote-pin" aria-hidden="true">
-          📌
-        </span>
-        <span className="cnote-title">{title}</span>
-        <button
-          className="small"
-          aria-label={collapsed ? 'Expand note' : 'Collapse note'}
-          onClick={(event) => {
-            event.stopPropagation()
-            onToggle()
-          }}
-          onDoubleClick={(event) => event.stopPropagation()}
-        >
-          {collapsed ? '+' : '−'}
-        </button>
-      </div>
-      {!collapsed && (
-        <div className="cnote-body nowheel">
-          <NoteBody html={note.body} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** D85: a node's notes, stacked in the corners they are pinned to, outward from the card. */
-function PinnedNotes({ notes, actions }: { notes: Note[]; actions: NoteActions }) {
-  // Collapsing shows at once; the saved state replaces this when the notes come back.
-  const [shown, setShown] = useState<Record<string, boolean>>({})
-  const [seen, setSeen] = useState(notes)
-  if (seen !== notes) {
-    setSeen(notes)
-    setShown({})
-  }
-  if (!notes.length) return null
-  return (
-    <>
-      {NOTE_CORNERS.map((corner) => {
-        const here = notes.filter((n) => n.corner === corner)
-        if (!here.length) return null
-        return (
-          <div key={corner} className={`cnotes cnotes-${corner} nodrag`}>
-            {here.map((note) => {
-              const collapsed = shown[note.id] ?? note.collapsed
-              return (
-                <PinnedNote
-                  key={note.id}
-                  note={note}
-                  collapsed={collapsed}
-                  onToggle={() => {
-                    setShown((current) => ({ ...current, [note.id]: !collapsed }))
-                    actions.onCollapse?.(note.id, !collapsed)
-                  }}
-                  onOpen={actions.onOpen ? () => actions.onOpen!(note.id) : undefined}
-                />
-              )
-            })}
-          </div>
-        )
-      })}
-    </>
-  )
 }
 
 const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<FlowNode<StructureData>>) {
@@ -285,7 +189,7 @@ const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<
         <span className={`status status-${node.status}`}>{STATUS_LABEL[node.status]}</span>
         {stepName && <span className="cnode-step">{stepName}</span>}
       </div>
-      <PinnedNotes notes={data.notes} actions={data.noteActions} />
+      <CardNotes notes={data.notes} actions={data.noteActions} />
     </div>
   )
 })
@@ -480,7 +384,7 @@ function CanvasView({
   onPositions,
   onError,
   onOpenNote,
-  onCollapseNote,
+  onLayoutNote,
   readOnly = false,
 }: {
   data: CanvasData
@@ -502,9 +406,10 @@ function CanvasView({
   onDropFiles: (files: File[], targetId: string | null, position: { x: number; y: number }) => void
   onPositions: (positions: Record<string, { x: number; y: number }>) => void
   onError: (message: string) => void
-  /** D85: edit a pinned note (double-click), and save whether it is collapsed. */
+  /** D85: edit a note (double-click), and (D87) save how it is drawn: collapsed, its size,
+   * where it floats. */
   onOpenNote?: (noteId: string) => void
-  onCollapseNote?: (noteId: string, collapsed: boolean) => void
+  onLayoutNote?: (noteId: string, layout: Partial<NoteLayout>) => void
   /** The shared read-only copy (D79): nothing can be moved, connected, added or dropped. */
   readOnly?: boolean
 }) {
@@ -522,8 +427,8 @@ function CanvasView({
     return found
   }, [data.notes])
   const noteActions: NoteActions = useMemo(
-    () => ({ onOpen: readOnly ? undefined : onOpenNote, onCollapse: readOnly ? undefined : onCollapseNote }),
-    [readOnly, onOpenNote, onCollapseNote],
+    () => ({ onOpen: readOnly ? undefined : onOpenNote, onLayout: readOnly ? undefined : onLayoutNote }),
+    [readOnly, onOpenNote, onLayoutNote],
   )
   const stepNames = useMemo(() => new Map(data.steps.map((s) => [s.id, s.name || 'Unnamed step'])), [data.steps])
 
@@ -596,6 +501,8 @@ function CanvasView({
           id: only.id,
           type: 'structure',
           className: notesOf(only.id).length ? 'has-notes' : undefined,
+          // D87: its notes, floating ones too, are drawn over the cards around it.
+          zIndex: notesOf(only.id).length ? 1 : undefined,
           position: { x: group.pos_x, y: group.pos_y },
           ariaLabel: `Node ${only.label || 'Untitled node'}`,
           selected: isSelected(only.id),
@@ -664,6 +571,8 @@ function CanvasView({
           id: member.id,
           type: 'structure',
           className: notesOf(member.id).length ? 'has-notes' : undefined,
+          // D87: its notes, floating ones too, are drawn over the cards around it.
+          zIndex: notesOf(member.id).length ? 1 : undefined,
           parentId: group.id,
           extent: 'parent',
           draggable: false,
@@ -692,6 +601,8 @@ function CanvasView({
         id: node.id,
         type: 'structure',
         className: notesOf(node.id).length ? 'has-notes' : undefined,
+        // D87: its notes, floating ones too, are drawn over the cards around it.
+        zIndex: notesOf(node.id).length ? 1 : undefined,
         position: { x: node.pos_x, y: node.pos_y },
         ariaLabel: `Node ${node.label || 'Untitled node'}`,
         selected: isSelected(node.id),
