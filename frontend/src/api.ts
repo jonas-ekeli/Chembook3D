@@ -379,8 +379,9 @@ export type HistoryEntry = {
   timestamp: string
   record_type: string
   record_id: string
-  // split, reconnect, add_members and dissolve are the structural actions INV-3 records as one entry each
-  action: 'create' | 'update' | 'delete' | 'split' | 'reconnect' | 'add_members' | 'dissolve'
+  // split, reconnect, add_members, remove_member and dissolve are the structural actions INV-3
+  // records as one entry each
+  action: 'create' | 'update' | 'delete' | 'split' | 'reconnect' | 'add_members' | 'remove_member' | 'dissolve'
   field: string | null
   old_value: unknown
   new_value: unknown
@@ -1033,6 +1034,7 @@ export const api = {
     request<Group>('POST', '/groups/reconnect', { member_ids, label, outgoing }),
   updateGroup: (id: string, fields: GroupFields) => request<Group>('PATCH', `/groups/${id}`, fields),
   addToGroup: (id: string, node_ids: string[]) => request<Group>('POST', `/groups/${id}/members`, { node_ids }),
+  removeFromGroup: (id: string, node_id: string) => request<Group>('DELETE', `/groups/${id}/members/${node_id}`),
   groupDeletePreview: (id: string) => request<GroupDeletePreview>('GET', `/groups/${id}/delete-preview`),
   dissolveGroup: (id: string, restore_branches: boolean) =>
     request<void>('POST', `/groups/${id}/dissolve`, { restore_branches }),

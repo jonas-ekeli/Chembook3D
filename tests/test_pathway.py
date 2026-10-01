@@ -482,6 +482,54 @@ def test_adding_a_node_extends_the_incoming_branches(open_client, example):
     assert get(open_client, f"/nodes/{after['id']}")["origin_branch_id"] == outgoing
 
 
+def test_take_a_member_out_of_a_group(open_client, example):
+    # T-BR-20, D88: the node leaves the group and stays, with its branch and edges.
+    group = reconnect_g6(open_client, example)
+    taken = example.nodes["B2-S6"]
+    into = edge(open_client, example.nodes["A1-S5"], group["id"])
+    patch(open_client, f"/groups/{group['id']}", {"representative_id": taken})
+    edges_before = len(get(open_client, "/transitions"))
+
+    response = open_client.delete(f"/api/groups/{group['id']}/members/{taken}")
+    assert response.status_code == 200, response.text
+    shrunk = response.json()
+    assert taken not in shrunk["member_ids"] and len(shrunk["member_ids"]) == 3
+    assert shrunk["representative_id"] is None  # FR-GRP-02: the app never picks one
+    # B2 was only B2-S6's branch, so it is no longer an incoming branch; R keeps its parents.
+    assert names(example, shrunk["incoming_branch_ids"]) == ["A1", "A2", "B1"]
+    r = branch(open_client, shrunk["outgoing_branch_id"])
+    assert names(example, r["parent_ids"]) == ["A1", "A2", "B1", "B2"]
+
+    kept = get(open_client, f"/nodes/{taken}")
+    assert kept["group_id"] is None and kept["origin_branch_id"] is None
+    assert kept["branch_id"] == example.branches["B2"]
+    assert (kept["pos_x"], kept["pos_y"]) == (shrunk["pos_x"] - 260.0, shrunk["pos_y"])
+    assert len(get(open_client, "/transitions")) == edges_before  # every edge stays
+    assert any(t["id"] == into["id"] for t in get(open_client, "/transitions"))
+    removals = [e for e in history(open_client, group["id"]) if e["action"] == "remove_member"]
+    assert len(removals) == 1 and taken in removals[0]["old_value"]["member_ids"]
+
+    # A node not in the group, or the group's last member, cannot be taken out.
+    status = open_client.delete(f"/api/groups/{group['id']}/members/{taken}").status_code
+    assert status == 422
+    two = post(
+        open_client,
+        "/groups/reconnect",
+        {"member_ids": [example.nodes["B1-S5"], example.nodes["B2-S5"]], "label": "G5"},
+    )
+    url = f"/api/groups/{two['id']}/members"
+    assert open_client.delete(f"{url}/{example.nodes['B1-S5']}").status_code == 200
+    assert open_client.delete(f"{url}/{example.nodes['B2-S5']}").status_code == 422
+
+
+def test_a_member_without_a_branch_goes_back_to_the_one_it_came_from(open_client, example):
+    group = reconnect_g6(open_client, example)
+    member = example.nodes["A1-S6"]
+    patch(open_client, f"/nodes/{member}", {"branch_id": None})
+    open_client.delete(f"/api/groups/{group['id']}/members/{member}")
+    assert get(open_client, f"/nodes/{member}")["branch_id"] == example.branches["A1"]
+
+
 def test_group_layout_is_stored_and_not_in_history(open_client, example):
     # T-BR-16, FR-GRP-07, A21
     group = reconnect_g6(open_client, example)

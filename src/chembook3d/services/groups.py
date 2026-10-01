@@ -7,6 +7,8 @@
 - The representative is chosen by the user and never by the app (FR-GRP-02, EN-10).
 - Transitions into a group are optional (D14): nothing here requires one.
 - Nodes can be added to an existing group later; a node in another group moves (D65, A20).
+- A member can be taken out of its group and kept as a node, with its calculations and edges
+  (D88).
 - Removing a group either dissolves it (members stay, keeping their branch or with it cleared,
   P4, A26) or deletes it with its members, their calculations and edges (D54).
 """
@@ -155,6 +157,45 @@ def add_members(session: Session, group_id: str, node_ids: Any) -> GroupNode:
     # INV-3: one explicit entry for the addition, like the reconnection itself.
     history.record(
         session, "group", group.id, "add_members", old=before, new=snapshot(session, group)
+    )
+    return group
+
+
+def remove_member(session: Session, group_id: str, node_id: str) -> GroupNode:
+    """D88: take one member out of the group and keep it as a node beside the group, with its
+    calculations and edges. It keeps its branch, or goes back to the one it came from. If it
+    was the representative, the group has none until the user picks one (FR-GRP-02). A branch
+    no remaining member came from stops being one of the group's incoming branches; the
+    outgoing branch's parents are left as they are."""
+    group = get(session, GroupNode, group_id, "Group")
+    node = get(session, Node, node_id, "Node")
+    if node.group_id != group.id:
+        raise RecordError(f"“{node.label or 'Untitled node'}” is not in this group")
+    rest = [m for m in members(session, group.id) if m.id != node.id]
+    if not rest:
+        raise RecordError("This is the group's last member: dissolve the group instead")
+    before = snapshot(session, group)
+
+    if group.representative_id == node.id:
+        group.representative_id = None
+    history.record(session, "node", node.id, "update", "group_id", group.id, None)
+    node.group_id = None
+    branch_id = node.branch_id or node.origin_branch_id
+    if branch_id is not None and session.get(Branch, branch_id) is None:
+        branch_id = None
+    if branch_id != node.branch_id:
+        history.record(session, "node", node.id, "update", "branch_id", node.branch_id, branch_id)
+        node.branch_id = branch_id
+    node.origin_branch_id = None
+    # Beside the group, where reconnected members came from, not hidden under it (layout only).
+    node.pos_x, node.pos_y = group.pos_x - GROUP_OFFSET_X, group.pos_y
+
+    still = {b for m in rest for b in (m.branch_id, m.origin_branch_id) if b}
+    group.incoming_branches = [b for b in group.incoming_branches if b.id in still]
+    session.flush()
+    # INV-3: one explicit entry for the removal, like the addition.
+    history.record(
+        session, "group", group.id, "remove_member", old=before, new=snapshot(session, group)
     )
     return group
 

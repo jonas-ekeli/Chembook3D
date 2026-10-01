@@ -452,8 +452,8 @@ class HistoryEntry(Base):
     timestamp: Mapped[datetime] = mapped_column(default=utcnow, index=True)
     record_type: Mapped[str] = mapped_column(String(32))
     record_id: Mapped[str] = mapped_column(String(32), index=True)
-    # create | update | delete, and split | reconnect | add_members | dissolve for the
-    # structural actions that INV-3 requires to be recorded as one explicit entry each.
+    # create | update | delete, and split | reconnect | add_members | remove_member | dissolve
+    # for the structural actions that INV-3 requires to be recorded as one explicit entry each.
     action: Mapped[str] = mapped_column(String(16))
     field: Mapped[str | None] = mapped_column(String(64), default=None)
     old_value: Mapped[Any] = mapped_column(JSON, nullable=True, default=None)

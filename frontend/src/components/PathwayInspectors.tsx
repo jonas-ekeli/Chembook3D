@@ -551,14 +551,16 @@ function RemoveGroupDialog({
   )
 }
 
-/** FR-IMP-11: removing a member deletes that node, after a confirmation that lists what goes
- * with it (P3). */
+/** D88: a member can be taken out of the group and kept, with its calculations and edges, or
+ * deleted (FR-IMP-11) after a confirmation that lists what goes with it (P3). */
 function RemoveMemberDialog({
+  group,
   member,
   canvas,
   onClose,
   onDone,
 }: {
+  group: Group
   member: Node
   canvas: Canvas
   onClose: () => void
@@ -573,6 +575,8 @@ function RemoveMemberDialog({
     const group = canvas.groups.find((g) => g.id === id)
     return group ? group.label || 'Group' : nodeName(canvas.nodes.find((n) => n.id === id))
   }
+  const last = group.member_ids.length < 2
+  const representative = group.representative_id === member.id
   return (
     <Modal
       title="Remove member?"
@@ -587,14 +591,28 @@ function RemoveMemberDialog({
           >
             Remove and delete
           </button>
+          <button
+            className="primary"
+            disabled={last}
+            onClick={() =>
+              api.removeFromGroup(group.id, member.id).then(onDone, (err: unknown) => setError(errorText(err)))
+            }
+          >
+            Keep as a node
+          </button>
         </>
       }
     >
       {error && <p role="alert">{error}</p>}
+      <p>
+        {last
+          ? `“${nodeName(member)}” is the group's last member; dissolve the group to keep it as a node.`
+          : `Keep as a node: “${nodeName(member)}” leaves the group and stays beside it, with its calculations and edges${representative ? '. The group then has no representative until you pick one' : ''}.`}
+      </p>
       {preview && (
         <>
           <p>
-            “{nodeName(member)}” is removed from the group and deleted, with its {preview.calculations} calculation
+            Remove and delete: it is deleted, with its {preview.calculations} calculation
             {preview.calculations === 1 ? '' : 's'}
             {preview.transitions.length > 0 ? ' and these transitions:' : '.'}
           </p>
@@ -774,7 +792,7 @@ export function GroupInspector({
                   <button
                     className="small icon danger"
                     aria-label={`Remove ${nodeName(m)} from the group`}
-                    title="Remove from the group (deletes the node)"
+                    title="Remove from the group, keeping or deleting the node"
                     onClick={() => setRemovingMember(m)}
                   >
                     ×
@@ -814,6 +832,7 @@ export function GroupInspector({
       {removing && <RemoveGroupDialog group={group} onClose={() => setRemoving(false)} onDone={onRemoved} />}
       {removingMember && (
         <RemoveMemberDialog
+          group={group}
           member={removingMember}
           canvas={canvas}
           onClose={() => setRemovingMember(null)}
