@@ -75,6 +75,16 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-SEL-06 | Different atoms, a different charge, a TS in two outcomes (also through a group) | Refused, with the reason (FR-SEL-02) |
 | T-SEL-07 | Experiment 95 : 5, then an amount for one outcome only | 95 %, ΔΔG‡ = RT ln 19, ee 90 %; then not compared, with a note (FR-SEL-05) |
 | T-SEL-08 | Create, rename, change notes, save without change, delete; delete a TS | History entries for each change only; the TS leaves its outcome (FR-SEL-06) |
+| T-TOF-01 | Cycles of one to four steps, exergonic and endergonic, solved exactly at steady state from Eyring rate constants for every forward and backward step | The energetic-span TOF equals the steady-state flux; the degrees of TOF control of the TSs add up to one, as do those of the intermediates; a cycle 900 kcal/mol downhill does not overflow (FR-TOF-03) |
+| T-TOF-02 | 0, 20‡, 5, 15‡ with ΔG_r −10; and 0, 20‡, −20, −5‡ with ΔG_r −15 (kcal/mol) | TDTS 20 and TDI 0, δE 20; then TDTS before TDI, δE = 20 + 20 − 15 = 25 (FR-TOF-03) |
+| T-TOF-03 | The same first cycle drawn with a substrate joining and a product leaving, through the API | ΔE_r −10.00 from the balance, the TOF by hand, TDTS and TDI, the table and its CSV with the same text, the cycle's profile (FR-TOF-01, 02, 04) |
+| T-TOF-04 | The turnover's own temperature, 350 K | The TOF by hand at 350 K (FR-TOF-04) |
+| T-TOF-05 | A "no TS" connection between two intermediates in the cycle | The TOF by hand with that intermediate, and a note that it is an upper bound (FR-TOF-03) |
+| T-TOF-06 | A point without a value; an open pathway or one with a gap saved; a cycle without TSs; no pathway; no level | n/a naming the point; refused when saved; refused with the reason; incomplete (FR-TOF-01, 02) |
+| T-TOF-07 | Two cycles 1 kcal/mol apart at the TDTS; then at different temperatures; compared with itself; the other deleted | Effective ΔΔG‡ 1.00 kcal/mol and the percentages; not compared, with the reason; refused; the comparison cleared (FR-TOF-05) |
+| T-TOF-08 | Create, rename, change notes, save without change, delete; delete a node on the pathway | History entries for each change only; the result says the pathway lost a node (FR-TOF-05) |
+| T-TOF-09 | A TS group in the cycle, without and then with a representative | n/a, then valued by the representative, which becomes the TDTS (FR-TOF-03, EN-7) |
+| T-TOF-10 | A precatalyst before the node the pathway returns to | Left out of the cycle, with a note (FR-TOF-01) |
 
 ## 5. Import and parsing tests
 
@@ -146,6 +156,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-04 | Canvas and profile image export | Files are produced and open in a standard viewer |
 | T-UI-05 | Sterics | Create a profile, type the atoms, compute (36.1 %V_bur for the NHC complex), see it go out of date after a setting change, share the atoms with a turned copy, compare both with maps, a difference map and a CSV (FR-STER-01…05) |
 | T-UI-06 | Selectivity | Select the demo's two TSs, "Selectivity…": 98.6 : 1.4, ee 97.1 %, ΔΔG‡ 2.50 kcal/mol; rename outcomes; 233.15 K gives 99.5 : 0.5; only the lowest TS; experiment 90 : 10 gives 1.30 kcal/mol; history; delete (FR-SEL-01…06) |
+| T-UI-07 | Turnover | Close the demo's branch B back to T-S0, "Turnover" in the drawer; with G: δE 23.30 kcal/mol, TDTS B-S2, TDI B-S3 (the TS before the TDI), ΔG_r 0 so TOF 0 with a note; TDTS and TDI marked on the profile; the degree-of-control table; a second turnover from the branch, compared; a branch that does not close is refused; history; delete (FR-TOF-01…05) |
 
 ## 8. Performance observation (no targets)
 

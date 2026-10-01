@@ -375,7 +375,8 @@ def _absolute(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.8f}"
 
 
-def _relative(value: float | None, unit: str) -> str:
+def relative_text(value: float | None, unit: str) -> str:
+    """A relative energy in `unit` with its decimals, as the table and its CSV show it."""
     if value is None:
         return "n/a"
     text = f"{value * units.HARTREE_IN[unit]:.{units.DECIMALS[unit]}f}"
@@ -442,7 +443,7 @@ def table(
                     _absolute(values["G"]),
                     _absolute(values["G_qh"]),
                     species_service.text(point["species"]),
-                    _relative(point["relative"], unit),
+                    relative_text(point["relative"], unit),
                 ]
             )
     return {"columns": columns, "rows": rows}

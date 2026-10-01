@@ -45,6 +45,12 @@ function show(field: string | null, value: unknown, names: Names = new Map()): s
     const outcomes = value as { name: string }[]
     return outcomes.length ? outcomes.map((o) => o.name).join(', ') : 'none'
   }
+  if (field === 'path') {
+    // D86: a turnover's pathway, in order
+    const ids = value as string[]
+    return ids.length ? ids.map((id) => named(names, id)).join(' → ') : 'none'
+  }
+  if (field === 'compare_id') return 'another turnover'
   if (field === 'conformers') return value === 'lowest' ? 'lowest TS only' : 'Boltzmann sum'
   if (field === 'temperature') return `${String(value)} K`
   if (field === 'notes') {
@@ -83,6 +89,8 @@ const STRUCTURE_FIELDS: Record<string, string> = {
   conformers: 'Conformers',
   excess: 'Shown for two outcomes',
   outcomes: 'Outcomes',
+  path: 'Pathway',
+  compare_id: 'Compared with',
 }
 
 const STRUCTURE_TYPES: Record<string, string> = {
@@ -91,6 +99,7 @@ const STRUCTURE_TYPES: Record<string, string> = {
   transition: 'transition',
   group: 'group',
   selectivity: 'selectivity',
+  turnover: 'turnover',
 }
 
 function describeStructure(entry: HistoryEntry, names: Names): string | null {
