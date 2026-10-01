@@ -219,3 +219,42 @@ export function measure(atoms: Atom[]): { kind: 'distance' | 'angle' | 'dihedral
   }
   return null
 }
+
+/** D80: atom numbers typed as numbers and ranges ("1-12, 15"), 1-based, in the order given
+ * (ranges run upwards). Returns the numbers or the reason they cannot be read; whether the
+ * atoms exist and pair up is checked by the backend. */
+export function parseAtomList(text: string): { numbers: number[] } | { error: string } {
+  const numbers: number[] = []
+  for (const part of text.split(/[\s,;]+/).filter(Boolean)) {
+    const range = /^(\d+)\s*[-–]\s*(\d+)$/.exec(part)
+    if (range) {
+      const [from, to] = [Number(range[1]), Number(range[2])]
+      if (from < 1 || to < from) return { error: `“${part}” is not a range of atom numbers` }
+      for (let n = from; n <= to; n++) numbers.push(n)
+    } else if (/^\d+$/.test(part) && Number(part) >= 1) {
+      numbers.push(Number(part))
+    } else {
+      return { error: `“${part}” is not an atom number` }
+    }
+  }
+  return { numbers }
+}
+
+/** The shortest text for atom numbers in their order: upward runs of three or more become
+ * ranges ([1, 2, 3, 4, 7, 5] → "1-4, 7, 5"). */
+export function formatAtomList(numbers: number[]): string {
+  const parts: string[] = []
+  let i = 0
+  while (i < numbers.length) {
+    let j = i
+    while (j + 1 < numbers.length && numbers[j + 1] === numbers[j] + 1) j++
+    if (j - i >= 2) {
+      parts.push(`${numbers[i]}-${numbers[j]}`)
+      i = j + 1
+    } else {
+      parts.push(String(numbers[i]))
+      i++
+    }
+  }
+  return parts.join(', ')
+}

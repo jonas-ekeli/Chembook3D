@@ -49,6 +49,7 @@ Investigation
  │              incoming branches: Branch[0..n], outgoing branch: Branch[0..1]
  ├── Transition (source Node|GroupNode → target Node|GroupNode, status, notes)
  │     └── species: [free-species Node, joins|leaves, count][0..n]   (D69)
+ ├── AlignmentSet ── per node: atom numbers   (D80; layout-like, no history)
  ├── LevelOfTheory registry, named custom basis sets
  └── ChangeHistory entries
 ```

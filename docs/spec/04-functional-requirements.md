@@ -179,9 +179,10 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-3D-01 | Show the selected node's geometry with rotate, zoom and pan; save the orientation for the structure card; hide hydrogens by a setting. | D20, D74, D75 | 1 |
 | FR-3D-02 | Measure distances and angles between picked atoms. | D20 | 3 |
 | FR-3D-03 | Animate any vibrational mode from a frequency calculation, with imaginary modes listed first. | D20 | 3 |
-| FR-3D-04 | Overlay two selected geometries after alignment. | D20 | 3 |
+| FR-3D-04 | Overlay 2 to 12 selected geometries, or a group's members, on one reference: aligned on all atoms, on chosen atoms (a list per structure where the numbering differs), or not aligned; optionally allowing a mirror image. Each has its own colour, a visibility switch and its RMSD over the alignment atoms and over all atoms. Save the image and a multi-structure .xyz. | D20, D80, A31 | 3 (choices after 5) |
 | FR-3D-05 | No geometry editing in the viewer. | X3 | — |
 | FR-3D-06 | Copy xyz to the clipboard and save a .xyz file from the node inspector. | D39 | 1 |
+| FR-3D-07 | Named alignment sets keep each node's alignment atoms in the investigation, to reuse and extend. | D80, A31 | after 5 |
 
 ## FR-SHARE · Read-only copy to share (D79)
 
