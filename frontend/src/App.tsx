@@ -28,6 +28,7 @@ import { HistoryList } from './components/HistoryList'
 import { ImportDialog } from './components/ImportDialog'
 import { Modal } from './components/Modal'
 import { NodeInspector } from './components/NodeInspector'
+import { NoteEditor } from './components/NoteEditor'
 import { Outline } from './components/Outline'
 import { Overview } from './components/Overview'
 import { AnalysesView } from './components/Analyses'
@@ -57,7 +58,7 @@ type ImportRequest = {
 
 type InspectorSelection = Selection | { kind: 'branch'; id: string }
 
-const EMPTY_CANVAS: Canvas = { nodes: [], species: [], steps: [], branches: [], transitions: [], groups: [] }
+const EMPTY_CANVAS: Canvas = { nodes: [], species: [], steps: [], branches: [], transitions: [], groups: [], notes: [] }
 
 function readMode(): ViewMode {
   try {
@@ -162,6 +163,8 @@ function App() {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
   const [importRequest, setImportRequest] = useState<ImportRequest | null>(null)
+  // D85: the pinned note being written: an existing one by id, or a new one on a node.
+  const [noteEditing, setNoteEditing] = useState<{ noteId: string } | { nodeId: string } | null>(null)
   const [inspectorWidth, setInspectorWidth] = useState(520)
   // Energies (FR-EN-01): one level and one energy type for the whole view (EN-2, INV-5).
   const [energyOptions, setEnergyOptions] = useState<EnergyOptions | null>(null)
@@ -421,6 +424,13 @@ function App() {
     api.updateGroup(id, { layout }).catch((err: unknown) => setError(errorText(err)))
   }, [])
 
+  const openNote = useCallback((noteId: string) => setNoteEditing({ noteId }), [])
+  const collapseNote = useCallback(
+    (noteId: string, collapsed: boolean) =>
+      void api.updateNote(noteId, { collapsed }).then(fetchRecords, (err: unknown) => setError(errorText(err))),
+    [fetchRecords],
+  )
+
   const toggleGroup = useCallback((id: string) => {
     setExpanded((current) => {
       const next = new Set(current)
@@ -467,8 +477,24 @@ function App() {
   const multiNodes = multi.map((id) => canvas.nodes.find((n) => n.id === id)).filter((n): n is Node => !!n)
   const multiGroups = multi.map((id) => canvas.groups.find((g) => g.id === id)).filter((g): g is Group => !!g)
 
+  const editedNote = noteEditing && 'noteId' in noteEditing ? canvas.notes.find((n) => n.id === noteEditing.noteId) : null
+  const notedNodeId = editedNote ? editedNote.node_id : noteEditing && 'nodeId' in noteEditing ? noteEditing.nodeId : null
+  const notedNode = notedNodeId ? canvas.nodes.find((n) => n.id === notedNodeId) : undefined
+
   const dialogs = (
-    <StericColourSetting value={stericColours}>
+    <>
+      {notedNode && (
+        <NoteEditor
+          note={editedNote ?? null}
+          nodeId={notedNode.id}
+          nodeLabel={notedNode.label || 'Untitled node'}
+          onClose={() => setNoteEditing(null)}
+          onSaved={() => {
+            setNoteEditing(null)
+            reload()
+          }}
+        />
+      )}
       {picker && (
         <FolderPicker
           mode={picker}
@@ -826,6 +852,7 @@ function App() {
         onRefresh={fetchRecords}
         isReference={referenceId === selectedNode.id}
         onUseAsReference={() => setReferenceId(selectedNode.id)}
+        onEditNote={(noteId) => setNoteEditing(noteId ? { noteId } : { nodeId: selectedNode.id })}
       />
     )
   } else if (selectedGroup) {
@@ -1055,6 +1082,8 @@ function App() {
                   onDropFiles={(files, targetId, position) => setImportRequest({ targetId, files, position })}
                   onPositions={savePositions}
                   onError={setError}
+                  onOpenNote={openNote}
+                  onCollapseNote={collapseNote}
                 />
               </ReactFlowProvider>
               <div

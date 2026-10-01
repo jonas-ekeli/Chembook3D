@@ -85,6 +85,11 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-TOF-08 | Create, rename, change notes, save without change, delete; delete a node on the pathway | History entries for each change only; the result says the pathway lost a node (FR-TOF-05) |
 | T-TOF-09 | A TS group in the cycle, without and then with a representative | n/a, then valued by the representative, which becomes the TDTS (FR-TOF-03, EN-7) |
 | T-TOF-10 | A precatalyst before the node the pathway returns to | Left out of the cycle, with a note (FR-TOF-01) |
+| T-NOTE-01 | Formatted HTML with scripts, styles, handlers, `javascript:` links, outside pictures and unknown tags | Only the allowed tags and attributes stay, with their text (FR-NOTE-02) |
+| T-NOTE-02 | An SVG as ChemDraw saves one, with a script, handlers, `javascript:` and outside links, `@import`, a foreignObject and `<set>`; SVG without namespaces; entities | The drawing stays, nothing that runs or loads stays; namespaces added; entities refused (FR-NOTE-03) |
+| T-NOTE-03 | Pictures stored twice; PDF and an over-large file; a note naming a picture not stored; a note on a free species; a corner or colour not offered | Stored once and served with a policy forbidding scripts; the rest refused with the reason (FR-NOTE-01, FR-NOTE-03) |
+| T-NOTE-04 | Create two notes, change text and corner, collapse, set a width out of range, save without change, delete one, delete the node | History entries for text, corner, create and delete only; width clamped; the node's notes go with it (FR-NOTE-01, FR-NOTE-04) |
+| T-NOTE-05 | Export a copy with a note holding an SVG, with an unused picture in the investigation | The note and its picture as a data URL are in the copy, the unused picture is not (FR-NOTE-05) |
 
 ## 5. Import and parsing tests
 
@@ -157,6 +162,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-05 | Sterics | Create a profile, type the atoms, compute (36.1 %V_bur for the NHC complex), see it go out of date after a setting change, share the atoms with a turned copy, switch the map colours to green–yellow–red, compare both with maps, a difference map and a CSV (FR-STER-01…06) |
 | T-UI-06 | Selectivity | Select the demo's two TSs, "Selectivity…": 98.6 : 1.4, ee 97.1 %, ΔΔG‡ 2.50 kcal/mol; rename outcomes; 233.15 K gives 99.5 : 0.5; only the lowest TS; experiment 90 : 10 gives 1.30 kcal/mol; history; delete (FR-SEL-01…06) |
 | T-UI-07 | Turnover | Close the demo's branch B back to T-S0, "Turnover" in the drawer; with G: δE 23.30 kcal/mol, TDTS B-S2, TDI B-S3 (the TS before the TDI), ΔG_r 0 so TOF 0 with a note; TDTS and TDI marked on the profile; the degree-of-control table; a second turnover from the branch, compared; a branch that does not close is refused; history; delete (FR-TOF-01…05) |
+| T-UI-08 | Pinned notes | Add a note to A-S2 with bold text, SVG pasted as text and a PNG chosen; an empty paste shows the ChemDraw advice; HTML with a script keeps only its italics; the note sits at the top right corner with both pictures and nothing ran; collapse survives a reload; double-click, move it to the bottom left; history; the read-only copy shows it with its pictures; delete (FR-NOTE-01…05) |
 
 ## 8. Performance observation (no targets)
 

@@ -6,6 +6,7 @@ import { NO_FILTERS, type Filters, type Selection, type ViewMode } from '../canv
 import { CanvasPane, type CanvasEnergy } from '../components/Canvas'
 import { FilterMenu } from '../components/FilterMenu'
 import { HydrogenDisplay } from '../display'
+import { NoteImageSource } from '../notes'
 import { energyView, referenceIds, sharedSettings, type SnapshotData } from './data'
 import { SnapshotDrawer } from './Drawer'
 import { AboutPanel, BranchPanel, GroupPanel, NodePanel, TransitionPanel } from './Panels'
@@ -122,6 +123,7 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [hydrogens, setHydrogens] = useState<HydrogenMode>(data.settings.hydrogens)
+  const noteImage = useCallback((id: string) => data.note_images?.[id], [data])
   const [energyLevel, setEnergyLevel] = useState<string | null>(null)
   const [energyType, setEnergyType] = useState<EnergyType>('G')
   const [edgeEnergies, setEdgeEnergies] = useState(true)
@@ -232,6 +234,8 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
 
   return (
     <HydrogenDisplay value={hydrogens}>
+      {/* D85: pictures in pinned notes travel inside the file. */}
+      <NoteImageSource.Provider value={noteImage}>
       <div className="app">
         <header className="topbar">
           <strong className="brand">Chembook3D</strong>
@@ -370,6 +374,7 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
           </div>
         </div>
       </div>
+      </NoteImageSource.Provider>
     </HydrogenDisplay>
   )
 }

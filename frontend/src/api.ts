@@ -225,7 +225,37 @@ export type Canvas = {
   branches: Branch[]
   transitions: Transition[]
   groups: Group[]
+  /** D85: notes pinned to a corner of a node's card. */
+  notes: Note[]
 }
+
+export const NOTE_CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const
+export type NoteCorner = (typeof NOTE_CORNERS)[number]
+export const NOTE_CORNER_LABEL: Record<NoteCorner, string> = {
+  'top-left': 'Top left',
+  'top-right': 'Top right',
+  'bottom-left': 'Bottom left',
+  'bottom-right': 'Bottom right',
+}
+export const NOTE_COLOURS = ['yellow', 'blue', 'green', 'pink', 'grey'] as const
+export type NoteColour = (typeof NOTE_COLOURS)[number]
+
+/** D85: a note pinned to a node's card. `body` is cleaned HTML (services/notes.py); a
+ * picture in it is `<img data-note-image="<sha256>">`. */
+export type Note = {
+  id: string
+  node_id: string
+  corner: NoteCorner
+  colour: NoteColour
+  title: string
+  body: string
+  collapsed: boolean
+  width: number
+  created_at: string
+  updated_at: string
+}
+
+export type NoteFields = Partial<Pick<Note, 'corner' | 'colour' | 'title' | 'body' | 'collapsed' | 'width'>>
 
 export type NodeDeletePreview = {
   node: string
@@ -950,6 +980,13 @@ export const api = {
   sourceFileUrl: (id: string) => `/api/source-files/${id}/download`,
 
   canvas: () => request<Canvas>('GET', '/canvas'),
+
+  createNote: (nodeId: string, fields: NoteFields) => request<Note>('POST', `/nodes/${nodeId}/notes`, fields),
+  updateNote: (id: string, fields: NoteFields) => request<Note>('PATCH', `/notes/${id}`, fields),
+  deleteNote: (id: string) => request<void>('DELETE', `/notes/${id}`),
+  /** A picture for a note; the server reads its type from the bytes and cleans an SVG. */
+  uploadNoteImage: (file: Blob) =>
+    request<{ id: string; media_type: string; size: number }>('POST', '/note-images', file),
   savePositions: (positions: Record<string, { x: number; y: number }>) =>
     request<void>('PUT', '/positions', { positions }),
 

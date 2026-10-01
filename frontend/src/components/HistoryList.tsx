@@ -1,5 +1,6 @@
 import type { GeometryRows, HistoryEntry } from '../api'
-import { CALCULATION_TYPES, ROLES, speciesChip, STATUSES } from '../api'
+import { CALCULATION_TYPES, NOTE_CORNER_LABEL, ROLES, speciesChip, STATUSES, type NoteCorner } from '../api'
+import { noteTitle } from '../notes'
 
 const FIELD_LABELS: Record<string, string> = {
   label: 'Label',
@@ -167,8 +168,29 @@ function describeOther(entry: HistoryEntry): string | null {
   return null
 }
 
+/** D85, A35: a pinned note's changes, recorded on its node. */
+function describeNote(entry: HistoryEntry): string | null {
+  if (entry.record_type !== 'note') return null
+  const value = (entry.new_value ?? entry.old_value) as { title?: string; body?: string } | null
+  const name = `“${noteTitle({ title: value?.title ?? '', body: value?.body ?? '' })}”`
+  if (entry.action === 'create') return `Pinned a note ${name}`
+  if (entry.action === 'delete') return `Deleted the pinned note ${name}`
+  const field = entry.field ?? ''
+  const before = (entry.old_value as Record<string, unknown> | null)?.[field]
+  const after = (entry.new_value as Record<string, unknown> | null)?.[field]
+  const title = (entry.new_value as { title?: string } | null)?.title
+  const named = title ? ` “${title}”` : ''
+  if (field === 'body') return `Text of the pinned note${named} changed`
+  if (field === 'title') return `Pinned note title: “${String(before ?? '')}” → “${String(after ?? '')}”`
+  if (field === 'corner') {
+    const corner = (c: unknown) => NOTE_CORNER_LABEL[c as NoteCorner]?.toLowerCase() ?? String(c)
+    return `Pinned note${named} moved: ${corner(before)} → ${corner(after)}`
+  }
+  return `Pinned note${named} ${field}: ${String(before)} → ${String(after)}`
+}
+
 function describe(entry: HistoryEntry, names: Names): string {
-  const other = describeOther(entry) ?? describeStructure(entry, names)
+  const other = describeNote(entry) ?? describeOther(entry) ?? describeStructure(entry, names)
   if (other !== null) return other
   if (entry.action === 'split') return `Split into branches ${named(names, entry.new_value)}`
   if (entry.action === 'create') {
@@ -206,7 +228,9 @@ function RecordLink({
   onSelect?: (recordId: string) => void
 }) {
   const value = entry.new_value as { node_id?: string } | null
-  const nodeId = entry.record_type === 'node' ? entry.record_id : (value?.node_id ?? null)
+  // A pinned note's changes are recorded on its node (D85).
+  const nodeId =
+    entry.record_type === 'node' || entry.record_type === 'note' ? entry.record_id : (value?.node_id ?? null)
   if (STRUCTURE_TYPES[entry.record_type]) {
     const name = names.get(entry.record_id)
     return <span className="muted">{name ? `${STRUCTURE_TYPES[entry.record_type]} ${name}` : STRUCTURE_TYPES[entry.record_type]}</span>

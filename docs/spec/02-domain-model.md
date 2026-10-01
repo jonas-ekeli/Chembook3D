@@ -54,6 +54,8 @@ Investigation
  │                    (D81; layout-like, no history)
  ├── Selectivity ── settings (level, energy type, temperature, conformers); outcomes:
  │                  [name, TS Node|GroupNode[1..n], experimental amount][2..n]   (D83; in the history)
+ ├── NodeNote ── per node: corner, colour, title, formatted text, width, collapsed;
+ │               pictures as NoteImage (PNG, JPEG, GIF, WebP, cleaned SVG)   (D85; in the node's history)
  ├── LevelOfTheory registry, named custom basis sets
  └── ChangeHistory entries
 ```
