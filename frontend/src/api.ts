@@ -2,6 +2,7 @@
 // the backend; the UI only shows what it returns.
 
 import type { HydrogenMode, Rotation } from './chem'
+import type { StericColours } from './display'
 
 export type Status = 'planned' | 'running_externally' | 'done' | 'failed' | 'rejected' | 'superseded'
 export type Role = 'minimum' | 'transition_state' | 'unspecified'
@@ -358,6 +359,8 @@ export type Settings = {
   /** Hydrogens drawn in the 3D views and on structure cards. */
   hydrogens: HydrogenMode
   hydrogen_modes: HydrogenMode[]
+  /** D84: the colours of the steric maps. */
+  steric_colours: StericColours
 }
 
 export type Level = {
@@ -914,6 +917,7 @@ export const api = {
         | 'qh_cutoff'
         | 'crest_count'
         | 'hydrogens'
+        | 'steric_colours'
       >
     >,
   ) => request<Settings>('PUT', '/settings', fields),

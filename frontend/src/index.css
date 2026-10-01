@@ -1522,6 +1522,11 @@ table.steric-octants td {
   width: 100%;
   justify-content: space-between;
 }
+.steric-map-box {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: start;
+}
 .steric-maps {
   display: flex;
   flex-wrap: wrap;

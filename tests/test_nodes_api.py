@@ -212,3 +212,12 @@ def test_hydrogen_display_setting(open_client):
     assert response.json()["hydrogens"] == "polar"
     assert open_client.get("/api/settings").json()["hydrogens"] == "polar"
     assert open_client.put("/api/settings", json={"hydrogens": "some"}).status_code == 422
+
+
+def test_steric_map_colours_setting(open_client):
+    # D84: the steric maps' colours are an app setting, blue unless changed.
+    assert open_client.get("/api/settings").json()["steric_colours"] == "blue"
+    response = open_client.put("/api/settings", json={"steric_colours": "green-yellow-red"})
+    assert response.json()["steric_colours"] == "green-yellow-red"
+    assert open_client.get("/api/settings").json()["steric_colours"] == "green-yellow-red"
+    assert open_client.put("/api/settings", json={"steric_colours": "pink"}).status_code == 422

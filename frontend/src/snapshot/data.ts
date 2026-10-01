@@ -79,6 +79,7 @@ export function sharedSettings(data: SnapshotData): Settings {
     duplicate_tolerance: 0,
     crest_count: 0,
     hydrogen_modes: ['all', 'polar', 'none'],
+    steric_colours: 'blue',
   }
 }
 
