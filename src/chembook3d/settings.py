@@ -21,6 +21,8 @@ CREST_COUNT = 10  # D34: the lowest N conformers of a CREST ensemble are ticked 
 # Hydrogens drawn in the 3D views and on structure-mode cards: all of them, only those not
 # bonded to carbon (hydrides, O–H, N–H), or none.
 HYDROGEN_MODES = ("all", "polar", "none")
+# D84: colours of the steric maps, low to high (the difference map keeps blue–grey–red).
+STERIC_COLOURS = ("blue", "green-yellow-red", "rainbow", "viridis", "grey")
 
 
 def config_dir() -> Path:
@@ -42,6 +44,7 @@ class Settings:
     qh_cutoff: float = DEFAULT_CUTOFF
     crest_count: int = CREST_COUNT
     hydrogens: str = "all"
+    steric_colours: str = "blue"
 
 
 def _path() -> Path:
@@ -70,6 +73,8 @@ def load() -> Settings:
         settings.crest_count = count
     if data.get("hydrogens") in HYDROGEN_MODES:
         settings.hydrogens = data["hydrogens"]
+    if data.get("steric_colours") in STERIC_COLOURS:
+        settings.steric_colours = data["steric_colours"]
     cutoff = data.get("qh_cutoff")
     if isinstance(cutoff, int | float) and not isinstance(cutoff, bool) and cutoff >= 0:
         settings.qh_cutoff = float(cutoff)

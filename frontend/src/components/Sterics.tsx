@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import {
   api,
   type Node,
@@ -11,6 +11,7 @@ import {
   type StericValues,
 } from '../api'
 import { formatAtomList, fragment, parseAtomList, parseXyz } from '../chem'
+import { STERIC_PALETTES, StericColourSetting, type StericColours } from '../display'
 import { download } from '../util'
 import { Modal } from './Modal'
 import { Viewer3D } from './Viewer3D'
@@ -42,10 +43,26 @@ const elementsOf = (n: Node) => parseXyz(n.xyz ?? '').map((a) => a.element).join
 
 // ---------- colours ----------
 
-// Sequential: one hue, light (low, far below the centre) to dark (high, crowding the centre).
-const SEQUENTIAL = ['#cde2fb', '#b7d3f6', '#9ec5f4', '#86b6ef', '#6da7ec', '#5598e7', '#3987e5', '#2a78d6', '#256abf', '#1c5cab', '#184f95', '#104281', '#0d366b']
-// Diverging: blue where the first map is lower, red where it is higher, grey for no change.
+// Diverging, for the difference map whatever the setting: blue where the first map is lower,
+// red where it is higher, grey for no change.
 const DIVERGING = ['#0d366b', '#1c5cab', '#3987e5', '#86b6ef', '#cde2fb', '#f0efec', '#f9d3cc', '#f0a091', '#e0644f', '#b8321f', '#7f1d12']
+
+/** The map colours setting, where the maps are (D84). */
+export function StericColourSelect() {
+  const { colours, setColours } = useContext(StericColourSetting)
+  return (
+    <label className="field">
+      <span>Map colours</span>
+      <select aria-label="Map colours" value={colours} onChange={(e) => setColours(e.target.value as StericColours)}>
+        {Object.entries(STERIC_PALETTES).map(([key, palette]) => (
+          <option key={key} value={key}>
+            {palette.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
 
 function hex(colour: string): [number, number, number] {
   return [1, 3, 5].map((i) => Number.parseInt(colour.slice(i, i + 2), 16)) as [number, number, number]
@@ -121,6 +138,7 @@ export function StericMapView({
   fileName?: string
 }) {
   const canvas = useRef<HTMLCanvasElement>(null)
+  const { colours } = useContext(StericColourSetting)
   const [hover, setHover] = useState<string | null>(null)
   const n = map.x.length
   const r = map.x[n - 1]
@@ -136,7 +154,7 @@ export function StericMapView({
     context.fillStyle = '#ffffff'
     context.fillRect(0, 0, size, size + BAR)
     const cell = size / n
-    const stops = difference ? DIVERGING : SEQUENTIAL
+    const stops = difference ? DIVERGING : STERIC_PALETTES[colours].stops
     map.z.forEach((row, j) =>
       row.forEach((z, i) => {
         if (z === null) return
@@ -184,7 +202,7 @@ export function StericMapView({
     context.fillText('0', size / 2, barTop + 13)
     context.fillText(`+${limit}`, size - 20, barTop + 13)
     context.fillText(difference ? 'Δz (Å)' : 'z (Å)', size / 2, barTop + 24)
-  }, [map, size, n, difference])
+  }, [map, size, n, difference, colours])
 
   const onMove = (event: MouseEvent<HTMLCanvasElement>) => {
     const box = event.currentTarget.getBoundingClientRect()
@@ -810,7 +828,10 @@ export function StericsSection({ node, nodes }: { node: Node; nodes: Node[] }) {
                 )}
               </div>
               {computed?.map && (
-                <StericMapView map={computed.map} title={nodeName(node)} fileName={`${nodeName(node)} steric map.png`} />
+                <div className="steric-map-box">
+                  <StericMapView map={computed.map} title={nodeName(node)} fileName={`${nodeName(node)} steric map.png`} />
+                  <StericColourSelect />
+                </div>
               )}
             </div>
           )}
@@ -974,6 +995,7 @@ export function CompareStericsDialog({
           <input type="checkbox" checked={octants} onChange={(e) => setOctants(e.target.checked)} />
           <span>Show octants</span>
         </label>
+        {withMaps.length > 0 && <StericColourSelect />}
         <span className="muted small">{title}</span>
       </div>
       {profiles && profiles.length === 0 && <p className="muted">No steric profile yet. Create one in a node’s Sterics section.</p>}

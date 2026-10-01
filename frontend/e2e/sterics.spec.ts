@@ -27,6 +27,21 @@ function canvasNode(page: Page, label: string): Locator {
   return page.getByRole('group', { name: `Node ${label}`, exact: true })
 }
 
+/** The colour at the left end of a map's colour bar, under the map. */
+async function lowestColour(map: Locator): Promise<number[]> {
+  return map.evaluate((canvas: HTMLCanvasElement) => {
+    const scale = canvas.width / canvas.getBoundingClientRect().width
+    const size = canvas.getBoundingClientRect().width
+    const pixel = canvas.getContext('2d')!.getImageData(Math.round(20 * scale), Math.round((size + 15) * scale), 1, 1)
+    return Array.from(pixel.data.slice(0, 3))
+  })
+}
+
+async function near(colour: Promise<number[]>, expected: number[]): Promise<boolean> {
+  const got = await colour
+  return got.every((value, i) => Math.abs(value - expected[i]) <= 4)
+}
+
 async function newInvestigation(page: Page, name: string) {
   await page.goto('/')
   await page.getByRole('button', { name: /^New/ }).first().click()
@@ -73,7 +88,17 @@ test('buried volume and steric maps from a saved profile', async ({ page }) => {
   await section.getByRole('button', { name: 'Compute' }).click()
   await expect(section.getByLabel('Buried volume')).toContainText('%V_bur 36.1')
   await expect(section.getByLabel('Quadrants')).toContainText('NE')
-  await expect(section.getByRole('img', { name: 'Steric map of NHC' })).toBeVisible()
+  const map = section.getByRole('img', { name: 'Steric map of NHC' })
+  await expect(map).toBeVisible()
+
+  // D84: the map colours are an app setting, changed beside the map; the colour bar starts
+  // with the scheme's lowest colour (blue #cde2fb, green #1a9850).
+  await expect.poll(() => near(lowestColour(map), [0xcd, 0xe2, 0xfb])).toBe(true)
+  await section.getByLabel('Map colours').selectOption('green-yellow-red')
+  await expect.poll(() => near(lowestColour(map), [0x1a, 0x98, 0x50])).toBe(true)
+  await expect.poll(async () => (await (await page.request.get('/api/settings')).json()).steric_colours).toBe(
+    'green-yellow-red',
+  )
 
   // A changed setting puts the result out of date until it is recomputed.
   await section.getByRole('button', { name: 'Settings…' }).click()
@@ -107,5 +132,6 @@ test('buried volume and steric maps from a saved profile', async ({ page }) => {
   await compare.getByRole('button', { name: 'Save CSV' }).click()
   const saved = readFileSync(await (await download).path(), 'utf8')
   expect(saved.split('\n').filter((line) => line.includes(',36.1,'))).toHaveLength(2)
+  await compare.getByLabel('Map colours').selectOption('blue')
   await compare.getByRole('button', { name: 'Close' }).click()
 })

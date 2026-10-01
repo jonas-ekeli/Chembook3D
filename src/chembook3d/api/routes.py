@@ -341,6 +341,7 @@ class SettingsOut(BaseModel):
     crest_count: int
     hydrogens: str
     hydrogen_modes: list[str]
+    steric_colours: str
 
 
 class SettingsIn(BaseModel):
@@ -352,6 +353,7 @@ class SettingsIn(BaseModel):
     qh_cutoff: float | None = None
     crest_count: int | None = None
     hydrogens: str | None = None
+    steric_colours: str | None = None
 
 
 class FolderEntry(BaseModel):
@@ -799,6 +801,7 @@ def get_settings():
         crest_count=s.crest_count,
         hydrogens=s.hydrogens,
         hydrogen_modes=list(app_settings.HYDROGEN_MODES),
+        steric_colours=s.steric_colours,
     )
 
 
@@ -833,6 +836,10 @@ def put_settings(body: SettingsIn):
         if body.hydrogens not in app_settings.HYDROGEN_MODES:
             raise HTTPException(422, f"Unknown hydrogen display '{body.hydrogens}'")
         s.hydrogens = body.hydrogens
+    if body.steric_colours is not None:
+        if body.steric_colours not in app_settings.STERIC_COLOURS:
+            raise HTTPException(422, f"Unknown steric map colours '{body.steric_colours}'")
+        s.steric_colours = body.steric_colours
     app_settings.save(s)
     return get_settings()
 

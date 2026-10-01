@@ -193,6 +193,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-STER-03 | The node inspector shows %V_bur and, with an orientation, the quadrants, octants and steric map, always with the profile's settings. | D81, A32 | after 5 |
 | FR-STER-04 | Each result is stored with the inputs it came from and marked out of date, with the reason, when the coordinates, the profile's settings or the node's atoms change. | D81, A32 | after 5 |
 | FR-STER-05 | Compare a branch, a pathway, a group or a selection: a table and a CSV with the settings and atoms on every row, maps side by side on one colour scale, a difference map of two nodes, and map images. | D81, A32 | after 5 |
+| FR-STER-06 | Choose the steric maps' colours (blue, green–yellow–red, rainbow, viridis or grey) in the settings or beside the maps; difference maps stay blue–grey–red. | D84 | after 5 |
 
 ## FR-SEL · Selectivity (D83)
 

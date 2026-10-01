@@ -1,5 +1,5 @@
 import { ReactFlowProvider } from '@xyflow/react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   api,
   ApiError,
@@ -32,8 +32,10 @@ import { NoteEditor } from './components/NoteEditor'
 import { Outline } from './components/Outline'
 import { Overview } from './components/Overview'
 import { AnalysesView } from './components/Analyses'
+import type { HydrogenMode } from './chem'
 import { recordNames } from './names'
-import { HydrogenDisplay } from './display'
+import { HydrogenDisplay, StericColourSetting, type StericColours } from './display'
+import { StericColourSelect } from './components/Sterics'
 import {
   CloneDialog,
   ConflictDialog,
@@ -100,9 +102,36 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+/** The display settings every 3D view, card and steric map reads. */
+function Displays({
+  hydrogens,
+  sterics,
+  children,
+}: {
+  hydrogens: HydrogenMode
+  sterics: { colours: StericColours; setColours: (colours: StericColours) => void }
+  children: ReactNode
+}) {
+  return (
+    <HydrogenDisplay value={hydrogens}>
+      <StericColourSetting value={sterics}>{children}</StericColourSetting>
+    </HydrogenDisplay>
+  )
+}
+
 function App() {
   const [investigation, setInvestigation] = useState<Investigation | null | undefined>(undefined)
   const [settings, setSettings] = useState<Settings | null>(null)
+  // D84: the steric maps' colours, changed from the settings or beside any map.
+  const stericColours = useMemo(
+    () => ({
+      colours: settings?.steric_colours ?? 'blue',
+      setColours: (steric_colours: StericColours) => {
+        api.saveSettings({ steric_colours }).then(setSettings, () => undefined)
+      },
+    }),
+    [settings?.steric_colours],
+  )
   const [picker, setPicker] = useState<'open' | 'create' | null>(null)
   const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -453,7 +482,7 @@ function App() {
   const notedNode = notedNodeId ? canvas.nodes.find((n) => n.id === notedNodeId) : undefined
 
   const dialogs = (
-    <>
+    <StericColourSetting value={stericColours}>
       {notedNode && (
         <NoteEditor
           note={editedNote ?? null}
@@ -613,6 +642,11 @@ function App() {
             Applies to the 3D views and the structure cards. “Hide those bonded to carbon” keeps hydrides, O–H and N–H,
             and C–H hydrogens also close to a metal (agostic).
           </p>
+          <h3>Steric maps</h3>
+          <StericColourSelect />
+          <p className="muted small">
+            Colours from low (far below the centre) to high (crowding it). Difference maps stay blue–grey–red.
+          </p>
         </Modal>
       )}
       {sharing && (
@@ -669,7 +703,7 @@ function App() {
           }}
         />
       )}
-    </>
+    </StericColourSetting>
   )
 
   if (investigation === undefined) return <p className="loading">Connecting to backend…</p>
@@ -884,7 +918,7 @@ function App() {
   }
 
   return (
-    <HydrogenDisplay value={settings?.hydrogens ?? 'all'}>
+    <Displays hydrogens={settings?.hydrogens ?? 'all'} sterics={stericColours}>
       <div className="app">
         <header className="topbar">
           <strong className="brand">Chembook3D</strong>
@@ -1109,7 +1143,7 @@ function App() {
         )}
         {dialogs}
       </div>
-    </HydrogenDisplay>
+    </Displays>
   )
 }
 
