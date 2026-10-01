@@ -464,6 +464,89 @@ section {
   margin-top: 150px;
 }
 
+/* D82: the 3D view can pop out into a floating window inside the tab, and be put back. */
+.viewer-corner {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+}
+.popout-toggle {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  line-height: 1;
+  font-size: 15px;
+  background: rgb(255 255 255 / 0.85);
+}
+.popout-placeholder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+.popout-window {
+  position: fixed;
+  /* Above the canvas and side panel, below dialogs (.modal-backdrop is 10). */
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgb(16 24 40 / 0.25);
+  overflow: hidden;
+}
+.popout-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 32px;
+  padding: 0.2rem 0.4rem 0.2rem 0.75rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+.popout-name {
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.popout-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0.5rem 0.5rem 0.9rem;
+  overflow: auto;
+}
+.popout-body .popout-content,
+.popout-body .viewer-block {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.popout-body .viewer {
+  flex: 1;
+  height: auto;
+  min-height: 120px;
+}
+.popout-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 58%, transparent 58%, transparent 70%, var(--muted) 70%, var(--muted) 78%, transparent 78%);
+}
+
 /* History */
 .history {
   list-style: none;

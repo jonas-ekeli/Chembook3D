@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { defaultRotation, hiddenAtoms, measure, parseXyz, type HydrogenMode, type Rotation } from '../chem'
 import { HydrogenDisplay } from '../display'
 
@@ -34,7 +34,9 @@ function hideHydrogens(model: import('3dmol').GLModel, xyz: string, mode: Hydrog
  * can be saved for the card, or cleared back to the default.
  *
  * For overlays (D80), a model can be hidden without losing the view, `picking` collects
- * alignment atoms, and `imageRef` is given a function returning the view as a PNG data URL. */
+ * alignment atoms, and `imageRef` is given a function returning the view as a PNG data URL.
+ *
+ * `corner` is drawn in the view's upper right corner (the pop-out button, D82). */
 export function Viewer3D({
   models,
   vibration = null,
@@ -42,6 +44,7 @@ export function Viewer3D({
   onSaveRotation,
   picking,
   imageRef,
+  corner,
 }: {
   models: ViewerModel[]
   vibration?: { xyz: string; amplitude?: number } | null
@@ -49,6 +52,7 @@ export function Viewer3D({
   onSaveRotation?: (rotation: Rotation | null) => void
   picking?: AtomPicking
   imageRef?: MutableRefObject<(() => string) | null>
+  corner?: ReactNode
 }) {
   const hydrogens = useContext(HydrogenDisplay)
   const host = useRef<HTMLDivElement>(null)
@@ -232,6 +236,7 @@ export function Viewer3D({
       <div className="viewer">
         <div ref={host} className="viewer-canvas" data-testid="viewer3d" hidden={empty} />
         {empty && <p className="muted viewer-empty">No coordinates yet.</p>}
+        {corner && <div className="viewer-corner">{corner}</div>}
       </div>
       {!empty && !vibration && !picking && (
         <div className="measure" aria-label="Measure">

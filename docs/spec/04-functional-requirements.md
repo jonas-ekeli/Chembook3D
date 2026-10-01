@@ -176,7 +176,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 
 | ID | Requirement | Trace | Phase |
 |---|---|---|---|
-| FR-3D-01 | Show the selected node's geometry with rotate, zoom and pan; save the orientation for the structure card; hide hydrogens by a setting. | D20, D74, D75 | 1 |
+| FR-3D-01 | Show the selected node's geometry with rotate, zoom and pan; save the orientation for the structure card; hide hydrogens by a setting; pop the view out into a movable, resizable window and put it back. | D20, D74, D75, D82, A33 | 1 (pop-out after 5) |
 | FR-3D-02 | Measure distances and angles between picked atoms. | D20 | 3 |
 | FR-3D-03 | Animate any vibrational mode from a frequency calculation, with imaginary modes listed first. | D20 | 3 |
 | FR-3D-04 | Overlay 2 to 12 selected geometries, or a group's members, on one reference: aligned on all atoms, on chosen atoms (a list per structure where the numbering differs), or not aligned; optionally allowing a mirror image. Each has its own colour, a visibility switch and its RMSD over the alignment atoms and over all atoms. Save the image and a multi-structure .xyz. | D20, D80, A31 | 3 (choices after 5) |
