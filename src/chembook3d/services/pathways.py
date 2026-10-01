@@ -208,7 +208,10 @@ def branch_pathway(session: Session, branch_id: str) -> Extended:
 
 
 def _balances(
-    session: Session, paths: list[list[str]], reference_id: str
+    session: Session,
+    paths: list[list[str]],
+    reference_id: str,
+    resolved: list[list[Segment]],
 ) -> list[list[species_service.Balance]]:
     """D69: the free-species balance of every point of every pathway."""
     known: dict[str, species_service.Balance] = {reference_id: {}}
@@ -216,7 +219,7 @@ def _balances(
     graph: dict[str, species_service.Balance] | None = None
     # Pathways through the reference first, so the others can start from a shared point.
     for i in sorted(range(len(paths)), key=lambda i: reference_id not in paths[i]):
-        path, segments = paths[i], resolve(session, paths[i])
+        path, segments = paths[i], resolved[i]
         start = next((j for j, record_id in enumerate(path) if record_id in known), None)
         anchor = known
         if start is None:
@@ -267,15 +270,22 @@ def _point(
     }
 
 
-def profiles(
-    session: Session,
-    paths: list[list[str]],
-    reference_id: str | None,
-    key: LevelKey,
-    energy_type: str,
-) -> dict[str, Any]:
-    if energy_type not in ENERGY_TYPES:
-        raise RecordError(f"unknown energy type '{energy_type}'")
+@dataclass
+class Prepared:
+    """What a profile needs that does not depend on the level or the energy type, so a
+    read-only copy (A30) works it out once per reference rather than once per level and type."""
+
+    paths: list[list[str]]
+    reference_id: str
+    segments: list[list[Segment]]
+    balances: list[list[species_service.Balance]]
+    species: list[list[list[dict[str, Any]]]]
+    ends: dict[str, Endpoint]
+    steps: dict[str, ReactionStep]
+    direct: dict[str, bool]
+
+
+def prepare(session: Session, paths: list[list[str]], reference_id: str | None) -> Prepared:
     if not paths:
         raise RecordError("Choose at least one pathway")
     on_paths = {record_id for path in paths for record_id in path}
@@ -283,26 +293,50 @@ def profiles(
         reference_id = paths[0][0]
     if reference_id not in on_paths:
         raise RecordError("The reference must be a node on one of the pathways (EN-8)")
-    energies = Energies(session)
-    steps = {s.id: s for s in session.scalars(select(ReactionStep))}
-    reference = energies.value(reference_id, key, energy_type).value
-    balances = _balances(session, paths, reference_id)
+    segments = [resolve(session, path) for path in paths]
+    balances = _balances(session, paths, reference_id, segments)
+    return Prepared(
+        paths=paths,
+        reference_id=reference_id,
+        segments=segments,
+        balances=balances,
+        species=[[species_service.describe(session, b) for b in balance] for balance in balances],
+        ends={record_id: transition_service.endpoint(session, record_id) for record_id in on_paths},
+        steps={s.id: s for s in session.scalars(select(ReactionStep))},
+        direct={
+            s.transition.id: transition_service.describe(session, s.transition)["direct"]
+            for path in segments
+            for s in path
+        },
+    )
+
+
+def profiles(
+    session: Session,
+    paths: list[list[str]],
+    reference_id: str | None,
+    key: LevelKey,
+    energy_type: str,
+    *,
+    prepared: Prepared | None = None,
+    energies: Energies | None = None,
+) -> dict[str, Any]:
+    if energy_type not in ENERGY_TYPES:
+        raise RecordError(f"unknown energy type '{energy_type}'")
+    prepared = prepared or prepare(session, paths, reference_id)
+    energies = energies or Energies(session)
+    reference = energies.value(prepared.reference_id, key, energy_type).value
     shown = []
-    for path, balance in zip(paths, balances, strict=True):
-        segments = resolve(session, path)
+    for path, balance, species, segments in zip(
+        prepared.paths, prepared.balances, prepared.species, prepared.segments, strict=True
+    ):
         points = []
-        for record_id, species in zip(path, balance, strict=True):
-            point = _point(
-                session,
-                energies,
-                transition_service.endpoint(session, record_id),
-                key,
-                energy_type,
-                steps,
-            )
+        for record_id, held, described in zip(path, balance, species, strict=True):
+            end = prepared.ends[record_id]
+            point = _point(session, energies, end, key, energy_type, prepared.steps)
             value = point["value"]
-            added, missing = species_service.energy(session, energies, species, key, energy_type)
-            point["species"] = species_service.describe(session, species)
+            added, missing = species_service.energy(session, energies, held, key, energy_type)
+            point["species"] = described
             point["species_message"] = missing
             point["relative"] = (
                 value + added - reference
@@ -319,7 +353,7 @@ def profiles(
                         "forward": s.forward,
                         "status": s.transition.status,
                         # D53, INV-8: drawn as a dotted "no TS" connector, never as a barrier.
-                        "direct": transition_service.describe(session, s.transition)["direct"],
+                        "direct": prepared.direct[s.transition.id],
                     }
                     for s in segments
                 ],
@@ -329,7 +363,7 @@ def profiles(
         "level": key.encode(),
         "level_label": key_label(session, key),
         "type": energy_type,
-        "reference_id": reference_id,
+        "reference_id": prepared.reference_id,
         "reference_value": reference,
         "temperature": energies.temperature,
         "cutoff": energies.cutoff,
@@ -355,13 +389,18 @@ def table(
     key: LevelKey,
     energy_type: str,
     unit: str,
+    *,
+    data: dict[str, Any] | None = None,
+    energies: Energies | None = None,
 ) -> dict[str, Any]:
     """FR-EN-06, D44: one row per node on the pathways, in pathway order. Values are already
-    formatted, so the screen and the CSV file show the same text (T-EN-08)."""
+    formatted, so the screen and the CSV file show the same text (T-EN-08). `data` is the
+    profile of the same pathways, reference, level and type when the caller has it already."""
     if unit not in units.HARTREE_IN:
         raise RecordError(f"unknown energy unit '{unit}'")
-    data = profiles(session, paths, reference_id, key, energy_type)
-    energies = Energies(session)
+    energies = energies or Energies(session)
+    if data is None:
+        data = profiles(session, paths, reference_id, key, energy_type, energies=energies)
     branch_names = {b.id: b.name or "Unnamed branch" for b in session.scalars(select(Branch))}
     label = data["level_label"]
     qh = f"G_qh {data['temperature']:g} K {data['cutoff']:g} cm-1"

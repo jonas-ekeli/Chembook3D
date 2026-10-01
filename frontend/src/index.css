@@ -1067,6 +1067,10 @@ legend {
   height: 11px;
   background: var(--accent);
 }
+/* The shared read-only copy (D79): arrows still attach to the handles, which are not shown */
+.canvas.read-only .react-flow__handle {
+  visibility: hidden;
+}
 
 /* Inspectors for branches, groups, transitions, selections */
 .transition-ends {

@@ -822,6 +822,33 @@ export const api = {
     return response.blob()
   },
 
+  /** D79: the investigation as one read-only HTML file, with the drawer's pathways (A30). */
+  exportSnapshot: async (
+    paths: { ids: string[]; branch_id: string | null }[],
+    referenceId: string | null,
+  ): Promise<{ blob: Blob; name: string }> => {
+    const response = await fetch('/api/snapshot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths, reference_id: referenceId }),
+    })
+    if (!response.ok) {
+      let detail: unknown = null
+      try {
+        detail = ((await response.json()) as { detail?: unknown }).detail
+      } catch {
+        // not JSON
+      }
+      throw new ApiError(response.status, detail)
+    }
+    const header = response.headers.get('Content-Disposition') ?? ''
+    const encoded = /filename\*=UTF-8''([^;]+)/.exec(header)
+    return {
+      blob: await response.blob(),
+      name: encoded ? decodeURIComponent(encoded[1]) : 'investigation read-only.html',
+    }
+  },
+
   modes: (calculationId: string) => request<Modes>('GET', `/calculations/${calculationId}/modes`),
   overlay: (body: OverlayRequest) => request<Overlay>('POST', '/overlay', body),
   alignmentSets: () => request<AlignmentSet[]>('GET', '/alignment-sets'),

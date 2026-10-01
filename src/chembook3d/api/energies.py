@@ -124,13 +124,10 @@ def energy_options(session: DbSession):
     )
 
 
-@router.get("/energies/view", response_model=EnergyViewOut)
-def energy_view(level: str, type: str, session: DbSession, reference: str | None = None):
-    """Every node's and group's value at one selection, and ΔX on every edge (FR-EN-02).
-    With a reference, also every node's and group's ΔX from it, balanced by the free species
-    along the route from the reference (D72)."""
-    key = _key(level)
-    energies = Energies(session)
+def view_values(
+    session, energies: Energies, key: LevelKey, type: str
+) -> tuple[dict[str, ValueOut], dict[str, EdgeValueOut]]:
+    """Every node's and group's value at one selection, and ΔX on every edge (FR-EN-02)."""
     values = {
         record_id: ValueOut(**energies.value(record_id, key, type).as_dict())
         for record_id in [*energies.nodes, *energies.groups]
@@ -149,26 +146,59 @@ def energy_view(level: str, type: str, session: DbSession, reference: str | None
             direct=transition_service.describe(session, transition)["direct"],
             message=message,
         )
+    return values, edges
+
+
+def relative_values(
+    session,
+    energies: Energies,
+    values: dict[str, ValueOut],
+    key: LevelKey,
+    type: str,
+    reference: str,
+    balances: dict[str, species_service.Balance] | None = None,
+) -> dict[str, RelativeOut]:
+    """Every node's and group's ΔX from the reference, balanced by the free species along the
+    route from the reference (D72). `balances` is `balances_from` the reference, when the
+    caller has it already."""
     relative = {}
-    if reference is not None:
-        # A reference deleted meanwhile leaves every card without a value, not an error.
-        base = values[reference].value if reference in values else None
-        balances = species_service.balances_from(session, reference) if reference in values else {}
-        for record_id, own in values.items():
-            balance = balances.get(record_id, {})
-            added, message = species_service.energy(session, energies, balance, key, type)
-            if own.value is None:
-                message = own.message or "no value at this level"
-            elif reference not in values:
-                message = "the reference is no longer on the canvas"
-            elif base is None:
-                message = "the reference has no value at this level"
-            relative[record_id] = RelativeOut(
-                value=own.value + added - base if message is None else None,
-                species=[SpeciesCountOut(**s) for s in species_service.describe(session, balance)],
-                message=message,
-                joined=record_id in balances,
-            )
+    # A reference deleted meanwhile leaves every card without a value, not an error.
+    base = values[reference].value if reference in values else None
+    if reference not in values:
+        balances = {}
+    elif balances is None:
+        balances = species_service.balances_from(session, reference)
+    for record_id, own in values.items():
+        balance = balances.get(record_id, {})
+        added, message = species_service.energy(session, energies, balance, key, type)
+        if own.value is None:
+            message = own.message or "no value at this level"
+        elif reference not in values:
+            message = "the reference is no longer on the canvas"
+        elif base is None:
+            message = "the reference has no value at this level"
+        relative[record_id] = RelativeOut(
+            value=own.value + added - base if message is None else None,
+            species=[SpeciesCountOut(**s) for s in species_service.describe(session, balance)],
+            message=message,
+            joined=record_id in balances,
+        )
+    return relative
+
+
+@router.get("/energies/view", response_model=EnergyViewOut)
+def energy_view(level: str, type: str, session: DbSession, reference: str | None = None):
+    """Every node's and group's value at one selection, and ΔX on every edge (FR-EN-02).
+    With a reference, also every node's and group's ΔX from it, balanced by the free species
+    along the route from the reference (D72)."""
+    key = _key(level)
+    energies = Energies(session)
+    values, edges = view_values(session, energies, key, type)
+    relative = (
+        relative_values(session, energies, values, key, type, reference)
+        if reference is not None
+        else {}
+    )
     return EnergyViewOut(
         level=level,
         type=type,

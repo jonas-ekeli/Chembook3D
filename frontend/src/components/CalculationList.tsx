@@ -7,13 +7,10 @@ import {
   type LevelFields,
   type SourceFile,
 } from '../api'
+import { hartree } from '../util'
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
-}
-
-function hartree(value: number | null | undefined, digits = 6): string {
-  return value === null || value === undefined ? '—' : `${value.toFixed(digits)} Eh`
 }
 
 const LEVEL_FIELDS: { key: keyof LevelFields; label: string }[] = [
@@ -147,6 +144,89 @@ function SourceFileBox({ source, onChanged }: { source: SourceFile; onChanged: (
   )
 }
 
+/** Key results of a calculation (FR-CALC-01); also shown by the read-only copy (D79). */
+export function ResultValues({ calculation }: { calculation: Pick<Calculation, 'result' | 'quasi_harmonic'> }) {
+  const r = calculation.result
+  if (!r) return null
+  return (
+    <dl className="values">
+      <dt>E(SCF)</dt>
+      <dd className="mono">{hartree(r.energy, 8)}</dd>
+      {r.optimization_converged !== null && (
+        <>
+          <dt>Optimization</dt>
+          <dd>
+            {r.optimization_converged ? 'converged' : 'not converged'}, {r.geometry_count} geometries
+          </dd>
+        </>
+      )}
+      {r.zpe !== null && (
+        <>
+          <dt>ZPE</dt>
+          <dd className="mono">{hartree(r.zpe)}</dd>
+          <dt>Thermal corr. to H, G</dt>
+          <dd className="mono">
+            {hartree(r.h_corr)}, {hartree(r.g_corr)}
+          </dd>
+          <dt>H, G</dt>
+          <dd className="mono">
+            {hartree(r.h)}, {hartree(r.g)}
+          </dd>
+          <dt>T, P</dt>
+          <dd>
+            {r.temperature} K, {r.pressure} atm
+          </dd>
+          {calculation.quasi_harmonic && (
+            <>
+              <dt>
+                G_qh corr. ({calculation.quasi_harmonic.temperature} K, {calculation.quasi_harmonic.cutoff} cm⁻¹)
+              </dt>
+              <dd className="mono" aria-label="Quasi-harmonic correction">
+                {calculation.quasi_harmonic.correction !== null ? (
+                  <>
+                    {hartree(calculation.quasi_harmonic.correction)}{' '}
+                    <span className="muted small">
+                      (printed G corr. {hartree(r.g_corr)}; {calculation.quasi_harmonic.raised_modes} modes raised
+                      {calculation.quasi_harmonic.imaginary_excluded
+                        ? `, ${calculation.quasi_harmonic.imaginary_excluded} imaginary left out`
+                        : ''}
+                      )
+                    </span>
+                  </>
+                ) : (
+                  <span title={calculation.quasi_harmonic.code ?? undefined}>
+                    n/a: {calculation.quasi_harmonic.message}
+                  </span>
+                )}
+              </dd>
+            </>
+          )}
+          <dt>Mass, symmetry number</dt>
+          <dd>
+            {r.molecular_mass} amu, σ = {r.symmetry_number ?? '—'} ({r.point_group ?? '—'})
+          </dd>
+        </>
+      )}
+      {r.frequencies.length > 0 && (
+        <>
+          <dt>Frequencies</dt>
+          <dd>
+            {r.frequencies.length} ({r.imaginary_count} imaginary):{' '}
+            <span className="mono">
+              {r.frequencies
+                .slice(0, 12)
+                .map((f) => f.toFixed(1))
+                .join(', ')}
+              {r.frequencies.length > 12 && ', …'}
+            </span>{' '}
+            cm⁻¹
+          </dd>
+        </>
+      )}
+    </dl>
+  )
+}
+
 function Details({
   calculation,
   levels,
@@ -158,7 +238,6 @@ function Details({
   onSaved: (c: Calculation) => void
   onChanged: () => void
 }) {
-  const r = calculation.result
   return (
     <div className="calc-details">
       <p className="muted small">
@@ -169,83 +248,7 @@ function Details({
         {calculation.title && <> · “{calculation.title}”</>}
       </p>
       {calculation.route && <pre className="route">{calculation.route}</pre>}
-      {r && (
-        <dl className="values">
-          <dt>E(SCF)</dt>
-          <dd className="mono">{hartree(r.energy, 8)}</dd>
-          {r.optimization_converged !== null && (
-            <>
-              <dt>Optimization</dt>
-              <dd>
-                {r.optimization_converged ? 'converged' : 'not converged'}, {r.geometry_count} geometries
-              </dd>
-            </>
-          )}
-          {r.zpe !== null && (
-            <>
-              <dt>ZPE</dt>
-              <dd className="mono">{hartree(r.zpe)}</dd>
-              <dt>Thermal corr. to H, G</dt>
-              <dd className="mono">
-                {hartree(r.h_corr)}, {hartree(r.g_corr)}
-              </dd>
-              <dt>H, G</dt>
-              <dd className="mono">
-                {hartree(r.h)}, {hartree(r.g)}
-              </dd>
-              <dt>T, P</dt>
-              <dd>
-                {r.temperature} K, {r.pressure} atm
-              </dd>
-              {calculation.quasi_harmonic && (
-                <>
-                  <dt>
-                    G_qh corr. ({calculation.quasi_harmonic.temperature} K, {calculation.quasi_harmonic.cutoff} cm⁻¹)
-                  </dt>
-                  <dd className="mono" aria-label="Quasi-harmonic correction">
-                    {calculation.quasi_harmonic.correction !== null ? (
-                      <>
-                        {hartree(calculation.quasi_harmonic.correction)}{' '}
-                        <span className="muted small">
-                          (printed G corr. {hartree(r.g_corr)}; {calculation.quasi_harmonic.raised_modes} modes raised
-                          {calculation.quasi_harmonic.imaginary_excluded
-                            ? `, ${calculation.quasi_harmonic.imaginary_excluded} imaginary left out`
-                            : ''}
-                          )
-                        </span>
-                      </>
-                    ) : (
-                      <span title={calculation.quasi_harmonic.code ?? undefined}>
-                        n/a: {calculation.quasi_harmonic.message}
-                      </span>
-                    )}
-                  </dd>
-                </>
-              )}
-              <dt>Mass, symmetry number</dt>
-              <dd>
-                {r.molecular_mass} amu, σ = {r.symmetry_number ?? '—'} ({r.point_group ?? '—'})
-              </dd>
-            </>
-          )}
-          {r.frequencies.length > 0 && (
-            <>
-              <dt>Frequencies</dt>
-              <dd>
-                {r.frequencies.length} ({r.imaginary_count} imaginary):{' '}
-                <span className="mono">
-                  {r.frequencies
-                    .slice(0, 12)
-                    .map((f) => f.toFixed(1))
-                    .join(', ')}
-                  {r.frequencies.length > 12 && ', …'}
-                </span>{' '}
-                cm⁻¹
-              </dd>
-            </>
-          )}
-        </dl>
-      )}
+      <ResultValues calculation={calculation} />
       <LevelEditor key={calculation.level?.id ?? 'none'} calculation={calculation} levels={levels} onSaved={onSaved} />
       {calculation.source_file && <SourceFileBox source={calculation.source_file} onChanged={onChanged} />}
     </div>
