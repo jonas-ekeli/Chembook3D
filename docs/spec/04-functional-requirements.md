@@ -184,6 +184,16 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-3D-06 | Copy xyz to the clipboard and save a .xyz file from the node inspector. | D39 | 1 |
 | FR-3D-07 | Named alignment sets keep each node's alignment atoms in the investigation, to reuse and extend. | D80, A31 | after 5 |
 
+## FR-STER · Buried volume and steric maps (D81)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-STER-01 | Named steric profiles keep the sphere radius, radii and their scale, whether hydrogens count, the mesh and the map's colour scale, and per node the centre (an atom or a centroid), the orientation (z-axis and xz-plane atoms) and the atoms left out. | D81, A32 | after 5 |
+| FR-STER-02 | A node's atoms are typed or picked in the 3D view, with helpers that leave out one side of a bond or everything but one ligand. A node with the same elements in the same order can use another node's atoms. | D81 | after 5 |
+| FR-STER-03 | The node inspector shows %V_bur and, with an orientation, the quadrants, octants and steric map, always with the profile's settings. | D81, A32 | after 5 |
+| FR-STER-04 | Each result is stored with the inputs it came from and marked out of date, with the reason, when the coordinates, the profile's settings or the node's atoms change. | D81, A32 | after 5 |
+| FR-STER-05 | Compare a branch, a pathway, a group or a selection: a table and a CSV with the settings and atoms on every row, maps side by side on one colour scale, a difference map of two nodes, and map images. | D81, A32 | after 5 |
+
 ## FR-SHARE · Read-only copy to share (D79)
 
 | ID | Requirement | Trace | Phase |

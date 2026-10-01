@@ -491,3 +491,51 @@ class AlignmentSetAtoms(Base):
     )
     atoms: Mapped[list[Any]] = mapped_column(default=list)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class StericProfile(Base):
+    """D81, FR-STER-01: a named, saved parameter set for buried volume and steric maps
+    (SambVca-style). Its atoms are kept per node, as alignment sets keep theirs (D80).
+    Layout-like data: saved in the investigation but not in the history (A32)."""
+
+    __tablename__ = "steric_profiles"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    radius: Mapped[float] = mapped_column(default=3.5)  # sphere radius, Å
+    radii: Mapped[str] = mapped_column(String(16), default="bondi")  # bondi | crc
+    radii_scale: Mapped[float] = mapped_column(default=1.17)
+    include_hydrogens: Mapped[bool] = mapped_column(default=False)
+    mesh: Mapped[float] = mapped_column(default=0.1)  # grid step for the volume and map, Å
+    # The map's colour scale runs from -map_limit to +map_limit Å; None means the radius.
+    map_limit: Mapped[float | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    entries: Mapped[list["StericProfileAtoms"]] = relationship(
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by=lambda: (StericProfileAtoms.created_at, StericProfileAtoms.node_id),
+    )
+
+
+class StericProfileAtoms(Base):
+    """One node's atoms in a steric profile (1-based numbers of the full structure), and the
+    last result computed for it together with the inputs it was computed from, so the app
+    can tell when the result is out of date. Deleting the node removes it from the profile."""
+
+    __tablename__ = "steric_profile_atoms"
+
+    profile_id: Mapped[str] = mapped_column(
+        ForeignKey("steric_profiles.id", ondelete="CASCADE"), primary_key=True
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    centre: Mapped[list[Any]] = mapped_column(default=list)  # one atom, or a centroid's atoms
+    z_axis: Mapped[list[Any]] = mapped_column(default=list)  # empty: not oriented
+    xz_plane: Mapped[list[Any]] = mapped_column(default=list)
+    excluded: Mapped[list[Any]] = mapped_column(default=list)
+    result: Mapped[dict[str, Any] | None] = mapped_column(default=None)
+    result_inputs: Mapped[dict[str, Any] | None] = mapped_column(default=None)
+    computed_at: Mapped[datetime | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)

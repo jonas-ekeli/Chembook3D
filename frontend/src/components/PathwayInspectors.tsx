@@ -21,6 +21,7 @@ import {
 import { Modal } from './Modal'
 import { Notes, TextField } from './Fields'
 import { MAX_OVERLAY, OverlayDialog } from './OverlayDialog'
+import { CompareStericsDialog } from './Sterics'
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -326,6 +327,7 @@ export function BranchInspector({
 }) {
   const [error, setError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState(false)
+  const [sterics, setSterics] = useState(false)
   const byId = new Map(canvas.branches.map((b) => [b.id, b]))
   const update = (fields: Parameters<typeof api.updateBranch>[1]) =>
     api.updateBranch(branch.id, fields).then(onChanged, (err: unknown) => setError(errorText(err)))
@@ -424,7 +426,23 @@ export function BranchInspector({
             </li>
           ))}
         </ul>
+        <div className="buttons">
+          <button
+            disabled={!members.some((n) => n.xyz)}
+            onClick={() => setSterics(true)}
+            title="Buried volume and steric maps of the branch's nodes (D81)"
+          >
+            Compare sterics
+          </button>
+        </div>
       </section>
+      {sterics && (
+        <CompareStericsDialog
+          nodes={members.filter((n) => n.xyz)}
+          title={`Nodes of “${branchName(branch)}”`}
+          onClose={() => setSterics(false)}
+        />
+      )}
       {confirm && (
         <Modal
           title="Delete branch?"
@@ -618,6 +636,7 @@ export function GroupInspector({
   const [removingMember, setRemovingMember] = useState<Node | null>(null)
   const [sorted, setSorted] = useState(false)
   const [overlay, setOverlay] = useState(false)
+  const [sterics, setSterics] = useState(false)
   const update = (fields: Parameters<typeof api.updateGroup>[1]) =>
     api.updateGroup(group.id, fields).then(onChanged, (err: unknown) => setError(errorText(err)))
   const byId = new Map(canvas.branches.map((b) => [b.id, b]))
@@ -773,6 +792,13 @@ export function GroupInspector({
           >
             Overlay members
           </button>
+          <button
+            disabled={shapes.length < 1}
+            onClick={() => setSterics(true)}
+            title="Buried volume and steric maps of the members (D81)"
+          >
+            Compare sterics
+          </button>
         </div>
         {shapes.length > MAX_OVERLAY && (
           <p className="muted small">
@@ -782,6 +808,9 @@ export function GroupInspector({
       </section>
       <Notes key={group.notes} notes={group.notes} onSave={(notes) => update({ notes })} />
       {overlay && <OverlayDialog nodes={shapes} onClose={() => setOverlay(false)} />}
+      {sterics && (
+        <CompareStericsDialog nodes={shapes} title={`Members of “${group.label || 'Group'}”`} onClose={() => setSterics(false)} />
+      )}
       {removing && <RemoveGroupDialog group={group} onClose={() => setRemoving(false)} onDone={onRemoved} />}
       {removingMember && (
         <RemoveMemberDialog
@@ -945,6 +974,7 @@ export function SelectionInspector({
   const [reconnecting, setReconnecting] = useState(false)
   const [adding, setAdding] = useState(false)
   const [overlay, setOverlay] = useState(false)
+  const [sterics, setSterics] = useState(false)
   const assign = (fields: { step_id?: string | null; branch_id?: string | null }) =>
     Promise.all(nodes.map((n) => api.updateNode(n.id, fields))).then(
       () => {
@@ -1028,6 +1058,13 @@ export function SelectionInspector({
         >
           Overlay in 3D
         </button>
+        <button
+          disabled={nodes.filter((n) => n.xyz).length < 1}
+          onClick={() => setSterics(true)}
+          title="Buried volume and steric maps of the selected nodes (D81)"
+        >
+          Compare sterics
+        </button>
       </div>
       {groups.length === 0 && free.length !== nodes.length && (
         <p className="muted small">Some selected nodes are already in a group.</p>
@@ -1061,6 +1098,9 @@ export function SelectionInspector({
         />
       )}
       {overlay && nodes.length >= 2 && <OverlayDialog nodes={nodes} onClose={() => setOverlay(false)} />}
+      {sterics && (
+        <CompareStericsDialog nodes={nodes.filter((n) => n.xyz)} title={describeSelection(nodes, [])} onClose={() => setSterics(false)} />
+      )}
     </div>
   )
 }

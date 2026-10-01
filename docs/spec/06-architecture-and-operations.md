@@ -73,7 +73,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Confirmed items are marked
 | NFR-SEC-03 | The app stores no passwords or tokens. Git sync signs in through the credential helper of the `git` installed on the computer, never through the app. | D71 |
 | NFR-PERF-01 | **No numerical performance targets are set.** Jonas has not confirmed any. The implementer should report load and render times on the reference example and on a stress case (see [07](07-validation-and-test-plan.md)) so targets can be set later. | HANDOFF |
 | NFR-UX-01 | Every destructive action (delete node, remove group member, delete step) asks for confirmation and lists what is affected. | P3 |
-| NFR-LIC-01 | Third-party libraries must allow use and redistribution in a tool Jonas may share (P27: permissive licences preferred; React Flow MIT, 3Dmol.js BSD, cclib BSD, FastAPI MIT). | D6 |
+| NFR-LIC-01 | Third-party libraries must allow use and redistribution in a tool Jonas may share (P27: permissive licences preferred; React Flow MIT, 3Dmol.js BSD, cclib BSD, FastAPI MIT, morfeus MIT with SciPy BSD, D81). | D6 |
 
 ## 6. Decisions needed before implementation
 

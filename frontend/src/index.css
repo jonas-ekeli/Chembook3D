@@ -1372,3 +1372,91 @@ button.chip {
 input.count {
   width: 4rem;
 }
+
+/* Buried volume and steric maps (D81) */
+.sterics .section-head select {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+.sterics .section-head button {
+  white-space: nowrap;
+}
+.steric-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-top: 0.5rem;
+}
+.steric-result.is-stale {
+  opacity: 0.55;
+}
+.stale {
+  color: #b54708;
+  margin: 0.35rem 0 0;
+}
+.steric-total {
+  font-size: 15px;
+  margin-bottom: 0.4rem;
+}
+.steric-total strong {
+  font-size: 20px;
+}
+table.steric-quadrants,
+table.steric-octants {
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 0.5rem;
+}
+table.steric-quadrants td {
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.6rem;
+  min-width: 5rem;
+}
+table.steric-octants th,
+table.steric-octants td {
+  padding: 0.1rem 0.5rem 0.1rem 0;
+  text-align: right;
+}
+.steric-map {
+  margin: 0;
+  display: grid;
+  gap: 0.2rem;
+  justify-items: start;
+}
+.steric-map figcaption {
+  font-size: 12px;
+  font-weight: 600;
+}
+.steric-map canvas {
+  display: block;
+}
+.steric-map-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  justify-content: space-between;
+}
+.steric-maps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.steric-atoms {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+.steric-atoms .overlay-lists input {
+  width: 12rem;
+}
+.steric-atoms-viewer .viewer {
+  height: 380px;
+}
+@media (max-width: 800px) {
+  .steric-atoms {
+    grid-template-columns: 1fr;
+  }
+}

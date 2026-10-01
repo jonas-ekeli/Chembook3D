@@ -7,11 +7,13 @@ import {
   type Canvas,
   type EnergyTable,
   type EnergyType,
+  type Node,
   type Profiles,
   type ProfileRequest,
   type Settings,
 } from '../api'
 import { closesCycle, download } from '../util'
+import { CompareStericsDialog } from './Sterics'
 
 const NO_BRANCH = '#98a2b3'
 const FALLBACK = ['#2459c6', '#c4320a', '#079455', '#6938ef', '#b54708']
@@ -314,6 +316,7 @@ export function EnergyDrawer({
   const [profiles, setProfiles] = useState<Profiles | null>(null)
   const [table, setTable] = useState<EnergyTable | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [sterics, setSterics] = useState<string[] | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
   const labels = useMemo(() => {
@@ -325,6 +328,17 @@ export function EnergyDrawer({
   const branches = useMemo(() => new Map(canvas.branches.map((b) => [b.id, b])), [canvas.branches])
   const branchOf = (id: string) =>
     canvas.nodes.find((n) => n.id === id)?.branch_id ?? canvas.groups.find((g) => g.id === id)?.outgoing_branch_id ?? null
+
+  // D81: a pathway's structures in order, each once; a group counts through its representative.
+  const pathwayNodes = (ids: string[]) => {
+    const found: Node[] = []
+    for (const id of ids) {
+      const group = canvas.groups.find((g) => g.id === id)
+      const node = canvas.nodes.find((n) => n.id === (group ? group.representative_id : id))
+      if (node?.xyz && !found.includes(node)) found.push(node)
+    }
+    return found
+  }
 
   // Records can be deleted elsewhere; drop pathways that lost a node.
   const livePaths = paths.filter((p) => p.ids.every((id) => labels.has(id)))
@@ -480,6 +494,13 @@ export function EnergyDrawer({
                 >
                   Undo step
                 </button>
+                <button
+                  className="small"
+                  onClick={() => setSterics(path.ids)}
+                  title="Buried volume and steric maps along this pathway; a group counts through its representative (D81)"
+                >
+                  Sterics
+                </button>
                 <button className="small" onClick={() => replace(index, null)} aria-label={`Remove pathway ${names[index]}`}>
                   ✕
                 </button>
@@ -590,6 +611,13 @@ export function EnergyDrawer({
           )}
         </div>
       </div>
+      {sterics && (
+        <CompareStericsDialog
+          nodes={pathwayNodes(sterics)}
+          title="Nodes along the pathway; groups through their representatives"
+          onClose={() => setSterics(null)}
+        />
+      )}
     </section>
   )
 }

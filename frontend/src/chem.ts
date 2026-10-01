@@ -258,3 +258,26 @@ export function formatAtomList(numbers: number[]): string {
   }
   return parts.join(', ')
 }
+
+/** D81: the atoms reached from `from` through bonds without passing through any atom in
+ * `cut` (0-based). Taking away the metal atom gives a ligand; taking away one bonded
+ * neighbour gives the side of that bond holding `from`. */
+export function fragment(atoms: Atom[], from: number, cut: number[], pairs: [number, number][] = bonds(atoms)): number[] {
+  const blocked = new Set(cut)
+  const neighbours = new Map<number, number[]>()
+  for (const [i, j] of pairs) {
+    neighbours.set(i, [...(neighbours.get(i) ?? []), j])
+    neighbours.set(j, [...(neighbours.get(j) ?? []), i])
+  }
+  const seen = new Set([from])
+  const queue = [from]
+  while (queue.length) {
+    const next = queue.shift()!
+    for (const other of neighbours.get(next) ?? []) {
+      if (blocked.has(other) || seen.has(other)) continue
+      seen.add(other)
+      queue.push(other)
+    }
+  }
+  return [...seen].sort((a, b) => a - b)
+}

@@ -50,6 +50,8 @@ Investigation
  ├── Transition (source Node|GroupNode → target Node|GroupNode, status, notes)
  │     └── species: [free-species Node, joins|leaves, count][0..n]   (D69)
  ├── AlignmentSet ── per node: atom numbers   (D80; layout-like, no history)
+ ├── StericProfile ── settings; per node: centre, orientation, left-out atoms, last result
+ │                    (D81; layout-like, no history)
  ├── LevelOfTheory registry, named custom basis sets
  └── ChangeHistory entries
 ```
