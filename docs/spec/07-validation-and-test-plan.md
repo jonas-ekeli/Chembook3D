@@ -62,6 +62,11 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-OVL-01 | Overlay a structure and its rotated, translated copy with extra atoms, on chosen atoms | RMSD over the chosen atoms 0; paired atoms of different elements, fewer than three atoms or numbers out of range are refused with the reason (FR-3D-04) |
 | T-OVL-02 | Overlay a structure and its mirror image, with and without "Allow mirror image" | Without: RMSD above 0, not mirrored; with: RMSD 0 and marked mirrored |
 | T-OVL-03 | Save an alignment set, reopen the investigation, add a node, delete a node | The set keeps each node's atoms, gains the new one, loses the deleted one, and writes no history (FR-3D-07, A31) |
+| T-STER-01 | %V_bur of the 18 complexes in morfeus's test data, with SambVca's values (among them Ni(CO)3 with an NHC and an NHC iridium complex) | Within 0.3 of SambVca at its standard settings (FR-STER-01) |
+| T-STER-02 | A probe atom inside one quadrant, and the same structure turned and shifted | Buried only in that quadrant, mostly in its −z octant; the same values and map both ways; their difference map is zero (FR-STER-03, FR-STER-05) |
+| T-STER-03 | A centroid centre; hydrogens, CRC radii, the scale and the mesh changed; settings and atoms out of range; orientation atoms that fix no frame | Each setting changes the value the expected way; refusals give the reason (FR-STER-01) |
+| T-STER-04 | Change the settings, the colour scale, a node's atoms and its coordinates; share atoms between nodes; reopen; delete a node | Out of date with the right reason, but not for the colour scale; sharing is refused when the elements differ; kept on reopen; no history; the deleted node leaves the profile (FR-STER-02, FR-STER-04, A32) |
+| T-STER-05 | Save the comparison CSV, with one node not in the profile | Values, settings and atoms on every row; the missing node says why (FR-STER-05) |
 
 ## 5. Import and parsing tests
 
@@ -131,6 +136,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-02 | View modes and filters | Switching modes and filters never changes stored data |
 | T-UI-03 | 3D | Rotate, measure, animate the imaginary mode, overlay two nodes, overlay three on typed atoms and save the set, copy xyz |
 | T-UI-04 | Canvas and profile image export | Files are produced and open in a standard viewer |
+| T-UI-05 | Sterics | Create a profile, type the atoms, compute (36.1 %V_bur for the NHC complex), see it go out of date after a setting change, share the atoms with a turned copy, compare both with maps, a difference map and a CSV (FR-STER-01…05) |
 
 ## 8. Performance observation (no targets)
 

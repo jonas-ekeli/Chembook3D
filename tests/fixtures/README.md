@@ -7,4 +7,6 @@
 | `xtb/` | `dvb_sp.out`, `dvb_opt.out`, `dvb_ir.out` (xTB 6.6.1) | cclib regression data, same commit, `data/XTB/basicXTB6.6.1/` | BSD-3-Clause, `xtb/LICENSE-cclib.txt` |
 | `crest/` | `crest_conformers.xyz` (74 conformers, 14 atoms) | CENSO's test fixtures, [grimme-lab/CENSO](https://github.com/grimme-lab/CENSO) commit `1a82c5a`, `test/unit/fixtures/` | LGPL-3.0, `crest/COPYING.LESSER-CENSO.txt` |
 
+| `sterics/` | `1.xyz` … `18.xyz` (metal complexes, the metal is atom 1) and `reference_data.csv` (the atoms left out and SambVca's %V_bur for each, 3.5 Å, Bondi ×1.17, no hydrogens) | morfeus's buried volume test data, [digital-chemistry-laboratory/morfeus](https://github.com/digital-chemistry-laboratory/morfeus) commit `e5dacf9`, `tests/data/buried_volume/` (line endings changed to LF) | MIT, `sterics/LICENSE-morfeus.txt` |
+
 The files are unchanged copies. Cases none of them cover (ORCA `opt freq`, xTB `--ohess`, multi-job ORCA files) are made in the tests by joining two real files. A Gaussian `--Link1--` chain with a custom GenECP basis set and dispersion set by IOps (D59) is written by `tests/gaussian_text.py` (`custom_chain`, `custom_single_point`).

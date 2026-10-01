@@ -19,6 +19,7 @@ import { usePopOut } from '../popOut'
 import { HistoryList } from './HistoryList'
 import { Modal } from './Modal'
 import { SplitDialog } from './PathwayInspectors'
+import { StericsSection } from './Sterics'
 import { recordNames } from '../names'
 import { Vibrations } from './Vibrations'
 import { Viewer3D } from './Viewer3D'
@@ -489,6 +490,8 @@ export function NodeInspector({
         <h3>Calculations</h3>
         <CalculationList nodeId={node.id} refreshKey={refreshKey} onChanged={onRefresh} />
       </section>
+
+      <StericsSection node={node} nodes={nodes} />
 
       <section aria-label="Node history">
         <h3>History of this node</h3>

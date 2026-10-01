@@ -273,6 +273,60 @@ export type Overlay = { align: OverlayAlign; structures: OverlayStructure[] }
 /** FR-3D-07: a named list of alignment atoms per node. */
 export type AlignmentSet = { id: string; name: string; atoms: Record<string, number[]> }
 
+/** D81: one node's atoms in a steric profile, 1-based numbers of the full structure. The
+ * z-axis and xz-plane atoms orient the sphere (both or neither). */
+export type StericAtoms = { centre: number[]; z_axis: number[]; xz_plane: number[]; excluded: number[] }
+
+export type StericRadii = 'bondi' | 'crc'
+
+export type StericSettings = {
+  radius: number
+  radii: StericRadii
+  radii_scale: number
+  include_hydrogens: boolean
+  mesh: number
+  /** The map's colour scale runs from −limit to +limit Å; null means the sphere radius. */
+  map_limit: number | null
+}
+
+export type StericValues = {
+  buried_percent: number
+  buried_volume: number
+  sphere_volume: number
+  atoms_counted: number
+  /** NE, NW, SW, SE; null without an orientation. */
+  quadrants: Record<string, number> | null
+  /** NE+, NE-, …: the quadrant above (+) or below (−) the xy-plane. */
+  octants: Record<string, number> | null
+  /** Elements the radii table lacks; morfeus uses 2.0 Å for them. */
+  missing_radii: string[]
+}
+
+export type StericProfile = StericSettings & {
+  id: string
+  name: string
+  atoms: Record<string, StericAtoms>
+  /** The last result per node; `stale` says why it is out of date. */
+  results: Record<string, { values: StericValues; computed_at: string | null; stale: string | null }>
+}
+
+/** A steric map: heights z (Å) over the grid, rows along y from −r, columns along x. */
+export type StericMap = { x: number[]; z: (number | null)[][]; limit: number }
+
+export type StericComputed = {
+  node_id: string
+  label: string
+  values: StericValues | null
+  map: StericMap | null
+  error: string | null
+  computed_at: string | null
+}
+
+export type StericProfileFields = Partial<StericSettings> & {
+  name?: string
+  atoms?: Record<string, StericAtoms | { same_as: string } | null>
+}
+
 export type HistoryEntry = {
   id: number
   timestamp: string
@@ -857,6 +911,24 @@ export const api = {
   updateAlignmentSet: (id: string, fields: { name?: string; atoms?: Record<string, number[] | null> }) =>
     request<AlignmentSet>('PATCH', `/alignment-sets/${id}`, fields),
   deleteAlignmentSet: (id: string) => request<void>('DELETE', `/alignment-sets/${id}`),
+  stericProfiles: () => request<StericProfile[]>('GET', '/steric-profiles'),
+  createStericProfile: (fields: StericProfileFields) => request<StericProfile>('POST', '/steric-profiles', fields),
+  updateStericProfile: (id: string, fields: StericProfileFields) =>
+    request<StericProfile>('PATCH', `/steric-profiles/${id}`, fields),
+  deleteStericProfile: (id: string) => request<void>('DELETE', `/steric-profiles/${id}`),
+  computeSterics: (id: string, nodeIds: string[], maps = false) =>
+    request<StericComputed[]>('POST', `/steric-profiles/${id}/compute`, { node_ids: nodeIds, maps }),
+  stericDifference: (id: string, firstId: string, secondId: string) =>
+    request<StericMap>('POST', `/steric-profiles/${id}/difference`, { first_id: firstId, second_id: secondId }),
+  stericTableCsv: async (id: string, nodeIds: string[]): Promise<Blob> => {
+    const response = await fetch(`/api/steric-profiles/${id}/table.csv`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ node_ids: nodeIds }),
+    })
+    if (!response.ok) throw new ApiError(response.status, null)
+    return response.blob()
+  },
 }
 
 export const STATUS_LABEL: Record<string, string> = Object.fromEntries(
