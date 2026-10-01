@@ -32,6 +32,20 @@ const DESTINATIONS: Record<string, string> = {
   preview: 'Not imported',
 }
 
+/** The file browser's name filter (D78): plain text matches names containing it; with * (any
+ * run of characters) or ? (one character) it must match the whole name, as in a Linux shell.
+ * Case is ignored either way. */
+function nameFilter(text: string): (name: string) => boolean {
+  const needle = text.trim().toLowerCase()
+  if (!/[*?]/.test(needle)) return (name) => name.toLowerCase().includes(needle)
+  const pattern = needle
+    .split('')
+    .map((c) => (c === '*' ? '.*' : c === '?' ? '.' : c.replace(/[.+^${}()|[\]\\]/g, '\\$&')))
+    .join('')
+  const glob = new RegExp(`^${pattern}$`, 's')
+  return (name) => glob.test(name.toLowerCase())
+}
+
 /** Browse the local disk through the backend (a browser page cannot read paths itself), so
  * the file's own path is kept as its origin path (FR-FILE-02). It starts in the folder a file
  * was last picked from, and the filter shows only names containing its text (D78). */
@@ -60,8 +74,9 @@ function FileBrowser({ onPick }: { onPick: (path: string) => void }) {
     )
   }, [go])
 
-  const needle = filter.trim().toLowerCase()
-  const entries = listing?.entries.filter((entry) => entry.name.toLowerCase().includes(needle)) ?? []
+  const needle = filter.trim()
+  const matches = nameFilter(needle)
+  const entries = listing?.entries.filter((entry) => matches(entry.name)) ?? []
 
   return (
     <div className="file-browser">
@@ -73,7 +88,7 @@ function FileBrowser({ onPick }: { onPick: (path: string) => void }) {
       <input
         type="search"
         aria-label="Filter by name"
-        placeholder="Filter by name, e.g. SPQZ"
+        placeholder="Filter by name, e.g. SPQZ or *SPQZ*.out"
         value={filter}
         onChange={(event) => setFilter(event.target.value)}
         onKeyDown={(event) => {
@@ -100,7 +115,7 @@ function FileBrowser({ onPick }: { onPick: (path: string) => void }) {
             )}
           </li>
         ))}
-        {listing && needle && entries.length === 0 && <li className="muted">No names here contain “{filter.trim()}”.</li>}
+        {listing && needle && entries.length === 0 && <li className="muted">No names here match “{needle}”.</li>}
       </ul>
     </div>
   )
