@@ -1,0 +1,166 @@
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { expect, test, type Locator, type Page } from '@playwright/test'
+
+// T-UI-08, FR-NOTE-01…05, D85: a note pinned to a node's card, with formatted text, an SVG
+// pasted as text, a PNG chosen from disk, an empty clipboard, HTML that tries to run a script,
+// collapsing, moving it to another corner, the history, the read-only copy, and deleting it.
+const E2E_DIR = process.env.E2E_DIR!
+
+// A drawing as ChemDraw's "Save As SVG" writes one, with a script and a handler to be removed.
+const SVG = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40" viewBox="0 0 120 40" onload="window.svgRan = 1">
+<script>window.svgRan = 2</script>
+<path d="M10 30 L40 10 L70 30" stroke="black" fill="none" stroke-width="2"/>
+<text x="80" y="25" font-size="14">Ru</text>
+</svg>`
+// 2 × 2 red pixels
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+async function openDemo(page: Page) {
+  await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
+  await page.goto('/')
+  await page.getByRole('button', { name: /^Open/ }).first().click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
+  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
+  await dialog.getByRole('button', { name: 'Go' }).click()
+  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(canvasNode(page, 'T-S0')).toBeVisible()
+}
+
+function canvasNode(page: Page, label: string): Locator {
+  return page.getByRole('group', { name: `Node ${label}`, exact: true })
+}
+
+/** Paste as the browser would, with the given clipboard contents. */
+async function paste(target: Locator, data: Record<string, string>) {
+  await target.evaluate((element, entries) => {
+    const transfer = new DataTransfer()
+    for (const [type, value] of Object.entries(entries)) transfer.setData(type, value)
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }))
+  }, data)
+}
+
+async function loaded(images: Locator, count: number) {
+  await expect(images).toHaveCount(count)
+  for (let i = 0; i < count; i++) {
+    await expect.poll(() => images.nth(i).evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBeGreaterThan(0)
+  }
+}
+
+test('a note pinned to a node card, with text and pictures', async ({ page, context }) => {
+  await openDemo(page)
+  await canvasNode(page, 'A-S2').click()
+  const inspector = page.getByLabel('Node inspector')
+  await inspector.getByRole('button', { name: 'Add pinned note' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'New note on A-S2' })
+  await dialog.getByLabel('Title').fill('Rotamer check')
+  const text = dialog.getByRole('textbox', { name: 'Note text' })
+  await text.click()
+  await dialog.getByRole('button', { name: 'Bold' }).click()
+  await page.keyboard.type('Keep syn')
+  await dialog.getByRole('button', { name: 'Bold' }).click()
+  await page.keyboard.type(' CAAC rotamer.')
+  await page.keyboard.press('Enter')
+
+  // SVG markup on the clipboard as text becomes a picture, cleaned on the server.
+  await paste(text, { 'text/plain': SVG })
+  await expect(text.locator('img[data-note-image]')).toHaveCount(1)
+  // A PNG chosen from disk.
+  await dialog.getByLabel('Insert picture').setInputFiles({ name: 'red.png', mimeType: 'image/png', buffer: PNG })
+  await loaded(text.locator('img[data-note-image]'), 2)
+  // Nothing a page can read: what ChemDraw's own copy looks like to a browser.
+  await paste(text, {})
+  await expect(dialog.getByRole('status')).toContainText('Edit › Copy As › PNG')
+  // HTML that tries to run something keeps only its formatting.
+  await paste(text, { 'text/html': '<i>see SI</i><img src=x onerror="window.htmlRan = 1"><script>window.htmlRan = 2</script>' })
+  await expect(text.locator('i', { hasText: 'see SI' })).toBeVisible()
+
+  await dialog.getByRole('radio', { name: 'Blue' }).click()
+  await dialog.getByRole('button', { name: 'Save note' }).click()
+  await expect(dialog).toHaveCount(0)
+
+  // On the canvas, at the card's top right corner, with both pictures.
+  const note = canvasNode(page, 'A-S2').getByTestId('canvas-note')
+  await expect(note).toHaveCount(1)
+  await expect(note).toHaveClass(/note-blue/)
+  await expect(note.locator('b', { hasText: 'Keep syn' })).toBeVisible()
+  await expect(note).toContainText('CAAC rotamer.')
+  await expect(note).toContainText('see SI')
+  await loaded(note.locator('img'), 2)
+  const card = await canvasNode(page, 'A-S2').locator('.cnode').boundingBox()
+  const box = await note.boundingBox()
+  expect(box!.x).toBeGreaterThan(card!.x + card!.width - 20)
+  expect(box!.y + box!.height).toBeLessThan(card!.y + 20)
+  expect(await page.evaluate(() => [(window as { svgRan?: number }).svgRan, (window as { htmlRan?: number }).htmlRan])).toEqual([
+    undefined,
+    undefined,
+  ])
+  // The stored SVG kept its drawing and lost its script.
+  const svgId = await note.locator('img').first().evaluate((img: HTMLImageElement) => img.src.split('/').pop()!)
+  const svg = await (await page.request.get(`/api/note-images/${svgId}`)).text()
+  expect(svg).toContain('>Ru</text>')
+  expect(svg).not.toContain('svgRan')
+
+  // Collapsing is saved: it stays collapsed after a reload.
+  await note.getByRole('button', { name: 'Collapse note' }).click()
+  await expect(note.locator('img')).toHaveCount(0)
+  await expect(note).toContainText('Rotamer check')
+  await expect.poll(async () => (await (await page.request.get('/api/notes')).json())[0].collapsed).toBe(true)
+  await page.reload()
+  await expect(canvasNode(page, 'A-S2').getByTestId('canvas-note').getByRole('button', { name: 'Expand note' })).toBeVisible()
+  await canvasNode(page, 'A-S2').getByTestId('canvas-note').getByRole('button', { name: 'Expand note' }).click()
+
+  // Double-click to edit: move it to the bottom left corner.
+  await canvasNode(page, 'A-S2').getByTestId('canvas-note').locator('.cnote-body').dblclick()
+  const edit = page.getByRole('dialog', { name: 'Note on A-S2' })
+  await edit.getByLabel('Corner').selectOption('bottom-left')
+  await edit.getByRole('button', { name: 'Save note' }).click()
+  await expect(edit).toHaveCount(0)
+  const moved = await canvasNode(page, 'A-S2').getByTestId('canvas-note').boundingBox()
+  const cardNow = await canvasNode(page, 'A-S2').locator('.cnode').boundingBox()
+  expect(moved!.x + moved!.width).toBeLessThan(cardNow!.x + 20)
+  expect(moved!.y).toBeGreaterThan(cardNow!.y + cardNow!.height - 20)
+
+  // The node's history shows it; the panel reads it in full.
+  await canvasNode(page, 'A-S2').click()
+  await expect(inspector.getByRole('region', { name: 'Pinned notes' })).toContainText('CAAC rotamer.')
+  const history = inspector.getByRole('list', { name: 'History' })
+  await expect(history).toContainText('Pinned note “Rotamer check” moved: top right → bottom left')
+  await expect(history).toContainText('Pinned a note “Rotamer check”')
+
+  // The read-only copy holds the note and its pictures, and opens with no server.
+  const exported = await page.request.post('/api/snapshot', { data: {} })
+  const path = join(E2E_DIR, 'notes-copy.html')
+  writeFileSync(path, await exported.body())
+  const shared = await context.newPage()
+  await shared.goto(pathToFileURL(path).href)
+  const sharedNote = canvasNode(shared, 'A-S2').getByTestId('canvas-note')
+  await expect(sharedNote).toContainText('CAAC rotamer.')
+  await loaded(sharedNote.locator('img'), 2)
+  await expect(sharedNote.locator('img').first()).toHaveAttribute('src', /^data:image\/svg\+xml;base64,/)
+  // Collapsing works there too, without saving anything.
+  await sharedNote.getByRole('button', { name: 'Collapse note' }).click()
+  await expect(sharedNote.locator('img')).toHaveCount(0)
+  await canvasNode(shared, 'A-S2').click()
+  await expect(shared.getByLabel('Node inspector').getByRole('region', { name: 'Pinned notes' })).toContainText('Keep syn')
+  await shared.close()
+
+  // Deleting it.
+  await inspector.getByRole('region', { name: 'Pinned notes' }).getByRole('button', { name: 'Edit…' }).click()
+  await edit.getByRole('button', { name: 'Delete…' }).click()
+  await edit.getByRole('button', { name: 'Delete this note' }).click()
+  await expect(edit).toHaveCount(0)
+  await expect(canvasNode(page, 'A-S2').getByTestId('canvas-note')).toHaveCount(0)
+  await expect(history).toContainText('Deleted the pinned note “Rotamer check”')
+
+  // Later tests start with no investigation open.
+  expect((await page.request.post('/api/investigations/close')).ok()).toBe(true)
+})

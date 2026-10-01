@@ -41,6 +41,8 @@ export type SnapshotData = {
     'energy_unit' | 'energy_factors' | 'energy_decimals' | 'qh_temperature' | 'qh_cutoff' | 'hydrogens'
   >
   canvas: Canvas
+  /** D85: the pictures in pinned notes, as data URLs by id. */
+  note_images: Record<string, string>
   overview: Overview
   calculations: Record<string, SharedCalculation[]>
   /** The imaginary and lowest real modes of each frequency calculation (A30). */

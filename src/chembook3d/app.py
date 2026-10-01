@@ -11,6 +11,7 @@ from starlette.types import Scope
 
 from chembook3d import __version__
 from chembook3d.api.energies import router as energy_router
+from chembook3d.api.notes import router as note_router
 from chembook3d.api.pathway import router as pathway_router
 from chembook3d.api.routes import close_and_push, router
 from chembook3d.api.selectivity import router as selectivity_router
@@ -95,6 +96,7 @@ def create_app() -> FastAPI:
     app.include_router(snapshot_router)
     app.include_router(steric_router)
     app.include_router(selectivity_router)
+    app.include_router(note_router)
     app.include_router(turnover_router)
 
     static = static_dir()

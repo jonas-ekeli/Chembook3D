@@ -13,6 +13,7 @@ from sqlalchemy import (
     Column,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Table,
     Text,
@@ -640,4 +641,42 @@ class Turnover(Base):
         ForeignKey("turnovers.id", ondelete="SET NULL"), default=None
     )
     notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class NodeNote(Base):
+    """D85, FR-NOTE-01: a note pinned to one corner of a node's card on the canvas, holding
+    formatted text and pictures. `body` is the cleaned HTML of `services/notes.py`; a picture
+    in it is `<img data-note-image="…">`, naming a `NoteImage`. Its text, title, corner and
+    colour are in the history (on the node, record type "note"); whether it is collapsed and
+    its width are layout and are not (A35)."""
+
+    __tablename__ = "node_notes"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    # Creation order, which is the order of the notes stacked in one corner.
+    seq: Mapped[int] = mapped_column(
+        Integer, default=text("(SELECT COALESCE(MAX(seq), 0) + 1 FROM node_notes)")
+    )
+    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), index=True)
+    corner: Mapped[str] = mapped_column(String(16), default="top-right")
+    colour: Mapped[str] = mapped_column(String(16), default="yellow")
+    title: Mapped[str] = mapped_column(String(200), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    collapsed: Mapped[bool] = mapped_column(default=False)
+    width: Mapped[int] = mapped_column(Integer, default=260)  # px on the canvas at zoom 1
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class NoteImage(Base):
+    """A picture pasted or dropped into a note (PNG, JPEG, GIF, WebP, or SVG cleaned of
+    scripts and outside links). Named by the SHA-256 of its bytes, so the same picture is
+    kept once and a stored picture never changes."""
+
+    __tablename__ = "note_images"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    media_type: Mapped[str] = mapped_column(String(32))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)

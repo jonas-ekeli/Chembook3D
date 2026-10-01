@@ -27,6 +27,7 @@ from chembook3d.api import pathway as pathway_api
 from chembook3d.api.routes import DbSession, _calculation_out, _investigation
 from chembook3d.models import Calculation, CalculationType
 from chembook3d.services import nodes as node_service
+from chembook3d.services import notes as note_service
 from chembook3d.services import pathways, species
 from chembook3d.services.energies import Energies, LevelKey
 from chembook3d.services.records import RecordError
@@ -105,6 +106,14 @@ def _paths(session: Session, body: SnapshotIn) -> list[dict[str, Any]]:
             continue  # a branch without nodes has no pathway
         found.append({"ids": extended.path, "branch_id": branch.id})
     return found
+
+
+def _note_images(session: Session, notes: list[Any]) -> dict[str, str]:
+    used = set().union(*(note_service.images_in(n.body) for n in notes)) if notes else set()
+    return {
+        image_id: f"data:{image.media_type};base64,{base64.b64encode(image.data).decode('ascii')}"
+        for image_id, image in note_service.image_data(session, used).items()
+    }
 
 
 def snapshot_data(request: Request, session: Session, body: SnapshotIn) -> dict[str, Any]:
@@ -190,6 +199,8 @@ def snapshot_data(request: Request, session: Session, body: SnapshotIn) -> dict[
             "hydrogens": settings.hydrogens,
         },
         "canvas": canvas.model_dump(mode="json"),
+        # D85: the pictures in the notes, as data URLs the viewer shows without a server.
+        "note_images": _note_images(session, canvas.notes),
         # FR-OV-01 without its recent changes: the copy holds no history (FR-SHARE-04).
         "overview": pathway_api.overview(session).model_dump(mode="json") | {"recent": []},
         "calculations": calculations,

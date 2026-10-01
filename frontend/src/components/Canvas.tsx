@@ -37,6 +37,8 @@ import {
   type Group,
   type GroupLayout,
   type Node,
+  type Note,
+  NOTE_CORNERS,
   type Settings,
   SIDES,
   isSide,
@@ -45,6 +47,8 @@ import {
   type TransitionSides,
 } from '../api'
 import { MoleculeSketch } from './MoleculeSketch'
+import { NoteBody } from './NoteContent'
+import { noteTitle } from '../notes'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import type { Rotation } from '../chem'
@@ -103,7 +107,17 @@ type StructureData = {
   energy: EnergyText | null
   /** The group this node is drawn in place of, when the filters leave it alone (A23). */
   standsFor?: string
+  /** D85: notes pinned to the card's corners. */
+  notes: Note[]
+  noteActions: NoteActions
 }
+
+/** D85: what a pinned note can do; in the read-only copy nothing is saved. */
+export type NoteActions = {
+  onOpen?: (noteId: string) => void
+  onCollapse?: (noteId: string, collapsed: boolean) => void
+}
+const NO_NOTES: Note[] = []
 type GroupData = {
   group: Group
   colour: string
@@ -120,6 +134,8 @@ type GroupData = {
   onToggle: (id: string) => void
   onLayout: (id: string, layout: GroupLayout) => void
   energy: EnergyText | null
+  /** D85: the notes on its members, shown as a count while it is collapsed. */
+  memberNotes: Note[]
 }
 type TransitionData = {
   /** The transitions this line stands for; more than one between two collapsed groups (A24). */
@@ -136,6 +152,97 @@ type TransitionData = {
   species: { text: string; direction: string; title: string }[]
   /** W-BALANCE messages, when the atoms or charge do not balance. */
   warnings: string[]
+}
+
+function PinnedNote({
+  note,
+  collapsed,
+  onToggle,
+  onOpen,
+}: {
+  note: Note
+  collapsed: boolean
+  onToggle: () => void
+  onOpen?: () => void
+}) {
+  const title = noteTitle(note)
+  return (
+    <div
+      className={`cnote note-${note.colour}${collapsed ? ' collapsed' : ''}`}
+      style={collapsed ? undefined : { width: note.width }}
+      data-testid="canvas-note"
+      role="note"
+      aria-label={`Note ${title}`}
+      title={onOpen ? 'Double-click to edit' : undefined}
+      onDoubleClick={(event) => {
+        if (!onOpen) return
+        event.stopPropagation()
+        onOpen()
+      }}
+    >
+      <div className="cnote-head">
+        <span className="cnote-pin" aria-hidden="true">
+          📌
+        </span>
+        <span className="cnote-title">{title}</span>
+        <button
+          className="small"
+          aria-label={collapsed ? 'Expand note' : 'Collapse note'}
+          onClick={(event) => {
+            event.stopPropagation()
+            onToggle()
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          {collapsed ? '+' : '−'}
+        </button>
+      </div>
+      {!collapsed && (
+        <div className="cnote-body nowheel">
+          <NoteBody html={note.body} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** D85: a node's notes, stacked in the corners they are pinned to, outward from the card. */
+function PinnedNotes({ notes, actions }: { notes: Note[]; actions: NoteActions }) {
+  // Collapsing shows at once; the saved state replaces this when the notes come back.
+  const [shown, setShown] = useState<Record<string, boolean>>({})
+  const [seen, setSeen] = useState(notes)
+  if (seen !== notes) {
+    setSeen(notes)
+    setShown({})
+  }
+  if (!notes.length) return null
+  return (
+    <>
+      {NOTE_CORNERS.map((corner) => {
+        const here = notes.filter((n) => n.corner === corner)
+        if (!here.length) return null
+        return (
+          <div key={corner} className={`cnotes cnotes-${corner} nodrag`}>
+            {here.map((note) => {
+              const collapsed = shown[note.id] ?? note.collapsed
+              return (
+                <PinnedNote
+                  key={note.id}
+                  note={note}
+                  collapsed={collapsed}
+                  onToggle={() => {
+                    setShown((current) => ({ ...current, [note.id]: !collapsed }))
+                    actions.onCollapse?.(note.id, !collapsed)
+                  }}
+                  onOpen={actions.onOpen ? () => actions.onOpen!(note.id) : undefined}
+                />
+              )
+            })}
+          </div>
+        )
+      })}
+    </>
+  )
 }
 
 const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<FlowNode<StructureData>>) {
@@ -178,6 +285,7 @@ const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<
         <span className={`status status-${node.status}`}>{STATUS_LABEL[node.status]}</span>
         {stepName && <span className="cnode-step">{stepName}</span>}
       </div>
+      <PinnedNotes notes={data.notes} actions={data.noteActions} />
     </div>
   )
 })
@@ -192,7 +300,7 @@ const LAYOUT_BUTTON: Record<GroupLayout, { label: string; icon: string }> = {
 const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<GroupData>>) {
   const { group, colour, stepName, memberCount, representativeLabel, mode, ts, expanded } = data
   const { representativeXyz, representativeRotation } = data
-  const { onToggle, onLayout, energy } = data
+  const { onToggle, onLayout, energy, memberNotes } = data
   // A21: the button cycles grid (a new group's layout), vertical line, horizontal line, grid.
   const next: GroupLayout =
     group.layout === 'vertical' ? 'horizontal' : group.layout === 'horizontal' ? 'grid' : 'vertical'
@@ -214,6 +322,16 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
         <span className="muted small">
           {memberCount} member{memberCount === 1 ? '' : 's'}
         </span>
+        {!expanded && memberNotes.length > 0 && (
+          <span
+            className="note-count"
+            role="img"
+            aria-label={`${memberNotes.length} note${memberNotes.length === 1 ? '' : 's'} on members`}
+            title={`Notes on members (expand the group to see them):\n${memberNotes.map(noteTitle).join('\n')}`}
+          >
+            📌 {memberNotes.length}
+          </span>
+        )}
         {expanded && memberCount > 1 && (
           <button
             className="small nodrag"
@@ -361,6 +479,8 @@ function CanvasView({
   onDropFiles,
   onPositions,
   onError,
+  onOpenNote,
+  onCollapseNote,
   readOnly = false,
 }: {
   data: CanvasData
@@ -382,6 +502,9 @@ function CanvasView({
   onDropFiles: (files: File[], targetId: string | null, position: { x: number; y: number }) => void
   onPositions: (positions: Record<string, { x: number; y: number }>) => void
   onError: (message: string) => void
+  /** D85: edit a pinned note (double-click), and save whether it is collapsed. */
+  onOpenNote?: (noteId: string) => void
+  onCollapseNote?: (noteId: string, collapsed: boolean) => void
   /** The shared read-only copy (D79): nothing can be moved, connected, added or dropped. */
   readOnly?: boolean
 }) {
@@ -392,6 +515,16 @@ function CanvasView({
   const [exportOpen, setExportOpen] = useState(false)
 
   const colours = useMemo(() => new Map(data.branches.map((b) => [b.id, b.colour])), [data.branches])
+  // D85: one list per node, kept while the notes do not change, so a collapsed note stays so.
+  const notesByNode = useMemo(() => {
+    const found = new Map<string, Note[]>()
+    for (const note of data.notes ?? []) found.set(note.node_id, [...(found.get(note.node_id) ?? []), note])
+    return found
+  }, [data.notes])
+  const noteActions: NoteActions = useMemo(
+    () => ({ onOpen: readOnly ? undefined : onOpenNote, onCollapse: readOnly ? undefined : onCollapseNote }),
+    [readOnly, onOpenNote, onCollapseNote],
+  )
   const stepNames = useMemo(() => new Map(data.steps.map((s) => [s.id, s.name || 'Unnamed step'])), [data.steps])
 
   // Nodes show energies only in energy mode, and in structure mode once a reference is chosen
@@ -435,6 +568,7 @@ function CanvasView({
       return branchOk && !hidden.steps.has(g.step_id ?? 'none')
     }
     const byId = new Map(data.nodes.map((n) => [n.id, n]))
+    const notesOf = (id: string) => notesByNode.get(id) ?? NO_NOTES
     const cell = MEMBER_CELL[mode]
     const chosen = new Set(multi)
     const isSelected = (id: string) => chosen.has(id) || (selection?.kind === 'node' && selection.id === id)
@@ -461,6 +595,7 @@ function CanvasView({
         result.push({
           id: only.id,
           type: 'structure',
+          className: notesOf(only.id).length ? 'has-notes' : undefined,
           position: { x: group.pos_x, y: group.pos_y },
           ariaLabel: `Node ${only.label || 'Untitled node'}`,
           selected: isSelected(only.id),
@@ -473,6 +608,8 @@ function CanvasView({
             representative: false,
             energy: nodeEnergy(only.id),
             standsFor: group.id,
+            notes: notesOf(only.id),
+            noteActions,
           } satisfies StructureData,
         })
         continue
@@ -513,6 +650,7 @@ function CanvasView({
           onToggle: onToggleGroup,
           onLayout: onGroupLayout,
           energy: nodeEnergy(group.id),
+          memberNotes: members.flatMap((m) => notesOf(m.id)),
         } satisfies GroupData,
       })
       drawnAs.set(group.id, group.id)
@@ -525,6 +663,7 @@ function CanvasView({
         result.push({
           id: member.id,
           type: 'structure',
+          className: notesOf(member.id).length ? 'has-notes' : undefined,
           parentId: group.id,
           extent: 'parent',
           draggable: false,
@@ -539,6 +678,8 @@ function CanvasView({
             faded: FADED_STATUSES.has(member.status),
             representative: group.representative_id === member.id,
             energy: nodeEnergy(member.id),
+            notes: notesOf(member.id),
+            noteActions,
           } satisfies StructureData,
         })
       })
@@ -550,6 +691,7 @@ function CanvasView({
       result.push({
         id: node.id,
         type: 'structure',
+        className: notesOf(node.id).length ? 'has-notes' : undefined,
         position: { x: node.pos_x, y: node.pos_y },
         ariaLabel: `Node ${node.label || 'Untitled node'}`,
         selected: isSelected(node.id),
@@ -561,6 +703,8 @@ function CanvasView({
           faded: FADED_STATUSES.has(node.status),
           representative: false,
           energy: nodeEnergy(node.id),
+          notes: notesOf(node.id),
+          noteActions,
         } satisfies StructureData,
       })
     }
@@ -640,7 +784,7 @@ function CanvasView({
         }) ?? null
     }
     return { flowNodes: result, flowEdges: edges }
-  }, [data, mode, nodeEnergySource, filters, expanded, selection, multi, colours, stepNames, onToggleGroup, onGroupLayout])
+  }, [data, mode, nodeEnergySource, filters, expanded, selection, multi, colours, stepNames, onToggleGroup, onGroupLayout, notesByNode, noteActions])
 
   // FR-EN-02: ΔX = X(target) − X(source) on each edge, or n/a (EN-3).
   const flowEdges = useMemo(() => {
