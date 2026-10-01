@@ -25,14 +25,19 @@ from chembook3d.services.records import RecordError, get, text_value
 
 CORNERS = ("top-left", "top-right", "bottom-left", "bottom-right")
 COLOURS = ("yellow", "blue", "green", "pink", "grey")
-MIN_WIDTH, MAX_WIDTH = 160, 640
+MIN_WIDTH, MAX_WIDTH = 160, 1000
+MIN_HEIGHT, MAX_HEIGHT = 60, 1200
+# D87: on the corner, or floating apart from it with or without a line to it.
+PLACEMENTS = ("corner", "line", "free")
+MAX_OFFSET = 5000  # px from the card's corner, either way
 MAX_BODY = 500_000  # characters of cleaned HTML; pictures are stored apart from it
 MAX_IMAGE = 10 * 1024 * 1024  # bytes
 # Pictures no note refers to are removed when a note is saved or deleted, unless they were
 # added within this time: they may belong to a note still open in the editor.
 UNUSED_IMAGE_GRACE = timedelta(hours=1)
 
-# Fields in the history (A35); `collapsed` and `width` are layout.
+# Fields in the history (A35); `collapsed`, `width` and (A37) where it floats and its height
+# are layout.
 RECORDED = ("title", "body", "corner", "colour")
 
 
@@ -250,6 +255,14 @@ def remove_unused_images(session: Session) -> int:
 # ---------- notes ----------
 
 
+def _whole(field: str, value: Any) -> int:
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise RecordError(f"{field} must be a whole number")
+    return value
+
+
 def _field(field: str, value: Any) -> Any:
     if field == "title":
         return text_value("Title", value).strip()[:200]
@@ -271,9 +284,15 @@ def _field(field: str, value: Any) -> Any:
             raise RecordError("collapsed must be true or false")
         return value
     if field == "width":
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise RecordError("width must be a whole number")
-        return max(MIN_WIDTH, min(MAX_WIDTH, value))
+        return max(MIN_WIDTH, min(MAX_WIDTH, _whole(field, value)))
+    if field == "height":
+        return None if value is None else max(MIN_HEIGHT, min(MAX_HEIGHT, _whole(field, value)))
+    if field == "placement":
+        if value not in PLACEMENTS:
+            raise RecordError(f"placement must be one of {', '.join(PLACEMENTS)}")
+        return value
+    if field in ("offset_x", "offset_y"):
+        return max(-MAX_OFFSET, min(MAX_OFFSET, _whole(field, value)))
     raise RecordError(f"unknown field '{field}'")
 
 

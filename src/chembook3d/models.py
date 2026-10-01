@@ -649,7 +649,10 @@ class NodeNote(Base):
     formatted text and pictures. `body` is the cleaned HTML of `services/notes.py`; a picture
     in it is `<img data-note-image="…">`, naming a `NoteImage`. Its text, title, corner and
     colour are in the history (on the node, record type "note"); whether it is collapsed and
-    its width are layout and are not (A35)."""
+    its width are layout and are not (A35). D87: it can float apart from the card instead
+    (`placement` "line" or "free"), its corner facing the card's corner at `offset_x`,
+    `offset_y` px outward from it, and moves with the card; with "line" a line joins the two.
+    `height` is set once it is resized (none: it fits its text). These are layout too (A37)."""
 
     __tablename__ = "node_notes"
 
@@ -665,6 +668,10 @@ class NodeNote(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     collapsed: Mapped[bool] = mapped_column(default=False)
     width: Mapped[int] = mapped_column(Integer, default=260)  # px on the canvas at zoom 1
+    placement: Mapped[str] = mapped_column(String(16), default="corner")
+    offset_x: Mapped[int] = mapped_column(Integer, default=40)
+    offset_y: Mapped[int] = mapped_column(Integer, default=40)
+    height: Mapped[int | None] = mapped_column(Integer, default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 

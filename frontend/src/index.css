@@ -1687,6 +1687,117 @@ table.selectivity-table {
   padding: 0.3rem 0.45rem;
   user-select: text;
 }
+/* D87: a resized note keeps its height; its text scrolls inside it. */
+.cnote {
+  position: relative;
+}
+.cnote.sized {
+  display: flex;
+  flex-direction: column;
+}
+.cnote.sized .cnote-body {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+.cnote-head.movable {
+  cursor: move;
+}
+.cnote-head button.cnote-pin {
+  padding: 0 0.15rem;
+  font-size: 11px;
+}
+/* The grip sits on the note's corner away from the card, so it grows outward. */
+.cnote-grip {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  touch-action: none;
+}
+.grip-top-right .cnote-grip,
+.grip-bottom-right .cnote-grip {
+  right: -1px;
+}
+.grip-top-left .cnote-grip,
+.grip-bottom-left .cnote-grip {
+  left: -1px;
+}
+.grip-top-right .cnote-grip,
+.grip-top-left .cnote-grip {
+  top: -1px;
+}
+.grip-bottom-right .cnote-grip,
+.grip-bottom-left .cnote-grip {
+  bottom: -1px;
+}
+.grip-top-left .cnote-grip,
+.grip-bottom-right .cnote-grip {
+  cursor: nwse-resize;
+}
+.grip-top-right .cnote-grip,
+.grip-bottom-left .cnote-grip {
+  cursor: nesw-resize;
+}
+.grip-bottom-right .cnote-grip {
+  background: linear-gradient(135deg, transparent 50%, var(--note-edge) 50%);
+}
+.grip-bottom-left .cnote-grip {
+  background: linear-gradient(225deg, transparent 50%, var(--note-edge) 50%);
+}
+.grip-top-right .cnote-grip {
+  background: linear-gradient(45deg, transparent 50%, var(--note-edge) 50%);
+}
+.grip-top-left .cnote-grip {
+  background: linear-gradient(315deg, transparent 50%, var(--note-edge) 50%);
+}
+.grip-top-right .cnote-head {
+  padding-right: 12px;
+}
+.grip-top-left .cnote-head {
+  padding-left: 12px;
+}
+/* A floating note is placed from the card's corner, a point of no size. */
+.cnote-anchor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  z-index: 5;
+  cursor: default;
+}
+.cnote-anchor.at-top-right {
+  left: 100%;
+  top: 0;
+}
+.cnote-anchor.at-top-left {
+  left: 0;
+  top: 0;
+}
+.cnote-anchor.at-bottom-right {
+  left: 100%;
+  top: 100%;
+}
+.cnote-anchor.at-bottom-left {
+  left: 0;
+  top: 100%;
+}
+.cnote-float {
+  position: absolute;
+}
+.cnote-tether {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.cnote-tether line {
+  stroke: color-mix(in srgb, var(--note-edge) 65%, #475467);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+.cnote-tether circle {
+  fill: color-mix(in srgb, var(--note-edge) 65%, #475467);
+}
 .note-body {
   overflow-wrap: anywhere;
 }
@@ -1743,7 +1854,7 @@ table.selectivity-table {
 }
 .note-settings {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr auto;
+  grid-template-columns: 2fr 1fr 2fr;
   gap: 0.6rem;
   align-items: end;
 }

@@ -4,9 +4,12 @@ import {
   NOTE_COLOURS,
   NOTE_CORNER_LABEL,
   NOTE_CORNERS,
+  NOTE_PLACEMENT_LABEL,
+  NOTE_PLACEMENTS,
   type Note,
   type NoteColour,
   type NoteCorner,
+  type NotePlacement,
 } from '../api'
 import { Modal } from './Modal'
 import { cleanNoteHtml } from '../notes'
@@ -73,6 +76,8 @@ export function NoteEditor({
   const [corner, setCorner] = useState<NoteCorner>(note?.corner ?? 'top-right')
   const [colour, setColour] = useState<NoteColour>(note?.colour ?? 'yellow')
   const [width, setWidth] = useState(note?.width ?? 260)
+  const [placement, setPlacement] = useState<NotePlacement>(note?.placement ?? 'corner')
+  const [height, setHeight] = useState<number | null>(note?.height ?? null)
   const [hint, setHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(0)
@@ -223,7 +228,7 @@ export function NoteEditor({
 
   const save = async () => {
     const body = cleanNoteHtml(editor.current?.innerHTML ?? '')
-    const fields = { title, corner, colour, width, body }
+    const fields = { title, corner, placement, colour, width, height, body }
     setSaving(true)
     setError(null)
     try {
@@ -298,6 +303,23 @@ export function NoteEditor({
           </select>
         </label>
         <label className="field">
+          <span>Placement</span>
+          <select
+            value={placement}
+            title="A floating note can be dragged by its head; it moves with the card"
+            onChange={(event) => {
+              setPlacement(event.target.value as NotePlacement)
+              markDirty()
+            }}
+          >
+            {NOTE_PLACEMENTS.map((p) => (
+              <option key={p} value={p}>
+                {NOTE_PLACEMENT_LABEL[p]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
           <span>Width</span>
           <select
             value={width}
@@ -312,6 +334,20 @@ export function NoteEditor({
                 {w.label}
               </option>
             ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Height</span>
+          <select
+            value={height ?? ''}
+            title="Drag the note's outer corner on the canvas to resize it"
+            onChange={(event) => {
+              setHeight(event.target.value ? Number(event.target.value) : null)
+              markDirty()
+            }}
+          >
+            <option value="">Fits the text</option>
+            {height != null && <option value={height}>{height} px</option>}
           </select>
         </label>
         <div className="field">

@@ -239,6 +239,14 @@ export const NOTE_CORNER_LABEL: Record<NoteCorner, string> = {
 }
 export const NOTE_COLOURS = ['yellow', 'blue', 'green', 'pink', 'grey'] as const
 export type NoteColour = (typeof NOTE_COLOURS)[number]
+/** D87: on the corner, or floating apart from it with or without a line to it. */
+export const NOTE_PLACEMENTS = ['corner', 'line', 'free'] as const
+export type NotePlacement = (typeof NOTE_PLACEMENTS)[number]
+export const NOTE_PLACEMENT_LABEL: Record<NotePlacement, string> = {
+  corner: 'On the corner',
+  line: 'Floating, with a line to the corner',
+  free: 'Floating, no line',
+}
 
 /** D85: a note pinned to a node's card. `body` is cleaned HTML (services/notes.py); a
  * picture in it is `<img data-note-image="<sha256>">`. */
@@ -251,11 +259,19 @@ export type Note = {
   body: string
   collapsed: boolean
   width: number
+  /** D87: where it is drawn; floating, its corner facing the card's corner sits `offset_x`,
+   * `offset_y` px outward from it, and it moves with the card. */
+  placement: NotePlacement
+  offset_x: number
+  offset_y: number
+  /** Set once resized; null fits its text. */
+  height: number | null
   created_at: string
   updated_at: string
 }
 
-export type NoteFields = Partial<Pick<Note, 'corner' | 'colour' | 'title' | 'body' | 'collapsed' | 'width'>>
+export type NoteLayout = Pick<Note, 'collapsed' | 'width' | 'height' | 'placement' | 'offset_x' | 'offset_y'>
+export type NoteFields = Partial<Pick<Note, 'corner' | 'colour' | 'title' | 'body'> & NoteLayout>
 
 export type NodeDeletePreview = {
   node: string

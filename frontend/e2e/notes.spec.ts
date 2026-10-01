@@ -133,7 +133,7 @@ test('a note pinned to a node card, with text and pictures', async ({ page, cont
   // Double-click to edit: move it to the bottom left corner.
   await canvasNode(page, 'A-S2').getByTestId('canvas-note').locator('.cnote-body').dblclick()
   const edit = page.getByRole('dialog', { name: 'Note on A-S2' })
-  await edit.getByLabel('Corner').selectOption('bottom-left')
+  await edit.getByLabel(/^Corner/).selectOption('bottom-left')
   await edit.getByRole('button', { name: 'Save note' }).click()
   await expect(edit).toHaveCount(0)
   // The canvas draws the move once its new data arrives, so wait for it.
@@ -171,4 +171,80 @@ test('a note pinned to a node card, with text and pictures', async ({ page, cont
   await expect(canvasNode(page, 'A-S2').getByTestId('canvas-note')).toHaveCount(0)
   await expect(history).toContainText('Deleted the pinned note “Rotamer check”')
 
+})
+
+/** Drags from the middle of `handle` by (dx, dy) screen px. */
+async function dragBy(page: Page, handle: Locator, dx: number, dy: number) {
+  const box = (await handle.boundingBox())!
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x + dx, y + dy, { steps: 8 })
+  await page.mouse.up()
+}
+
+type SavedNote = { id: string; placement: string; offset_x: number; offset_y: number; width: number; height: number | null }
+
+test('a note floats apart from its card, joined by a line, and is resized', async ({ page }) => {
+  // T-UI-09, FR-NOTE-06, D87
+  await openDemo(page)
+  const canvas = await (await page.request.get('/api/canvas')).json()
+  const target = canvas.nodes.find((n: { label: string }) => n.label === 'T-S0')
+  const created = await page.request.post(`/api/nodes/${target.id}/notes`, {
+    data: { title: 'Apart', body: '<p>Floating beside the card</p>' },
+  })
+  const id = ((await created.json()) as SavedNote).id
+  const saved = async () => ((await (await page.request.get('/api/notes')).json()) as SavedNote[]).find((n) => n.id === id)!
+  await page.reload()
+  const note = canvasNode(page, 'T-S0').getByTestId('canvas-note')
+  await expect(note).toContainText('Floating beside the card')
+  await expect(canvasNode(page, 'T-S0').getByTestId('note-line')).toHaveCount(0)
+
+  // Detached: it moves a little away from the corner, joined to it by a line.
+  await note.getByRole('button', { name: 'Detach note' }).click()
+  await expect(canvasNode(page, 'T-S0').getByTestId('note-line')).toHaveCount(1)
+  await expect.poll(async () => (await saved()).placement).toBe('line')
+  await expect.poll(() => corner(page, 'T-S0')).toBe('top-right')
+
+  // Dragged by its head, further up and to the right.
+  const before = await saved()
+  await dragBy(page, note.locator('.cnote-title'), 120, -80)
+  await expect.poll(async () => (await saved()).offset_x).toBeGreaterThan(before.offset_x + 40)
+  expect((await saved()).offset_y).toBeGreaterThan(before.offset_y + 25)
+  const line = canvasNode(page, 'T-S0').getByTestId('note-line').locator('line')
+  expect(Number(await line.getAttribute('x2'))).toBeGreaterThan(40)
+
+  // Resized from its outer corner: wider and taller.
+  const size = (await note.boundingBox())!
+  await dragBy(page, note.getByRole('separator', { name: 'Resize note' }), 80, -60)
+  await expect.poll(async () => (await saved()).height).not.toBeNull()
+  const resized = await saved()
+  expect(resized.width).toBeGreaterThan(before.width + 25)
+  await expect.poll(async () => (await note.boundingBox())!.height).toBeGreaterThan(size.height + 20)
+
+  // From the editor: floating with no line, then back on the corner, fitting its text.
+  await note.locator('.cnote-body').dblclick()
+  const edit = page.getByRole('dialog', { name: 'Note on T-S0' })
+  await edit.getByLabel('Placement').selectOption('free')
+  await edit.getByRole('button', { name: 'Save note' }).click()
+  await expect(edit).toHaveCount(0)
+  await expect(canvasNode(page, 'T-S0').getByTestId('note-line')).toHaveCount(0)
+  await expect(note).toBeVisible()
+  await expect.poll(async () => (await saved()).placement).toBe('free')
+
+  await note.locator('.cnote-body').dblclick()
+  await edit.getByLabel('Placement').selectOption('corner')
+  await edit.getByLabel('Height').selectOption('')
+  await edit.getByRole('button', { name: 'Save note' }).click()
+  await expect(edit).toHaveCount(0)
+  await expect.poll(async () => [(await saved()).placement, (await saved()).height]).toEqual(['corner', null])
+  await expect.poll(() => corner(page, 'T-S0')).toBe('top-right')
+
+  // The history has none of it: where a note is drawn is layout (A37).
+  await canvasNode(page, 'T-S0').click()
+  const history = page.getByLabel('Node inspector').getByRole('list', { name: 'History' })
+  await expect(history).toContainText('Pinned a note “Apart”')
+  await expect(history).not.toContainText('Placement')
+  expect((await page.request.delete(`/api/notes/${id}`)).ok()).toBe(true)
 })

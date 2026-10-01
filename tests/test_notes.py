@@ -183,3 +183,30 @@ def test_the_copy_holds_the_notes_and_their_pictures(open_client, page):  # noqa
     assert list(data["note_images"]) == [image]
     assert data["note_images"][image].startswith("data:image/svg+xml;base64,")
     assert unused not in data["note_images"]
+
+
+def test_a_note_floats_apart_from_its_card_and_can_be_resized(open_client):
+    # FR-NOTE-06, D87, A37
+    n = node(open_client)
+    note = post(open_client, f"/nodes/{n['id']}/notes", {"title": "Apart"})
+    assert (note["placement"], note["offset_x"], note["offset_y"], note["height"]) == (
+        "corner",
+        40,
+        40,
+        None,
+    )
+    moved = patch(
+        open_client,
+        f"/notes/{note['id']}",
+        {"placement": "line", "offset_x": -30, "offset_y": 99999, "width": 420, "height": 10},
+    )
+    assert (moved["placement"], moved["offset_x"], moved["offset_y"]) == ("line", -30, 5000)
+    assert (moved["width"], moved["height"]) == (420, notes.MIN_HEIGHT)
+    freed = patch(open_client, f"/notes/{note['id']}", {"placement": "free", "height": None})
+    assert freed["placement"] == "free" and freed["height"] is None
+    patch(open_client, f"/notes/{note['id']}", {"placement": "middle"}, status=422)
+    patch(open_client, f"/notes/{note['id']}", {"offset_x": "left"}, status=422)
+    patch(open_client, f"/notes/{note['id']}", {"height": 2.5}, status=422)
+    # Layout: none of it is in the history.
+    entries = [e for e in history(open_client, n["id"]) if e["record_type"] == "note"]
+    assert [e["action"] for e in entries] == ["create"]

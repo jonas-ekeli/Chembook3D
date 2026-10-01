@@ -75,7 +75,10 @@ export function PinnedNotesSection({
             <li key={note.id} className={`pinned-note note-${note.colour}`}>
               <div className="pinned-note-head">
                 <strong>{noteTitle(note)}</strong>
-                <span className="muted small">{CORNER_LABEL[note.corner] ?? note.corner}</span>
+                <span className="muted small">
+                  {CORNER_LABEL[note.corner] ?? note.corner}
+                  {note.placement !== 'corner' && ', floating'}
+                </span>
                 {onEdit && (
                   <button className="small" onClick={() => onEdit(note.id)}>
                     Edit…
