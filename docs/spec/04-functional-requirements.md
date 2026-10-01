@@ -194,6 +194,17 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-STER-04 | Each result is stored with the inputs it came from and marked out of date, with the reason, when the coordinates, the profile's settings or the node's atoms change. | D81, A32 | after 5 |
 | FR-STER-05 | Compare a branch, a pathway, a group or a selection: a table and a CSV with the settings and atoms on every row, maps side by side on one colour scale, a difference map of two nodes, and map images. | D81, A32 | after 5 |
 
+## FR-SEL · Selectivity (D83)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-SEL-01 | Saved selectivities have two or more named outcomes; each outcome is one or more TS nodes or groups, and a group counts with all its members. | D83, A34 | after 5 |
+| FR-SEL-02 | Every TS is valued at one composite level and energy type with no fallback; a missing value makes the result n/a with the reason. TSs with different atoms or charges, or a TS in two outcomes, are refused with the reason. | D83, EN-3 | after 5 |
+| FR-SEL-03 | An outcome's weight is the Boltzmann sum over its TSs (Curtin–Hammett) or only its lowest TS's; both are computed, the chosen one leads. | D83, A34 | after 5 |
+| FR-SEL-04 | The temperature is the G_qh setting or the selectivity's own; G_qh is recomputed at it from the stored frequencies, E, H and G are used as read and the result says so. | D83, A34 | after 5 |
+| FR-SEL-05 | The result shows each outcome's ΔΔG‡ and predicted percentage, the ee or de for two outcomes, each TS's ΔG and share, and an optional experimental ratio with its ΔΔG‡. | D83, A34 | after 5 |
+| FR-SEL-06 | An Analyses view lists the selectivities; one is made there or from a canvas selection. Creating, changing and deleting one is recorded in the history. | D83, A34 | after 5 |
+
 ## FR-SHARE · Read-only copy to share (D79)
 
 | ID | Requirement | Trace | Phase |

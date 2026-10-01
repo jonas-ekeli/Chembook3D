@@ -67,6 +67,14 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-STER-03 | A centroid centre; hydrogens, CRC radii, the scale and the mesh changed; settings and atoms out of range; orientation atoms that fix no frame | Each setting changes the value the expected way; refusals give the reason (FR-STER-01) |
 | T-STER-04 | Change the settings, the colour scale, a node's atoms and its coordinates; share atoms between nodes; reopen; delete a node | Out of date with the right reason, but not for the colour scale; sharing is refused when the elements differ; kept on reopen; no history; the deleted node leaves the profile (FR-STER-02, FR-STER-04, A32) |
 | T-STER-05 | Save the comparison CSV, with one node not in the profile | Values, settings and atoms on every row; the missing node says why (FR-STER-05) |
+| T-SEL-01 | Two TSs ΔΔG‡ = RT ln 10 apart at 298.15 K, one per outcome | 10 : 1 (90.9 %), ee 81.8 %, the same with only the lowest TS; no ee when "ratio only" (FR-SEL-05) |
+| T-SEL-02 | Two equal TSs in one outcome against one equal TS in the other | 2 : 1 and ΔΔG‡ = RT ln 2 summed, 1 : 1 with only the lowest TS; each TS's share given (FR-SEL-03) |
+| T-SEL-03 | A TS group as an outcome; a member added to the group | Every member counts, the added one too (FR-SEL-01) |
+| T-SEL-04 | The selectivity's own temperature (233.15 K), then none, then G | G_qh as the reference formula gives at 233.15 K and the ratio at that T; the setting's temperature when none; for G, a note that it is at the job temperature (FR-SEL-04) |
+| T-SEL-05 | A TS without a value at the level | n/a, naming the TS and why; no numbers (FR-SEL-02) |
+| T-SEL-06 | Different atoms, a different charge, a TS in two outcomes (also through a group) | Refused, with the reason (FR-SEL-02) |
+| T-SEL-07 | Experiment 95 : 5, then an amount for one outcome only | 95 %, ΔΔG‡ = RT ln 19, ee 90 %; then not compared, with a note (FR-SEL-05) |
+| T-SEL-08 | Create, rename, change notes, save without change, delete; delete a TS | History entries for each change only; the TS leaves its outcome (FR-SEL-06) |
 
 ## 5. Import and parsing tests
 
@@ -137,6 +145,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-03 | 3D | Rotate, measure, animate the imaginary mode, overlay two nodes, overlay three on typed atoms and save the set, copy xyz |
 | T-UI-04 | Canvas and profile image export | Files are produced and open in a standard viewer |
 | T-UI-05 | Sterics | Create a profile, type the atoms, compute (36.1 %V_bur for the NHC complex), see it go out of date after a setting change, share the atoms with a turned copy, compare both with maps, a difference map and a CSV (FR-STER-01…05) |
+| T-UI-06 | Selectivity | Select the demo's two TSs, "Selectivity…": 98.6 : 1.4, ee 97.1 %, ΔΔG‡ 2.50 kcal/mol; rename outcomes; 233.15 K gives 99.5 : 0.5; only the lowest TS; experiment 90 : 10 gives 1.30 kcal/mol; history; delete (FR-SEL-01…06) |
 
 ## 8. Performance observation (no targets)
 

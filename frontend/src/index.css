@@ -1543,3 +1543,41 @@ table.steric-octants td {
     grid-template-columns: 1fr;
   }
 }
+
+/* D83: the Analyses view (selectivities) */
+.analyses .outline ul.plain {
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 0.4rem;
+}
+.analyses .outline button[aria-current='true'] {
+  font-weight: 600;
+  text-decoration: none;
+}
+.analyses .main .inspector {
+  max-width: 1000px;
+}
+ul.chips {
+  list-style: none;
+  margin: 0 0 0.3rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+table.outcomes td {
+  vertical-align: top;
+}
+table.outcomes input[aria-label='Outcome name'] {
+  width: 8rem;
+}
+table.outcomes td:nth-child(3) input {
+  width: 5rem;
+}
+.headline {
+  font-size: 1.05rem;
+  margin: 0.4rem 0;
+}
+table.selectivity-table {
+  margin-top: 0.6rem;
+}

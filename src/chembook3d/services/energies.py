@@ -235,10 +235,16 @@ class NodeEnergies:
 class Energies:
     """Energies of every node and group in the investigation, for one request."""
 
-    def __init__(self, session: Session, settings: app_settings.Settings | None = None):
+    def __init__(
+        self,
+        session: Session,
+        settings: app_settings.Settings | None = None,
+        temperature: float | None = None,
+    ):
+        """`temperature` overrides the G_qh temperature setting (a selectivity's own, S4)."""
         settings = settings or app_settings.load()
         self.session = session
-        self.temperature = settings.qh_temperature
+        self.temperature = settings.qh_temperature if temperature is None else temperature
         self.cutoff = settings.qh_cutoff
         query = select(Node).options(
             selectinload(Node.calculations).selectinload(Calculation.result)
