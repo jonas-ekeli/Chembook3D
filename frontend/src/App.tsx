@@ -44,7 +44,13 @@ import {
   SyncButton,
   UpgradeDialog,
 } from './components/SyncDialogs'
-import { BranchInspector, GroupInspector, SelectionInspector, TransitionInspector } from './components/PathwayInspectors'
+import {
+  BranchInspector,
+  GroupInspector,
+  GroupOrderDialog,
+  SelectionInspector,
+  TransitionInspector,
+} from './components/PathwayInspectors'
 
 type LockPrompt = { folder: string; host?: string; openedAt?: string }
 
@@ -425,6 +431,10 @@ function App() {
     api.updateGroup(id, { layout }).catch((err: unknown) => setError(errorText(err)))
   }, [])
 
+  // D89: the group whose member order list is open
+  const [ordering, setOrdering] = useState<string | null>(null)
+  const orderGroup = useCallback((id: string) => setOrdering(id), [])
+
   const openNote = useCallback((noteId: string) => setNoteEditing({ noteId }), [])
   const layoutNote = useCallback(
     (noteId: string, layout: Partial<NoteLayout>) =>
@@ -533,6 +543,14 @@ function App() {
           folder={upgrade.folder}
           onCancel={() => setUpgrade(null)}
           onUpgrade={() => openFolder(upgrade.folder, false, true)}
+        />
+      )}
+      {ordering && canvas.groups.some((g) => g.id === ordering) && (
+        <GroupOrderDialog
+          group={canvas.groups.find((g) => g.id === ordering)!}
+          nodes={canvas.nodes}
+          onClose={() => setOrdering(null)}
+          onChanged={fetchRecords}
         />
       )}
       {lockPrompt && (
@@ -1065,6 +1083,7 @@ function App() {
                   expanded={expanded}
                   onToggleGroup={toggleGroup}
                   onGroupLayout={setGroupLayout}
+                  onGroupOrder={orderGroup}
                   onSelect={(next) => {
                     setNotice(null)
                     choose(next)

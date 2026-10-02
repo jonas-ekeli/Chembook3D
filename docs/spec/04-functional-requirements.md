@@ -120,6 +120,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-GRP-08 | Group members keep their branch, so a group can hold members from several branches; a group left with one member by the filters is drawn as that node (D66). | D66, A22–A26 | after 5 |
 | FR-GRP-09 | In the structure view mode, a collapsed group shows its representative's structure; with no representative it shows none (D68). | D68 | after 5 |
 | FR-GRP-10 | A member can be taken out of its group and kept as a node beside the group, with its calculations and edges and its branch (or the branch it came from). If it was the representative, the group has none until the user picks one. The group's last member cannot be taken out; the group is dissolved instead (D88). | D88 | after 5 |
+| FR-GRP-11 | A group's members are kept in an order the user sets. A button beside the layout button of an expanded group opens the list of members with arrows to move each up or down, like the reaction steps; the grid, the column and the row all follow the order. A member added later comes last (D89). | D89 | after 5 |
 
 **AC (lineage):** build the §6 example of [02](02-domain-model.md). A1's inspector shows lineage A1 → A → T, and R shows parents A1, A2, B1, B2. Adding the A-S3↔B-S3 rotation transitions leaves every node's branch unchanged. There is no action in the UI that creates a path across steps without edges.
 

@@ -109,6 +109,8 @@ class Node(Base):
     origin_branch_id: Mapped[str | None] = mapped_column(
         ForeignKey("branches.id", ondelete="SET NULL"), default=None
     )
+    # D89: a member's place in its group's order, which every member layout follows.
+    group_position: Mapped[int | None] = mapped_column(default=None)
     pos_x: Mapped[float] = mapped_column(default=0.0)
     pos_y: Mapped[float] = mapped_column(default=0.0)
     # The orientation saved from the 3D view as a unit quaternion [x, y, z, w] turning the

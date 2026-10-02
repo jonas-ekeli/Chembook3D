@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   api,
   formatDelta,
@@ -627,6 +627,69 @@ function RemoveMemberDialog({
           )}
         </>
       )}
+    </Modal>
+  )
+}
+
+/** D89: the order of a group's members, which the grid, column and row layouts follow. Each
+ * move is saved at once, like the order of the reaction steps (FR-STEP-01). */
+export function GroupOrderDialog({
+  group,
+  nodes,
+  onClose,
+  onChanged,
+}: {
+  group: Group
+  nodes: Node[]
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const [order, setOrder] = useState(group.member_ids)
+  const saving = useRef(Promise.resolve())
+  const [error, setError] = useState<string | null>(null)
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const move = (index: number, by: number) => {
+    const ids = [...order]
+    const [moved] = ids.splice(index, 1)
+    ids.splice(index + by, 0, moved)
+    setOrder(ids)
+    // One save at a time, so quick clicks reach the backend in the order they were made.
+    saving.current = saving.current.then(() =>
+      api.reorderGroup(group.id, ids).then(
+        () => {
+          setError(null)
+          onChanged()
+        },
+        (err: unknown) => setError(errorText(err)),
+      ),
+    )
+  }
+  return (
+    <Modal title="Member order" onClose={onClose} actions={<button onClick={onClose}>Done</button>}>
+      <p className="muted small">The grid, the column and the row all follow this order.</p>
+      {error && <p role="alert">{error}</p>}
+      <ol className="member-order" aria-label="Members in order">
+        {order.map((id, index) => {
+          const name = nodeName(byId.get(id))
+          return (
+            <li key={id} className="step-row">
+              <span className="step-number">{index + 1}</span>
+              <span className="member-order-name">{name}</span>
+              <button className="small icon" aria-label={`Move ${name} up`} disabled={index === 0} onClick={() => move(index, -1)}>
+                ↑
+              </button>
+              <button
+                className="small icon"
+                aria-label={`Move ${name} down`}
+                disabled={index === order.length - 1}
+                onClick={() => move(index, 1)}
+              >
+                ↓
+              </button>
+            </li>
+          )
+        })}
+      </ol>
     </Modal>
   )
 }

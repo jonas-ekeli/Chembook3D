@@ -1034,6 +1034,7 @@ export const api = {
     request<Group>('POST', '/groups/reconnect', { member_ids, label, outgoing }),
   updateGroup: (id: string, fields: GroupFields) => request<Group>('PATCH', `/groups/${id}`, fields),
   addToGroup: (id: string, node_ids: string[]) => request<Group>('POST', `/groups/${id}/members`, { node_ids }),
+  reorderGroup: (id: string, ids: string[]) => request<Group>('PUT', `/groups/${id}/order`, { ids }),
   removeFromGroup: (id: string, node_id: string) => request<Group>('DELETE', `/groups/${id}/members/${node_id}`),
   groupDeletePreview: (id: string) => request<GroupDeletePreview>('GET', `/groups/${id}/delete-preview`),
   dissolveGroup: (id: string, restore_branches: boolean) =>

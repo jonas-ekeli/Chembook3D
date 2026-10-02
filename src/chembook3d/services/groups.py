@@ -9,6 +9,7 @@
 - Nodes can be added to an existing group later; a node in another group moves (D65, A20).
 - A member can be taken out of its group and kept as a node, with its calculations and edges
   (D88).
+- The members are kept in an order the user sets, which every member layout follows (D89).
 - Removing a group either dissolves it (members stay, keeping their branch or with it cleared,
   P4, A26) or deletes it with its members, their calculations and edges (D54).
 """
@@ -30,7 +31,13 @@ LAYOUTS = ("grid", "vertical", "horizontal")  # A21
 
 
 def members(session: Session, group_id: str) -> list[Node]:
-    return list(session.scalars(select(Node).where(Node.group_id == group_id).order_by(Node.seq)))
+    """In the group's order (D89); a member without a place yet comes last."""
+    query = (
+        select(Node)
+        .where(Node.group_id == group_id)
+        .order_by(Node.group_position.is_(None), Node.group_position, Node.seq)
+    )
+    return list(session.scalars(query))
 
 
 def snapshot(session: Session, group: GroupNode) -> dict[str, Any]:
@@ -51,6 +58,11 @@ def _join(session: Session, node: Node, group: GroupNode) -> None:
     history.record(session, "node", node.id, "update", "group_id", node.group_id, group.id)
     if node.group_id is None:
         node.origin_branch_id = node.branch_id
+    # D89: a new member comes last in the group's order.
+    current = members(session, group.id)
+    for position, member in enumerate(current, start=1):
+        member.group_position = position
+    node.group_position = len(current) + 1
     node.group_id = group.id
 
 
@@ -180,6 +192,7 @@ def remove_member(session: Session, group_id: str, node_id: str) -> GroupNode:
         group.representative_id = None
     history.record(session, "node", node.id, "update", "group_id", group.id, None)
     node.group_id = None
+    node.group_position = None
     branch_id = node.branch_id or node.origin_branch_id
     if branch_id is not None and session.get(Branch, branch_id) is None:
         branch_id = None
@@ -197,6 +210,23 @@ def remove_member(session: Session, group_id: str, node_id: str) -> GroupNode:
     history.record(
         session, "group", group.id, "remove_member", old=before, new=snapshot(session, group)
     )
+    return group
+
+
+def reorder_members(session: Session, group_id: str, ordered_ids: Any) -> GroupNode:
+    """D89: set the order of all members at once, as the reaction steps are ordered
+    (FR-STEP-01). The grid, column and row layouts all follow it; one history entry."""
+    group = get(session, GroupNode, group_id, "Group")
+    current = members(session, group.id)
+    if not isinstance(ordered_ids, list) or sorted(ordered_ids) != sorted(m.id for m in current):
+        raise RecordError("the new order must list every member of the group once")
+    old = [m.id for m in current]
+    by_id = {m.id: m for m in current}
+    for position, node_id in enumerate(ordered_ids, start=1):
+        by_id[node_id].group_position = position
+    if old != ordered_ids:
+        history.record(session, "group", group.id, "update", "member_ids", old, ordered_ids)
+    session.flush()
     return group
 
 
@@ -265,6 +295,7 @@ def dissolve(session: Session, group_id: str, restore_branches: bool) -> list[No
     for node in nodes:
         history.record(session, "node", node.id, "update", "group_id", group.id, None)
         node.group_id = None
+        node.group_position = None
         branch_id = (node.branch_id or node.origin_branch_id) if restore_branches else None
         if branch_id is not None and session.get(Branch, branch_id) is None:
             branch_id = None

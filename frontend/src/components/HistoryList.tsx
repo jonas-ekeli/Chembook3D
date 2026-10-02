@@ -46,6 +46,11 @@ function show(field: string | null, value: unknown, names: Names = new Map()): s
     const outcomes = value as { name: string }[]
     return outcomes.length ? outcomes.map((o) => o.name).join(', ') : 'none'
   }
+  if (field === 'member_ids') {
+    // D89: a group's members, in order
+    const ids = value as string[]
+    return ids.length ? ids.map((id) => named(names, id)).join(', ') : 'none'
+  }
   if (field === 'path') {
     // D86: a turnover's pathway, in order
     const ids = value as string[]
@@ -81,6 +86,7 @@ const STRUCTURE_FIELDS: Record<string, string> = {
   parent_ids: 'Parents',
   step_id: 'Step',
   representative_id: 'Representative',
+  member_ids: 'Member order',
   outgoing_branch_id: 'Outgoing branch',
   incoming_branch_ids: 'Incoming branches',
   species: 'Free species',
