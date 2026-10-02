@@ -552,6 +552,12 @@ def remove_group_member(group_id: str, node_id: str, session: DbSession):
     return _group_out(session, group_service.remove_member(session, group_id, node_id))
 
 
+@router.put("/groups/{group_id}/order", response_model=GroupOut)
+def reorder_group_members(group_id: str, body: StepOrderIn, session: DbSession):
+    """D89: the members' order, which every member layout follows."""
+    return _group_out(session, group_service.reorder_members(session, group_id, body.ids))
+
+
 @router.patch("/groups/{group_id}", response_model=GroupOut)
 def update_group(group_id: str, body: GroupIn, session: DbSession):
     group = group_service.update(session, group_id, body.model_dump(exclude_unset=True))

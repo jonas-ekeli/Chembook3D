@@ -92,7 +92,7 @@ def test_schema_upgrade_backs_up_the_database_first(tmp_path, monkeypatch):
 
     assert upgrades == ["head"]
     backups = list((folder / inv.BACKUP_DIR).iterdir())
-    assert len(backups) == 1 and backups[0].name.startswith("investigation.sqlite.0014.")
+    assert len(backups) == 1 and backups[0].name.startswith("investigation.sqlite.0015.")
     assert b"keep me" in backups[0].read_bytes()
 
 
@@ -216,6 +216,46 @@ def test_transitions_keep_left_to_right_on_upgrade_to_sides(tmp_path):
         with investigation.sessions() as session:
             transition = session.get(Transition, "t1")
             assert (transition.source_side, transition.target_side) == ("right", "left")
+    finally:
+        investigation.close()
+
+
+def test_group_members_keep_their_order_on_upgrade(tmp_path):
+    # D89: members of a group made before the order could be set keep the order they were
+    # made in; nodes outside a group get no place.
+    folder = tmp_path / "pre-d89"
+    folder.mkdir()
+    engine = inv._make_engine(folder / inv.DB_NAME)
+    with engine.begin() as connection:
+        inv.command.upgrade(inv._alembic_config(connection), "0014")
+        sql = connection.exec_driver_sql
+        sql("INSERT INTO investigation_info VALUES (1, 'Old', '2026-10-01')")
+        for group_id in ("g1", "g2"):
+            sql(
+                "INSERT INTO group_nodes (id, seq, label, notes, pos_x, pos_y, layout, created_at)"
+                f" VALUES ('{group_id}', 1, 'G', '', 0, 0, 'grid', '2026-10-01')"
+            )
+        for node_id, seq, group in (
+            ("a", 5, "g1"),
+            ("b", 2, "g1"),
+            ("c", 9, "g1"),
+            ("d", 4, "g2"),
+            ("e", 1, None),
+        ):
+            group_sql = f"'{group}'" if group else "NULL"
+            sql(
+                "INSERT INTO nodes (id, seq, label, role, status, tags, notes, pos_x, pos_y,"
+                " created_at, updated_at, kind, group_id) VALUES"
+                f" ('{node_id}', {seq}, '{node_id}', 'minimum', 'done', '[]', '', 0, 0,"
+                f" '2026-10-01', '2026-10-01', 'node', {group_sql})"
+            )
+    engine.dispose()
+
+    investigation = inv.open_investigation(folder)
+    try:
+        with investigation.sessions() as session:
+            positions = {n: session.get(Node, n).group_position for n in "abcde"}
+            assert positions == {"a": 2, "b": 1, "c": 3, "d": 1, "e": None}
     finally:
         investigation.close()
 

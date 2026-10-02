@@ -874,7 +874,7 @@ def _commit_ensemble(
         session.add(group)
         session.flush()
         calculation_ids = []
-        for conformer in kept:
+        for position, conformer in enumerate(kept, start=1):
             rows = _rows(conformer.atoms)
             node = Node(
                 label=f"{label}-{conformer.index}" if label else f"conformer {conformer.index}",
@@ -885,6 +885,7 @@ def _commit_ensemble(
                 geometry=rows,
                 tags=[],
                 group_id=group.id,
+                group_position=position,  # D89
             )
             session.add(node)
             session.flush()

@@ -230,6 +230,23 @@ test('add a node to a group and cycle its members through a column, a row and th
 
     // A21: a button in the expanded group cycles grid, column, row and back to the grid.
     await box.getByRole('button', { name: 'Expand group' }).click()
+    // D89: A-S1 joined last, so it is last in the members' order; the button beside the layout
+    // button opens the order, and every layout below follows it.
+    await box.getByRole('button', { name: 'Order members' }).click()
+    const order = page.getByRole('dialog', { name: 'Member order' })
+    const listed = order.getByRole('list', { name: 'Members in order' }).getByRole('listitem')
+    await expect(listed).toHaveText([/A-S3/, /B-S3/, /A-S1/])
+    await expect(order.getByRole('button', { name: 'Move A-S3 up' })).toBeDisabled()
+    await order.getByRole('button', { name: 'Move A-S1 up' }).click()
+    await order.getByRole('button', { name: 'Move A-S1 up' }).click()
+    await expect(listed).toHaveText([/A-S1/, /A-S3/, /B-S3/])
+    await expect(order.getByRole('button', { name: 'Move A-S1 up' })).toBeDisabled()
+    await order.getByRole('button', { name: 'Done' }).click()
+    await expect(async () => {
+      const group = (await canvasRecords(page)).groups.find((g: { label: string }) => g.label === 'G4')
+      expect(group.member_ids).toHaveLength(3)
+      expect(group.member_ids[0]).toBe((await canvasRecords(page)).nodes.find((n: { label: string }) => n.label === 'A-S1').id)
+    }).toPass()
     const members = ['A-S1', 'A-S3', 'B-S3'].map((label) => canvasNode(page, label))
     for (const member of members) await expect(member).toBeVisible()
     const places = () => Promise.all(members.map(async (m) => (await m.boundingBox())!))

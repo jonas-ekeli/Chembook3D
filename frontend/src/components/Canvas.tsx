@@ -129,6 +129,8 @@ type GroupData = {
   expanded: boolean
   onToggle: (id: string) => void
   onLayout: (id: string, layout: GroupLayout) => void
+  /** D89: opens the member order list; none in the read-only copy. */
+  onOrder?: (id: string) => void
   energy: EnergyText | null
   /** D85: the notes on its members, shown as a count while it is collapsed. */
   memberNotes: Note[]
@@ -205,7 +207,7 @@ const LAYOUT_BUTTON: Record<GroupLayout, { label: string; icon: string }> = {
 const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<GroupData>>) {
   const { group, colour, stepName, memberCount, representativeLabel, mode, ts, expanded } = data
   const { representativeXyz, representativeRotation } = data
-  const { onToggle, onLayout, energy, memberNotes } = data
+  const { onToggle, onLayout, onOrder, energy, memberNotes } = data
   // A21: the button cycles grid (a new group's layout), vertical line, horizontal line, grid.
   const next: GroupLayout =
     group.layout === 'vertical' ? 'horizontal' : group.layout === 'horizontal' ? 'grid' : 'vertical'
@@ -248,6 +250,19 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
             }}
           >
             {nextLabel.icon}
+          </button>
+        )}
+        {expanded && memberCount > 1 && onOrder && (
+          <button
+            className="small nodrag"
+            aria-label="Order members"
+            title="Order members"
+            onClick={(event) => {
+              event.stopPropagation()
+              onOrder(group.id)
+            }}
+          >
+            ⇅
           </button>
         )}
         <button
@@ -392,6 +407,7 @@ function CanvasView({
   expanded,
   onToggleGroup,
   onGroupLayout,
+  onGroupOrder,
   onSelect,
   onMultiSelect,
   onToggleNode,
@@ -415,6 +431,7 @@ function CanvasView({
   expanded: Set<string>
   onToggleGroup: (id: string) => void
   onGroupLayout: (id: string, layout: GroupLayout) => void
+  onGroupOrder?: (id: string) => void
   onSelect: (selection: Selection) => void
   onMultiSelect: (nodeIds: string[]) => void
   onToggleNode: (id: string) => void
@@ -574,6 +591,7 @@ function CanvasView({
           expanded: open,
           onToggle: onToggleGroup,
           onLayout: onGroupLayout,
+          onOrder: onGroupOrder,
           energy: nodeEnergy(group.id),
           memberNotes: members.flatMap((m) => notesOf(m.id)),
         } satisfies GroupData,
@@ -713,7 +731,7 @@ function CanvasView({
         }) ?? null
     }
     return { flowNodes: result, flowEdges: edges }
-  }, [data, mode, nodeEnergySource, filters, expanded, selection, multi, colours, stepNames, onToggleGroup, onGroupLayout, notesByNode, noteActions])
+  }, [data, mode, nodeEnergySource, filters, expanded, selection, multi, colours, stepNames, onToggleGroup, onGroupLayout, onGroupOrder, notesByNode, noteActions])
 
   // FR-EN-02: ΔX = X(target) − X(source) on each edge, or n/a (EN-3).
   const flowEdges = useMemo(() => {

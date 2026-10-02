@@ -530,6 +530,35 @@ def test_a_member_without_a_branch_goes_back_to_the_one_it_came_from(open_client
     assert get(open_client, f"/nodes/{member}")["branch_id"] == example.branches["A1"]
 
 
+def test_members_keep_the_order_the_user_sets(open_client, example):
+    # T-BR-21, D89: one order per group, which every layout follows; new members come last.
+    group = reconnect_g6(open_client, example)
+    ids = group["member_ids"]
+    assert ids == [example.nodes[f"{b}-S6"] for b in ("A1", "A2", "B1", "B2")]
+    turned = list(reversed(ids))
+    response = open_client.put(f"/api/groups/{group['id']}/order", json={"ids": turned})
+    assert response.status_code == 200, response.text
+    assert response.json()["member_ids"] == turned
+    assert get(open_client, "/canvas")["groups"][0]["member_ids"] == turned
+    orders = [e for e in history(open_client, group["id"]) if e["field"] == "member_ids"]
+    assert len(orders) == 1 and (orders[0]["old_value"], orders[0]["new_value"]) == (ids, turned)
+
+    # The same order again is not a change; a list that misses or adds a member is refused.
+    open_client.put(f"/api/groups/{group['id']}/order", json={"ids": turned})
+    assert len([e for e in history(open_client, group["id"]) if e["field"] == "member_ids"]) == 1
+    for wrong in (turned[:3], [*turned, example.nodes["A1-S5"]], [*turned[:3], turned[0]]):
+        status = open_client.put(f"/api/groups/{group['id']}/order", json={"ids": wrong})
+        assert status.status_code == 422
+
+    # A node added later comes last, and one taken out leaves the others in their order.
+    added = example.nodes["A1-S5"]
+    grown = post(open_client, f"/groups/{group['id']}/members", {"node_ids": [added]}, status=200)
+    assert grown["member_ids"] == [*turned, added]
+    open_client.delete(f"/api/groups/{group['id']}/members/{turned[1]}")
+    shrunk = get(open_client, "/groups")[0]
+    assert shrunk["member_ids"] == [turned[0], *turned[2:], added]
+
+
 def test_group_layout_is_stored_and_not_in_history(open_client, example):
     # T-BR-16, FR-GRP-07, A21
     group = reconnect_g6(open_client, example)

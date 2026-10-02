@@ -48,6 +48,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-BR-18 | Open an investigation made before D66 with a reconnection | Members are back in the branches they came from (A22) |
 | T-BR-19 | Collapse a group, switch to the structure view mode, then pick a representative | No structure on the group until a representative is picked, then the representative's structure; none in compact mode (D68) |
 | T-BR-20 | Take B2-S6, the representative of G6 with an edge into G6, out of the group; then try to take out the last member of a two-member group after removing one | B2-S6 stays a node on B2 beside G6 with its edges; G6 has 3 members, no representative, and B2 is no longer an incoming branch (R keeps B2 as a parent); one history entry; the last member is refused (D88) |
+| T-BR-21 | Reverse G6's members, add A1-S5, take out the second member; open an investigation made before D89 | The new order is kept and shown by every layout, with one history entry; A1-S5 comes last; the rest keep their order; old groups keep the order their members were made in (D89) |
 
 ## 4. Identity and geometry tests
 

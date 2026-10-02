@@ -1932,3 +1932,17 @@ table.selectivity-table {
 .energy-table tr.determining td {
   font-weight: 600;
 }
+
+/* D89: the member order dialog */
+.member-order {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.member-order-name {
+  flex: 1;
+  min-width: 12rem;
+}
