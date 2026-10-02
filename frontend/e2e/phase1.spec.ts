@@ -63,6 +63,20 @@ test('create an investigation, add a node by hand and edit its coordinates', asy
   await expect(history.getByText('Coordinates changed (3 atoms → 3 atoms)')).toBeVisible()
   await expect(page.getByRole('list', { name: 'Nodes' }).getByRole('listitem')).toHaveCount(1)
 
+  // T-ID-08, D90: with no calculations, saving empty text removes the coordinates, and
+  // restoring the history entry brings them back.
+  await inspector.getByLabel('xyz text').fill('')
+  await inspector.getByRole('button', { name: 'Remove coordinates' }).click()
+  await expect(history.getByText('Coordinates removed (3 atoms)')).toBeVisible()
+  await expect(inspector.getByText('Formula: H2O')).toHaveCount(0)
+  await expect(inspector.getByLabel('xyz text')).toHaveValue('')
+  await history
+    .getByRole('listitem')
+    .filter({ hasText: 'Coordinates removed (3 atoms)' })
+    .getByRole('button', { name: 'Restore old value' })
+    .click()
+  await expect(inspector.getByText('Formula: H2O')).toBeVisible()
+
   // FR-NODE-07 and FR-HIST-01: status changes are recorded.
   await inspector.getByLabel('Status').selectOption('done')
   await expect(history.getByText('Status: Planned → Done')).toBeVisible()
@@ -88,7 +102,7 @@ test('create an investigation, add a node by hand and edit its coordinates', asy
 
   // FR-HIST-02: history for the whole investigation.
   await page.getByRole('button', { name: 'History' }).click()
-  await expect(page.getByRole('list', { name: 'History' }).getByRole('listitem')).toHaveCount(8)
+  await expect(page.getByRole('list', { name: 'History' }).getByRole('listitem')).toHaveCount(10)
 })
 
 test('editing coordinates of a node with a calculation creates a derived node', async ({ page }) => {
@@ -98,6 +112,11 @@ test('editing coordinates of a node with a calculation creates a derived node', 
   const inspector = page.getByLabel('Node inspector')
   await expect(inspector.getByText('1 calculation', { exact: true })).toBeVisible()
   const original = await inspector.getByLabel('xyz text').inputValue()
+
+  // D90: the coordinates of a node with calculations cannot be removed.
+  await inspector.getByLabel('xyz text').fill('')
+  await expect(inspector.getByRole('button', { name: 'Save as derived node' })).toBeDisabled()
+  await expect(inspector.getByRole('note')).toContainText('cannot be removed')
 
   await inspector.getByLabel('xyz text').fill(original.replace('0.66750000', '0.67000000'))
   await inspector.getByRole('button', { name: 'Save as derived node' }).click()

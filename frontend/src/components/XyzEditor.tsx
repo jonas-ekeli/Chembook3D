@@ -3,6 +3,7 @@ import { api, ApiError, type Node, type XyzLineError } from '../api'
 
 /** Coordinates as xyz text (FR-NODE-03). Saving follows the identity rules in the backend:
  * in place while the node has no calculations (ID-4), otherwise a new derived node (ID-5).
+ * Saving empty text removes the coordinates, only while there are no calculations (D90).
  * Copy and Save .xyz give the stored coordinates (FR-3D-06). Remount with a new key when the
  * stored coordinates change. */
 export function XyzEditor({
@@ -20,6 +21,7 @@ export function XyzEditor({
 
   const dirty = text !== stored
   const derives = node.calculation_count > 0
+  const clearing = !text.trim() && !!node.xyz
 
   const save = async () => {
     setSaving(true)
@@ -80,7 +82,13 @@ export function XyzEditor({
           ))}
         </ul>
       )}
-      {derives && (
+      {derives && clearing && (
+        <p className="muted" role="note">
+          The coordinates of a node with calculations cannot be removed: they are the geometry
+          its calculations were run on.
+        </p>
+      )}
+      {derives && !clearing && (
         <p className="muted">
           This node has {node.calculation_count} calculation
           {node.calculation_count === 1 ? '' : 's'}, so saving keeps it unchanged and creates a new
@@ -88,8 +96,16 @@ export function XyzEditor({
         </p>
       )}
       <div className="buttons">
-        <button className="primary" disabled={!dirty || saving || !text.trim()} onClick={save}>
-          {derives ? 'Save as derived node' : 'Save coordinates'}
+        <button
+          className="primary"
+          disabled={!dirty || saving || (!text.trim() && (derives || !clearing))}
+          onClick={save}
+        >
+          {clearing && !derives
+            ? 'Remove coordinates'
+            : derives
+              ? 'Save as derived node'
+              : 'Save coordinates'}
         </button>
         {dirty && (
           <button

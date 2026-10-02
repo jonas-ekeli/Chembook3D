@@ -216,6 +216,8 @@ function describe(entry: HistoryEntry, names: Names): string {
   }
   const field = entry.field ?? ''
   if (field === 'geometry') {
+    if (entry.old_value == null) return `Coordinates added (${show(field, entry.new_value)})`
+    if (entry.new_value == null) return `Coordinates removed (${show(field, entry.old_value)})`
     return `Coordinates changed (${show(field, entry.old_value)} → ${show(field, entry.new_value)})`
   }
   return `${FIELD_LABELS[field] ?? field}: ${show(field, entry.old_value, names)} → ${show(field, entry.new_value, names)}`
@@ -224,7 +226,8 @@ function describe(entry: HistoryEntry, names: Names): string {
 function canRestore(entry: HistoryEntry): boolean {
   if (entry.record_type !== 'node') return false
   if (entry.action !== 'update' || !entry.field || !(entry.field in FIELD_LABELS)) return false
-  return entry.field !== 'geometry' || Array.isArray(entry.old_value)
+  // D90: restoring to no coordinates removes them (refused on a node with calculations).
+  return entry.field !== 'geometry' || Array.isArray(entry.old_value) || entry.old_value == null
 }
 
 /** The node an entry belongs to: the record itself, or the node a calculation was added to. */

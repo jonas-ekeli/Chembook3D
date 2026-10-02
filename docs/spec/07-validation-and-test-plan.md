@@ -61,6 +61,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-ID-05 | Import a geometry within tolerance of an existing node | The possible-duplicate prompt; nothing is merged without the user's choice (ID-8) |
 | T-ID-06 | Same file imported twice | A checksum notice |
 | T-ID-07 | Invalid xyz line | The error names the line; no save |
+| T-ID-08 | Save empty xyz on a node without calculations, then on one with a calculation | The first has no coordinates and the history holds the old ones; the second is refused and keeps its coordinates (D90) |
 | T-OVL-01 | Overlay a structure and its rotated, translated copy with extra atoms, on chosen atoms | RMSD over the chosen atoms 0; paired atoms of different elements, fewer than three atoms or numbers out of range are refused with the reason (FR-3D-04) |
 | T-OVL-02 | Overlay a structure and its mirror image, with and without "Allow mirror image" | Without: RMSD above 0, not mirrored; with: RMSD 0 and marked mirrored |
 | T-OVL-03 | Save an alignment set, reopen the investigation, add a node, delete a node | The set keeps each node's atoms, gains the new one, loses the deleted one, and writes no history (FR-3D-07, A31) |

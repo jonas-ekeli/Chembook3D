@@ -84,6 +84,44 @@ def test_invalid_xyz_reports_lines_and_saves_nothing(open_client):
     assert not any(e["field"] == "geometry" for e in _history(open_client, node["id"]))
 
 
+def test_empty_xyz_removes_coordinates_without_calculations(open_client):
+    # T-ID-08, D90
+    node = _create(open_client, label="INT1", xyz=WATER)
+    response = open_client.put(f"/api/nodes/{node['id']}/geometry", json={"xyz": "  \n"})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["derived"] is False
+    assert result["node"]["id"] == node["id"]
+    assert result["node"]["xyz"] is None and result["node"]["formula"] is None
+    assert result["node"]["label"] == "INT1"
+
+    geometry_changes = [e for e in _history(open_client, node["id"]) if e["field"] == "geometry"]
+    assert len(geometry_changes) == 1
+    assert geometry_changes[0]["old_value"][0] == ["O", 0.0, 0.0, 0.1173]
+    assert geometry_changes[0]["new_value"] is None
+
+    # Saving empty text again changes nothing and records nothing.
+    again = open_client.put(f"/api/nodes/{node['id']}/geometry", json={"xyz": ""})
+    assert again.status_code == 200
+    assert len([e for e in _history(open_client, node["id"]) if e["field"] == "geometry"]) == 1
+    assert open_client.get(f"/api/nodes/{node['id']}/xyz").status_code == 404
+
+
+def test_empty_xyz_is_refused_on_a_node_with_calculations(open_client):
+    # T-ID-08, D90: the coordinates are the geometry the calculations were run on.
+    node = _create(open_client, xyz=WATER)
+    investigation = open_client.app.state.investigation
+    with investigation.sessions.begin() as session:
+        session.add(Calculation(node_id=node["id"], type="single_point", program="Gaussian"))
+
+    response = open_client.put(f"/api/nodes/{node['id']}/geometry", json={"xyz": ""})
+    assert response.status_code == 422
+    assert "calculations" in response.json()["detail"]
+    assert open_client.get(f"/api/nodes/{node['id']}").json()["xyz"] == node["xyz"]
+    assert not any(e["field"] == "geometry" for e in _history(open_client, node["id"]))
+    assert len(open_client.get("/api/nodes").json()) == 1
+
+
 def test_field_updates_are_validated_and_recorded(open_client):
     node = _create(open_client, tags=["optimization-incomplete", "A1"])
     response = open_client.patch(
