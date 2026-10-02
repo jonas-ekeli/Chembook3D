@@ -35,7 +35,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-NODE-01 | The user can create a node with no required fields. Available fields: label, role, charge, multiplicity, status, step, branch, tags, notes, coordinates. | D7, D37, P1, WF-02 | 1 |
 | FR-NODE-02 | Nodes have free-text notes (Markdown rendering is P11). | D37 | 1 |
 | FR-NODE-03 | Coordinates can be viewed and edited as xyz text (element symbol and x y z in Å per line, with an optional count and comment header). Invalid lines are reported with line numbers and are not saved. | D20 | 1 |
-| FR-NODE-04 | While a node has no calculations, saving edited coordinates updates the node in place. | D23, ID-4 | 1 |
+| FR-NODE-04 | While a node has no calculations, saving edited coordinates updates the node in place, and saving empty text removes its coordinates (D90). | D23, ID-4, D90 | 1 |
 | FR-NODE-05 | When a node has ≥1 calculation, saving edited coordinates creates a new node with `derived_from` set to the original, placed next to it on the canvas. The original's geometry and calculations are unchanged. | D23, ID-5, INV-6 | 1 |
 | FR-NODE-06 | Composition (formula) is derived from the coordinates and is not editable separately. | P12 | 1 |
 | FR-NODE-07 | The user can set a node's status to planned, running externally, done, failed, rejected or superseded. | D19 | 1 |

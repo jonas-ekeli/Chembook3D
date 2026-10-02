@@ -174,7 +174,9 @@ export function NodeInspector({
     if (entry.field === 'kind') {
       void setKind(entry.old_value as Node['kind'])
     } else if (entry.field === 'geometry') {
-      api.setGeometry(node.id, geometryToXyz(entry.old_value as GeometryRows, node.label)).then(
+      // An entry with no old coordinates restores to none (D90).
+      const old = entry.old_value as GeometryRows | null
+      api.setGeometry(node.id, old ? geometryToXyz(old, node.label) : '').then(
         (result) =>
           onChanged(
             result.node,

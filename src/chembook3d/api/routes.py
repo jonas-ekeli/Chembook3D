@@ -719,6 +719,8 @@ def set_geometry(node_id: str, body: GeometryIn, session: DbSession):
         result = node_service.set_geometry(session, node_id, body.xyz)
     except xyz.XyzParseError as exc:
         raise _xyz_error(exc) from exc
+    except node_service.NodeError as exc:
+        raise HTTPException(422, str(exc)) from exc
     return GeometryOut(node=_node_out(session, result.node), derived=result.derived)
 
 

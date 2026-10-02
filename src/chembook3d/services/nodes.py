@@ -211,8 +211,11 @@ class GeometryResult:
 
 
 def set_geometry(session: Session, node_id: str, xyz_text: str) -> GeometryResult:
-    """Save edited coordinates. Invalid text raises xyz.XyzParseError and changes nothing."""
+    """Save edited coordinates. Invalid text raises xyz.XyzParseError and changes nothing.
+    Empty text removes the coordinates of a node with no calculations (D90)."""
     node = get(session, node_id)
+    if not xyz_text.strip():
+        return GeometryResult(clear_geometry(session, node), derived=False)
     geometry = _geometry_from_atoms(xyz.parse_xyz(xyz_text))
 
     if calculation_count(session, node.id) == 0:  # ID-4: edit in place
@@ -244,6 +247,22 @@ def set_geometry(session: Session, node_id: str, xyz_text: str) -> GeometryResul
     session.flush()
     history.record(session, "node", derived.id, "create", new=snapshot(derived))
     return GeometryResult(derived, derived=True)
+
+
+def clear_geometry(session: Session, node: Node) -> Node:
+    """D90: a node with no calculations can go back to having no coordinates, recorded in the
+    history like any edit. A node with calculations keeps its coordinates: they are the
+    geometry its calculations belong to (ID-4, ID-5)."""
+    if calculation_count(session, node.id) > 0:
+        raise NodeError(
+            "This node has calculations, so its coordinates cannot be removed: they are the "
+            "geometry its calculations were run on"
+        )
+    if node.geometry is not None:
+        history.record(session, "node", node.id, "update", "geometry", node.geometry, None)
+        node.geometry = None
+        session.flush()
+    return node
 
 
 def delete(session: Session, node_id: str) -> dict[str, Any]:
