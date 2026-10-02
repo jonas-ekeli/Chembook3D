@@ -15,6 +15,7 @@ import {
   Position,
   ReactFlow,
   useReactFlow,
+  useStore,
   useUpdateNodeInternals,
   type Connection,
   type Edge,
@@ -280,9 +281,25 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
   )
 })
 
+/**
+ * React Flow raises an edge that ends at a node inside a group (an expanded group's member)
+ * to that node's level, above the layer where edge labels are drawn. Its label is raised as
+ * far, so the energy and the other marks stay on top of the line as on every other edge.
+ */
+function useEdgeLevel(source: string, target: string): number {
+  return useStore((store) => {
+    const level = (id: string) => {
+      const node = store.nodeLookup.get(id)
+      return node?.parentId ? node.internals.z : 0
+    }
+    return Math.max(level(source), level(target))
+  })
+}
+
 function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
-  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd, selected } =
+  const { id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd, selected } =
     props
+  const level = useEdgeLevel(source, target)
   let [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
   const dx = targetX - sourceX
   const sideways = sourcePosition === Position.Right && targetPosition === Position.Left
@@ -315,7 +332,8 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
       <EdgeLabelRenderer>
         <div
           className={`edge-label${data.faded ? ' faded' : ''}`}
-          style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+          data-edge={id}
+          style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, zIndex: level || undefined }}
         >
           {data.energy && (
             <span className="edge-energy" title={data.energy.title}>

@@ -246,7 +246,7 @@ function FloatingNote({ note, children }: { note: Note; children: ReactNode }) {
   const ex = clamp(0, note.offset_x, note.offset_x + w) * sx
   const ey = clamp(0, note.offset_y, note.offset_y + h) * sy
   return (
-    <div className={`cnote-anchor at-${note.corner} note-${note.colour} nodrag`}>
+    <div className={`cnote-anchor at-${note.corner} note-${note.colour} nodrag nopan`}>
       {note.placement === 'line' && (
         <svg className="cnote-tether" width="1" height="1" aria-hidden="true" data-testid="note-line">
           <line x1="0" y1="0" x2={ex} y2={ey} />
@@ -313,7 +313,7 @@ export function CardNotes({ notes, actions }: { notes: Note[]; actions: NoteActi
         const here = drawn.filter((n) => n.corner === corner && n.placement === 'corner')
         if (!here.length) return null
         return (
-          <div key={corner} className={`cnotes cnotes-${corner} nodrag`}>
+          <div key={corner} className={`cnotes cnotes-${corner} nodrag nopan`}>
             {here.map(card)}
           </div>
         )
