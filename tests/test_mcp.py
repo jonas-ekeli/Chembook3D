@@ -19,7 +19,7 @@ from mcp.client.stdio import stdio_client
 from chembook3d.api.live import ACTIONS
 from chembook3d.app import create_app
 from chembook3d.mcp_server import Bridge, build_server, check_url
-from chembook3d.mcp_tools import BY_NAME, TOOLS, input_schema, openapi
+from chembook3d.mcp_tools import BY_NAME, READ_ONLY_TOOLS, TOOLS, input_schema, openapi
 from tests.conftest import WATER
 
 ORIGIN = {"Origin": "http://127.0.0.1:8765"}
@@ -75,6 +75,8 @@ def test_every_delete_asks_the_user():
         if spec.method == "DELETE" and spec.kind != "confirm":
             assert spec.path in UNASKED_DELETES, spec.name
     assert BY_NAME["remove_coordinates"].kind == "confirm"
+    assert "get_node" in READ_ONLY_TOOLS and "update_node" not in READ_ONLY_TOOLS
+    assert not READ_ONLY_TOOLS & {t.name for t in TOOLS if t.kind != "read"}
     assert BY_NAME["dissolve_group"].kind == "confirm"
 
 

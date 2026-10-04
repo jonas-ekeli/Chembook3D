@@ -679,6 +679,8 @@ for _name, _action in ACTIONS.items():
     TOOLS.append(T(_name, "confirm", _action.method, _action.path, CONFIRM_DESCRIPTIONS[_name]))
 
 BY_NAME = {t.name: t for t in TOOLS}
+# The tools that change nothing; a client may allow them without asking (the panel, D92).
+READ_ONLY_TOOLS = frozenset(t.name for t in TOOLS if t.kind == "read")
 
 
 # ---------- input schemas ----------
