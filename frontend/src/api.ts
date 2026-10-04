@@ -885,15 +885,19 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** D91: this tab's name in the backend's change counter, so it reloads only for changes made
+ * elsewhere (by Claude, or in another tab). */
+export const CLIENT_ID = `tab-${Math.random().toString(36).slice(2, 10)}`
+
+async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const raw = body instanceof Blob
+  const headers: Record<string, string> = { 'X-Chembook-Client': CLIENT_ID }
+  if (body !== undefined) headers['Content-Type'] = raw ? 'application/octet-stream' : 'application/json'
   const response = await fetch(`/api${path}`, {
     method,
-    headers:
-      body === undefined
-        ? undefined
-        : { 'Content-Type': raw ? 'application/octet-stream' : 'application/json' },
+    headers,
     body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
+    signal,
   })
   if (!response.ok) {
     let detail: unknown = null
@@ -908,7 +912,50 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return (await response.json()) as T
 }
 
+/** D91: a delete Claude asks for; the app does it only on the user's Confirm. */
+export type ClaudeRequest = {
+  id: string
+  action: string
+  summary: string
+  reason: string
+  status: 'pending' | 'running' | 'done' | 'refused' | 'expired' | 'failed'
+  seconds_left: number
+  error: string | null
+}
+
+export type Live = {
+  version: number
+  /** Something was changed elsewhere since the version asked about. */
+  changed: boolean
+  confirm_version: number
+  confirmations: ClaudeRequest[]
+  investigation: string | null
+}
+
+/** What the tab shows, for Claude's get_selection (D91). */
+export type SelectionReport = {
+  nodes: string[]
+  groups: string[]
+  transitions: string[]
+  branch_id: string | null
+  view: string
+  level: string | null
+  energy_type: string | null
+  reference_id: string | null
+}
+
 export const api = {
+  /** A long poll: answers when something changed elsewhere, the requests changed, or after `wait` s. */
+  live: (since: number | null, confirmVersion: number | null, wait: number, signal?: AbortSignal) => {
+    const query = new URLSearchParams({ client: CLIENT_ID, wait: String(wait) })
+    if (since !== null) query.set('since', String(since))
+    if (confirmVersion !== null) query.set('confirmations', String(confirmVersion))
+    return request<Live>('GET', `/live?${query.toString()}`, undefined, signal)
+  },
+  reportSelection: (selection: SelectionReport) => request<void>('PUT', '/selection', selection),
+  answerClaude: (id: string, confirm: boolean) =>
+    request<ClaudeRequest>('POST', `/confirmations/${id}/answer`, { confirm }),
+
   currentInvestigation: () => request<Investigation | null>('GET', '/investigation'),
   createInvestigation: (folder: string, name: string) =>
     request<Investigation>('POST', '/investigations', { folder, name }),

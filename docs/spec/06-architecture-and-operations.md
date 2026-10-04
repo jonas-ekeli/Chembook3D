@@ -34,6 +34,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Confirmed items are marked
 
 - **Domain rules live in the backend.** Identity rules (ID-*), invariants (INV-*) and energy rules (EN-*) are enforced by backend services, not only by the UI. That keeps the rules testable in Python, and keeps them in place if the UI or a future hosted mode changes.
 - **The API is local-only:** it binds to 127.0.0.1 (NFR-SEC-01).
+- **Claude works through the same API (D91).** `chembook3d mcp`, started by Claude Code or Claude Desktop on the same computer, turns Claude's tool calls into API requests to the running app, so the rules above hold for it too. It never opens the database. Open tabs wait on `GET /api/live` and reload when something is changed elsewhere; deletes Claude asks for wait there for the user's Confirm, and only the app's page can answer them.
 - The backend serves the built UI as static files, so running one command starts everything (P19).
 
 ## 3. Storage

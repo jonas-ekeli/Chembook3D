@@ -11,6 +11,8 @@ from starlette.types import Scope
 
 from chembook3d import __version__
 from chembook3d.api.energies import router as energy_router
+from chembook3d.api.live import ChangeTracker, LiveState
+from chembook3d.api.live import router as live_router
 from chembook3d.api.notes import router as note_router
 from chembook3d.api.pathway import router as pathway_router
 from chembook3d.api.routes import close_and_push, router
@@ -77,6 +79,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Chembook3D", version=__version__, lifespan=_lifespan)
     app.state.investigation = None
     app.state.staging = Staging()
+    app.state.live = LiveState()  # D91: changes, selection and confirmations
+    app.add_middleware(ChangeTracker, live=app.state.live)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -98,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(selectivity_router)
     app.include_router(note_router)
     app.include_router(turnover_router)
+    app.include_router(live_router)
 
     static = static_dir()
     if static is not None:

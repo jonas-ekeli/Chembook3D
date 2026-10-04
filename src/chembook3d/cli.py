@@ -1,9 +1,11 @@
-"""Command-line entry point: `chembook3d` starts the local server and opens the browser."""
+"""Command-line entry point: `chembook3d` starts the local server and opens the browser;
+`chembook3d mcp` runs the MCP server through which Claude works in it (D91)."""
 
 import argparse
 import platform
 import shutil
 import subprocess
+import sys
 import threading
 import webbrowser
 from pathlib import Path
@@ -37,6 +39,13 @@ def open_browser(url: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv[:1] == ["mcp"]:  # D91: the MCP server for Claude, beside the running app
+        from chembook3d.mcp_server import main as mcp_main
+
+        mcp_main(argv[1:])
+        return
     parser = argparse.ArgumentParser(prog="chembook3d", description=__doc__)
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
