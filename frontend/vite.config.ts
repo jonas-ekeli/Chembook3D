@@ -6,7 +6,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:8765',
+      // ws: the Claude panel's terminal is a WebSocket (D92).
+      '/api': { target: 'http://127.0.0.1:8765', ws: true },
     },
   },
   build: {

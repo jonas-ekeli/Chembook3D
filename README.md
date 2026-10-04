@@ -107,6 +107,30 @@ the folders and file paths on your computer, the output files themselves and the
 After updating Chembook3D, build the interface again (`uv run python scripts/build_frontend.py`),
 since the viewer inside the file is built with it.
 
+## Claude in the app
+
+The **Claude** button opens a panel beside the notebook running
+[Claude Code](https://code.claude.com/docs/en/setup), Anthropic's command-line assistant, with
+your own Claude account (a Pro or Max plan, or another account Claude Code accepts). Chembook3D
+stores no sign-in and sends nothing to Claude itself; what Claude reads in the conversation goes
+to Anthropic under your account's settings.
+
+Install Claude Code once on each computer, in the same system the app runs in (in WSL, inside
+WSL), then run `claude` once in a terminal to sign in:
+
+```sh
+# Windows PowerShell
+irm https://claude.ai/install.ps1 | iex
+# Linux, WSL or macOS
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+In the panel, **New conversation** starts Claude Code for the open investigation and **Continue
+last conversation** picks up its last one. Claude works on the notebook through the app's own
+notebook tools, asks before changing anything, and cannot run commands, edit files or browse
+the web from the panel. **Hide** keeps it running; **Stop**, closing the investigation or
+reloading the page ends it.
+
 ## Develop
 
 ```sh

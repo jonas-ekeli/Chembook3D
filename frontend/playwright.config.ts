@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { defineConfig } from '@playwright/test'
@@ -8,6 +8,21 @@ import { defineConfig } from '@playwright/test'
 // realpath expands Windows short names (RUNNER~1), matching the paths the backend shows.
 process.env.E2E_DIR ??= realpathSync.native(mkdtempSync(join(tmpdir(), 'chembook3d-e2e-')))
 const port = 8766
+
+// D92: the Claude panel runs tests/fake_claude.py instead of Claude Code, through a `claude`
+// command as Windows (a .cmd file, as npm installs it) or a shell would find it.
+function fakeClaude(): string {
+  const root = resolve(import.meta.dirname, '..')
+  const windows = process.platform === 'win32'
+  const python = windows ? join(root, '.venv', 'Scripts', 'python.exe') : join(root, '.venv', 'bin', 'python')
+  const script = join(root, 'tests', 'fake_claude.py')
+  const folder = join(process.env.E2E_DIR!, 'bin')
+  mkdirSync(folder, { recursive: true })
+  const path = join(folder, windows ? 'claude.cmd' : 'claude')
+  writeFileSync(path, windows ? `@"${python}" "${script}" %*\r\n` : `#!/bin/sh\nexec "${python}" "${script}" "$@"\n`)
+  if (!windows) chmodSync(path, 0o755)
+  return path
+}
 
 export default defineConfig({
   testDir: './e2e',
@@ -33,6 +48,6 @@ export default defineConfig({
     cwd: resolve(import.meta.dirname, '..'),
     url: `http://127.0.0.1:${port}/api/health`,
     reuseExistingServer: false,
-    env: { CHEMBOOK3D_CONFIG_DIR: join(process.env.E2E_DIR, 'config') },
+    env: { CHEMBOOK3D_CONFIG_DIR: join(process.env.E2E_DIR, 'config'), CHEMBOOK3D_CLAUDE: fakeClaude() },
   },
 })

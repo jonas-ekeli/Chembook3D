@@ -229,6 +229,17 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-NOTE-05 | Notes show in full in the node's side panel, and on the canvas, in the side panel and with their pictures in the read-only copy. | D85, D79 | after 5 |
 | FR-NOTE-06 | A note can be detached to float apart from the card, joined to its corner by a line or not, moving with the card; it is dragged by its head and put back on its corner with its pin. An expanded note is resized from its outer corner. | D87, A37 | after 5 |
 
+## FR-PANEL · Claude panel (D92)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-PANEL-01 | A "Claude" button opens a resizable panel docked beside the notebook with a terminal running the official `claude` CLI on this computer; hiding the panel keeps it running. | D92, A39 | after 5 |
+| FR-PANEL-02 | Only `claude` is started, never a shell, in an app-managed working folder per investigation, with the `chembook3d` MCP server (D91) as its only MCP server, the notebook's read tools pre-approved, its other tools asking, and shell, file editing and web tools denied. "Continue last conversation" resumes the investigation's last one. | D92 | after 5 |
+| FR-PANEL-03 | The terminal accepts a connection only while the app listens on 127.0.0.1, from this computer, for a loopback host name and page origin, with a one-time token only the app's page can read. | D92, NFR-SEC-01 | after 5 |
+| FR-PANEL-04 | Without `claude` installed, the panel shows how to install it and sign in; without the notebook tools it says Claude can only answer from what it is told. | D92 | after 5 |
+
+**AC:** with Claude Code installed and signed in, open the demo, "Claude", "New conversation": Claude Code starts in the panel; asking it to run a shell command is refused; hide and show the panel and the conversation is still there.
+
 ## FR-SHARE · Read-only copy to share (D79)
 
 | ID | Requirement | Trace | Phase |
