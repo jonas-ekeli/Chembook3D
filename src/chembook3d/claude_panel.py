@@ -102,13 +102,13 @@ def notebook_server() -> tuple[dict, list[str]] | None:
     """The chembook3d MCP server (D91) and its read-only tools, or None in a version of the app
     that does not have it yet (Claude then has no notebook tools)."""
     try:
-        from chembook3d import mcp  # type: ignore[attr-defined]
+        from chembook3d import mcp_tools  # type: ignore[attr-defined]
     except ImportError:
         return None
-    read_only = sorted(getattr(mcp, "READ_ONLY_TOOLS", ()))
-    return {"type": "stdio", "command": sys.executable, "args": ["-m", "chembook3d.cli", "mcp"]}, (
-        read_only
-    )
+    read_only = sorted(tool.name for tool in mcp_tools.TOOLS if tool.kind == "read")
+    # The app's own Python runs `chembook3d mcp`, so it works without uv on the PATH.
+    server = {"type": "stdio", "command": sys.executable, "args": ["-m", "chembook3d.cli", "mcp"]}
+    return server, read_only
 
 
 def workspace(folder: Path) -> Path:
@@ -339,9 +339,11 @@ class _WindowsBackend(_Backend):
 
     def read(self) -> str | None:
         try:
-            return self._process.read(65536)
-        except EOFError:
+            text = self._process.read(65536)
+        except (EOFError, OSError):
             return None
+        # pywinpty's reader thread sends this marker when a read found nothing.
+        return text.replace("0011Ignore", "")
 
     def write(self, text: str) -> None:
         try:
@@ -367,4 +369,10 @@ class _WindowsBackend(_Backend):
             self._process.wait()
         except (EOFError, OSError):
             pass
-        return self._process.exitstatus
+        code = self._process.exitstatus
+        # pywinpty reads through a local socket pair that its close() leaves open once the
+        # program has ended (it then counts as closed), so close those here.
+        for sock in (self._process.fileobj, getattr(self._process, "_server", None)):
+            if sock is not None:
+                sock.close()
+        return code
