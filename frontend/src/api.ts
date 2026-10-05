@@ -885,6 +885,18 @@ export class ApiError extends Error {
   }
 }
 
+/** Whether the Claude panel can run here (D92). */
+export type ClaudeStatus = {
+  /** Claude Code was found on this computer. */
+  available: boolean
+  /** The panel may be used from this page (the app listens on 127.0.0.1 only). */
+  enabled: boolean
+  reason: string | null
+  /** The chembook3d MCP server (D91) is part of this version of the app. */
+  notebook_tools: boolean
+  install: { command: string; docs: string }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const raw = body instanceof Blob
   const response = await fetch(`/api${path}`, {
@@ -909,6 +921,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
+  claudeStatus: () => request<ClaudeStatus>('GET', '/claude'),
+  /** A one-time token for the panel's terminal WebSocket (D92). */
+  claudeSession: (resume: boolean) => request<{ token: string }>('POST', '/claude/sessions', { resume }),
   currentInvestigation: () => request<Investigation | null>('GET', '/investigation'),
   createInvestigation: (folder: string, name: string) =>
     request<Investigation>('POST', '/investigations', { folder, name }),

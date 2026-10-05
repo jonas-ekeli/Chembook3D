@@ -159,6 +159,10 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-SYNC-07 | Open a linked investigation from an older schema | Asks before upgrading (FR-SYNC-07) |
 | T-SHARE-01 | Export the demo, open the file from disk with no server | Canvas, node details, calculations and a profile show; changing level and type works; no request leaves the page (FR-SHARE-01–03) |
 | T-SHARE-02 | Search the exported file for the investigation folder and the original paths of imported files | Not found (FR-SHARE-04) |
+| T-PANEL-01 | Ask for a terminal from another site's page, for a foreign host name, from another computer, without a token, with a spent or expired token | Refused before anything starts (FR-PANEL-03) |
+| T-PANEL-02 | Start the panel with a stand-in for `claude` | Started in the investigation's working folder with only the fixed arguments and the terminal's size; typing reaches it; its exit is reported; `--continue` when continuing; closing the page stops it (FR-PANEL-01, FR-PANEL-02) |
+| T-PANEL-03 | The written settings, with and without the notebook server | Shell, editing and web tools denied; the server and its read tools listed only when present (FR-PANEL-02, FR-PANEL-04) |
+| T-PANEL-04 | UI: open the panel, start, type, hide and show, let it end, continue, stop | The output stays while hidden; each end says why; continuing passes `--continue` (FR-PANEL-01) |
 | T-UI-01 | Resume overview on the example | Branch statuses, open items, recent changes and step notes all shown; clicking navigates (FR-OV-01) |
 | T-UI-02 | View modes and filters | Switching modes and filters never changes stored data |
 | T-UI-03 | 3D | Rotate, measure, animate the imaginary mode, overlay two nodes, overlay three on typed atoms and save the set, copy xyz |
