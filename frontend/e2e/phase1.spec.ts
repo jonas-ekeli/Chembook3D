@@ -144,6 +144,19 @@ test('xyz can be copied and saved as a file', async ({ page }) => {
   const download = page.waitForEvent('download')
   await inspector.getByRole('link', { name: 'Save .xyz' }).click()
   expect((await download).suggestedFilename()).toBe('water guess.xyz')
+
+  // Primes stay in the file name, so TS1-2, TS1-2' and TS1-2'' save as three files.
+  for (const name of ["TS1-2", "TS1-2'", "TS1-2''"]) {
+    const node = await (await page.request.post('/api/nodes', { data: { label: name, xyz: WATER } })).json()
+    const saved = page.waitForEvent('download')
+    await page.evaluate((id) => {
+      const link = document.createElement('a')
+      link.href = `/api/nodes/${id}/xyz`
+      link.download = ''
+      link.click()
+    }, node.id as string)
+    expect((await saved).suggestedFilename()).toBe(`${name}.xyz`)
+  }
 })
 
 test('deleting a node asks first and lists what goes', async ({ page }) => {

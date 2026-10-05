@@ -9,6 +9,9 @@ from chembook3d.api.downloads import attachment, file_name
     ("text", "name"),
     [
         ("int2'", "int2'"),
+        ("TS1-2", "TS1-2"),  # Jonas's primes keep these three apart
+        ("TS1-2'", "TS1-2'"),
+        ("TS1-2''", "TS1-2''"),
         ("TS1–2‡ β-H", "TS1–2‡ β-H"),
         ('<>:"/\\|?*', "_________"),
         ("a\tb\x7f", "a_b_"),

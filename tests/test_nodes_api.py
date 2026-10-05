@@ -167,7 +167,9 @@ def test_xyz_download(open_client):
         ("Ru-CAAC α", "Ru-CAAC _", "Ru-CAAC%20%CE%B1"),  # was a 500 (headers are Latin-1)
         ("café", "caf_", "caf%C3%A9"),
         ("TS1–2 ‡", "TS1_2 _", "TS1%E2%80%932%20%E2%80%A1"),
-        ("int2'", "int2'", "int2%27"),  # Jonas's primes stay
+        ("TS1-2", "TS1-2", "TS1-2"),  # Jonas's primes stay, so these three stay apart
+        ("TS1-2'", "TS1-2'", "TS1-2%27"),
+        ("TS1-2''", "TS1-2''", "TS1-2%27%27"),
         ('a/b: "c"?.', "a_b_ _c__", "a_b_%20_c__"),  # only what Windows refuses goes
     ],
 )
