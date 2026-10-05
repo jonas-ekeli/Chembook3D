@@ -457,3 +457,45 @@ def test_the_task_is_safe_on_a_windows_command_line():
     assert not set(task) & set('&|<>^%"!()')
     with pytest.raises(cloud_jobs.CloudJobError):
         cloud_jobs.task_text("2026-10-05-x & calc")
+
+
+def test_the_cloud_instructions_name_the_repository(tmp_path):
+    # T-CLOUD-09: a session given an uploaded folder has no origin, so it is told where to push
+    folder = tmp_path / "inv"
+    folder.mkdir()
+    git(folder, "init", "-q")
+    git(folder, "remote", "add", "origin", "https://jonas:ghp_secret@github.com/jonas/rucaac.git")
+    cloud_jobs.write_cloud_files(folder)
+    text = (folder / cloud_templates.INSTRUCTIONS).read_text(encoding="utf-8")
+    assert "git remote add origin https://github.com/jonas/rucaac.git" in text
+    assert "ghp_secret" not in text and "@REPOSITORY@" not in text
+    assert cloud_templates.github_https("git@github.com:a/b.git") == "https://github.com/a/b.git"
+    assert cloud_templates.github_https("https://gitlab.com/a/b.git") is None
+
+
+def test_an_uploaded_folder_is_flagged_and_the_session_can_be_asked_to_push(
+    linked_client, fake_claude, monkeypatch
+):
+    # T-CLOUD-10: the Claude GitHub App is not set up, so Claude Code uploads the folder
+    client = linked_client
+    draft = new_job(client, name="Draft")
+    response = client.post(f"/api/jobs/{draft['id']}/message", json={"text": "Push again"})
+    assert response.status_code == 422 and "no cloud session" in response.text
+    monkeypatch.setenv("FAKE_CLAUDE_CLOUD", "upload")
+    job = new_job(client)
+    out = client.post(f"/api/jobs/{job['id']}/start").json()
+    assert out["status"] == "running" and out["uploaded"] is True
+    assert "Claude GitHub App" in out["warning"]
+    response = client.post(
+        f"/api/jobs/{job['id']}/message", json={"text": 'Push again & say "done" | 100%'}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["sent"] is True
+    sent = [json.loads(line) for line in fake_claude.read_text(encoding="utf-8").splitlines()]
+    assert {
+        "message": 'Push again & say "done" | 100%',
+        "session": "session_01FakeCloudJob42",
+    } in sent
+    monkeypatch.setenv("FAKE_CLAUDE_CLOUD", "fail")
+    response = client.post(f"/api/jobs/{job['id']}/message", json={"text": "Push again"})
+    assert response.status_code == 422 and "Session not found" in response.text

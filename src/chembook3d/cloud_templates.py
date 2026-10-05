@@ -7,6 +7,7 @@ claude.ai. They are rewritten whenever this version of the app differs from what
 """
 
 import json
+import re
 from typing import Any
 
 from chembook3d.investigation import BACKUP_DIR, DB_NAME, FILES_DIR
@@ -68,7 +69,7 @@ fi
 echo "Chembook3D: xtb {XTB_VERSION} and crest {CREST_VERSION} are installed ($xtb_bin, $crest_bin)."
 """
 
-INSTRUCTIONS_TEXT = f"""\
+_INSTRUCTIONS = f"""\
 <!-- Written by Chembook3D (D93); rewritten when the app changes it. Do not edit. -->
 # Chembook3D calculation jobs
 
@@ -119,10 +120,35 @@ returns its outputs. The app imports them into the notebook; you never change th
 
    `status` is "done" or "failed"; with "failed", `summary` says why.
 5. Commit only `jobs/<job>/outputs/` and `jobs/<job>/result.json`, and push to this session's
-   branch. Do not open a pull request, merge, or push to `main`. The app finds the job's
-   `result.json` on whichever branch it is pushed to.
-6. Answer with the summary.
+   own branch of the investigation's GitHub repository, @REPOSITORY@. If `git remote -v`
+   shows no `origin` (Claude Code uploaded the folder instead of cloning it), add it first:
+   `git remote add origin @REPOSITORY@`. Do not open a pull request, merge, or push to
+   `main`. The app finds the job's `result.json` on whichever branch it is pushed to.
+6. Answer with the summary. If the push was refused, keep the commit, say so, and end with:
+   "Not pushed: install the Claude GitHub App (https://github.com/apps/claude) on
+   @REPOSITORY@, then ask me to push again."
 """
+
+
+def instructions_text(repository: str | None) -> str:
+    """The cloud session's instructions, naming the repository it pushes to (D93)."""
+    return _INSTRUCTIONS.replace(
+        "@REPOSITORY@", repository or "the repository this investigation syncs with"
+    )
+
+
+def github_https(url: str | None) -> str | None:
+    """The https address of a GitHub repository from a git remote address, without any user
+    name or token in it; None for anything not on github.com."""
+    if not url:
+        return None
+    url = url.strip()
+    match = re.match(
+        r"^(?:https?://(?:[^/@]+@)?github\.com/|ssh://git@github\.com/|git@github\.com:)"
+        r"([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$",
+        url,
+    )
+    return f"https://github.com/{match.group(1)}/{match.group(2)}.git" if match else None
 
 
 def settings_with_hook(existing: dict[str, Any] | None) -> dict[str, Any]:

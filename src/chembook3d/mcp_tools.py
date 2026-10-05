@@ -617,6 +617,16 @@ TOOLS: list[ToolSpec] = [
         "GitHub. Only start a job the user agreed to.",
     ),
     T(
+        "message_cloud_job",
+        "write",
+        "POST",
+        "/api/jobs/{job_id}/message",
+        "Send a message to a started job's cloud session, as the user would type it on "
+        "claude.ai: for example to ask it to push its results again once the user has "
+        "installed the Claude GitHub App on the investigation's repository, or to correct "
+        "something the user asked for. Say what you will send before sending it.",
+    ),
+    T(
         "fetch_cloud_job",
         "write",
         "POST",
