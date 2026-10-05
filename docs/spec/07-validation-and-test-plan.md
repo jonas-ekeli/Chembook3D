@@ -174,6 +174,13 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-PANEL-02 | Start the panel with a stand-in for `claude` | Started in the investigation's working folder with only the fixed arguments and the terminal's size; typing reaches it; its exit is reported; `--continue` when continuing; closing the page stops it (FR-PANEL-01, FR-PANEL-02) |
 | T-PANEL-03 | The written settings, with and without the notebook server | Shell, editing and web tools denied; the server and its read tools listed only when present (FR-PANEL-02, FR-PANEL-04) |
 | T-PANEL-04 | UI: open the panel, start, type, hide and show, let it end, continue, stop | The output stays while hidden; each end says why; continuing passes `--continue` (FR-PANEL-01) |
+| T-CLOUD-01 | Write a job with a node and a text file; again with the same name; bad file names; a node without coordinates | Inputs, charge and multiplicity in job.md; the second gets "-2"; names with paths, reserved names or spaces refused, as is the node (FR-CLOUD-01) |
+| T-CLOUD-02 | Start a job not linked to GitHub, without Claude Code, with a newer version on GitHub | Refused with the reason; nothing pushed or started (FR-CLOUD-02) |
+| T-CLOUD-03 | Start a linked job with a stand-in for `claude --cloud`; start it again | One commit on GitHub with only the job and the cloud files, the database left for the sync; `--cloud` run in the investigation folder with only the job in its task; session id and link recorded; the second start refused (FR-CLOUD-02, FR-CLOUD-03) |
+| T-CLOUD-04 | A second clone pushes outputs, result.json, a change to the database and a stray file on its own branch; check, fetch, import | Finished with the summary; only outputs and result.json copied, the database change reported and not copied; the output imports as xTB (FR-CLOUD-03, FR-CLOUD-04) |
+| T-CLOUD-05 | `claude --cloud` fails (not signed in), then works | launch_failed with its message without terminal codes, then running (FR-CLOUD-03) |
+| T-CLOUD-06 | Create, start and fetch from another site's page | Refused (FR-CLOUD-06) |
+| T-CLOUD-07 | The cloud files: settings with other keys, written twice; the setup script outside a cloud session | Other keys kept, the hook added once; checksums pinned; the script does nothing (FR-CLOUD-02, FR-CLOUD-05) |
 | T-UI-01 | Resume overview on the example | Branch statuses, open items, recent changes and step notes all shown; clicking navigates (FR-OV-01) |
 | T-UI-02 | View modes and filters | Switching modes and filters never changes stored data |
 | T-UI-03 | 3D | Rotate, measure, animate the imaginary mode, overlay two nodes, overlay three on typed atoms and save the set, copy xyz |

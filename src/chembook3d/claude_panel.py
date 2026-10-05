@@ -59,10 +59,26 @@ Rules of the notebook:
 - Compare energies only at the same level of theory, including the geometry level
   (e.g. QZ//DZ); never mix levels. Take energies from the app; do not recompute them.
 - Never choose or rebuild branch lineage from energies (for example from per-step minima).
-- The app does not launch or monitor calculations.
 - Deleting anything is confirmed by the person in the app window; you cannot confirm it.
 
-Shell, file editing and web tools are switched off in this panel.
+Calculations (D93): nothing runs on this computer. An xTB or CREST calculation goes to a
+Claude Code cloud session on the person's account, through the investigation's private GitHub
+repository:
+1. `create_cloud_job`: the nodes as inputs (their charge and multiplicity go with them) and
+   exactly what to run and return (program, method such as GFN2-xTB, job type, solvent,
+   constraints, which files). Ask about anything the person did not say that changes the
+   result, then show them the job.
+2. `start_cloud_job` only once they agree. Give them the session link; they can follow and
+   steer it on claude.ai or their phone.
+3. `get_cloud_job` with `wait` to see when it has finished (call again to keep waiting; they
+   can also ask you later to look at a named job).
+4. `fetch_cloud_job`, then import the outputs it lists with `import_file` and
+   `commit_import`, or set the coordinates of the node the person names. Say what changed,
+   and tell them if the cloud session changed anything outside its job folder.
+The investigation must be linked to GitHub (Sync, then Link to GitHub) for this to work.
+
+Shell, file editing and web tools are switched off in this panel; the job tools do the git
+and cloud work themselves.
 """
 
 

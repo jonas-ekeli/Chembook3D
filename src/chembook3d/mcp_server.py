@@ -54,7 +54,12 @@ Rules:
 - Use the app's numbers (energy view, profiles, tables, selectivity and turnover results)
   rather than recomputing them from raw energies.
 - Never choose pathways, branches, lineage or a group's representative from energies: ask the
-  user (X5). The app never launches or monitors calculations (X1).
+  user (X5).
+- The app runs no calculation on this computer (X1). xTB and CREST calculations go to a Claude
+  Code cloud session (D93): create_cloud_job (nodes as inputs, what to run and return), show
+  the user the job and start it only when they agree (start_cloud_job, give them the session
+  link), get_cloud_job with `wait` until it is finished, fetch_cloud_job, then import the
+  outputs (import_file, commit_import) or set coordinates on the node the user names.
 - "This node", "these", "the selected": call get_selection first.
 - Import only files at paths the user gave you: import_file, check the plan, then
   commit_import.

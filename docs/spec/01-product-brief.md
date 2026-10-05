@@ -79,7 +79,7 @@ In scope:
 
 | ID | Exclusion |
 |---|---|
-| X1 | No launching, queueing or monitoring of calculations. |
+| X1 | No launching, queueing or monitoring of calculations on this computer. Calculations Claude sets up may be handed to the user's Claude Code cloud sessions (D93). |
 | X2 | No multi-user collaboration. Syncing one person's investigations between their own computers through a private Git repository is in scope (D71). |
 | X3 | No geometry editing in the 3D viewer (text editing of coordinates is in scope). |
 | X4 | No internet hosting, login or access control. |

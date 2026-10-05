@@ -136,6 +136,32 @@ Claude wants to delete something, dissolve a group or remove coordinates, the ap
 and does nothing unless you click **Confirm**. When you say "this node", Claude asks the app what
 you have selected.
 
+### Calculations in the cloud
+
+Claude can hand an xTB or CREST calculation to a
+[Claude Code cloud session](https://code.claude.com/docs/en/claude-code-on-the-web) on your
+account, for example "optimise this TS guess with GFN2-xTB in toluene". It writes a job folder
+`jobs/<date>-<name>/` in the investigation (the structures, what to run and return), shows it
+to you, and starts it only when you agree: the app pushes that folder to the investigation's
+GitHub repository and starts the session, and Claude gives you its claude.ai link, where you can
+follow it from any device. The session installs xTB 6.7.1 and CREST 3.0.2 itself, runs the job
+and pushes the outputs to a branch; Claude then fetches them and imports them into the notebook.
+The cloud session never touches the investigation's database.
+
+This needs:
+
+- the investigation linked to a private GitHub repository (see Sync above);
+- Claude Code signed in with a plan that includes Claude Code on the web (Pro, Max, Team or
+  Enterprise), and GitHub connected to it, ideally with the
+  [Claude GitHub App](https://github.com/apps/claude) installed on the investigation's
+  repository (without it, Claude Code uploads the folder instead of cloning it);
+- the cloud environment's network access at its default, Trusted, so the session can download
+  xTB and CREST from GitHub.
+
+The first job also adds `.claude/` to the investigation's repository (the setup script and the
+instructions the cloud session follows). The branches the sessions push stay on GitHub until you
+delete them there.
+
 ### Claude Code in your own terminal, or Claude Desktop
 
 The panel's notebook tools are `chembook3d mcp`, an MCP server that talks to the running app on
