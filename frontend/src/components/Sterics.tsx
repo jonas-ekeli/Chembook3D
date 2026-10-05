@@ -12,7 +12,7 @@ import {
 } from '../api'
 import { formatAtomList, fragment, parseAtomList, parseXyz } from '../chem'
 import { STERIC_PALETTES, StericColourSetting, type StericColours } from '../display'
-import { download } from '../util'
+import { download, fileName } from '../util'
 import { Modal } from './Modal'
 import { Viewer3D } from './Viewer3D'
 
@@ -829,7 +829,7 @@ export function StericsSection({ node, nodes }: { node: Node; nodes: Node[] }) {
               </div>
               {computed?.map && (
                 <div className="steric-map-box">
-                  <StericMapView map={computed.map} title={nodeName(node)} fileName={`${nodeName(node)} steric map.png`} />
+                  <StericMapView map={computed.map} title={nodeName(node)} fileName={`${fileName(nodeName(node), 'structure')} steric map.png`} />
                   <StericColourSelect />
                 </div>
               )}
@@ -1033,7 +1033,7 @@ export function CompareStericsDialog({
         <>
           <div className="steric-maps" aria-label="Steric maps">
             {withMaps.slice(0, MAX_MAPS).map((r) => (
-              <StericMapView key={r.node_id} map={r.map!} title={r.label} size={200} fileName={`${r.label} steric map.png`} />
+              <StericMapView key={r.node_id} map={r.map!} title={r.label} size={200} fileName={`${fileName(r.label, 'structure')} steric map.png`} />
             ))}
           </div>
           {withMaps.length > MAX_MAPS && (

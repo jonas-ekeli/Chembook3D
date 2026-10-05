@@ -23,7 +23,7 @@ import { PinnedNotesSection } from '../components/NoteContent'
 import { PopOut, PopOutButton } from '../components/PopOut'
 import { usePopOut } from '../popOut'
 import { Viewer3D } from '../components/Viewer3D'
-import { download, hartree, withDisplacements } from '../util'
+import { download, fileName, hartree, withDisplacements } from '../util'
 import type { SharedCalculation, SnapshotData } from './data'
 
 type Select = {
@@ -233,7 +233,7 @@ export function NodePanel({
   const saveXyz = () => {
     if (!node.xyz) return
     const url = URL.createObjectURL(new Blob([node.xyz], { type: 'chemical/x-xyz' }))
-    download(url, `${(node.label || 'structure').replace(/[<>:"/\\|?*]+/g, '-')}.xyz`)
+    download(url, `${fileName(node.label, 'structure')}.xyz`)
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 

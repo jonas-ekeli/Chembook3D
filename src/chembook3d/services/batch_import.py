@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from chembook3d import settings as app_settings
+from chembook3d.api.downloads import file_name
 from chembook3d.investigation import FILES_DIR
 from chembook3d.models import Calculation, GroupNode, Node, NodeKind, SourceFile, new_id
 from chembook3d.parsers import crest, gaussian, orca, xtb
@@ -162,14 +163,13 @@ def get(staging: imports.Staging, token: str) -> Batch:
 
 # ---------- name matching (D97 rule 3) ----------
 
-# Mirrors api/downloads.file_name: a label as the app writes it into a file name.
-_FORBIDDEN = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
 # Characters every file name the app ever wrote kept; any other one may have become "_".
 _KEPT = re.compile(r"[A-Za-z0-9.\-]")
 
 
 def saved_name(label: str) -> str:
-    return _FORBIDDEN.sub("_", label).strip(" ").rstrip(". ")
+    """A label as the app writes it into a file name (the download rule)."""
+    return file_name(label, "")
 
 
 def _key(text: str) -> str:

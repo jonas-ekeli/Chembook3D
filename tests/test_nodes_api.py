@@ -156,7 +156,7 @@ def test_xyz_download(open_client):
     response = open_client.get(f"/api/nodes/{node['id']}/xyz")
     assert response.status_code == 200
     assert response.headers["content-disposition"] == (
-        "attachment; filename=\"water_1.xyz\"; filename*=UTF-8''water_1.xyz"
+        "attachment; filename=\"water 1.xyz\"; filename*=UTF-8''water%201.xyz"
     )
     assert response.text.splitlines()[:2] == ["3", "water 1"]
 
@@ -164,14 +164,16 @@ def test_xyz_download(open_client):
 @pytest.mark.parametrize(
     ("label", "ascii_name", "utf8_name"),
     [
-        ("Ru-CAAC α", "Ru-CAAC__", "Ru-CAAC_%CE%B1"),
-        ("β-H elim", "_-H_elim", "%CE%B2-H_elim"),
+        ("Ru-CAAC α", "Ru-CAAC _", "Ru-CAAC%20%CE%B1"),  # was a 500 (headers are Latin-1)
         ("café", "caf_", "caf%C3%A9"),
-        ("TS1–2 ‡", "TS1_2__", "TS1_2__"),
+        ("TS1–2 ‡", "TS1_2 _", "TS1%E2%80%932%20%E2%80%A1"),
+        ("TS1-2", "TS1-2", "TS1-2"),  # Jonas's primes stay, so these three stay apart
+        ("TS1-2'", "TS1-2'", "TS1-2%27"),
+        ("TS1-2''", "TS1-2''", "TS1-2%27%27"),
+        ('a/b: "c"?.', "a_b_ _c__", "a_b_%20_c__"),  # only what Windows refuses goes
     ],
 )
-def test_xyz_download_with_non_ascii_name(open_client, label, ascii_name, utf8_name):
-    # Greek and accented letters in a node's name gave a 500 (headers are Latin-1)
+def test_xyz_download_is_named_as_the_node(open_client, label, ascii_name, utf8_name):
     node = _create(open_client, label=label, xyz=WATER)
     response = open_client.get(f"/api/nodes/{node['id']}/xyz")
     assert response.status_code == 200

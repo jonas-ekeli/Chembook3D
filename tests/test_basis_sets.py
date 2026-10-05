@@ -169,7 +169,9 @@ def test_inspect_and_download_through_the_api(open_client):
 
     response = open_client.get(f"/api/custom-bases/{listed[0]['id']}/file")
     assert response.status_code == 200
-    assert response.headers["content-disposition"] == 'attachment; filename="modDZ.gbs"'
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"modDZ.gbs\"; filename*=UTF-8''modDZ.gbs"
+    )
     bases, ecps = read_gbs(response.text)
     assert list(bases) == ["H", "C", "I"] and list(ecps) == ["I"]
     # the synthetic printout has only the "F and up" block, which the file points out
