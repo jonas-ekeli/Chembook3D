@@ -107,14 +107,40 @@ the folders and file paths on your computer, the output files themselves and the
 After updating Chembook3D, build the interface again (`uv run python scripts/build_frontend.py`),
 since the viewer inside the file is built with it.
 
-## Work with Claude
+## Claude in the app
 
-Claude Code or Claude Desktop can read and change the investigation open in the app, through
-`chembook3d mcp`, an MCP server that talks to the running app on this computer. It uses your
-Claude subscription; no API key is needed. Changes appear on the canvas at once and are marked
-"claude" in the history. When Claude wants to delete something, dissolve a group or remove
-coordinates, the app asks you first and does nothing unless you click **Confirm**. When you say
-"this node", Claude asks the app what you have selected.
+The **Claude** button opens a panel beside the notebook running
+[Claude Code](https://code.claude.com/docs/en/setup), Anthropic's command-line assistant, with
+your own Claude account (a Pro or Max plan, or another account Claude Code accepts). Chembook3D
+stores no sign-in and sends nothing to Claude itself; what Claude reads in the conversation goes
+to Anthropic under your account's settings.
+
+Install Claude Code once on each computer, in the same system the app runs in (in WSL, inside
+WSL), then run `claude` once in a terminal to sign in:
+
+```sh
+# Windows PowerShell
+irm https://claude.ai/install.ps1 | iex
+# Linux, WSL or macOS
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+In the panel, **New conversation** starts Claude Code for the open investigation and **Continue
+last conversation** picks up its last one. Claude works on the notebook through the app's own
+notebook tools, asks before changing anything, and cannot run commands, edit files or browse
+the web from the panel. **Hide** keeps it running; **Stop**, closing the investigation or
+reloading the page ends it.
+
+Changes Claude makes appear on the canvas at once and are marked "claude" in the history. When
+Claude wants to delete something, dissolve a group or remove coordinates, the app asks you first
+and does nothing unless you click **Confirm**. When you say "this node", Claude asks the app what
+you have selected.
+
+### Claude Code in your own terminal, or Claude Desktop
+
+The panel's notebook tools are `chembook3d mcp`, an MCP server that talks to the running app on
+this computer. Claude Code in your own terminal, or Claude Desktop, can use them too, to read and
+change the investigation open in the app. It uses your Claude subscription; no API key is needed.
 
 After `uv run chembook3d` has run once, the command is in the project's `.venv`. Add it to
 Claude Code once, with the full path of your Chembook3D folder.

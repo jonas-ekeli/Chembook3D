@@ -10,6 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
 
 from chembook3d import __version__
+from chembook3d.api.claude import Panel
+from chembook3d.api.claude import router as claude_router
 from chembook3d.api.energies import router as energy_router
 from chembook3d.api.live import ChangeTracker, LiveState
 from chembook3d.api.live import router as live_router
@@ -66,6 +68,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.investigation = None
     app.state.staging = Staging()
     yield
+    app.state.claude_panel.close_all()  # stop Claude Code in any open panel (D92)
     app.state.staging.clear()  # previewed but not imported files (FR-IMP-05)
     if app.state.investigation is not None:  # release the lock file on shutdown (P22)
         # A linked investigation is also pushed, with a short time limit (FR-SYNC-05);
@@ -79,6 +82,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Chembook3D", version=__version__, lifespan=_lifespan)
     app.state.investigation = None
     app.state.staging = Staging()
+    app.state.claude_panel = Panel()
     app.state.live = LiveState()  # D91: changes, selection and confirmations
     app.add_middleware(ChangeTracker, live=app.state.live)
 
@@ -102,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(selectivity_router)
     app.include_router(note_router)
     app.include_router(turnover_router)
+    app.include_router(claude_router)
     app.include_router(live_router)
 
     static = static_dir()

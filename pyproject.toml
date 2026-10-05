@@ -12,8 +12,10 @@ dependencies = [
     "morfeus-ml>=0.8,<0.9",
     "numpy>=2",
     "platformdirs>=4.12.1",
+    "pywinpty>=2.0.14 ; sys_platform == 'win32'",
     "sqlalchemy>=2.1.1",
     "uvicorn>=0.30",
+    "websockets>=13",
 ]
 
 [project.scripts]

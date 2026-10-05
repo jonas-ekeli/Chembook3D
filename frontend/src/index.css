@@ -1946,3 +1946,67 @@ table.selectivity-table {
   flex: 1;
   min-width: 12rem;
 }
+
+/* D92: the Claude panel, docked at the right of every view. */
+.app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.app-body > .main {
+  min-width: 0;
+}
+.claude-panel {
+  flex-shrink: 0;
+  max-width: 70vw;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #1e1e1e;
+  color: #e6e6e6;
+}
+.claude-panel[hidden],
+.claude-panel [hidden],
+.splitter[hidden] {
+  display: none;
+}
+.claude-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--panel);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.claude-intro {
+  padding: 1rem;
+  background: var(--panel);
+  color: var(--text);
+  flex: 1;
+  overflow: auto;
+}
+.claude-command {
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  user-select: all;
+}
+.claude-terminal {
+  flex: 1;
+  min-height: 0;
+  padding: 0.25rem 0 0 0.5rem;
+  overflow: hidden;
+}
+.claude-ended {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--panel);
+  color: var(--text);
+  border-top: 1px solid var(--border);
+}

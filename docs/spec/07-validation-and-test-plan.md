@@ -170,6 +170,10 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-MCP-09 | App not running; an address on another computer | Said plainly; refused (FR-MCP-01) |
 | T-MCP-10 | `chembook3d mcp --url …` started over stdio as Claude Code starts it | Tools listed with read-only and destructive hints, instructions given, a node created in the running app, invalid input refused (FR-MCP-01) |
 | T-MCP-11 | UI: Claude creates and renames a node, the user selects it, Claude asks to delete it twice | The canvas follows without a reload; the selection is reported; Refuse keeps it, Confirm deletes it; History shows "claude" (FR-MCP-03, 04, 05) |
+| T-PANEL-01 | Ask for a terminal from another site's page, for a foreign host name, from another computer, without a token, with a spent or expired token | Refused before anything starts (FR-PANEL-03) |
+| T-PANEL-02 | Start the panel with a stand-in for `claude` | Started in the investigation's working folder with only the fixed arguments and the terminal's size; typing reaches it; its exit is reported; `--continue` when continuing; closing the page stops it (FR-PANEL-01, FR-PANEL-02) |
+| T-PANEL-03 | The written settings, with and without the notebook server | Shell, editing and web tools denied; the server and its read tools listed only when present (FR-PANEL-02, FR-PANEL-04) |
+| T-PANEL-04 | UI: open the panel, start, type, hide and show, let it end, continue, stop | The output stays while hidden; each end says why; continuing passes `--continue` (FR-PANEL-01) |
 | T-UI-01 | Resume overview on the example | Branch statuses, open items, recent changes and step notes all shown; clicking navigates (FR-OV-01) |
 | T-UI-02 | View modes and filters | Switching modes and filters never changes stored data |
 | T-UI-03 | 3D | Rotate, measure, animate the imaginary mode, overlay two nodes, overlay three on typed atoms and save the set, copy xyz |

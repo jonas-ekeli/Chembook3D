@@ -885,6 +885,18 @@ export class ApiError extends Error {
   }
 }
 
+/** Whether the Claude panel can run here (D92). */
+export type ClaudeStatus = {
+  /** Claude Code was found on this computer. */
+  available: boolean
+  /** The panel may be used from this page (the app listens on 127.0.0.1 only). */
+  enabled: boolean
+  reason: string | null
+  /** The chembook3d MCP server (D91) is part of this version of the app. */
+  notebook_tools: boolean
+  install: { command: string; docs: string }
+}
+
 /** D91: this tab's name in the backend's change counter, so it reloads only for changes made
  * elsewhere (by Claude, or in another tab). */
 export const CLIENT_ID = `tab-${Math.random().toString(36).slice(2, 10)}`
@@ -945,6 +957,9 @@ export type SelectionReport = {
 }
 
 export const api = {
+  claudeStatus: () => request<ClaudeStatus>('GET', '/claude'),
+  /** A one-time token for the panel's terminal WebSocket (D92). */
+  claudeSession: (resume: boolean) => request<{ token: string }>('POST', '/claude/sessions', { resume }),
   /** A long poll: answers when something changed elsewhere, the requests changed, or after `wait` s. */
   live: (since: number | null, confirmVersion: number | null, wait: number, signal?: AbortSignal) => {
     const query = new URLSearchParams({ client: CLIENT_ID, wait: String(wait) })

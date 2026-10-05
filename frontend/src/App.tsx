@@ -21,6 +21,7 @@ import {
 } from './api'
 import { NO_FILTERS, type Filters, type Selection, type ViewMode } from './canvasView'
 import { CanvasPane, type CanvasEnergy } from './components/Canvas'
+import { ClaudePanel } from './components/ClaudePanel'
 import { EnergyDrawer, type DrawerPath } from './components/EnergyDrawer'
 import { download } from './util'
 import { FilterMenu } from './components/FilterMenu'
@@ -183,6 +184,7 @@ function App() {
   const [edgeEnergies, setEdgeEnergies] = useState(true)
   const [referenceId, setReferenceId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [claudeOpen, setClaudeOpen] = useState(false) // D92
   // D79: the read-only copy exports the drawer's pathways, or one per branch (A30).
   const [drawerPaths, setDrawerPaths] = useState<DrawerPath[]>([])
   const [sharing, setSharing] = useState<'ask' | 'saving' | null>(null)
@@ -1056,6 +1058,13 @@ function App() {
             </>
           )}
           <span className="spacer" />
+          <button
+            aria-pressed={claudeOpen}
+            onClick={() => setClaudeOpen(!claudeOpen)}
+            title="Claude Code in a panel beside the notebook (D92)"
+          >
+            Claude
+          </button>
           {investigation.linked ? (
             <SyncButton status={sync} busy={syncing} onSync={syncNow} />
           ) : (
@@ -1083,6 +1092,7 @@ function App() {
             </button>
           </div>
         )}
+        <div className="app-body">
         {view === 'canvas' ? (
           <div className="work-column">
             <div className="workspace">
@@ -1193,6 +1203,8 @@ function App() {
             <HistoryList entries={history} labels={labels} names={names} onSelect={(id) => selectNode(id, true)} />
           </main>
         )}
+          <ClaudePanel key={investigation.folder} open={claudeOpen} onClose={() => setClaudeOpen(false)} />
+        </div>
         {dialogs}
       </div>
     </Displays>
