@@ -2000,6 +2000,23 @@ table.selectivity-table {
   padding: 0.25rem 0 0 0.5rem;
   overflow: hidden;
 }
+.launch-question {
+  background: var(--panel);
+  color: var(--text);
+  border-bottom: 2px solid var(--accent, #d97706);
+}
+.launch-question-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+.launch-question-screen {
+  height: 16.5rem;
+  padding: 0.25rem 0 0.25rem 0.5rem;
+  background: #1e1e1e;
+  overflow: hidden;
+}
 .claude-ended {
   display: flex;
   flex-wrap: wrap;

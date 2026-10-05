@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FitAddon } from '@xterm/addon-fit'
 import type { Terminal } from '@xterm/xterm'
-import { api, ApiError, type ClaudeStatus } from '../api'
+import { api, ApiError, type ClaudeStatus, type LaunchQuestion as Question } from '../api'
+import { LaunchQuestion } from './LaunchQuestion'
 
 // D92: the Claude panel, a terminal docked at the side of the window running the official
 // Claude Code CLI on this computer (src/chembook3d/claude_panel.py). It stays mounted while
@@ -24,6 +25,8 @@ type Session = {
 }
 
 const MIN_WIDTH = 360
+/** How often the panel looks for a cloud job's launch that waits for an answer (ms). */
+const QUESTION_POLL = 2500
 const MAX_WIDTH = 1400
 
 function errorMessage(err: unknown): string {
@@ -47,7 +50,16 @@ function browserKey(event: KeyboardEvent, term: Terminal): boolean {
   return false
 }
 
-export function ClaudePanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ClaudePanel({
+  open,
+  onClose,
+  onAttention,
+}: {
+  open: boolean
+  onClose: () => void
+  /** A cloud job's launch asks something: show the panel. */
+  onAttention: () => void
+}) {
   const [status, setStatus] = useState<ClaudeStatus | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
@@ -55,6 +67,33 @@ export function ClaudePanel({ open, onClose }: { open: boolean; onClose: () => v
   const host = useRef<HTMLDivElement>(null)
   const session = useRef<Session | null>(null)
   const resizing = useRef<{ x: number; width: number } | null>(null)
+  const [question, setQuestion] = useState<Question | null>(null)
+  const attention = useRef(onAttention)
+  useEffect(() => {
+    attention.current = onAttention
+  }, [onAttention])
+
+  // D93: a `claude --cloud` launch that stops at a question is answered here, never in
+  // another terminal.
+  useEffect(() => {
+    if (question !== null || !status?.enabled) return
+    let stopped = false
+    const look = () =>
+      api.claudeLaunches().then(
+        (waiting) => {
+          if (stopped || waiting.length === 0) return
+          setQuestion(waiting[0])
+          attention.current()
+        },
+        () => undefined,
+      )
+    void look()
+    const timer = window.setInterval(() => void look(), QUESTION_POLL)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+  }, [question, status?.enabled])
 
   const load = () =>
     api.claudeStatus().then(
@@ -66,8 +105,8 @@ export function ClaudePanel({ open, onClose }: { open: boolean; onClose: () => v
     )
 
   useEffect(() => {
-    if (open && status === null) void load()
-  }, [open, status])
+    if (status === null) void load()
+  }, [status])
 
   // Stop Claude Code when the panel goes away (another investigation, or closing it).
   useEffect(
@@ -237,6 +276,7 @@ export function ClaudePanel({ open, onClose }: { open: boolean; onClose: () => v
             Hide
           </button>
         </div>
+        {question && <LaunchQuestion key={question.job_id} question={question} onDone={() => setQuestion(null)} />}
         {phase.kind === 'idle' && (
           <div className="claude-intro">
             {statusError ? (

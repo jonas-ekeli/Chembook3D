@@ -41,8 +41,9 @@ MAX_INSTRUCTIONS = 20000
 MAX_WAIT = 300.0  # seconds one status call may wait for a result
 POLL_EVERY = 20.0  # seconds between fetches while waiting
 LAUNCH_WAIT = 90.0  # seconds `start` waits for `claude --cloud` to name the session
-LAUNCH_QUIET = 45.0  # no session and a screen this long unchanged: it waits for an answer
-LAUNCH_GIVE_UP = 600.0  # no session after this long: stopped
+LAUNCH_QUIET = 5.0  # no session and a screen this long unchanged: it waits for an answer
+LAUNCH_GIVE_UP = 1800.0  # no session after this long: stopped
+LAUNCH_REPLAY = 256 * 1024  # characters kept, so the Claude panel can show the screen
 LAUNCH_LIMIT = 6 * 3600.0  # a launcher still running after this is stopped
 LAUNCH_SIZE = (50, 250)  # rows, columns of its terminal: wide, so a link is never wrapped
 
@@ -276,7 +277,9 @@ def task_text(job_id: str) -> str:
 
 
 def claude_command(executable: str, job_id: str) -> list[str]:
-    argv = [executable, "--cloud", task_text(job_id)]
+    # Auto mode: the cloud session runs the job to the end, its actions checked by Claude
+    # Code's classifier rather than waiting for someone to approve them on claude.ai (A40).
+    argv = [executable, "--permission-mode", "auto", "--cloud", task_text(job_id)]
     if sys.platform == "win32" and executable.lower().endswith((".cmd", ".bat")):
         argv = [os.environ.get("COMSPEC", "cmd.exe"), "/c", *argv]
     return argv
@@ -287,8 +290,11 @@ def launch_command(executable: str | None, folder: Path, job_id: str) -> str:
     task = task_text(job_id)
     exe = executable or "claude"
     if sys.platform == "win32":
-        return f'cd "{folder}"; & "{exe}" --cloud "{task}"'
-    return f"cd {shlex.quote(str(folder))}; {shlex.quote(exe)} --cloud {shlex.quote(task)}"
+        return f'cd "{folder}"; & "{exe}" --permission-mode auto --cloud "{task}"'
+    return (
+        f"cd {shlex.quote(str(folder))}; {shlex.quote(exe)} --permission-mode auto --cloud "
+        f"{shlex.quote(task)}"
+    )
 
 
 def _commit_paths(folder: Path, paths: list[str], message: str) -> None:
@@ -354,9 +360,11 @@ def _on_github(folder: Path, commit: str) -> bool:
 @dataclass
 class Launch:
     """One `claude --cloud` run and what it showed. It runs in a pseudo-terminal: without one,
-    Claude Code refuses to create a cloud session."""
+    Claude Code refuses to create a cloud session. When it stops at a question (the folder
+    trust question, for one), the Claude panel shows its screen and the user answers there."""
 
     job_id: str
+    name: str = ""
     terminal: claude_panel.Terminal | None = None
     started: float = field(default_factory=time.monotonic)
     screen: str = ""  # the last of what it wrote, terminal codes and all
@@ -367,13 +375,54 @@ class Launch:
     stopped: str | None = None  # why the app stopped it before it named a session
     ended: bool = False
     named: threading.Event = field(default_factory=threading.Event)
+    # Claude panel views of its screen: called with ("output", text), ("named", url) and
+    # ("ended", None).
+    viewers: list[Callable[[str, str | None], None]] = field(default_factory=list)
+    lock: threading.Lock = field(default_factory=threading.Lock)
 
     @property
     def running(self) -> bool:
         return not self.ended
 
+    @property
+    def waiting(self) -> bool:
+        """Whether it shows a question: running, no session yet, and a still screen."""
+        quiet = time.monotonic() - self.last_output
+        return (
+            bool(self.screen)
+            and self.running
+            and self.session_id is None
+            and (quiet >= LAUNCH_QUIET)
+        )
+
     def output(self) -> str:
         return "\n".join(screen_lines(self.screen)[-40:]).strip()
+
+    def watch(self, viewer: Callable[[str, str | None], None]) -> str:
+        """Send what it writes from now on to `viewer`, and return what it has written so
+        far, so the viewer can draw the screen."""
+        with self.lock:
+            if self.ended:
+                return self.screen
+            self.viewers.append(viewer)
+            return self.screen
+
+    def unwatch(self, viewer: Callable[[str, str | None], None]) -> None:
+        with self.lock:
+            if viewer in self.viewers:
+                self.viewers.remove(viewer)
+            last = not self.viewers
+        if last and self.terminal is not None and self.running:
+            self.terminal.resize(*LAUNCH_SIZE)
+
+    def answer(self, text: str) -> None:
+        """Keys the user typed in the Claude panel."""
+        if self.terminal is not None and self.running:
+            self.terminal.write(text)
+
+    def resize(self, rows: int, cols: int) -> None:
+        if self.terminal is not None and self.running:
+            self.terminal.resize(rows, cols)
 
 
 def screen_lines(raw: str) -> list[str]:
@@ -396,7 +445,7 @@ def find_session(text: str) -> tuple[str | None, str | None]:
     url = url_match.group(0).rstrip(".,;") if url_match else None
     id_match = _SESSION.search(text) or (_SESSION.search(url) if url else None)
     session = id_match.group(1) if id_match else None
-    if session and not url:
+    if session and (not url or session not in url):  # no link, or one cut off at the edge
         url = f"https://claude.ai/code/{session}"
     return session, url
 
@@ -414,9 +463,9 @@ _QUERIES = {
 class Launcher:
     """The `claude --cloud` runs the app started. `claude --cloud` creates the session,
     prints its id and link and may then keep following it; the app reads what it shows and
-    leaves it running (it is stopped when the app stops, which does not stop the session). One
-    that names no session is stopped once its screen stays still (it waits for an answer, in
-    a terminal nobody sees) or after LAUNCH_GIVE_UP."""
+    leaves it running (it is stopped when the app stops, which does not stop the session). The
+    app answers none of its questions itself: one waiting for an answer is shown in the Claude
+    panel. One that names no session is stopped after LAUNCH_GIVE_UP."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -426,6 +475,13 @@ class Launcher:
         with self._lock:
             return self._runs.get((str(Path(folder).resolve()), job_id))
 
+    def waiting(self, folder: Path) -> list[Launch]:
+        """The runs for this investigation that wait for an answer."""
+        key = str(Path(folder).resolve())
+        with self._lock:
+            runs = [run for (where, _), run in self._runs.items() if where == key]
+        return [run for run in runs if run.waiting]
+
     def launch(
         self,
         folder: Path,
@@ -433,13 +489,14 @@ class Launcher:
         executable: str,
         on_session: Callable[[Launch], None],
         on_end: Callable[[Launch], None],
+        name: str = "",
     ) -> Launch:
         key = (str(Path(folder).resolve()), job_id)
         with self._lock:
             old = self._runs.get(key)
             if old is not None and old.running:
                 return old
-            run = Launch(job_id)
+            run = Launch(job_id, name=name)
             seen = [""]
             ready = threading.Event()  # run.terminal is set
 
@@ -447,12 +504,20 @@ class Launcher:
                 if text is None:
                     ready.wait(timeout=10)
                     run.exit_code = run.terminal.exit_code if run.terminal else None
-                    run.ended = True
+                    with run.lock:
+                        run.ended = True
+                        viewers, run.viewers = run.viewers, []
                     on_end(run)
                     run.named.set()
+                    for viewer in viewers:
+                        viewer("ended", None)
                     return
                 run.last_output = time.monotonic()
-                run.screen = (run.screen + text)[-20000:]
+                with run.lock:
+                    run.screen = (run.screen + text)[-LAUNCH_REPLAY:]
+                    viewers = list(run.viewers)
+                for viewer in viewers:
+                    viewer("output", text)
                 for query, answer in _QUERIES.items():
                     if query in text and run.terminal is not None:
                         run.terminal.write(answer)
@@ -463,6 +528,8 @@ class Launcher:
                         run.session_id, run.session_url = session, url
                         on_session(run)
                         run.named.set()
+                        for viewer in viewers:
+                            viewer("named", url)
 
             rows, cols = LAUNCH_SIZE
             try:
@@ -483,13 +550,10 @@ class Launcher:
         """Stop a run that waits for an answer, names no session in time, or runs too long."""
         while not run.ended:
             now = time.monotonic()
-            if run.session_id is None and now - run.last_output > LAUNCH_QUIET:
-                run.stopped = (
-                    f"It showed the same screen for {LAUNCH_QUIET:.0f} s without naming a "
-                    "session, so it was probably waiting for an answer"
+            if run.session_id is None and now - run.started > LAUNCH_GIVE_UP:
+                run.stopped = f"It named no session in {LAUNCH_GIVE_UP / 60:.0f} minutes" + (
+                    ", waiting for an answer" if run.waiting else ""
                 )
-            elif run.session_id is None and now - run.started > LAUNCH_GIVE_UP:
-                run.stopped = f"It named no session in {LAUNCH_GIVE_UP / 60:.0f} minutes"
             elif now - run.started > LAUNCH_LIMIT:
                 run.stopped = "It ran too long"
             if run.stopped:
@@ -538,12 +602,10 @@ def start_job(folder: Path, job_id: str, launcher: Launcher, wait: float = LAUNC
                 else f"`claude --cloud` ended (exit code {run.exit_code}) without naming a "
                 "session. It said"
             )
-            if run.stopped and "trust this folder" in said:
+            if run.stopped:
                 advice = (
-                    "Claude Code first asks whether you trust the investigation folder, and the "
-                    f"app does not answer that for you. Open a terminal in {folder}, run "
-                    '`claude`, choose "Yes, I trust this folder", leave it with /exit and start '
-                    "the job again."
+                    "Start the job again and answer Claude Code's question in the Claude panel "
+                    "when it shows it."
                 )
             else:
                 advice = (
@@ -554,9 +616,19 @@ def start_job(folder: Path, job_id: str, launcher: Launcher, wait: float = LAUNC
             _update(folder, job_id, launch_error=f"{why}: {said[-1500:]}\n\n{advice}")
 
     _update(folder, job_id, launch_error=None)
-    run = launcher.launch(folder, job_id, executable, on_session, on_end)
-    run.named.wait(timeout=wait)
+    name = str(read_job(folder, job_id).get("name") or job_id)
+    run = launcher.launch(folder, job_id, executable, on_session, on_end, name=name)
+    _wait_for_launch(run, wait)
     return job_status(folder, job_id, launcher, fetch=False)
+
+
+def _wait_for_launch(run: Launch, wait: float, until_answered: bool = False) -> None:
+    """Until the run names its session or ends, or the time is up; and, unless until_answered,
+    until it waits for an answer."""
+    deadline = time.monotonic() + wait
+    while not run.named.wait(timeout=min(0.25, max(deadline - time.monotonic(), 0))):
+        if (run.waiting and not until_answered) or time.monotonic() >= deadline:
+            return
 
 
 # ---------- results ----------
@@ -616,6 +688,12 @@ def job_status(
     deadline = time.monotonic() + min(max(wait, 0.0), MAX_WAIT)
     fetch_error = None
     refs: list[tuple[str, str]] = []
+    run = launcher.get(folder, job_id) if launcher else None
+    if run is not None and run.running and run.session_id is None and wait > 0:
+        # Still being started (perhaps waiting for the user's answer in the Claude panel):
+        # wait for it rather than for a result.
+        _wait_for_launch(run, min(max(wait, 0.0), MAX_WAIT), until_answered=True)
+        deadline = time.monotonic()
     while True:
         if fetch and record["state"] != "draft" and sync.is_linked(folder):
             try:
@@ -635,6 +713,7 @@ def job_status(
     out["folder"] = str(jobs_dir(folder) / job_id)
     out["launcher_running"] = bool(run and run.running)
     out["launcher_output"] = run.output() if run and not record.get("session_id") else None
+    out["question"] = run.output() if run and run.waiting else None
     out["fetch_error"] = fetch_error
     out["result"] = None
     out["result_branch"] = None
@@ -649,6 +728,8 @@ def job_status(
         status = "finished"
     elif record["state"] == "draft":
         status = "draft"
+    elif run is not None and run.waiting and not record.get("session_id"):
+        status = "waiting_for_answer"
     elif run is not None and run.running and not record.get("session_id"):
         status = "starting"
     elif record.get("launch_error") and not record.get("session_id"):

@@ -69,9 +69,12 @@ repository:
    constraints, which files). Ask about anything the person did not say that changes the
    result, then show them the job.
 2. `start_cloud_job` only once they agree. Give them the session link; they can follow and
-   steer it on claude.ai or their phone. If it ends in launch_failed, pass on what its
-   launch_error says to do (such as trusting the folder once) and start it again when they
-   have done it; that pushes nothing new.
+   steer it on claude.ai or their phone. If it is waiting_for_answer, Claude Code is asking
+   something before it starts (whether it may trust the investigation folder, for one): the
+   app shows that in a box at the top of this panel, and the person answers it there (never
+   in another terminal). Tell them what it asks, then `get_cloud_job` with `wait` until the
+   session link is there. If it ends in launch_failed, pass on what its launch_error says and
+   start it again when they are ready; that pushes nothing new.
 3. `get_cloud_job` with `wait` to see when it has finished (call again to keep waiting; they
    can also ask you later to look at a named job).
 4. `fetch_cloud_job`, then import the outputs it lists with `import_file` and

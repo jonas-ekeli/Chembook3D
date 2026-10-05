@@ -1203,7 +1203,12 @@ function App() {
             <HistoryList entries={history} labels={labels} names={names} onSelect={(id) => selectNode(id, true)} />
           </main>
         )}
-          <ClaudePanel key={investigation.folder} open={claudeOpen} onClose={() => setClaudeOpen(false)} />
+          <ClaudePanel
+            key={investigation.folder}
+            open={claudeOpen}
+            onClose={() => setClaudeOpen(false)}
+            onAttention={() => setClaudeOpen(true)}
+          />
         </div>
         {dialogs}
       </div>

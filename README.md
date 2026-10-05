@@ -152,15 +152,19 @@ This needs:
 
 - the investigation linked to a private GitHub repository (see Sync above);
 - Claude Code signed in with a plan that includes Claude Code on the web (Pro, Max, Team or
-  Enterprise), and GitHub connected to it, ideally with the
+  Enterprise), and GitHub connected to it with the
   [Claude GitHub App](https://github.com/apps/claude) installed on the investigation's
-  repository (without it, Claude Code uploads the folder instead of cloning it);
+  repository, once, on github.com, so the session can push its results (without the app,
+  Claude Code uploads the folder, and the session can push only if your GitHub connection
+  has push access);
 - the cloud environment's network access at its default, Trusted, so the session can download
-  xTB and CREST from GitHub;
-- Claude Code trusting the investigation folder. The app starts the session in a terminal you
-  don't see and does not answer Claude Code's questions for you, so if it has never asked about
-  this folder, open a terminal in the investigation folder once, run `claude`, choose "Yes, I
-  trust this folder" and leave it with `/exit`. Claude tells you when this is needed.
+  xTB and CREST from GitHub.
+
+Nothing is approved in a separate terminal. When Claude Code asks something before it starts
+the session (the first time, whether it may trust the investigation folder), the Claude panel
+opens with that question at its top and you answer it there. The session runs in Claude
+Code's auto mode, so it runs the job to the end without waiting for you to approve its steps
+on claude.ai.
 
 The first job also adds `.claude/` to the investigation's repository (the setup script and the
 instructions the cloud session follows). The branches the sessions push stay on GitHub until you

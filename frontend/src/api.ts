@@ -956,8 +956,15 @@ export type SelectionReport = {
   reference_id: string | null
 }
 
+/** A `claude --cloud` launch of a calculation job that waits for the user's answer (D93). */
+export type LaunchQuestion = { job_id: string; name: string; screen: string }
+
 export const api = {
   claudeStatus: () => request<ClaudeStatus>('GET', '/claude'),
+  claudeLaunches: () => request<LaunchQuestion[]>('GET', '/claude/launches'),
+  /** A one-time token for the WebSocket showing that launch's screen. */
+  claudeLaunchView: (jobId: string) =>
+    request<{ token: string }>('POST', `/claude/launches/${encodeURIComponent(jobId)}/view`),
   /** A one-time token for the panel's terminal WebSocket (D92). */
   claudeSession: (resume: boolean) => request<{ token: string }>('POST', '/claude/sessions', { resume }),
   /** A long poll: answers when something changed elsewhere, the requests changed, or after `wait` s. */
