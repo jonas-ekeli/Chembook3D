@@ -155,8 +155,8 @@ This needs:
   Enterprise), and GitHub connected to it with the
   [Claude GitHub App](https://github.com/apps/claude) installed on the investigation's
   repository, once, on github.com, so the session can push its results (without the app,
-  Claude Code uploads the folder, and the session can push only if your GitHub connection
-  has push access);
+  Claude Code uploads the folder instead, and the session's push is refused; install the app
+  and ask Claude to tell the session to push again, its results wait there);
 - the cloud environment's network access at its default, Trusted, so the session can download
   xTB and CREST from GitHub.
 

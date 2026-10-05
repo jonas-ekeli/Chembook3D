@@ -139,3 +139,17 @@ def fetch_results(job_id: str, request: Request) -> dict[str, Any]:
         return cloud_jobs.fetch_results(folder, job_id)
     except cloud_jobs.CloudJobError as exc:
         raise _refused(exc) from exc
+
+
+class MessageIn(BaseModel):
+    text: str = Field(description="What to tell the job's cloud session, as its user would.")
+
+
+@router.post("/{job_id}/message")
+def message_session(job_id: str, body: MessageIn, request: Request) -> dict[str, Any]:
+    _local_page_only(request)
+    folder = _investigation(request).folder
+    try:
+        return cloud_jobs.send_message(folder, job_id, body.text)
+    except cloud_jobs.CloudJobError as exc:
+        raise _refused(exc) from exc

@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 import threading
 import time
@@ -60,6 +61,14 @@ _CURSOR_LINE = re.compile(r"\x1b\[[0-9;?]*[ABEFHdf]")
 _CURSOR_ALONG = re.compile(r"\x1b\[[0-9;?]*[CG]")
 _SESSION = re.compile(r"\b((?:session|cse)_[A-Za-z0-9]{8,})\b")
 _URL = re.compile(r"https://claude\.ai/code/[^\s\"'<>)\]]+")
+# What Claude Code shows when it uploads the folder rather than having the session clone it
+# from GitHub (the Claude GitHub App is not set up for the repository): such a session starts
+# with no `origin` and can push only with the user's GitHub access.
+_UPLOADED = re.compile(
+    r"Packag(?:ing|ed) this (?:repository|folder)|Upload(?:ing|ed) this repository"
+)
+MAX_MESSAGE = 4000
+MESSAGE_TIMEOUT = 180.0
 
 
 class CloudJobError(Exception):
@@ -249,7 +258,9 @@ def write_cloud_files(folder: Path) -> list[str]:
     folder = Path(folder)
     wanted = {
         cloud_templates.SETUP_SCRIPT: cloud_templates.SETUP_TEXT,
-        cloud_templates.INSTRUCTIONS: cloud_templates.INSTRUCTIONS_TEXT,
+        cloud_templates.INSTRUCTIONS: cloud_templates.instructions_text(
+            cloud_templates.github_https(sync.remote_url(folder))
+        ),
     }
     settings = folder / cloud_templates.SETTINGS
     current = settings.read_text(encoding="utf-8") if settings.is_file() else None
@@ -276,13 +287,18 @@ def task_text(job_id: str) -> str:
     )
 
 
+def _runnable(argv: list[str]) -> list[str]:
+    """Windows runs an npm-installed `claude.cmd` only through cmd.exe. Every argument the app
+    passes is its own (a job id, a session id), never text typed by someone."""
+    if sys.platform == "win32" and argv[0].lower().endswith((".cmd", ".bat")):
+        return [os.environ.get("COMSPEC", "cmd.exe"), "/c", *argv]
+    return argv
+
+
 def claude_command(executable: str, job_id: str) -> list[str]:
     # Auto mode: the cloud session runs the job to the end, its actions checked by Claude
     # Code's classifier rather than waiting for someone to approve them on claude.ai (A40).
-    argv = [executable, "--permission-mode", "auto", "--cloud", task_text(job_id)]
-    if sys.platform == "win32" and executable.lower().endswith((".cmd", ".bat")):
-        argv = [os.environ.get("COMSPEC", "cmd.exe"), "/c", *argv]
-    return argv
+    return _runnable([executable, "--permission-mode", "auto", "--cloud", task_text(job_id)])
 
 
 def launch_command(executable: str | None, folder: Path, job_id: str) -> str:
@@ -591,6 +607,7 @@ def start_job(folder: Path, job_id: str, launcher: Launcher, wait: float = LAUNC
             session_id=run.session_id,
             session_url=run.session_url,
             launch_error=None,
+            uploaded=bool(_UPLOADED.search("\n".join(screen_lines(run.screen)))),
         )
 
     def on_end(run: Launch) -> None:
@@ -737,7 +754,67 @@ def job_status(
     else:
         status = "running"
     out["status"] = status
+    out["warning"] = None
+    if record.get("uploaded") and status == "running":
+        repository = cloud_templates.github_https(sync.remote_url(folder)) or "the repository"
+        out["warning"] = (
+            "Claude Code uploaded the investigation folder instead of having the session clone "
+            f"it from GitHub, because the Claude GitHub App is not set up for {repository}. "
+            "The session can push its results only if it is: install the app "
+            "(https://github.com/apps/claude) on that repository, then, if the session says "
+            "it could not push, ask it to push again with message_cloud_job."
+        )
     return out
+
+
+def send_message(folder: Path, job_id: str, text: str) -> dict[str, Any]:
+    """Send a message to the job's cloud session, as its user would type it on claude.ai.
+    The text goes to `claude -p --cloud <session>` on its standard input, never on a command
+    line."""
+    folder = Path(folder)
+    record = read_job(folder, job_id)
+    session = record.get("session_id") or ""
+    if not _SESSION.fullmatch(session):
+        raise CloudJobError("This job has no cloud session yet; start it first")
+    text = text.strip()
+    if not text:
+        raise CloudJobError("The message is empty")
+    if len(text) > MAX_MESSAGE:
+        raise CloudJobError(f"The message is longer than {MAX_MESSAGE} characters")
+    executable = claude_panel.find_claude()
+    if executable is None:
+        raise CloudJobError("Claude Code (the `claude` command) is not installed on this computer")
+    kwargs: dict[str, Any] = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    try:
+        done = subprocess.run(
+            _runnable([executable, "-p", "--output-format", "json", "--cloud", session]),
+            input=text,
+            cwd=folder,
+            env=claude_panel.environment(),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=MESSAGE_TIMEOUT,
+            **kwargs,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise CloudJobError(f"Claude Code could not send the message: {exc}") from exc
+    answer: dict[str, Any] = {}
+    for line in reversed(done.stdout.splitlines()):
+        try:
+            parsed = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(parsed, dict):
+            answer = parsed
+            break
+    if not answer.get("ok"):
+        said = answer.get("error") or "\n".join(screen_lines(done.stdout + done.stderr))[-1500:]
+        raise CloudJobError(f"The message could not be sent to the cloud session: {said}")
+    return {"sent": True, "session_id": session, "session_url": record.get("session_url")}
 
 
 def _safe_output(job_id: str, path: str) -> PurePosixPath | None:

@@ -76,7 +76,10 @@ repository:
    session link is there. If it ends in launch_failed, pass on what its launch_error says and
    start it again when they are ready; that pushes nothing new.
 3. `get_cloud_job` with `wait` to see when it has finished (call again to keep waiting; they
-   can also ask you later to look at a named job).
+   can also ask you later to look at a named job). If it has a `warning`, or the session says
+   it could not push its results, the Claude GitHub App is not set up for the investigation's
+   repository: ask the person to install it there (https://github.com/apps/claude), then ask
+   the session to push again with `message_cloud_job`. Its results wait in the session.
 4. `fetch_cloud_job`, then import the outputs it lists with `import_file` and
    `commit_import`, or set the coordinates of the node the person names. Say what changed,
    and tell them if the cloud session changed anything outside its job folder.

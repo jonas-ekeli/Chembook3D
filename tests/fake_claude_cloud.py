@@ -2,7 +2,8 @@
 was started to the file named by FAKE_CLAUDE_LOG and, like the real CLI, refuses to create a
 session without a terminal. In one it prints what the real CLI prints after creating a session,
 or as FAKE_CLAUDE_CLOUD says: "fail" prints an error, "attach" keeps following the session,
-"ask" first asks a question and waits for an answer, as the folder trust question does."""
+"upload" says it uploaded the folder, "ask" first asks a question and waits for an answer, as
+the folder trust question does. With -p it takes a message to a session on its input."""
 
 import json
 import os
@@ -18,6 +19,17 @@ def main() -> int:
             json.dumps({"args": sys.argv[1:], "cwd": os.getcwd(), "tty": sys.stdout.isatty()})
             + "\n"
         )
+    if "-p" in sys.argv:  # a message to an existing session: no terminal needed
+        session = sys.argv[sys.argv.index("--cloud") + 1]
+        text = sys.stdin.read()
+        with log.open("a", encoding="utf-8") as out:
+            out.write(json.dumps({"message": text, "session": session}) + "\n")
+        if os.environ.get("FAKE_CLAUDE_CLOUD") == "fail":
+            print(json.dumps({"ok": False, "session_id": session, "error": "Session not found"}))
+            return 0
+        url = f"https://claude.ai/code/{session}"
+        print(json.dumps({"ok": True, "session_id": session, "url": url}))
+        return 0
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print(
             "Error: --cloud requires an interactive terminal. Non-interactive invocations "
@@ -42,6 +54,8 @@ def main() -> int:
         answer = sys.stdin.readline()
         with log.open("a", encoding="utf-8") as out:
             out.write(json.dumps({"answer": answer}) + "\n")
+    if mode == "upload":  # the Claude GitHub App is not set up for the repository
+        print("\x1b[2G* Packaged this repository - 12 KB, with history", flush=True)
     print("\x1b[?25l\x1b[2K\x1b[GCreating cloud session...", flush=True)
     print("Created cloud session: Run the Chembook3D calculation job", flush=True)
     print("Session ID: session_01FakeCloudJob42", flush=True)
