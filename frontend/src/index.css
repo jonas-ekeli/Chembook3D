@@ -2027,3 +2027,42 @@ table.selectivity-table {
   color: var(--text);
   border-top: 1px solid var(--border);
 }
+
+/* D94: saved custom basis sets */
+.basis-sets {
+  display: grid;
+  grid-template-columns: minmax(10rem, 14rem) 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+.basis-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+.basis-list button {
+  width: 100%;
+  display: grid;
+  gap: 0.1rem;
+  text-align: left;
+}
+.basis-list button[aria-pressed='true'] {
+  border-color: var(--accent);
+}
+.basis-detail {
+  display: grid;
+  gap: 0.6rem;
+  min-width: 0;
+}
+.basis-detail h3,
+.basis-detail h4 {
+  margin: 0;
+}
+pre.basis-text {
+  max-height: 22rem;
+  overflow: auto;
+  word-break: normal;
+  white-space: pre;
+}

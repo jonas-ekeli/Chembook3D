@@ -55,6 +55,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-CALC-03 | The user can register a named custom basis set, and map a parsed basis description to that name. Equality uses the name. | D35 | 2 |
 | FR-CALC-04 | A single-point calculation records its geometry level: the level of the optimization that produced the node's geometry, taken from that calculation or set by the user. Its composite level is `SP level // geometry level`. | D31 | 2 |
 | FR-CALC-05 | The user can edit a calculation's level-of-theory fields and geometry level. Edits are recorded in history, and the original parsed values stay viewable. | D29, P13 | 2 |
+| FR-CALC-06 | The user can inspect each saved custom basis set (elements, contraction, ECP, every exponent and coefficient, the calculations using it) and download it, or chosen elements, as a Gaussian basis file. | D94, A41 | after 5 |
 
 **AC:**
 - Two calculations differing only in solvent are different levels.
