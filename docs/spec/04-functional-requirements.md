@@ -240,6 +240,19 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 
 **AC:** with Claude Code installed and signed in, open the demo, "Claude", "New conversation": Claude Code starts in the panel; asking it to run a shell command is refused; hide and show the panel and the conversation is still there.
 
+## FR-CLOUD · Calculations in Claude Code cloud sessions (D93)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-CLOUD-01 | Claude can write a calculation job into the investigation, `jobs/<date>-<name>/`: the chosen nodes' coordinates as XYZ inputs with their charge and multiplicity named, other input text files with checked names, `job.md` (what to run and return) and `job.json`. Nothing leaves the computer when a job is written. | D93 | after 5 |
+| FR-CLOUD-02 | Starting a job commits only its folder and the cloud files (`.claude/settings.json` with the SessionStart hook, `.claude/chembook3d/setup-tools.sh`, `.claude/CLAUDE.md`), pushes them to the linked repository and runs `claude --cloud` in the investigation folder with a task naming only the job. It is refused when the investigation is not linked, GitHub has a newer version, or Claude Code is not installed; a job with a session is not started twice. | D93, D71, A40 | after 5 |
+| FR-CLOUD-03 | The job's state is draft, starting, launch_failed (with what Claude Code said; it can be started again), running (with the session's link), finished (its `result.json` is on a branch of the repository) or fetched. Claude can wait for a result for up to 300 s per call. | D93, A40 | after 5 |
+| FR-CLOUD-04 | Fetching copies only the job's `outputs/` and `result.json` from the result's branch into the local job folder (names Windows cannot hold are skipped), answers with the local paths, and lists files the session changed outside its job folder; Claude imports the outputs like any other output file. | D93 | after 5 |
+| FR-CLOUD-05 | The SessionStart hook does nothing outside a cloud session; in one it installs xtb 6.7.1 and crest 3.0.2 from their pinned releases after checking their SHA-256. The cloud instructions forbid touching the database, `files/`, `backups/`, `.claude/` and other jobs. | D93 | after 5 |
+| FR-CLOUD-06 | Creating, starting and fetching a job are refused from a web page of another origin. | D93, NFR-SEC-01 | after 5 |
+
+**AC:** with the demo linked to an empty private repository and Claude Code signed in, ask Claude in the panel to optimise a node with GFN2-xTB in the cloud: it shows the job, starts it when you agree and gives a claude.ai link; when the session has pushed its result, Claude fetches and imports the output, and the node has an xTB calculation.
+
 ## FR-SHARE · Read-only copy to share (D79)
 
 | ID | Requirement | Trace | Phase |
@@ -260,7 +273,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-MCP-03 | Every delete, dissolving a group and removing coordinates is a request: the app shows what would go and Claude's reason, and does it only on the user's Confirm; Refuse, closing or no answer within the time limit changes nothing (A38). The server cannot answer a request. | D91, A38 | after 5 |
 | FR-MCP-04 | Open tabs reload what they show when the investigation is changed elsewhere, without reloading the page. | D91 | after 5 |
 | FR-MCP-05 | The tab reports what is selected and the energy level, type and reference shown; Claude reads it with names. | D91, A38 | after 5 |
-| FR-MCP-06 | Changes made through the server are marked "claude" in the history. The server's instructions state the domain rules (steps are not transitions, one composite level, X1, X5). | D91 | after 5 |
+| FR-MCP-06 | Changes made through the server are marked "claude" in the history. The server's instructions state the domain rules (steps are not transitions, one composite level, X1 with D93's cloud jobs, X5). | D91 | after 5 |
 
 **AC:** with the app open, Claude Code renames a node: the canvas shows the new name at once and the history marks it "claude". Asked to delete it, Claude waits; Refuse in the app keeps the node, Confirm deletes it.
 

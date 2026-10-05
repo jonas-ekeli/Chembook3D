@@ -5,7 +5,8 @@ in-process), so a tool always takes what its route takes.
 Tools come in three kinds: "read" (changes nothing), "write" (changes the investigation, like a
 click in the app) and "confirm" (deletes something: the app asks the user first, D91).
 Not offered: opening, closing, creating or cloning investigations, sync, folder browsing,
-opening files with other programs, app settings and the read-only export.
+opening files with other programs, app settings and the read-only export. Calculation jobs for
+cloud sessions (D93) commit and push only their own job folder.
 """
 
 from dataclasses import dataclass, field
@@ -68,6 +69,8 @@ FIELD_HELP = {
     "count": "How many of the species join or leave.",
     "temperature": "Kelvin; null uses the app's G_qh temperature setting.",
     "token": "The import token returned by import_file.",
+    "job_id": "Id of a calculation job (its folder name in jobs/), from create_cloud_job or "
+    "list_cloud_jobs.",
     "xyz": "XYZ text: atom count line, comment line, then 'Element x y z' lines in Å.",
     "ids": "All ids in the new order.",
     "node_ids": "Node ids.",
@@ -517,9 +520,9 @@ TOOLS: list[ToolSpec] = [
         "POST",
         "/api/imports/from-path",
         "Stage an output file (Gaussian, ORCA, xTB, CREST) from a path on this computer that "
-        "the user named, and get the import plan: what was found, which steps attach to which "
-        "node, possible duplicates, names needed for custom basis sets. Nothing is imported "
-        "until commit_import. Only import paths the user gave you.",
+        "the user named, or one that fetch_cloud_job returned, and get the import plan: what "
+        "was found, which steps attach to which node, possible duplicates, names needed for "
+        "custom basis sets. Nothing is imported until commit_import. Import no other paths.",
         help={
             "path": "Full path of the output file.",
             "node_id": "Attach to this node (optional).",
@@ -555,6 +558,66 @@ TOOLS: list[ToolSpec] = [
         "DELETE",
         "/api/imports/{token}",
         "Drop a staged import (nothing in the investigation changes).",
+    ),
+    # ---------- calculations in Claude Code cloud sessions (D93) ----------
+    T(
+        "list_cloud_jobs",
+        "read",
+        "GET",
+        "/api/jobs",
+        "The calculation jobs of this investigation (folders in jobs/), as recorded on this "
+        "computer: name, state, cloud session link. get_cloud_job tells where each stands.",
+    ),
+    T(
+        "get_cloud_job",
+        "read",
+        "GET",
+        "/api/jobs/{job_id}",
+        "Where a calculation job stands: draft, starting, launch_failed (with what Claude Code "
+        "said), running, finished (its result.json is on GitHub: status, summary, outputs) or "
+        "fetched. Checks GitHub for the result first. With `wait`, keeps checking for up to "
+        "that many seconds until the result is there; call again to keep waiting.",
+        help={
+            "refresh": "Check GitHub for the result (default true).",
+            "wait": "Seconds to keep checking until the result is there (0 to 300).",
+        },
+    ),
+    T(
+        "create_cloud_job",
+        "write",
+        "POST",
+        "/api/jobs",
+        "Write a calculation job for a Claude Code cloud session (xTB or CREST): a folder "
+        "jobs/<date>-<name>/ in the investigation with the nodes' coordinates as XYZ inputs "
+        "(their charge and multiplicity go into job.md; where a node has none recorded, give "
+        "them in the instructions), any other input files, and what to run and return. "
+        "Nothing leaves this computer yet: show the user the job (program, "
+        "method, settings, inputs) and start it with start_cloud_job only when they agree.",
+        help={
+            "nodes": "Nodes whose coordinates go in, each {node_id, file (optional name)}.",
+            "files": "Other text inputs, each {name, content}; e.g. an xcontrol file.",
+        },
+    ),
+    T(
+        "start_cloud_job",
+        "write",
+        "POST",
+        "/api/jobs/{job_id}/start",
+        "Start a job in a Claude Code cloud session on the user's account: commits only the job "
+        "folder (and the cloud setup files in .claude/), pushes it to the investigation's "
+        "GitHub repository and runs `claude --cloud`. Answers with the session link for the "
+        "user, who can follow or steer it on claude.ai. Needs the investigation linked to "
+        "GitHub. Only start a job the user agreed to.",
+    ),
+    T(
+        "fetch_cloud_job",
+        "write",
+        "POST",
+        "/api/jobs/{job_id}/fetch",
+        "Copy a finished job's outputs and result.json from the branch the cloud session "
+        "pushed into the job folder on this computer. Answers with the local paths: import "
+        "them with import_file and commit_import, or read a structure and set_coordinates on "
+        "the node the user names. Report anything listed in changed_outside_job to the user.",
     ),
     T(
         "create_selectivity",
