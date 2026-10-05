@@ -156,7 +156,11 @@ This needs:
   [Claude GitHub App](https://github.com/apps/claude) installed on the investigation's
   repository (without it, Claude Code uploads the folder instead of cloning it);
 - the cloud environment's network access at its default, Trusted, so the session can download
-  xTB and CREST from GitHub.
+  xTB and CREST from GitHub;
+- Claude Code trusting the investigation folder. The app starts the session in a terminal you
+  don't see and does not answer Claude Code's questions for you, so if it has never asked about
+  this folder, open a terminal in the investigation folder once, run `claude`, choose "Yes, I
+  trust this folder" and leave it with `/exit`. Claude tells you when this is needed.
 
 The first job also adds `.claude/` to the investigation's repository (the setup script and the
 instructions the cloud session follows). The branches the sessions push stay on GitHub until you

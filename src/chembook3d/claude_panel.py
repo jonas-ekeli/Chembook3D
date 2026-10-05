@@ -69,7 +69,9 @@ repository:
    constraints, which files). Ask about anything the person did not say that changes the
    result, then show them the job.
 2. `start_cloud_job` only once they agree. Give them the session link; they can follow and
-   steer it on claude.ai or their phone.
+   steer it on claude.ai or their phone. If it ends in launch_failed, pass on what its
+   launch_error says to do (such as trusting the folder once) and start it again when they
+   have done it; that pushes nothing new.
 3. `get_cloud_job` with `wait` to see when it has finished (call again to keep waiting; they
    can also ask you later to look at a named job).
 4. `fetch_cloud_job`, then import the outputs it lists with `import_file` and
