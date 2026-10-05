@@ -423,6 +423,35 @@ export type Level = {
 
 export type LevelFields = Pick<Level, 'method' | 'basis' | 'dispersion' | 'solvation_model' | 'solvent'>
 
+/** D94: a saved custom basis set (FR-CALC-03), as listed. */
+export type CustomBasisSummary = {
+  id: string
+  name: string
+  description: string
+  elements: string[]
+  created_at: string
+  calculation_count: number
+}
+
+/** D94: one element's definition; an element has several when its atoms differed. */
+export type BasisVariant = {
+  header: string
+  contraction: string
+  shells: { kind: string; scale: string; primitives: string[][] }[]
+  ecp: {
+    core_electrons: number | null
+    max_angular: number
+    blocks: { title: string; terms: string[][] }[]
+  } | null
+  /** The element's lines in Gaussian Gen/GenECP input. */
+  text: string[]
+}
+
+export type CustomBasisDetail = Omit<CustomBasisSummary, 'elements' | 'calculation_count'> & {
+  elements: { element: string; variants: BasisVariant[] }[]
+  calculations: { id: string; type: string; node_id: string; node_label: string; geometry_level_only: boolean }[]
+}
+
 export type SourceFile = {
   id: string
   stored_path: string
@@ -1057,6 +1086,10 @@ export const api = {
     fields: Partial<LevelFields> & { geometry_level_id?: string | null; notes?: string },
   ) => request<Calculation>('PATCH', `/calculations/${id}`, fields),
   levels: () => request<Level[]>('GET', '/levels'),
+  customBases: () => request<CustomBasisSummary[]>('GET', '/custom-bases'),
+  customBasis: (id: string) => request<CustomBasisDetail>('GET', `/custom-bases/${id}`),
+  customBasisFileUrl: (id: string, elements?: string[]) =>
+    `/api/custom-bases/${id}/file${elements ? `?elements=${encodeURIComponent(elements.join(','))}` : ''}`,
   updateSourceFile: (
     id: string,
     fields: Partial<Pick<SourceFile, 'original_name' | 'origin_device' | 'origin_path'>>,

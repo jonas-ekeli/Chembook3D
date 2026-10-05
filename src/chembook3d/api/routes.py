@@ -1,6 +1,7 @@
 """HTTP API used by the web interface. One investigation is open at a time (single user, D42)."""
 
 import os
+import re
 import string
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -36,7 +37,7 @@ from chembook3d.models import (
     Node,
     SourceFile,
 )
-from chembook3d.services import energies, history, imports, levels
+from chembook3d.services import basis_sets, energies, history, imports, levels
 from chembook3d.services import files as file_service
 from chembook3d.services import nodes as node_service
 from chembook3d.services import species as species_service
@@ -1162,3 +1163,95 @@ def custom_names(session: DbSession):
         "bases": [{"name": b.name, "elements": sorted(b.definition)} for b in bases],
         "dispersions": [{"name": d.name, "base": d.base, "iops": d.iops} for d in dispersions],
     }
+
+
+# ---------- saved custom basis sets: inspect and download (D94) ----------
+
+
+def _get_basis(session: Session, basis_id: str) -> CustomBasis:
+    basis = session.get(CustomBasis, basis_id)
+    if basis is None:
+        raise HTTPException(404, "Basis set not found")
+    return basis
+
+
+def _basis_calculations(session: Session, name: str) -> list[dict[str, Any]]:
+    """Gaussian calculations whose level, or geometry level, uses this basis set's name."""
+    level_ids = set(
+        session.scalars(
+            select(LevelOfTheory.id).where(
+                LevelOfTheory.basis == name, LevelOfTheory.program == "Gaussian"
+            )
+        )
+    )
+    if not level_ids:
+        return []
+    rows = session.execute(
+        select(Calculation, Node)
+        .join(Node, Node.id == Calculation.node_id)
+        .where(Calculation.level_id.in_(level_ids) | Calculation.geometry_level_id.in_(level_ids))
+        .order_by(Node.seq, Calculation.created_at)
+    )
+    return [
+        {
+            "id": calculation.id,
+            "type": calculation.type,
+            "node_id": node.id,
+            "node_label": node.label,
+            "geometry_level_only": calculation.level_id not in level_ids,
+        }
+        for calculation, node in rows
+    ]
+
+
+@router.get("/custom-bases")
+def list_custom_bases(session: DbSession):
+    """The saved custom basis sets with their elements and how many calculations use them."""
+    return [
+        {
+            "id": b.id,
+            "name": b.name,
+            "description": b.description,
+            "elements": basis_sets.sort_elements(b.definition),
+            "created_at": b.created_at.replace(tzinfo=UTC),
+            "calculation_count": len(_basis_calculations(session, b.name)),
+        }
+        for b in session.scalars(select(CustomBasis).order_by(CustomBasis.name))
+    ]
+
+
+@router.get("/custom-bases/{basis_id}")
+def get_custom_basis(basis_id: str, session: DbSession):
+    """One saved basis set in full: per element the contraction scheme, the shells with
+    exponents and coefficients, the ECP and its Gaussian input text, and the calculations
+    that use it."""
+    basis = _get_basis(session, basis_id)
+    return {
+        "id": basis.id,
+        "name": basis.name,
+        "description": basis.description,
+        "created_at": basis.created_at.replace(tzinfo=UTC),
+        "elements": basis_sets.describe(basis.definition),
+        "calculations": _basis_calculations(session, basis.name),
+    }
+
+
+@router.get("/custom-bases/{basis_id}/file")
+def custom_basis_file(basis_id: str, session: DbSession, elements: str | None = None):
+    """The basis set as a Gaussian Gen/GenECP basis file (.gbs); `elements` (comma-separated
+    symbols) limits it to those elements."""
+    basis = _get_basis(session, basis_id)
+    chosen = [e.strip() for e in elements.split(",") if e.strip()] if elements else None
+    if chosen is not None:
+        unknown = [e for e in chosen if e not in basis.definition]
+        if unknown or not chosen:
+            raise HTTPException(
+                422, f"{basis.name} does not define {', '.join(unknown) or 'these elements'}"
+            )
+    text = basis_sets.gaussian_file(basis.name, basis.definition, chosen)
+    filename = re.sub(r"[^A-Za-z0-9._()+-]+", "_", basis.name).strip("_.") or "basis"
+    return Response(
+        content=text.encode("utf-8"),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.gbs"'},
+    )

@@ -20,6 +20,7 @@ import {
   type SyncStatus,
 } from './api'
 import { NO_FILTERS, type Filters, type Selection, type ViewMode } from './canvasView'
+import { BasisSetsDialog } from './components/BasisSets'
 import { CanvasPane, type CanvasEnergy } from './components/Canvas'
 import { ClaudePanel } from './components/ClaudePanel'
 import { EnergyDrawer, type DrawerPath } from './components/EnergyDrawer'
@@ -145,6 +146,7 @@ function App() {
   const [picker, setPicker] = useState<'open' | 'create' | null>(null)
   const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [showBases, setShowBases] = useState(false) // D94
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   // Git sync (D71)
@@ -610,6 +612,15 @@ function App() {
             synced folder. Open it anyway only if you are sure it is closed (for example after a crash).
           </p>
         </Modal>
+      )}
+      {showBases && (
+        <BasisSetsDialog
+          onClose={() => setShowBases(false)}
+          onSelectNode={(id) => {
+            setView('canvas')
+            selectNode(id, true)
+          }}
+        />
       )}
       {showSettings && settings && (
         <Modal
@@ -1081,6 +1092,9 @@ function App() {
             title="Save a read-only HTML file to send to others (D79)"
           >
             Share read-only copy…
+          </button>
+          <button onClick={() => setShowBases(true)} title="The saved custom basis sets, to inspect and download (D94)">
+            Basis sets
           </button>
           <button onClick={() => setShowSettings(true)}>Settings</button>
         </header>

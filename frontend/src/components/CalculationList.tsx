@@ -3,11 +3,13 @@ import {
   api,
   CALCULATION_TYPES,
   type Calculation,
+  type CustomBasisSummary,
   type Level,
   type LevelFields,
   type SourceFile,
 } from '../api'
 import { hartree } from '../util'
+import { BasisSetsDialog } from './BasisSets'
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -227,14 +229,44 @@ export function ResultValues({ calculation }: { calculation: Pick<Calculation, '
   )
 }
 
+/** D94: the saved custom basis sets this calculation's levels use, to open and download. */
+function CustomBasisLinks({ calculation, bases }: { calculation: Calculation; bases: CustomBasisSummary[] }) {
+  const [open, setOpen] = useState<string | null>(null)
+  const names = [
+    ...new Set(
+      [calculation.level, calculation.geometry_level]
+        .filter((level) => level?.program === 'Gaussian')
+        .map((level) => level!.basis)
+        .filter((name) => bases.some((b) => b.name === name)),
+    ),
+  ]
+  if (names.length === 0) return null
+  return (
+    <div className="small">
+      Custom basis set{names.length > 1 ? 's' : ''}:{' '}
+      {names.map((name, i) => (
+        <span key={name}>
+          {i > 0 && ', '}
+          <button className="link" onClick={() => setOpen(name)}>
+            {name}
+          </button>
+        </span>
+      ))}
+      {open && <BasisSetsDialog initialName={open} onClose={() => setOpen(null)} />}
+    </div>
+  )
+}
+
 function Details({
   calculation,
   levels,
+  bases,
   onSaved,
   onChanged,
 }: {
   calculation: Calculation
   levels: Level[]
+  bases: CustomBasisSummary[]
   onSaved: (c: Calculation) => void
   onChanged: () => void
 }) {
@@ -250,6 +282,7 @@ function Details({
       {calculation.route && <pre className="route">{calculation.route}</pre>}
       <ResultValues calculation={calculation} />
       <LevelEditor key={calculation.level?.id ?? 'none'} calculation={calculation} levels={levels} onSaved={onSaved} />
+      <CustomBasisLinks calculation={calculation} bases={bases} />
       {calculation.source_file && <SourceFileBox source={calculation.source_file} onChanged={onChanged} />}
     </div>
   )
@@ -267,12 +300,14 @@ export function CalculationList({
 }) {
   const [calculations, setCalculations] = useState<Calculation[]>([])
   const [levels, setLevels] = useState<Level[]>([])
+  const [bases, setBases] = useState<CustomBasisSummary[]>([])
   const [open, setOpen] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     api.calculations(nodeId).then(setCalculations, (err: unknown) => setError(errorText(err)))
     api.levels().then(setLevels, () => undefined)
+    api.customBases().then(setBases, () => undefined)
   }, [nodeId, refreshKey])
 
   const saved = (updated: Calculation) => {
@@ -307,6 +342,7 @@ export function CalculationList({
             <Details
               calculation={c}
               levels={levels}
+              bases={bases}
               onSaved={saved}
               onChanged={() => {
                 api.calculations(nodeId).then(setCalculations, () => undefined)

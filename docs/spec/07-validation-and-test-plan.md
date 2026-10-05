@@ -104,6 +104,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-IMP-03 | Truncated opt | Last geometry; `optimization-incomplete` tag; W-TERM |
 | T-IMP-04 | `--Link1--` opt then SP at a higher level | Two calculations; the SP has composite level SP//opt; the geometry is from the default step (the last), and the override works |
 | T-IMP-05 | `genecp` job | The preview asks for a custom basis name; equality uses the name |
+| T-IMP-05b | Saved `genecp` basis set (D94) | The dialog shows each element's contraction and ECP; the downloaded `.gbs` gives back every printed exponent, coefficient and ECP term, and only the ticked elements |
 | T-IMP-06 | Route line removed | Geometry imported; W-PARSE lists the missing fields |
 | T-IMP-07 | Cancel in the preview | No records and no copied files |
 | T-IMP-08 | Kill the process during import | No partial records on reopen (NFR-DATA-04) |

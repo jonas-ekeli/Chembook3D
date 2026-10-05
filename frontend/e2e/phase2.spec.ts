@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -24,6 +25,10 @@ async function nameCustom(dialog: ReturnType<Page['getByRole']>, label: string, 
   const field = dialog.getByLabel(label)
   await field.fill(value)
   await field.press('Enter')
+}
+
+function elementsRow(dialog: ReturnType<Page['getByRole']>, element: string) {
+  return dialog.getByRole('row').filter({ has: dialog.page().getByLabel(`Include ${element}`, { exact: true }) })
 }
 
 test('import a Gaussian TS job, then a single point onto it', async ({ page }) => {
@@ -68,6 +73,51 @@ test('import a Gaussian TS job, then a single point onto it', async ({ page }) =
   await expect(calculations.getByRole('listitem')).toHaveCount(3)
   await expect(calculations).toContainText('modQZ // Gaussian PBEPBE-GD3MBJ/modDZ')
   await expect(page.getByRole('list', { name: 'Nodes' }).getByRole('listitem')).toHaveCount(1)
+})
+
+test('a saved basis set can be inspected and downloaded', async ({ page }) => {
+  // D94
+  await newInvestigation(page, 'Basis set test')
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  const importer = page.getByRole('dialog')
+  await importer.getByLabel('Upload a file').setInputFiles(join(CUSTOM, 'MeI_TS.out'))
+  await nameCustom(importer, 'Name for the custom basis set', 'modDZ')
+  await nameCustom(importer, 'Name for the custom dispersion', 'GD3MBJ')
+  await importer.getByRole('button', { name: 'Import', exact: true }).click()
+  const inspector = page.getByLabel('Node inspector')
+  await expect(inspector.getByRole('heading', { name: 'MeI_TS' })).toBeVisible()
+
+  // from the calculation: its custom basis set opens in the dialog
+  await inspector.getByRole('list', { name: 'Calculations' }).getByRole('button', { name: /Frequency/ }).click()
+  await inspector.getByRole('button', { name: 'modDZ', exact: true }).click()
+  let dialog = page.getByRole('dialog', { name: 'Custom basis sets' })
+  const elements = dialog.getByRole('table', { name: 'Elements' })
+  await expect(elements.getByRole('row')).toHaveCount(4)
+  await expect(elements.getByRole('row').nth(3)).toContainText('(3s2p)/[1s1p]')
+  await expect(elements.getByRole('row').nth(3)).toContainText('28 core electrons')
+  await dialog.getByRole('button', { name: 'Close' }).click()
+
+  // from the top bar, with every function and the file
+  await page.getByRole('button', { name: 'Basis sets' }).click()
+  dialog = page.getByRole('dialog', { name: 'Custom basis sets' })
+  await expect(dialog.getByRole('list', { name: 'Saved basis sets' })).toContainText('H C I')
+  await elementsRow(dialog, 'I').getByRole('button', { name: 'Show functions' }).click()
+  await expect(dialog.getByLabel('I functions')).toContainText('I-ECP     3     28')
+  await dialog.getByLabel('Include I').uncheck()
+  await expect(dialog).toContainText('H C; use with Gen.')
+  const [file] = await Promise.all([
+    page.waitForEvent('download'),
+    dialog.getByRole('button', { name: 'Download Gaussian file (.gbs)' }).click(),
+  ])
+  expect(file.suggestedFilename()).toBe('modDZ.gbs')
+  const text = await readFile(await file.path(), 'utf-8')
+  expect(text).toContain('! Elements: H C\n')
+  expect(text).not.toContain('ECP')
+
+  // the node link selects the node and closes the dialog
+  await dialog.getByRole('button', { name: 'MeI_TS' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(inspector.getByRole('heading', { name: 'MeI_TS' })).toBeVisible()
 })
 
 test('cancelling an import writes nothing', async ({ page }) => {

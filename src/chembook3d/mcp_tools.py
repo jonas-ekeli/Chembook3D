@@ -166,6 +166,22 @@ TOOLS: list[ToolSpec] = [
         "The names given to custom basis sets and dispersions.",
     ),
     T(
+        "list_custom_bases",
+        "read",
+        "GET",
+        "/api/custom-bases",
+        "The saved custom basis sets: name, elements and how many calculations use each.",
+    ),
+    T(
+        "get_custom_basis",
+        "read",
+        "GET",
+        "/api/custom-bases/{basis_id}",
+        "One saved custom basis set in full: per element the contraction scheme, every shell "
+        "with its exponents and coefficients, the ECP, the Gaussian input text, and the "
+        "calculations that use it.",
+    ),
+    T(
         "list_steps",
         "read",
         "GET",
