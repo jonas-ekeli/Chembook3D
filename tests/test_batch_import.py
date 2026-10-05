@@ -65,10 +65,12 @@ def test_folder_of_results(open_client, tmp_path):
     shutil.copy(FIXTURES / TS_SP, folder / "ts" / "A_sp.log")
     shutil.copy(FIXTURES / TS, folder / "ts" / TS)
     shutil.copy(FIXTURES / MINIMUM, folder / MINIMUM)
-    (folder / "job.gjf").write_text("%chk=job.chk\n#P B3LYP/6-31G(d) Opt\n\njob\n\n0 1\n")
+    (folder / "job.gjf").write_text(
+        "%chk=job.chk\n#P B3LYP/6-31G(d) Opt\n\njob\n\n0 1\n", encoding="utf-8"
+    )
     (folder / "job.chk").write_bytes(b"\x00\x01binary checkpoint")
-    (folder / "slurm-1234.out").write_text("Starting job on node c12\n")
-    (folder / ".hidden.log").write_text("ignored")
+    (folder / "slurm-1234.out").write_text("Starting job on node c12\n", encoding="utf-8")
+    (folder / ".hidden.log").write_text("ignored", encoding="utf-8")
 
     plan = scan(open_client, folder)
     assert plan["other_count"] == 3  # the input, the checkpoint and the scheduler log
@@ -127,8 +129,8 @@ def test_folder_of_results(open_client, tmp_path):
 def test_subfolders_can_be_left_out(open_client, tmp_path):
     folder = tmp_path / "results"
     (folder / "sub").mkdir(parents=True)
-    (folder / "a.out").write_text(water_opt(g.WATER))
-    (folder / "sub" / "b.out").write_text(water_opt(OTHER))
+    (folder / "a.out").write_text(water_opt(g.WATER), encoding="utf-8")
+    (folder / "sub" / "b.out").write_text(water_opt(OTHER), encoding="utf-8")
     assert [r["path"] for r in scan(open_client, folder)["rows"]] == ["a.out", "sub/b.out"]
     assert [r["path"] for r in scan(open_client, folder, recursive=False)["rows"]] == ["a.out"]
 
@@ -140,9 +142,9 @@ def test_existing_and_planned_nodes_are_matched(open_client, tmp_path):
     ).json()
     folder = tmp_path / "results"
     folder.mkdir()
-    (folder / "w_SPQZ.out").write_text(g.single_point(g.WATER))
+    (folder / "w_SPQZ.out").write_text(g.single_point(g.WATER), encoding="utf-8")
     # Optimised from the guess: the first geometry is the guess, the last one is new.
-    (folder / "b.out").write_text(water_opt(OTHER, g.moved(OTHER, 0.1)))
+    (folder / "b.out").write_text(water_opt(OTHER, g.moved(OTHER, 0.1)), encoding="utf-8")
     plan = scan(open_client, folder)
     sp, b = row(plan, "w_SPQZ.out"), row(plan, "b.out")
     assert sp["match"] == "geometry" and sp["target"]["node_id"] == existing
@@ -222,9 +224,11 @@ def test_file_names_go_to_their_primed_nodes(open_client, tmp_path):
     folder = tmp_path / "results"
     folder.mkdir()
     # Geometries that match no node, so only the names can tell.
-    (folder / "TS1-2''.out").write_text(water_opt(g.moved(g.WATER, -0.31)))
-    (folder / "TS1-2'_SPQZ.out").write_text(g.single_point(g.moved(g.WATER, -0.32)))
-    (folder / "TS1-2__.out").write_text(g.single_point(g.moved(g.WATER, -0.33)))
+    (folder / "TS1-2''.out").write_text(water_opt(g.moved(g.WATER, -0.31)), encoding="utf-8")
+    (folder / "TS1-2'_SPQZ.out").write_text(
+        g.single_point(g.moved(g.WATER, -0.32)), encoding="utf-8"
+    )
+    (folder / "TS1-2__.out").write_text(g.single_point(g.moved(g.WATER, -0.33)), encoding="utf-8")
     plan = scan(open_client, folder)
     double, single, close = (
         row(plan, "TS1-2''.out"),
@@ -244,7 +248,7 @@ def test_a_name_fitting_two_nodes_waits_for_a_choice(open_client, tmp_path):
     open_client.post("/api/nodes", json={"label": "MCB"})
     folder = tmp_path / "results"
     folder.mkdir()
-    (folder / "MCB.out").write_text(water_opt(g.WATER))
+    (folder / "MCB.out").write_text(water_opt(g.WATER), encoding="utf-8")
     plan = scan(open_client, folder)
     mcb = row(plan, "MCB.out")
     assert mcb["match"] == "none" and len(mcb["candidates"]) == 2
@@ -262,10 +266,10 @@ def test_a_name_fitting_two_nodes_waits_for_a_choice(open_client, tmp_path):
 def test_rows_can_be_unticked_and_retargeted(open_client, tmp_path):
     folder = tmp_path / "results"
     folder.mkdir()
-    (folder / "a.out").write_text(water_opt(g.WATER))
-    (folder / "a_SP.out").write_text(g.single_point(g.WATER))
-    (folder / "c.out").write_text(water_opt(OTHER))
-    (folder / "d.out").write_text(g.single_point(g.moved(g.WATER, 0.7)))
+    (folder / "a.out").write_text(water_opt(g.WATER), encoding="utf-8")
+    (folder / "a_SP.out").write_text(g.single_point(g.WATER), encoding="utf-8")
+    (folder / "c.out").write_text(water_opt(OTHER), encoding="utf-8")
+    (folder / "d.out").write_text(g.single_point(g.moved(g.WATER, 0.7)), encoding="utf-8")
     plan = scan(open_client, folder)
     a, sp, c, d = (row(plan, p) for p in ("a.out", "a_SP.out", "c.out", "d.out"))
     assert d["match"] == "new"
@@ -294,7 +298,7 @@ def test_possible_duplicate_asks(open_client, tmp_path):
     base = commit(open_client, upload(open_client, "w.out", water_opt(g.WATER)))["node_id"]
     folder = tmp_path / "results"
     folder.mkdir()
-    (folder / "near.out").write_text(water_opt(g.moved(g.WATER, 0.02)))
+    (folder / "near.out").write_text(water_opt(g.moved(g.WATER, 0.02)), encoding="utf-8")
     plan = scan(open_client, folder)
     near = row(plan, "near.out")
     assert near["duplicates"][0]["node_id"] == base
@@ -320,7 +324,10 @@ def test_files_without_coordinates_need_a_node(open_client, tmp_path):
         "It prints no coordinates: choose the node it was run on, or untick it"
     ]
     # The suffix _SP* is taken off before matching: "dvb_sp" goes to the node "dvb".
-    dvb = commit(open_client, upload(open_client, "dvb_opt.out", (XTB / "dvb_opt.out").read_text()))
+    dvb = commit(
+        open_client,
+        upload(open_client, "dvb_opt.out", (XTB / "dvb_opt.out").read_text(encoding="utf-8")),
+    )
     open_client.patch(f"/api/nodes/{dvb['node_id']}", json={"label": "dvb"})
     plan = scan(open_client, folder)
     sp = row(plan, "dvb_sp.out")
@@ -333,7 +340,7 @@ def test_custom_basis_named_once_for_the_batch(open_client, tmp_path):
     folder = tmp_path / "results"
     folder.mkdir()
     for name, make in g.CUSTOM_FILES.items():
-        (folder / name).write_text(make())
+        (folder / name).write_text(make(), encoding="utf-8")
     plan = scan(open_client, folder)
     kinds = sorted(r["kind"] for r in plan["names"])
     assert kinds == ["basis", "basis", "dispersion"]  # modDZ, modQZ and the IOp dispersion
@@ -373,7 +380,9 @@ def test_new_nodes_go_right_of_the_canvas(open_client, tmp_path):
     folder = tmp_path / "results"
     folder.mkdir()
     for n in range(5):
-        (folder / f"n{n}.out").write_text(water_opt(g.moved(g.WATER, 0.2 * (n + 1))))
+        (folder / f"n{n}.out").write_text(
+            water_opt(g.moved(g.WATER, 0.2 * (n + 1))), encoding="utf-8"
+        )
     assert run(open_client, scan(open_client, folder)).status_code == 200
     placed = {n["label"]: (n["pos_x"], n["pos_y"]) for n in nodes(open_client)}
     x0 = 1000 + 2 * 240
@@ -387,8 +396,8 @@ def test_new_nodes_go_right_of_the_canvas(open_client, tmp_path):
 def test_a_failure_writes_nothing(open_client, tmp_path, monkeypatch):
     folder = tmp_path / "results"
     folder.mkdir()
-    (folder / "a.out").write_text(water_opt(g.WATER))
-    (folder / "b.out").write_text(water_opt(OTHER))
+    (folder / "a.out").write_text(water_opt(g.WATER), encoding="utf-8")
+    (folder / "b.out").write_text(water_opt(OTHER), encoding="utf-8")
     plan = scan(open_client, folder)
     real = imports._create_calculation
     count = {"n": 0}
@@ -411,7 +420,7 @@ def test_a_failure_writes_nothing(open_client, tmp_path, monkeypatch):
 def test_cancel_drops_the_staged_files(open_client, tmp_path):
     folder = tmp_path / "results"
     folder.mkdir()
-    (folder / "a.out").write_text(water_opt(g.WATER))
+    (folder / "a.out").write_text(water_opt(g.WATER), encoding="utf-8")
     plan = scan(open_client, folder)
     staging = open_client.app.state.staging
     staged = staging.get(plan["rows"][0]["id"])
@@ -425,8 +434,8 @@ def test_cancel_drops_the_staged_files(open_client, tmp_path):
 def test_same_file_twice_in_the_folder(open_client, tmp_path):
     folder = tmp_path / "results"
     (folder / "copy").mkdir(parents=True)
-    (folder / "a.out").write_text(water_opt(g.WATER))
-    (folder / "copy" / "a.out").write_text(water_opt(g.WATER))
+    (folder / "a.out").write_text(water_opt(g.WATER), encoding="utf-8")
+    (folder / "copy" / "a.out").write_text(water_opt(g.WATER), encoding="utf-8")
     plan = scan(open_client, folder)
     assert row(plan, "copy/a.out")["skipped"] == "same_file"
     assert row(plan, "a.out")["included"] and not row(plan, "copy/a.out")["included"]
@@ -435,11 +444,11 @@ def test_same_file_twice_in_the_folder(open_client, tmp_path):
 def test_suffixes_are_remembered(open_client, tmp_path):
     folder = tmp_path / "results"
     folder.mkdir()
-    (folder / "a.out").write_text(water_opt(g.WATER))
+    (folder / "a.out").write_text(water_opt(g.WATER), encoding="utf-8")
     plan = scan(open_client, folder)
     assert plan["suffixes"] == ["_SP*", "_freq", "_opt", "_irc"]
     assert run(open_client, plan, suffixes=["_SP*", "_hess"]).status_code == 200
-    (folder / "b.out").write_text(water_opt(OTHER))
+    (folder / "b.out").write_text(water_opt(OTHER), encoding="utf-8")
     assert scan(open_client, folder)["suffixes"] == ["_SP*", "_hess"]
 
 
