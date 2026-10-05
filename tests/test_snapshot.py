@@ -155,6 +155,6 @@ def test_page_and_file_name():
     with pytest.raises(Exception, match="not built correctly"):
         snapshot.render("<title></title>", data, "x")
     when = datetime(2026, 9, 30)
-    name = snapshot.file_name('Ru: "CAAC"/cycle?', when)
-    assert name == "Ru- -CAAC-cycle read-only 2026-09-30.html"
+    name = snapshot.file_name('Ru: "CAAC"/cycle\' α?', when)
+    assert name == "Ru_ _CAAC__cycle' α_ read-only 2026-09-30.html"
     assert snapshot.file_name("...", when) == "investigation read-only 2026-09-30.html"

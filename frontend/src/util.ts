@@ -5,6 +5,15 @@ export function closesCycle(ids: string[]): boolean {
   return ids.slice(0, -1).includes(ids[ids.length - 1])
 }
 
+/** `text` as a file name, by the backend's rule (api/downloads.py): each of <>:"/\|?* and each
+ * control character becomes "_", spaces around it and dots at its end go; primes, spaces and
+ * Greek letters stay. */
+export function fileName(text: string, fallback: string): string {
+  // eslint-disable-next-line no-control-regex
+  const name = text.replace(/[<>:"/\\|?*\x00-\x1f\x7f]/g, '_').replace(/^ +/, '').replace(/[. ]+$/, '')
+  return name || fallback
+}
+
 export function download(url: string, name: string) {
   const link = document.createElement('a')
   link.href = url

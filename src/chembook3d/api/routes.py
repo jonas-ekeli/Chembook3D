@@ -1,13 +1,11 @@
 """HTTP API used by the web interface. One investigation is open at a time (single user, D42)."""
 
 import os
-import re
 import string
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
@@ -18,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from chembook3d import settings as app_settings
 from chembook3d import sync, thermochem, units, xyz
+from chembook3d.api import downloads
 from chembook3d.investigation import (
     DB_NAME,
     Investigation,
@@ -736,18 +735,11 @@ def download_xyz(node_id: str, session: DbSession):
         text = node_service.to_xyz(node)
     except node_service.NodeError as exc:
         raise HTTPException(404, str(exc)) from exc
-    name = "".join(c if c.isalnum() or c in "-_." else "_" for c in (node.label or node.id))
-    # Headers are Latin-1: a name with Greek letters (str.isalnum keeps them) broke the
-    # response with a 500. The plain filename is ASCII; filename* keeps the real name.
-    fallback = "".join(c if c.isascii() else "_" for c in name)
+    name = downloads.file_name(node.label or "", node.id)
     return Response(
         text,
         media_type="chemical/x-xyz",
-        headers={
-            "Content-Disposition": (
-                f"attachment; filename=\"{fallback}.xyz\"; filename*=UTF-8''{quote(name)}.xyz"
-            )
-        },
+        headers={"Content-Disposition": downloads.attachment(f"{name}.xyz")},
     )
 
 
@@ -1266,9 +1258,9 @@ def custom_basis_file(basis_id: str, session: DbSession, elements: str | None = 
                 422, f"{basis.name} does not define {', '.join(unknown) or 'these elements'}"
             )
     text = basis_sets.gaussian_file(basis.name, basis.definition, chosen)
-    filename = re.sub(r"[^A-Za-z0-9._()+-]+", "_", basis.name).strip("_.") or "basis"
+    name = downloads.file_name(basis.name, "basis")
     return Response(
         content=text.encode("utf-8"),
         media_type="text/plain; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}.gbs"'},
+        headers={"Content-Disposition": downloads.attachment(f"{name}.gbs")},
     )

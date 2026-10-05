@@ -10,11 +10,9 @@ files and no history (FR-SHARE-04)."""
 import base64
 import gzip
 import json
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
@@ -22,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from chembook3d import __version__, units
 from chembook3d import settings as app_settings
+from chembook3d.api import downloads
 from chembook3d.api import energies as energy_api
 from chembook3d.api import pathway as pathway_api
 from chembook3d.api.routes import DbSession, _calculation_out, _investigation
@@ -236,9 +235,8 @@ def render(template: str, data: dict[str, Any], title: str) -> str:
 
 
 def file_name(name: str, when: datetime) -> str:
-    """ "<name> read-only YYYY-MM-DD.html", with characters Windows refuses in names replaced."""
-    clean = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "-", name).strip(" .-") or "investigation"
-    return f"{clean} read-only {when:%Y-%m-%d}.html"
+    """ "<name> read-only YYYY-MM-DD.html", named by the downloads rule."""
+    return f"{downloads.file_name(name, 'investigation')} read-only {when:%Y-%m-%d}.html"
 
 
 @router.post("/snapshot")
@@ -255,13 +253,8 @@ def export_snapshot(body: SnapshotIn, request: Request, session: DbSession) -> R
     name = data["investigation"]["name"]
     html = render(template.read_text(encoding="utf-8"), data, f"{name} · Chembook3D (read-only)")
     filename = file_name(name, datetime.now())
-    fallback = filename.encode("ascii", "replace").decode("ascii").replace("?", "_")
     return Response(
         content=html.encode("utf-8"),
         media_type="text/html; charset=utf-8",
-        headers={
-            "Content-Disposition": (
-                f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename)}"
-            )
-        },
+        headers={"Content-Disposition": downloads.attachment(filename)},
     )
