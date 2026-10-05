@@ -23,6 +23,8 @@ test('a folder of results is imported at once', async ({ page }) => {
   await newInvestigation(page, 'Batch test')
   await page.getByRole('button', { name: 'Import file…' }).click()
   let dialog = page.getByRole('dialog')
+  // wait for the first listing, so it cannot replace the folder typed below
+  await expect(dialog.getByLabel('Folder path')).not.toHaveValue('')
   await dialog.getByLabel('Folder path').fill(CUSTOM)
   await dialog.getByRole('button', { name: 'Go' }).click()
   await expect(dialog.getByRole('button', { name: /MeI_TS_QZ\.out/ })).toBeVisible()
