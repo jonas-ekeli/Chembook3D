@@ -395,6 +395,7 @@ class Launch:
     # ("ended", None).
     viewers: list[Callable[[str, str | None], None]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    asked: bool = False  # a still screen was seen and the user has not typed since
 
     @property
     def running(self) -> bool:
@@ -402,14 +403,14 @@ class Launch:
 
     @property
     def waiting(self) -> bool:
-        """Whether it shows a question: running, no session yet, and a still screen."""
-        quiet = time.monotonic() - self.last_output
-        return (
-            bool(self.screen)
-            and self.running
-            and self.session_id is None
-            and (quiet >= LAUNCH_QUIET)
-        )
+        """Whether it shows a question: running, no session yet, and a still screen. Once
+        seen, a question stays until the user types: a terminal redrawing itself (Windows
+        does when the Claude panel resizes it to show the question) answers nothing."""
+        if not (self.screen and self.running and self.session_id is None):
+            return False
+        if time.monotonic() - self.last_output >= LAUNCH_QUIET:
+            self.asked = True
+        return self.asked
 
     def output(self) -> str:
         return "\n".join(screen_lines(self.screen)[-40:]).strip()
@@ -433,6 +434,8 @@ class Launch:
 
     def answer(self, text: str) -> None:
         """Keys the user typed in the Claude panel."""
+        self.asked = False
+        self.last_output = time.monotonic()  # a still screen from now on is a new question
         if self.terminal is not None and self.running:
             self.terminal.write(text)
 
