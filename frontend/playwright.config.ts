@@ -48,6 +48,12 @@ export default defineConfig({
     cwd: resolve(import.meta.dirname, '..'),
     url: `http://127.0.0.1:${port}/api/health`,
     reuseExistingServer: false,
-    env: { CHEMBOOK3D_CONFIG_DIR: join(process.env.E2E_DIR, 'config'), CHEMBOOK3D_CLAUDE: fakeClaude() },
+    env: {
+      CHEMBOOK3D_CONFIG_DIR: join(process.env.E2E_DIR, 'config'),
+      CHEMBOOK3D_CLAUDE: fakeClaude(),
+      // D93: a cloud job's launch first asks a question, as the folder trust question does.
+      FAKE_CLAUDE_CLOUD: 'ask',
+      FAKE_CLAUDE_LOG: join(process.env.E2E_DIR, 'fake-claude-cloud.log'),
+    },
   },
 })

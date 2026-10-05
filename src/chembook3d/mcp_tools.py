@@ -573,8 +573,10 @@ TOOLS: list[ToolSpec] = [
         "read",
         "GET",
         "/api/jobs/{job_id}",
-        "Where a calculation job stands: draft, starting, launch_failed (with what Claude Code "
-        "said or showed and what the user can do; start it again afterwards), running, "
+        "Where a calculation job stands: draft, starting, waiting_for_answer (the user answers "
+        "Claude Code's question in the Claude panel; `wait` waits for that), launch_failed "
+        "(with what Claude Code said or showed and what the user can do; start it again "
+        "afterwards), running, "
         "finished (its result.json is on GitHub: status, summary, outputs) or fetched. Checks "
         "GitHub for the result first. With `wait`, keeps checking for up to that many seconds "
         "until the result is there; call again to keep waiting.",
@@ -606,8 +608,12 @@ TOOLS: list[ToolSpec] = [
         "/api/jobs/{job_id}/start",
         "Start a job in a Claude Code cloud session on the user's account: commits only the job "
         "folder (and the cloud setup files in .claude/), pushes it to the investigation's "
-        "GitHub repository and runs `claude --cloud`. Answers with the session link for the "
-        "user, who can follow or steer it on claude.ai. Needs the investigation linked to "
+        "GitHub repository and runs `claude --cloud` (in auto mode, so the session runs to the "
+        "end). Answers with the session link for the user, who can follow or steer it on "
+        "claude.ai. When Claude Code first asks something (status waiting_for_answer, its "
+        "screen in `question`, e.g. whether it may trust the investigation folder), the user "
+        "answers it in the box the app shows at the top of the Claude panel; then call "
+        "get_cloud_job with `wait` for the session link. Needs the investigation linked to "
         "GitHub. Only start a job the user agreed to.",
     ),
     T(

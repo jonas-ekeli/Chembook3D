@@ -2,7 +2,7 @@
 was started to the file named by FAKE_CLAUDE_LOG and, like the real CLI, refuses to create a
 session without a terminal. In one it prints what the real CLI prints after creating a session,
 or as FAKE_CLAUDE_CLOUD says: "fail" prints an error, "attach" keeps following the session,
-"ask" asks a question and waits for an answer."""
+"ask" first asks a question and waits for an answer, as the folder trust question does."""
 
 import json
 import os
@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 def main() -> int:
-    log = Path(os.environ["FAKE_CLAUDE_LOG"])
+    log = Path(os.environ.get("FAKE_CLAUDE_LOG") or "fake-claude-cloud.log")
     with log.open("a", encoding="utf-8") as out:
         out.write(
             json.dumps({"args": sys.argv[1:], "cwd": os.getcwd(), "tty": sys.stdout.isatty()})
@@ -27,6 +27,11 @@ def main() -> int:
             flush=True,
         )
         return 1
+    args = sys.argv[1:]
+    task = args[args.index("--cloud") + 1] if args.index("--cloud") + 1 < len(args) else "-"
+    if task.startswith("-"):  # as the real CLI reads it: the task must follow --cloud
+        print("Error: --cloud requires a description.", flush=True)
+        return 1
     mode = os.environ.get("FAKE_CLAUDE_CLOUD")
     if mode == "fail":
         print("\x1b[31mError: Unable to get organization UUID\x1b[0m", flush=True)
@@ -34,9 +39,9 @@ def main() -> int:
     if mode == "ask":
         print("\x1b[2GAccessing\x1b[12Gworkspace:\r\n\x1b[2GQuick safety check", flush=True)
         print(" > No, exit\r\n   Yes, I trust this folder", flush=True)
-        sys.stdin.readline()
-        time.sleep(60)
-        return 0
+        answer = sys.stdin.readline()
+        with log.open("a", encoding="utf-8") as out:
+            out.write(json.dumps({"answer": answer}) + "\n")
     print("\x1b[?25l\x1b[2K\x1b[GCreating cloud session...", flush=True)
     print("Created cloud session: Run the Chembook3D calculation job", flush=True)
     print("Session ID: session_01FakeCloudJob42", flush=True)

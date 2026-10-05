@@ -10,12 +10,17 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from chembook3d import cloud_jobs, cloud_templates
 from chembook3d.app import create_app
 from chembook3d.investigation import DB_NAME
 
 from .conftest import WATER
+
+APP = "http://127.0.0.1:8765"
+ORIGIN = {"origin": APP}
+WS = "ws://127.0.0.1:8765"
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -210,7 +215,7 @@ def test_round_trip_through_a_cloud_session(linked_client, remote, fake_claude, 
     assert out["session_url"].startswith("https://claude.ai/code/session_01FakeCloudJob42")
     # claude --cloud ran in the investigation folder with only the job in its task
     call = json.loads(fake_claude.read_text(encoding="utf-8").splitlines()[0])
-    assert call["args"] == ["--cloud", cloud_jobs.task_text(job_id)]
+    assert call["args"] == ["--permission-mode", "auto", "--cloud", cloud_jobs.task_text(job_id)]
     assert call["tty"]  # without a terminal, Claude Code creates no cloud session
     assert Path(call["cwd"]).resolve() == folder.resolve()
     # GitHub has the job and the cloud files, in one commit that leaves the database alone
@@ -278,17 +283,73 @@ def test_a_failed_launch_says_why_and_can_be_retried(
     assert git(remote, "rev-parse", "main") == pushed  # the job went to GitHub only once
 
 
-def test_a_launch_waiting_for_an_answer_is_stopped(linked_client, fake_claude, monkeypatch):
-    # T-CLOUD-05: nobody sees its terminal, so a question is never answered
-    monkeypatch.setattr(cloud_jobs, "LAUNCH_QUIET", 1.0)
+@pytest.fixture
+def local_client(tmp_path, remote):
+    """The app as the browser on this computer reaches it (the Claude panel needs that)."""
+    app = create_app()
+    with TestClient(app, base_url=APP, client=("127.0.0.1", 50000)) as client:
+        response = client.post(
+            "/api/investigations", json={"folder": str(tmp_path / "inv"), "name": "Metathesis"}
+        )
+        assert response.status_code == 200, response.text
+        assert client.post("/api/sync/link", json={"url": str(remote)}).status_code == 200
+        yield client
+
+
+def test_a_question_is_answered_in_the_claude_panel(local_client, fake_claude, monkeypatch):
+    # T-CLOUD-08: the app answers nothing itself; the user answers in the panel
+    client = local_client
+    monkeypatch.setattr(cloud_jobs, "LAUNCH_QUIET", 0.5)
+    monkeypatch.setenv("FAKE_CLAUDE_CLOUD", "ask")
+    job = new_job(client)
+    out = client.post(f"/api/jobs/{job['id']}/start").json()
+    assert out["status"] == "waiting_for_answer", out
+    assert "Accessing workspace:" in out["question"]  # words kept apart
+    out = client.get(f"/api/jobs/{job['id']}", params={"wait": 0.3, "refresh": False}).json()
+    assert out["status"] == "waiting_for_answer"
+    (waiting,) = client.get("/api/claude/launches").json()
+    assert waiting["job_id"] == job["id"] and waiting["name"] == "TS guess opt"
+    assert "trust this folder" in waiting["screen"]
+    # Only the app's page may answer (Claude's requests carry no origin)
+    view = f"/api/claude/launches/{job['id']}/view"
+    assert client.post(view).status_code == 403
+    assert client.post(view, headers={"origin": "http://x.example"}).status_code == 403
+    token = client.post(view, headers=ORIGIN).json()["token"]
+    url = f"{WS}/api/claude/launch-view?token={token}&rows=20&cols=80"
+    with client.websocket_connect(url, headers=ORIGIN) as ws:
+        seen = ""
+        while "trust this folder" not in seen:
+            message = ws.receive_json()
+            assert message["type"] == "output"
+            seen += message["data"]
+        ws.send_text(json.dumps({"type": "input", "data": "\r"}))
+        while (message := ws.receive_json())["type"] == "output":
+            pass
+        assert message == {
+            "type": "named",
+            "url": "https://claude.ai/code/session_01FakeCloudJob42?from=cli&m=0",
+        }
+    out = client.get(f"/api/jobs/{job['id']}", params={"refresh": False}).json()
+    assert out["status"] == "running" and out["session_id"] == "session_01FakeCloudJob42"
+    assert client.get("/api/claude/launches").json() == []
+    assert client.post(view, headers=ORIGIN).status_code == 404  # nothing left to answer
+    # a token works once
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(url, headers=ORIGIN):
+            pass
+
+
+def test_a_launch_that_names_no_session_is_stopped(linked_client, fake_claude, monkeypatch):
+    monkeypatch.setattr(cloud_jobs, "LAUNCH_QUIET", 0.2)
+    monkeypatch.setattr(cloud_jobs, "LAUNCH_GIVE_UP", 1.0)
     monkeypatch.setenv("FAKE_CLAUDE_CLOUD", "ask")
     job = new_job(linked_client)
-    out = linked_client.post(f"/api/jobs/{job['id']}/start").json()
+    linked_client.post(f"/api/jobs/{job['id']}/start")
+    out = linked_client.get(f"/api/jobs/{job['id']}", params={"wait": 10, "refresh": False})
+    out = out.json()
     assert out["status"] == "launch_failed", out
     assert "waiting for an answer" in out["launch_error"]
-    assert "Accessing workspace:" in out["launch_error"]  # what it showed, words kept apart
-    assert "run `claude`" in out["launch_error"]  # and how to answer it once
-    assert "\x1b" not in out["launch_error"]
+    assert "Claude panel" in out["launch_error"]
 
 
 def test_a_launch_that_keeps_following_the_session(linked_client, fake_claude, monkeypatch):
