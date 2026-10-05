@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
@@ -736,10 +737,17 @@ def download_xyz(node_id: str, session: DbSession):
     except node_service.NodeError as exc:
         raise HTTPException(404, str(exc)) from exc
     name = "".join(c if c.isalnum() or c in "-_." else "_" for c in (node.label or node.id))
+    # Headers are Latin-1: a name with Greek letters (str.isalnum keeps them) broke the
+    # response with a 500. The plain filename is ASCII; filename* keeps the real name.
+    fallback = "".join(c if c.isascii() else "_" for c in name)
     return Response(
         text,
         media_type="chemical/x-xyz",
-        headers={"Content-Disposition": f'attachment; filename="{name}.xyz"'},
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=\"{fallback}.xyz\"; filename*=UTF-8''{quote(name)}.xyz"
+            )
+        },
     )
 
 

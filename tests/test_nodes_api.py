@@ -155,8 +155,30 @@ def test_xyz_download(open_client):
     node = _create(open_client, label="water 1", xyz=WATER)
     response = open_client.get(f"/api/nodes/{node['id']}/xyz")
     assert response.status_code == 200
-    assert response.headers["content-disposition"] == 'attachment; filename="water_1.xyz"'
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"water_1.xyz\"; filename*=UTF-8''water_1.xyz"
+    )
     assert response.text.splitlines()[:2] == ["3", "water 1"]
+
+
+@pytest.mark.parametrize(
+    ("label", "ascii_name", "utf8_name"),
+    [
+        ("Ru-CAAC α", "Ru-CAAC__", "Ru-CAAC_%CE%B1"),
+        ("β-H elim", "_-H_elim", "%CE%B2-H_elim"),
+        ("café", "caf_", "caf%C3%A9"),
+        ("TS1–2 ‡", "TS1_2__", "TS1_2__"),
+    ],
+)
+def test_xyz_download_with_non_ascii_name(open_client, label, ascii_name, utf8_name):
+    # Greek and accented letters in a node's name gave a 500 (headers are Latin-1)
+    node = _create(open_client, label=label, xyz=WATER)
+    response = open_client.get(f"/api/nodes/{node['id']}/xyz")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        f"attachment; filename=\"{ascii_name}.xyz\"; filename*=UTF-8''{utf8_name}.xyz"
+    )
+    assert response.text.splitlines()[:2] == ["3", label]
 
 
 def test_delete_previews_then_removes_and_records(open_client):

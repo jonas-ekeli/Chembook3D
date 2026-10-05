@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -294,6 +295,23 @@ def local_client(tmp_path, remote):
         assert response.status_code == 200, response.text
         assert client.post("/api/sync/link", json={"url": str(remote)}).status_code == 200
         yield client
+
+
+def test_a_question_stays_until_answered(monkeypatch):
+    # A terminal redrawing itself (Windows does when the panel resizes it) answers nothing;
+    # this let a start report "starting" while the question was on screen.
+    monkeypatch.setattr(cloud_jobs, "LAUNCH_QUIET", 0.05)
+    run = cloud_jobs.Launch("J", screen="Quick safety check")
+    run.last_output -= 1
+    assert run.waiting
+    run.last_output = time.monotonic()  # redrawn
+    assert run.waiting
+    run.answer("\r")
+    assert not run.waiting
+    run.last_output -= 1  # still again: the next question
+    assert run.waiting
+    run.session_id = "session_01X"
+    assert not run.waiting
 
 
 def test_a_question_is_answered_in_the_claude_panel(local_client, fake_claude, monkeypatch):
