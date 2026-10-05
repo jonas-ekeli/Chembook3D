@@ -143,7 +143,7 @@ test('xyz can be copied and saved as a file', async ({ page }) => {
 
   const download = page.waitForEvent('download')
   await inspector.getByRole('link', { name: 'Save .xyz' }).click()
-  expect((await download).suggestedFilename()).toBe('water_guess.xyz')
+  expect((await download).suggestedFilename()).toBe('water guess.xyz')
 })
 
 test('deleting a node asks first and lists what goes', async ({ page }) => {

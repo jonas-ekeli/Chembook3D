@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type BasisVariant, type CustomBasisDetail, type CustomBasisSummary } from '../api'
-import { download } from '../util'
+import { download, fileName } from '../util'
 import { Modal } from './Modal'
 
 const ANGULAR = 'SPDFGHIK'
@@ -152,7 +152,7 @@ function BasisSetDetail({ id, onSelectNode }: { id: string; onSelectNode?: (id: 
         </tbody>
       </table>
       <div className="row">
-        <button className="primary" disabled={chosen.length === 0} onClick={() => download(url, `${basis.name}.gbs`)}>
+        <button className="primary" disabled={chosen.length === 0} onClick={() => download(url, `${fileName(basis.name, 'basis')}.gbs`)}>
           Download Gaussian file (.gbs)
         </button>
         <button disabled={chosen.length === 0} onClick={copy}>
