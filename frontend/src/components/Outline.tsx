@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { api, STATUS_LABEL, type Canvas, type Node, type Step } from '../api'
 import { Modal } from './Modal'
 
@@ -26,9 +26,12 @@ function Steps({ steps, onChanged }: { steps: Step[]; onChanged: () => void }) {
     ids.splice(index + by, 0, moved)
     run(api.reorderSteps(ids))
   }
+  // Steps added in quick succession are created one after another, so they keep their order.
+  const adding = useRef<Promise<unknown>>(Promise.resolve())
   const add = () => {
-    if (!draft.trim()) return
-    run(api.createStep(draft.trim()))
+    const name = draft.trim()
+    if (!name) return
+    adding.current = adding.current.then(() => run(api.createStep(name)))
     setDraft('')
   }
 
