@@ -79,6 +79,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-IMP-11 | Members can be removed from a group node after import. Removal either keeps the member as a node (FR-GRP-10) or deletes it after confirmation. | D34, D88 | 5 |
 | FR-IMP-12 | Importing onto a planned node with no calculations replaces its geometry, and the old geometry is kept in history. | D24, ID-6 | 2 |
 | FR-IMP-13 | A frequency job can be imported onto an existing node at any time. If the file contains other steps, the preview lists every step with its geometry: steps matching the node's geometry are attached as calculations; from the first step that changes the geometry, the app offers a derived node. The preview flags a freq whose level differs from the node's geometry level. | D52, ID-7, EN-4 | 2 |
+| FR-IMP-14 | Import a folder of output files at once: scan (optionally with subfolders), propose each file's node by geometry, by a planned node's guess, by file name or as a new node, review and retarget every file in one table, name custom basis sets once, and write all of them in one transaction with one history entry. | D97, A44 | later |
 
 **AC:**
 - An opt+freq output yields one node with 2 calculations (opt, freq), the geometry from the last step, and G, T and P shown.

@@ -63,6 +63,7 @@ QUIET = re.compile(
     r"|energies/(profile|table|table\.csv)|pathways/extend|overlay|snapshot"
     r"|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|imports|imports/[^/]+|imports/[^/]+/preview"
+    r"|batch-imports|batch-imports/[^/]+|batch-imports/[^/]+/preview"
     r"|note-images|source-files/[^/]+/open|claude(/.*)?|jobs(/.*)?"
     r")$"
 )

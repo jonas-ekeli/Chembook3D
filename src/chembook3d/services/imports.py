@@ -123,6 +123,9 @@ class Staging:
 
     def __init__(self) -> None:
         self._files: dict[str, StagedFile] = {}
+        # Scanned folders awaiting their review (batch_import.Batch by token, D97); their
+        # files are staged here like single files.
+        self.batches: dict[str, Any] = {}
 
     def add(self, data: bytes, original_name: str, origin_path: str = "") -> StagedFile:
         text = data.decode("utf-8", errors="replace")
@@ -153,6 +156,7 @@ class Staging:
             shutil.rmtree(staged.folder, ignore_errors=True)
 
     def clear(self) -> None:
+        self.batches.clear()
         for token in list(self._files):
             self.discard(token)
 
@@ -837,7 +841,12 @@ def _plan_ensemble(
 
 
 def _commit_ensemble(
-    session: Session, folder: Path, staged: StagedFile, plan_: Plan, options: ImportOptions
+    session: Session,
+    folder: Path,
+    staged: StagedFile,
+    plan_: Plan,
+    options: ImportOptions,
+    dry_run: bool = False,
 ) -> "CommitResult":
     """One group node, and one member node per kept conformer with its CREST energy as a
     conformer-search calculation. No representative is chosen (D18, FR-GRP-02)."""
@@ -858,7 +867,7 @@ def _commit_ensemble(
 
     origin = plan_.origin
     source_id = new_id()
-    stored = _copy_into(folder, staged, source_id, _stored_name(origin["name"]))
+    stored = _copy_into(folder, staged, source_id, _stored_name(origin["name"]), dry_run)
     try:
         source = SourceFile(
             id=source_id,
@@ -940,7 +949,8 @@ def _commit_ensemble(
     except BaseException:
         shutil.rmtree(folder / FILES_DIR / source_id, ignore_errors=True)
         raise
-    _remember_device(origin["device"])
+    if not dry_run:
+        _remember_device(origin["device"])
     return CommitResult(
         node_id=None,
         derived_node_id=None,
@@ -977,8 +987,13 @@ def _stored_name(name: str) -> str:
     return cleaned or "output.log"
 
 
-def _copy_into(folder: Path, staged: StagedFile, source_id: str, name: str) -> str:
-    """Copy the file to files/<source-file-id>/<name> (D16). Returns the relative path."""
+def _copy_into(
+    folder: Path, staged: StagedFile, source_id: str, name: str, dry_run: bool = False
+) -> str:
+    """Copy the file to files/<source-file-id>/<name> (D16). Returns the relative path; a dry
+    run (a batch preview, D97) only returns it."""
+    if dry_run:
+        return f"{FILES_DIR}/{source_id}/{name}"
     directory = folder / FILES_DIR / source_id
     directory.mkdir(parents=True)
     target = directory / name
@@ -1061,13 +1076,20 @@ def _node_fields(plan_: Plan, options: ImportOptions) -> dict[str, Any]:
 
 
 def commit(
-    session: Session, folder: Path, staged: StagedFile, options: ImportOptions
+    session: Session,
+    folder: Path,
+    staged: StagedFile,
+    options: ImportOptions,
+    dry_run: bool = False,
 ) -> CommitResult:
+    """Write the import in the caller's transaction. A dry run writes the same records but
+    copies no file and remembers no setting, for a caller that rolls the transaction back
+    (the batch preview, D97)."""
     plan_ = plan(session, staged, options, store_names=True)
     if plan_.blockers:
         raise ImportBlocked(plan_.blockers)
     if plan_.kind == "ensemble":
-        return _commit_ensemble(session, folder, staged, plan_, options)
+        return _commit_ensemble(session, folder, staged, plan_, options, dry_run)
     fields = _node_fields(plan_, options)
     steps = {s.index: s for s in staged.parsed.steps}
     chosen = steps[plan_.chosen_step] if plan_.chosen_step is not None else None
@@ -1075,7 +1097,7 @@ def commit(
 
     origin = plan_.origin
     source_id = new_id()
-    stored = _copy_into(folder, staged, source_id, _stored_name(origin["name"]))
+    stored = _copy_into(folder, staged, source_id, _stored_name(origin["name"]), dry_run)
     try:
         source = SourceFile(
             id=source_id,
@@ -1129,7 +1151,8 @@ def commit(
         shutil.rmtree(folder / FILES_DIR / source_id, ignore_errors=True)
         raise
 
-    _remember_device(origin["device"])
+    if not dry_run:
+        _remember_device(origin["device"])
     return CommitResult(
         node_id=node.id,
         derived_node_id=derived.id if derived else None,

@@ -63,7 +63,7 @@ To try it with some data, create a demo investigation and open that folder from 
 uv run python scripts/make_demo.py demo-investigation
 ```
 
-Then import an output file with **Import file…** (or drop it on the node list). Sample outputs are in `tests/fixtures/`. In WSL, the folder and file pickers show the WSL file system; Windows drives are under `/mnt/c`, `/mnt/d` and so on.
+Then import an output file with **Import file…** (or drop it on the node list). To import a whole folder of results at once, browse to it in that dialog and press **Import this folder…**: every output gets a proposed node (by geometry, by a planned node's guess or by file name), which you can check and change before anything is written. Sample outputs are in `tests/fixtures/`. In WSL, the folder and file pickers show the WSL file system; Windows drives are under `/mnt/c`, `/mnt/d` and so on.
 
 ## Sync investigations between computers
 

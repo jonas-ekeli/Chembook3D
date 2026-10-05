@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
 
 from chembook3d import __version__, cloud_jobs
+from chembook3d.api.batch_imports import router as batch_router
 from chembook3d.api.claude import Panel
 from chembook3d.api.claude import router as claude_router
 from chembook3d.api.energies import router as energy_router
@@ -102,6 +103,7 @@ def create_app() -> FastAPI:
         return JSONResponse({"detail": str(exc)}, status_code=404)
 
     app.include_router(router)
+    app.include_router(batch_router)
     app.include_router(pathway_router)
     app.include_router(energy_router)
     app.include_router(snapshot_router)

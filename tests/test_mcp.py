@@ -40,7 +40,7 @@ UNASKED_DELETES = {
 # Never offered to Claude (D91).
 NOT_OFFERED = re.compile(
     r"^/api/(investigations?(/.*)?|sync(/.*)?|folders|settings|snapshot"
-    r"|source-files/[^/]+/(open|download)|imports|note-images(/.*)?|health"
+    r"|source-files/[^/]+/(open|download)|imports|batch-imports(/.*)?|note-images(/.*)?|health"
     r"|live|selection$|confirmations(/.*)?|nodes/[^/]+/delete-preview"
     r"|groups/[^/]+/delete-preview|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|energies/table\.csv|turnovers/[^/]+/table\.csv|custom-bases/[^/]+/file"

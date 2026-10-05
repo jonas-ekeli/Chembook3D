@@ -26,6 +26,9 @@ STERIC_COLOURS = ("blue", "green-yellow-red", "rainbow", "viridis", "grey")
 # D95: the standard state of G and G_qh, the 1 atm ideal gas of the files and the reference
 # script (D57) or 1 mol/L, which adds RT ln(V_m / 1 L mol⁻¹) to each molecule.
 STANDARD_STATES = ("1 atm", "1 M")
+# D97, A44: suffixes taken off an output's file name before it is matched to a node label in a
+# batch import (* and ? as in the file filter, D78).
+BATCH_SUFFIXES = ("_SP*", "_freq", "_opt", "_irc")
 
 
 def config_dir() -> Path:
@@ -49,6 +52,7 @@ class Settings:
     crest_count: int = CREST_COUNT
     hydrogens: str = "all"
     steric_colours: str = "blue"
+    batch_suffixes: list[str] = field(default_factory=lambda: list(BATCH_SUFFIXES))
 
 
 def _path() -> Path:
@@ -81,6 +85,9 @@ def load() -> Settings:
         settings.standard_state = data["standard_state"]
     if data.get("steric_colours") in STERIC_COLOURS:
         settings.steric_colours = data["steric_colours"]
+    suffixes = data.get("batch_suffixes")
+    if isinstance(suffixes, list) and all(isinstance(s, str) for s in suffixes):
+        settings.batch_suffixes = [s.strip() for s in suffixes if s.strip()]
     cutoff = data.get("qh_cutoff")
     if isinstance(cutoff, int | float) and not isinstance(cutoff, bool) and cutoff >= 0:
         settings.qh_cutoff = float(cutoff)
