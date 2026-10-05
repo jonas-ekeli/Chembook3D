@@ -1,11 +1,16 @@
 """Append-only change history (D29, FR-HIST-01…03). Entries are only ever added."""
 
+from contextvars import ContextVar
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from chembook3d.models import Calculation, HistoryEntry
+
+# Who makes the current request's changes: "manual" for the user, "claude" when Claude makes
+# them through `chembook3d mcp` (D91). Set per request by api.live.ChangeTracker.
+SOURCE: ContextVar[str] = ContextVar("history_source", default="manual")
 
 
 def record(
@@ -18,6 +23,8 @@ def record(
     new: Any = None,
     source: str = "manual",
 ) -> None:
+    if source == "manual":
+        source = SOURCE.get()
     session.add(
         HistoryEntry(
             record_type=record_type,

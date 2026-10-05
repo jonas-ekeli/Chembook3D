@@ -131,6 +131,50 @@ notebook tools, asks before changing anything, and cannot run commands, edit fil
 the web from the panel. **Hide** keeps it running; **Stop**, closing the investigation or
 reloading the page ends it.
 
+Changes Claude makes appear on the canvas at once and are marked "claude" in the history. When
+Claude wants to delete something, dissolve a group or remove coordinates, the app asks you first
+and does nothing unless you click **Confirm**. When you say "this node", Claude asks the app what
+you have selected.
+
+### Claude Code in your own terminal, or Claude Desktop
+
+The panel's notebook tools are `chembook3d mcp`, an MCP server that talks to the running app on
+this computer. Claude Code in your own terminal, or Claude Desktop, can use them too, to read and
+change the investigation open in the app. It uses your Claude subscription; no API key is needed.
+
+After `uv run chembook3d` has run once, the command is in the project's `.venv`. Add it to
+Claude Code once, with the full path of your Chembook3D folder.
+
+Windows (PowerShell):
+
+```powershell
+claude mcp add --scope user chembook3d C:\path\to\Chembook3D\.venv\Scripts\chembook3d.exe mcp
+```
+
+Linux and WSL:
+
+```sh
+claude mcp add --scope user chembook3d /path/to/Chembook3D/.venv/bin/chembook3d mcp
+```
+
+In WSL, add it in the WSL Claude Code, where the app runs. For Claude Desktop (Windows), add
+this to its `claude_desktop_config.json` (Settings → Developer → Edit Config) and restart it:
+
+```json
+{
+  "mcpServers": {
+    "chembook3d": {
+      "command": "C:\\path\\to\\Chembook3D\\.venv\\Scripts\\chembook3d.exe",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Start the app and open an investigation first; otherwise Claude's tools say the app is not
+running. If the app runs on another port, add `--url http://127.0.0.1:<port>` after `mcp`
+(in the JSON, as two more entries in `args`).
+
 ## Develop
 
 ```sh

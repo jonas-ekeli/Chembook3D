@@ -159,6 +159,17 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-SYNC-07 | Open a linked investigation from an older schema | Asks before upgrading (FR-SYNC-07) |
 | T-SHARE-01 | Export the demo, open the file from disk with no server | Canvas, node details, calculations and a profile show; changing level and type works; no request leaves the page (FR-SHARE-01–03) |
 | T-SHARE-02 | Search the exported file for the investigation folder and the original paths of imported files | Not found (FR-SHARE-04) |
+| T-MCP-01 | A change from one client, then reads, failed requests and computations that change nothing | Other clients are told of the change, the one that made it is not; the rest count no change (FR-MCP-04) |
+| T-MCP-02 | A node created and changed by Claude, then by the user | History source "claude", then "manual" (FR-MCP-06) |
+| T-MCP-03 | Report two nodes, an edge and an energy view; delete one node | Claude reads them by name with the level, type and reference; the deleted one is left out (FR-MCP-05) |
+| T-MCP-04 | Claude asks to delete a node with an edge; answered without a page origin, then confirmed; answered again | Described as "Delete node “TS1-2” with 1 edge"; refused (403); deleted with the edge, history "claude"; already done (FR-MCP-03) |
+| T-MCP-05 | Requests refused, expired, made while the investigation closes; unknown actions, odd ids, coordinates of a node without them or with calculations | Nothing changes; expired; refused with the reason (FR-MCP-03, D90) |
+| T-MCP-06 | Every API route | Either a tool or deliberately not offered; every DELETE asks, except the three of A38; read tools change nothing (FR-MCP-02) |
+| T-MCP-07 | Tools through the app: create, rename, xyz, an empty coordinates save, a refused value, the selection | Same answers as the app; the empty save is pointed to remove_coordinates (FR-MCP-02) |
+| T-MCP-08 | Delete through the server, refused and then confirmed in the page; then with no answer | Nothing changes, then deleted; then no change after the time limit (FR-MCP-03) |
+| T-MCP-09 | App not running; an address on another computer | Said plainly; refused (FR-MCP-01) |
+| T-MCP-10 | `chembook3d mcp --url …` started over stdio as Claude Code starts it | Tools listed with read-only and destructive hints, instructions given, a node created in the running app, invalid input refused (FR-MCP-01) |
+| T-MCP-11 | UI: Claude creates and renames a node, the user selects it, Claude asks to delete it twice | The canvas follows without a reload; the selection is reported; Refuse keeps it, Confirm deletes it; History shows "claude" (FR-MCP-03, 04, 05) |
 | T-PANEL-01 | Ask for a terminal from another site's page, for a foreign host name, from another computer, without a token, with a spent or expired token | Refused before anything starts (FR-PANEL-03) |
 | T-PANEL-02 | Start the panel with a stand-in for `claude` | Started in the investigation's working folder with only the fixed arguments and the terminal's size; typing reaches it; its exit is reported; `--continue` when continuing; closing the page stops it (FR-PANEL-01, FR-PANEL-02) |
 | T-PANEL-03 | The written settings, with and without the notebook server | Shell, editing and web tools denied; the server and its read tools listed only when present (FR-PANEL-02, FR-PANEL-04) |

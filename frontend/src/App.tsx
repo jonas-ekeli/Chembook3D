@@ -34,6 +34,8 @@ import { NoteEditor } from './components/NoteEditor'
 import { Outline } from './components/Outline'
 import { Overview } from './components/Overview'
 import { AnalysesView } from './components/Analyses'
+import { ClaudeRequestDialog } from './components/ClaudeRequestDialog'
+import { useLive } from './live'
 import type { HydrogenMode } from './chem'
 import { recordNames } from './names'
 import { HydrogenDisplay, StericColourSetting, type StericColours } from './display'
@@ -221,6 +223,9 @@ function App() {
     setRefreshKey((k) => k + 1)
   }
 
+  // D91: changes Claude (or another tab) makes show at once; Claude's deletes wait for an answer.
+  const claudeRequests = useLive(investigation?.folder ?? null, reload)
+
   // The chosen level, or else the first with G (D32: free energy preferred), or else the first.
   const levelOption =
     energyOptions?.levels.find((l) => l.key === energyLevel) ??
@@ -250,6 +255,30 @@ function App() {
       current = false
     }
   }, [levelKey, shownType, referenceId, energyOptions, refreshKey])
+
+  // D91: what this tab shows, for Claude's get_selection ("this node"). The tab used last wins.
+  const groupIds = useMemo(() => new Set(canvas.groups.map((g) => g.id)), [canvas.groups])
+  useEffect(() => {
+    if (!investigation) return
+    const many = multi.length >= 2
+    const report = {
+      nodes: many ? multi.filter((id) => !groupIds.has(id)) : selection?.kind === 'node' ? [selection.id] : [],
+      groups: many ? multi.filter((id) => groupIds.has(id)) : selection?.kind === 'group' ? [selection.id] : [],
+      transitions: !many && selection?.kind === 'edge' ? [selection.id] : [],
+      branch_id: !many && selection?.kind === 'branch' ? selection.id : null,
+      view,
+      level: levelKey,
+      energy_type: levelKey ? shownType : null,
+      reference_id: referenceId,
+    }
+    const send = () => void api.reportSelection(report).catch(() => undefined)
+    const timer = setTimeout(send, 150)
+    window.addEventListener('focus', send)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('focus', send)
+    }
+  }, [investigation, selection, multi, groupIds, view, levelKey, shownType, referenceId])
 
   // Stable between renders, so the canvas only rebuilds its nodes when energies change.
   const canvasEnergy: CanvasEnergy = useMemo(
@@ -496,6 +525,9 @@ function App() {
 
   const dialogs = (
     <StericColourSetting value={stericColours}>
+      {claudeRequests.length > 0 && (
+        <ClaudeRequestDialog key={claudeRequests[0].id} request={claudeRequests[0]} onError={setError} />
+      )}
       {notedNode && (
         <NoteEditor
           note={editedNote ?? null}

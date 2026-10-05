@@ -251,6 +251,19 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 
 **AC:** export the demo investigation, open the file with the server stopped: the canvas, a node's calculations and 3D view, and a profile at another level show, nothing can be edited, and the file contains no folder path.
 
+## FR-MCP · Claude in the notebook (D91)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-MCP-01 | `chembook3d mcp` is an MCP server (stdio) that works on the investigation open in the running app, only through the app's API on this computer; it never opens the database. When the app is not running or nothing is open, its tools say so. | D91, NFR-SEC-01 | after 5 |
+| FR-MCP-02 | Its tools read everything the app shows and change what the app can change, through the same rules and history; opening, closing, creating and cloning investigations, sync, folder browsing, opening files with other programs, settings and the read-only copy are not offered. Imports take a path the user names and are previewed before they are committed. | D91 | after 5 |
+| FR-MCP-03 | Every delete, dissolving a group and removing coordinates is a request: the app shows what would go and Claude's reason, and does it only on the user's Confirm; Refuse, closing or no answer within the time limit changes nothing (A38). The server cannot answer a request. | D91, A38 | after 5 |
+| FR-MCP-04 | Open tabs reload what they show when the investigation is changed elsewhere, without reloading the page. | D91 | after 5 |
+| FR-MCP-05 | The tab reports what is selected and the energy level, type and reference shown; Claude reads it with names. | D91, A38 | after 5 |
+| FR-MCP-06 | Changes made through the server are marked "claude" in the history. The server's instructions state the domain rules (steps are not transitions, one composite level, X1, X5). | D91 | after 5 |
+
+**AC:** with the app open, Claude Code renames a node: the canvas shows the new name at once and the history marks it "claude". Asked to delete it, Claude waits; Refuse in the app keeps the node, Confirm deletes it.
+
 ## FR-HIST / FR-OV · History and overview
 
 | ID | Requirement | Trace | Phase |
