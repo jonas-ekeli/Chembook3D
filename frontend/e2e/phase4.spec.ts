@@ -103,6 +103,8 @@ test('a free species on one edge counts on every node card after it', async ({ p
     await page.getByLabel('Node inspector').getByRole('button', { name: 'Use as energy reference' }).click()
     await expect(canvasNode(page, 'T-S0')).toContainText('ΔG 0.00')
     for (const label of ['A-S1', 'A-S2', 'A-S3']) await expect(canvasNode(page, label)).toContainText('ΔG n/a')
+    // D96: the card says why below "n/a".
+    await expect(canvasNode(page, 'A-S1').locator('.cnode-why')).toHaveText('free species has no value')
     await expect(canvasNode(page, 'B-S3')).toContainText('ΔG -6.00')
   } finally {
     await page.request.delete(`/api/nodes/${species.id}`)
@@ -192,8 +194,8 @@ test('profile along branches with a "no TS" connection, the energy table and exp
   const shown = await table.getByRole('row').evaluateAll((rows) =>
     rows.map((row) => Array.from(row.querySelectorAll('th, td')).map((cell) => cell.textContent ?? '')),
   )
-  expect(shown[0].at(-1)).toBe('ΔG (kcal/mol)')
-  expect(shown.find((row) => row[0] === 'A-S3')?.at(-1)).toBe('-8.50')
+  expect(shown[0].slice(-2)).toEqual(['ΔG (kcal/mol)', 'Why n/a'])
+  expect(shown.find((row) => row[0] === 'A-S3')?.slice(-2)).toEqual(['-8.50', ''])
 
   // T-EN-08: the CSV holds the same text as the table on screen.
   const download = page.waitForEvent('download')

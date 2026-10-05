@@ -244,6 +244,16 @@ def test_free_energy_needs_a_frequency_calculation_at_the_geometry_level(open_cl
     assert view(open_client, key, "E")["values"][node_id]["value"] == -76.4089
     missing = view(open_client, key, "G")["values"][node_id]
     assert missing["value"] is None and missing["code"] == "W-NOFREQ"
+    # D96: the card says why below "n/a", and the energy table names the reason.
+    assert missing["short"] == "no frequency job"
+    card = get(open_client, f"/energies/view?level={key}&type=G&reference={node_id}")
+    assert card["relative"][node_id]["short"] == "no frequency job"
+    body = {"paths": [[node_id]], "reference_id": node_id, "level": key, "type": "G"}
+    table = post(open_client, "/energies/table", body, status=200)
+    assert table["rows"][0][9:] == [
+        "n/a",
+        "H, G, G_qh: no frequency calculation at the geometry level (W-NOFREQ)",
+    ]
 
 
 def test_frequency_at_another_level_is_not_used_for_free_energy(open_client):
@@ -294,7 +304,7 @@ def test_unit_switch_changes_display_not_stored_values(open_client):
     shown = {}
     for unit in ("kcal/mol", "kJ/mol", "eV", "hartree"):
         settings(open_client, energy_unit=unit)
-        shown[unit] = post(open_client, "/energies/table", body, status=200)["rows"][1][-1]
+        shown[unit] = post(open_client, "/energies/table", body, status=200)["rows"][1][-2]
         assert view(open_client, key, "E")["values"][b]["value"] == -76.39
     assert shown == {"kcal/mol": "6.28", "kJ/mol": "26.25", "eV": "0.272", "hartree": "0.010000"}
 
@@ -739,12 +749,13 @@ def test_energy_table_and_csv_show_the_same_values(open_client, energetic):
         "G_qh 298.15 K 100 cm-1 (hartree)",
         "Free species",
         "ΔG (kcal/mol)",
+        "Why n/a",
     ]
     assert [row[0] for row in table["rows"]][:3] == ["T-pre", "A-S0", "A1-S1"]
     a1s2 = next(row for row in table["rows"] if row[0] == "A1-S2")
     assert a1s2[1:4] == ["[2+2] TS", "A1", "Gaussian B3LYP/def2SVP"]
     assert a1s2[4] == "-99.98400000" and a1s2[6] == "-99.96400000"
-    assert a1s2[8] == "" and a1s2[9] == f"{(0.024 - 0.008) * KCAL:.2f}"
+    assert a1s2[8] == "" and a1s2[9] == f"{(0.024 - 0.008) * KCAL:.2f}" and a1s2[10] == ""
 
     response = open_client.post("/api/energies/table.csv", json=body)
     assert response.status_code == 200

@@ -94,8 +94,8 @@ export type CanvasEnergy = {
   settings: Settings | null
 }
 
-/** "ΔG 12.34", or "n/a" with its reason as a tooltip. */
-type EnergyText = { text: string; title: string }
+/** "ΔG 12.34", or "n/a" with its reason in a few words below it (D96) and in full as a tooltip. */
+type EnergyText = { text: string; title: string; why?: string }
 const GROUP_HEADER = 48
 
 type StructureData = {
@@ -186,6 +186,7 @@ const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<
       {energy && (
         <div className={`cnode-energy${mode === 'structure' ? ' below-structure' : ''}`} title={energy.title}>
           {energy.text}
+          {energy.why && <span className="cnode-why">{energy.why}</span>}
         </div>
       )}
       <div className="cnode-meta">
@@ -282,6 +283,7 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
       {!expanded && energy && (
         <div className={`cnode-energy${mode === 'structure' ? ' below-structure' : ''}`} title={energy.title}>
           {energy.text}
+          {energy.why && <span className="cnode-why">{energy.why}</span>}
         </div>
       )}
       {!expanded && (
@@ -484,7 +486,8 @@ function CanvasView({
       if (!energy.referenceId) return { text: `Δ${energy.type}: no reference`, title: 'Choose a reference node' }
       if (energy.view.reference_id !== energy.referenceId) return { text: `Δ${energy.type} …`, title: 'Updating' }
       const own = energy.view.relative[id]
-      if (own?.value == null) return { text: `Δ${energy.type} n/a`, title: own?.message ?? 'no value' }
+      if (own?.value == null)
+        return { text: `Δ${energy.type} n/a`, title: own?.message ?? 'no value', why: own?.short ?? undefined }
       const unit = energy.settings?.energy_unit ?? 'kcal/mol'
       const title = own.species.length
         ? `${unit}, balanced with ${balanceText(own.species)}`

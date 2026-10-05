@@ -619,7 +619,7 @@ export function EnergyDrawer({
                   {shownTable.rows.map((row, i) => (
                     <tr key={i}>
                       {row.map((cell, j) => (
-                        <td key={j} className={j >= 4 ? 'num' : undefined}>
+                        <td key={j} className={j >= 4 && j < row.length - 1 ? 'num' : undefined}>
                           {cell}
                         </td>
                       ))}

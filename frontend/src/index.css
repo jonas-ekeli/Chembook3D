@@ -1294,6 +1294,14 @@ table.overlay-legend td {
   margin: 0.15rem 0;
 }
 
+/* D96: why a value is n/a, in a few words below it. */
+.cnode-why {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
 /* D73: ΔX centred under the structure, as in a figure. */
 .cnode-energy.below-structure {
   text-align: center;

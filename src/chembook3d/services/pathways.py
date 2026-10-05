@@ -28,7 +28,7 @@ from chembook3d.models import Branch, GroupNode, Node, ReactionStep, Role, Trans
 from chembook3d.services import branches as branch_service
 from chembook3d.services import species as species_service
 from chembook3d.services import transitions as transition_service
-from chembook3d.services.energies import ENERGY_TYPES, Energies, LevelKey, key_label
+from chembook3d.services.energies import ENERGY_TYPES, Energies, LevelKey, Value, key_label
 from chembook3d.services.records import RecordError, get
 
 Endpoint = Node | GroupNode
@@ -376,6 +376,19 @@ def _absolute(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.8f}"
 
 
+def _why_missing(found: dict[str, Value], point: dict[str, Any], energy_type: str) -> str:
+    """D96: why each n/a in a table row is n/a, one reason per group of columns, such as
+    "G, G_qh: no frequency calculation at the geometry level (W-NOFREQ)"."""
+    reasons: dict[str, list[str]] = {}
+    for name, value in found.items():
+        if value.value is None:
+            text = value.message or "no value"
+            reasons.setdefault(f"{text} ({value.code})" if value.code else text, []).append(name)
+    if found[energy_type].value is not None and point["species_message"]:
+        reasons.setdefault(point["species_message"], []).append(f"Δ{energy_type}")
+    return "; ".join(f"{', '.join(types)}: {text}" for text, types in reasons.items())
+
+
 def relative_text(value: float | None, unit: str) -> str:
     """A relative energy in `unit` with its decimals, as the table and its CSV show it."""
     if value is None:
@@ -420,6 +433,7 @@ def table(
         f"{qh} (hartree)",
         "Free species",
         f"Δ{energy_type} ({unit})",
+        "Why n/a",
     ]
     rows: list[list[str]] = []
     seen: set[tuple] = set()
@@ -435,7 +449,8 @@ def table(
             if point["kind"] == "group":
                 rep = session.get(Node, representative) if representative else None
                 name += f" (representative: {rep.label or 'Untitled node'})" if rep else ""
-            values = {t: energies.value(point["id"], key, t).value for t in ("E", "H", "G", "G_qh")}
+            found = {t: energies.value(point["id"], key, t) for t in ENERGY_TYPES}
+            values = {t: v.value for t, v in found.items()}
             rows.append(
                 [
                     name,
@@ -448,6 +463,7 @@ def table(
                     _absolute(values["G_qh"]),
                     species_service.text(point["species"]),
                     relative_text(point["relative"], unit),
+                    _why_missing(found, point, energy_type),
                 ]
             )
     return {"columns": columns, "rows": rows}

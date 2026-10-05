@@ -66,7 +66,8 @@ def key_label(session: Session, key: LevelKey) -> str:
 @dataclass
 class Value:
     """One energy of one node or group in hartree, or None with the reason (`code` is a
-    warning code such as W-NOFREQ when there is one)."""
+    warning code such as W-NOFREQ when there is one, `short` a few words a node card shows
+    below "n/a" (D96))."""
 
     value: float | None
     code: str | None = None
@@ -74,6 +75,7 @@ class Value:
     energy_calculation_id: str | None = None
     thermo_calculation_id: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
+    short: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -83,7 +85,17 @@ class Value:
             "energy_calculation_id": self.energy_calculation_id,
             "thermo_calculation_id": self.thermo_calculation_id,
             "details": self.details,
+            "short": self.short,
         }
+
+
+# D96: the few words a node card shows below "n/a" for each reason G_qh cannot be computed.
+QH_SHORT = {
+    "W-LINEAR": "linear molecule",
+    "W-NOFREQ": "no real frequencies",
+    "W-PARSE": "values not in the file",
+    "W-QH": "check temperature",
+}
 
 
 def _order(calculation: Calculation) -> tuple:
@@ -176,7 +188,7 @@ class NodeEnergies:
     def value(self, key: LevelKey, energy_type: str) -> Value:
         source = self.energy(key)
         if source is None:
-            return Value(None, None, "no energy at this level")
+            return Value(None, None, "no energy at this level", short="not at this level")
         energy = source.result.energy
         if energy_type == "E":
             return Value(energy, energy_calculation_id=source.id)
@@ -186,6 +198,7 @@ class NodeEnergies:
                 "W-NOFREQ",
                 "the geometry level of this single point is not known",
                 source.id,
+                short="geometry level unknown",
             )
         thermo = self.thermo_source(key)
         if thermo is None:
@@ -194,6 +207,7 @@ class NodeEnergies:
                 "W-NOFREQ",
                 "no frequency calculation at the geometry level",
                 source.id,
+                short="no frequency job",
             )
         result = thermo.result
         details: dict[str, Any] = {
@@ -209,6 +223,7 @@ class NodeEnergies:
                     f"the frequency calculation has no printed {energy_type} correction",
                     source.id,
                     thermo.id,
+                    short=f"no {energy_type} correction in the file",
                 )
             if energy_type == "G":
                 correction += self._standard_state(details)
@@ -216,7 +231,8 @@ class NodeEnergies:
         try:
             qh = self.qh(thermo)
         except thermochem.NotComputable as exc:
-            return Value(None, exc.code, exc.message, source.id, thermo.id, details)
+            short = QH_SHORT.get(exc.code, exc.code)
+            return Value(None, exc.code, exc.message, source.id, thermo.id, details, short)
         details.update(
             temperature=qh.temperature,
             cutoff=qh.cutoff,
@@ -302,7 +318,9 @@ class Energies:
         if group is None:
             raise RecordError("not a node or group node")
         if group.representative_id is None or group.representative_id not in self.nodes:
-            return Value(None, None, "the group has no representative (EN-7)")
+            return Value(
+                None, None, "the group has no representative (EN-7)", short="no representative"
+            )
         found = self.nodes[group.representative_id].value(key, energy_type)
         found.details = {**found.details, "representative_id": group.representative_id}
         return found

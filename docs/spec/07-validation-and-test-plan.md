@@ -118,7 +118,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 |---|---|---|
 | T-EN-01 | Edge between nodes at different levels | "n/a" (EN-3) |
 | T-EN-02 | Composite G | Equals E_SP + (G − E)_freq by hand calculation (EN-4) |
-| T-EN-03 | G with no frequency calculation at the geometry level | "n/a" and W-NOFREQ |
+| T-EN-03 | G with no frequency calculation at the geometry level | "n/a" and W-NOFREQ; the card says "no frequency job" and the energy table names the reason (D96) |
 | T-EN-04 | G_qh on a file with no modes below 100 cm⁻¹, at the job's T | Equals the job-printed G correction within 0.01 kcal/mol (P29) |
 | T-EN-05 | G_qh on files with low modes, at default and at a non-default T and cutoff | Matches Jonas's reference script `thermochem_corr_G16` "Thermic correction" within 0.01 kcal/mol (D56, D58) |
 | T-EN-06 | Unit switch | Display changes; stored values are unchanged |

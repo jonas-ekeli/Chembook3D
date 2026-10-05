@@ -40,6 +40,7 @@ class ValueOut(BaseModel):
     energy_calculation_id: str | None
     thermo_calculation_id: str | None
     details: dict[str, Any]
+    short: str | None = None  # D96: the reason in a few words, for a node card
 
 
 class EdgeValueOut(BaseModel):
@@ -61,6 +62,7 @@ class RelativeOut(BaseModel):
     value: float | None
     species: list[SpeciesCountOut]
     message: str | None  # why value is missing
+    short: str | None = None  # the same in a few words, shown below "n/a" on the card (D96)
     joined: bool  # joined to the reference by transitions; if not, no species are counted
 
 
@@ -173,16 +175,21 @@ def relative_values(
     for record_id, own in values.items():
         balance = balances.get(record_id, {})
         added, message = species_service.energy(session, energies, balance, key, type)
+        short = "free species has no value" if message else None
         if own.value is None:
             message = own.message or "no value at this level"
+            short = own.short or "not at this level"
         elif reference not in values:
             message = "the reference is no longer on the canvas"
+            short = "no reference"
         elif base is None:
             message = "the reference has no value at this level"
+            short = "reference has no value"
         relative[record_id] = RelativeOut(
             value=own.value + added - base if message is None else None,
             species=[SpeciesCountOut(**s) for s in species_service.describe(session, balance)],
             message=message,
+            short=short,
             joined=record_id in balances,
         )
     return relative

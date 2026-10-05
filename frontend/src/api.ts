@@ -675,6 +675,8 @@ export type EnergyValue = {
   energy_calculation_id: string | null
   thermo_calculation_id: string | null
   details: Record<string, unknown>
+  /** D96: the reason in a few words, for a node card. */
+  short?: string | null
 }
 
 export type EnergyView = {
@@ -684,7 +686,10 @@ export type EnergyView = {
   edges: Record<string, { delta: number | null; direct: boolean; message?: string | null }>
   reference_id: string | null
   /** ΔX of each node and group from the reference, with the species that balance it (D72). */
-  relative: Record<string, { value: number | null; species: SpeciesCount[]; message: string | null; joined: boolean }>
+  relative: Record<
+    string,
+    { value: number | null; species: SpeciesCount[]; message: string | null; short?: string | null; joined: boolean }
+  >
 }
 
 export type PathChoice = { transition_id: string; node_id: string; label: string; status: string }
