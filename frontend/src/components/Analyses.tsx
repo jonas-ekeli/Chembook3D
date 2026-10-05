@@ -206,7 +206,7 @@ function ResultView({
       <h3>Result</h3>
       {result.level_label && (
         <p className="muted small">
-          {result.level_label} · {energyTypeName(result.energy_type, result.temperature, result.cutoff)} · Boltzmann
+          {result.level_label} · {energyTypeName(result.energy_type, result.temperature, result.cutoff, result.standard_state)} · Boltzmann
           factors at {result.temperature} K
           {result.temperature_from_settings ? ' (the G_qh temperature in Settings)' : ''}
         </p>
@@ -420,7 +420,7 @@ function SelectivityEditor({
             >
               {types.map((t) => (
                 <option key={t} value={t}>
-                  {energyTypeName(t, result?.temperature, result?.cutoff)}
+                  {energyTypeName(t, result?.temperature, result?.cutoff, result?.standard_state)}
                 </option>
               ))}
             </select>
@@ -599,7 +599,7 @@ function TurnoverResultView({
   if (result.tdts !== null) marks.set(`0:${result.tdts}`, 'TDTS')
   if (result.tdi !== null) marks.set(`0:${result.tdi}`, 'TDI')
   const comparison = result.comparison
-  const typeName = energyTypeName(result.energy_type, result.temperature, result.cutoff)
+  const typeName = energyTypeName(result.energy_type, result.temperature, result.cutoff, result.standard_state)
   return (
     <section aria-label="Turnover result">
       <h3>Result</h3>
@@ -848,7 +848,7 @@ function TurnoverEditor({
             >
               {types.map((t) => (
                 <option key={t} value={t}>
-                  {energyTypeName(t, result?.temperature, result?.cutoff)}
+                  {energyTypeName(t, result?.temperature, result?.cutoff, result?.standard_state)}
                 </option>
               ))}
             </select>

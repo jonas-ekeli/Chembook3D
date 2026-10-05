@@ -9,6 +9,8 @@
   frequency calculation on the same node at the geometry level (EN-4, D35); there is no
   fallback to another level or type (EN-3, D27). G_qh is recomputed from that step's
   frequencies (EN-5, EN-6, `thermochem`).
+- With the 1 M standard state chosen in Settings (D95), G and G_qh of every node add
+  RT ln(V_m / 1 L mol⁻¹) at the G_qh temperature (or an analysis's own); E and H never do.
 - A group node's value is its representative's; with none, it has no value (EN-7).
 - Values are only read from calculation results, never typed (EN-1), and are never used to
   pick nodes, representatives or pathways (EN-10).
@@ -125,10 +127,13 @@ def quasi_harmonic(
 class NodeEnergies:
     """Every energy one node has, by composite level."""
 
-    def __init__(self, node: Node, temperature: float, cutoff: float):
+    def __init__(
+        self, node: Node, temperature: float, cutoff: float, standard_state: str = "1 atm"
+    ):
         self.node = node
         self.temperature = temperature
         self.cutoff = cutoff
+        self.standard_state = standard_state
         geometry = levels.node_geometry_level(node)
         self.by_key: dict[LevelKey, list[Calculation]] = {}
         for calculation in sorted(node.calculations, key=_order):
@@ -205,6 +210,8 @@ class NodeEnergies:
                     source.id,
                     thermo.id,
                 )
+            if energy_type == "G":
+                correction += self._standard_state(details)
             return Value(energy + correction, None, None, source.id, thermo.id, details)
         try:
             qh = self.qh(thermo)
@@ -218,7 +225,20 @@ class NodeEnergies:
             raised_modes=qh.raised_modes,
             imaginary_excluded=qh.imaginary_excluded,
         )
-        return Value(energy + qh.g_corr, None, None, source.id, thermo.id, details)
+        shift = self._standard_state(details)
+        return Value(energy + qh.g_corr + shift, None, None, source.id, thermo.id, details)
+
+    def _standard_state(self, details: dict[str, Any]) -> float:
+        """D95: the 1 atm → 1 M shift of a free energy (0 at 1 atm), noted in `details`."""
+        if self.standard_state != "1 M":
+            return 0.0
+        shift = thermochem.standard_state_correction(self.temperature)
+        details.update(
+            standard_state="1 M",
+            standard_state_correction=shift,
+            standard_state_temperature=self.temperature,
+        )
+        return shift
 
     def available(self) -> dict[LevelKey, set[str]]:
         found: dict[LevelKey, set[str]] = {}
@@ -241,16 +261,19 @@ class Energies:
         settings: app_settings.Settings | None = None,
         temperature: float | None = None,
     ):
-        """`temperature` overrides the G_qh temperature setting (a selectivity's own, S4)."""
+        """`temperature` overrides the G_qh temperature setting (a selectivity's own, S4); it
+        is also the temperature of the 1 M standard state (D95)."""
         settings = settings or app_settings.load()
         self.session = session
         self.temperature = settings.qh_temperature if temperature is None else temperature
         self.cutoff = settings.qh_cutoff
+        self.standard_state = settings.standard_state
         query = select(Node).options(
             selectinload(Node.calculations).selectinload(Calculation.result)
         )
         self.nodes = {
-            n.id: NodeEnergies(n, self.temperature, self.cutoff) for n in session.scalars(query)
+            n.id: NodeEnergies(n, self.temperature, self.cutoff, self.standard_state)
+            for n in session.scalars(query)
         }
         self.groups = {g.id: g for g in session.scalars(select(GroupNode))}
 

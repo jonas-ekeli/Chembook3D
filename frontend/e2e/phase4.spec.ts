@@ -236,3 +236,34 @@ test('a catalytic cycle closes at the resting state', async ({ page }) => {
     await page.request.delete(`/api/transitions/${closing.id}`)
   }
 })
+
+test('the 1 M standard state is a setting the energy view names', async ({ page }) => {
+  // D95, A42: off by default; once on, G and G_qh say 1 M and a badge shows it.
+  await openDemo(page)
+  const view = page.getByRole('group', { name: 'Energy view' })
+  await expect(view.locator('.badge', { hasText: '1 M' })).toHaveCount(0)
+  try {
+    await page.getByRole('button', { name: 'Settings' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Settings' })
+    await expect(dialog.getByLabel('Standard state')).toHaveValue('1 atm')
+    await expect(dialog).toContainText('1.8943 kcal/mol at 298.15 K')
+    await dialog.getByLabel('Standard state').selectOption('1 M')
+    await expect(dialog.getByLabel('Standard state')).toHaveValue('1 M')
+    await dialog.getByRole('button', { name: 'Done' }).click()
+
+    await expect(view.getByLabel('Energy type').locator('option')).toHaveText([
+      'E',
+      'H',
+      'G (1 M, 298.15 K)',
+      'G_qh (298.15 K, 100 cm⁻¹, 1 M)',
+    ])
+    await expect(view.locator('.badge', { hasText: '1 M' })).toBeVisible()
+    // One molecule on each side: the correction cancels on the edge.
+    await expect(page.locator('.edge-energy', { hasText: 'ΔG 18.00' })).toBeVisible()
+    await view.getByLabel('Energy type').selectOption('E')
+    await expect(view.locator('.badge', { hasText: '1 M' })).toHaveCount(0)
+    await view.getByLabel('Energy type').selectOption('G')
+  } finally {
+    await page.request.put('/api/settings', { data: { standard_state: '1 atm' } })
+  }
+})

@@ -4,6 +4,7 @@ import {
   api,
   ApiError,
   energyTypeName,
+  standardStateCorrection,
   SYNC_PROBLEMS,
   type Canvas,
   type EnergyOptions,
@@ -16,6 +17,7 @@ import {
   type Node,
   type NoteLayout,
   type Settings,
+  type StandardState,
   type SyncConflict,
   type SyncStatus,
 } from './api'
@@ -680,6 +682,32 @@ function App() {
             Frequencies below the cutoff are raised to it for the vibrational entropy only (Truhlar), as in the
             reference script. Every G_qh value is shown with these two numbers.
           </p>
+          <h3>Standard state of G and G_qh</h3>
+          <label className="field">
+            <span>Standard state</span>
+            <select
+              aria-label="Standard state"
+              value={settings.standard_state}
+              onChange={(event) =>
+                api.saveSettings({ standard_state: event.target.value as StandardState }).then((s) => {
+                  setSettings(s)
+                  reload()
+                })
+              }
+            >
+              <option value="1 atm">1 atm ideal gas (as in the output files)</option>
+              <option value="1 M">1 M (1 mol/L)</option>
+            </select>
+          </label>
+          <p className="muted small">
+            1 M adds RT ln(V<sub>m</sub> / 1 L mol⁻¹) to the free energy of every node and free species, with the
+            ideal-gas molar volume V<sub>m</sub> at the temperature above:{' '}
+            {(standardStateCorrection(settings.qh_temperature) * settings.energy_factors[settings.energy_unit]).toFixed(
+              settings.energy_decimals[settings.energy_unit] + 2,
+            )}{' '}
+            {settings.energy_unit} at {settings.qh_temperature} K. It changes relative free energies only where the
+            number of molecules changes (species joining or leaving). E and H are not changed.
+          </p>
           <h3>CREST ensembles</h3>
           <NumberSetting
             label="Conformers kept on import"
@@ -1050,10 +1078,18 @@ function App() {
                 >
                   {(levelOption?.types ?? []).map((t) => (
                     <option key={t} value={t}>
-                      {energyTypeName(t, energyOptions?.temperature, energyOptions?.cutoff)}
+                      {energyTypeName(t, energyOptions?.temperature, energyOptions?.cutoff, energyOptions?.standard_state)}
                     </option>
                   ))}
                 </select>
+                {energyOptions?.standard_state === '1 M' && (shownType === 'G' || shownType === 'G_qh') && (
+                  <span
+                    className="badge"
+                    title="Free energies are at the 1 M standard state: each node and free species includes RT ln(V_m / 1 L mol⁻¹) (Settings)"
+                  >
+                    1 M
+                  </span>
+                )}
                 <label className="check" title="Show ΔX on transitions (FR-CAN-03)">
                   <input
                     type="checkbox"

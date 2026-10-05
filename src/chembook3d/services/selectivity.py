@@ -307,6 +307,7 @@ def result(
         "temperature": temperature,
         "temperature_from_settings": selectivity.temperature is None,
         "cutoff": settings.qh_cutoff,
+        "standard_state": settings.standard_state,
         "conformers": selectivity.conformers,
         "outcomes": [],
         "excess": None,

@@ -5,6 +5,8 @@
 - ZPE and the vibrational thermal energy use the unmodified frequencies.
 - Vibrational entropy raises every frequency below the cutoff to the cutoff (Truhlar).
 - Translational entropy is for an ideal gas at 1 atm: no concentration correction (D57).
+  The 1 M standard state (D95) is an option added on top by `services/energies`, with
+  `standard_state_correction`; it is not part of the script.
 - Linear molecules are not supported by the script, so they give no value (D58).
 
 Each formula is written in the same form and order as the script, so the results agree with
@@ -178,3 +180,13 @@ def quasi_harmonic(
         raised_modes=sum(1 for f in real if f < cutoff),
         imaginary_excluded=imaginary,
     )
+
+
+def standard_state_correction(temperature: float) -> float:
+    """D95: G(1 M) − G(1 atm) of one molecule in hartree, RT ln(V_m / 1 L mol⁻¹) with the
+    ideal-gas molar volume V_m = RT / (1 atm) at the same temperature (1.894 kcal/mol at
+    298.15 K)."""
+    if temperature <= 0:
+        raise ValueError("the temperature must be above zero")
+    molar_volume_litres = GAS_CONSTANT * temperature / ATM_PA * 1000.0
+    return GAS_CONSTANT * temperature * math.log(molar_volume_litres) / J_PER_MOL_HARTREE

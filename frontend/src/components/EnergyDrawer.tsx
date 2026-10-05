@@ -93,7 +93,7 @@ export function ProfileChart({
   const y = (v: number) => margin.top + plotH - ((v * factor - lo) / (hi - lo)) * plotH
   const yTicks = ticks(lo, hi)
   const decimals = settings?.energy_decimals[unit] ?? 2
-  const typeName = energyTypeName(data.type, data.temperature, data.cutoff)
+  const typeName = energyTypeName(data.type, data.temperature, data.cutoff, data.standard_state)
   const reference = data.profiles.flatMap((p) => p.points).find((p) => p.id === data.reference_id)
   // Label placement. A node shared by overlaid pathways is labelled once. Where bars in one
   // column lie close together, their labels go beside them, stacked so none overlap.
@@ -471,7 +471,7 @@ export function EnergyDrawer({
           </button>
         </div>
         <span className="muted small">
-          {level ? `${energyTypeName(type, settings?.qh_temperature, settings?.qh_cutoff)} at ${levelLabel}` : 'No energies in this investigation yet'}
+          {level ? `${energyTypeName(type, settings?.qh_temperature, settings?.qh_cutoff, settings?.standard_state)} at ${levelLabel}` : 'No energies in this investigation yet'}
         </span>
         <span className="spacer" />
         {tab === 'profile' ? (

@@ -257,6 +257,7 @@ def result(
         "temperature": temperature,
         "temperature_from_settings": turnover.temperature is None,
         "cutoff": settings.qh_cutoff,
+        "standard_state": settings.standard_state,
         "unit": settings.energy_unit,
         "cycle": [],  # ids from the closing node round to it again
         "points": [],  # one per state of the cycle (the closing repeat left out)

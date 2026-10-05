@@ -100,7 +100,7 @@ export function SnapshotDrawer({
         </div>
         <span className="muted small">
           {level
-            ? `${energyTypeName(type, settings.qh_temperature, settings.qh_cutoff)} at ${levelLabel}`
+            ? `${energyTypeName(type, settings.qh_temperature, settings.qh_cutoff, settings.standard_state)} at ${levelLabel}`
             : 'No energies in this investigation'}
         </span>
         <span className="spacer" />

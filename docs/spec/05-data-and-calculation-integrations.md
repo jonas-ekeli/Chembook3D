@@ -58,7 +58,7 @@ The exact input file variants beyond these (e.g. .fchk, .gjf, ORCA .hess, CREST 
 - **Parameters** (D58): T (default 298.15 K) and cutoff (default 100 cm⁻¹) are settings, and each stored G_qh value records the T and cutoff it was computed with. The energy-type drop-down labels it, e.g. "G_qh (298.15 K, 100 cm⁻¹)".
 - **Multi-step files:** only the frequencies of the selected frequency step are used. (The reference script collects frequency lines from every step in a file, which double-counts modes if a file has two frequency jobs. The app deliberately differs here.)
 - **Verification:** G_corr,qh must match the reference script's "Thermic correction" on the same single-frequency-job file within the test tolerance (P29). With no frequencies below the cutoff and T equal to the job's T, it must also match the job-printed G correction within tolerance.
-- **Standard state** (D57): no concentration correction; the gas-phase 1 atm reference is used, as in the script.
+- **Standard state** (D57, D95): by default no concentration correction; the gas-phase 1 atm reference is used, as in the script. As an option in Settings, G and G_qh are at 1 M: each molecule adds RT ln(V_m / 1 L mol⁻¹) with V_m = RT / 1 atm at the G_qh temperature (1.894 kcal/mol at 298.15 K). The reference script's values are those at 1 atm.
 
 ## 5. Units
 

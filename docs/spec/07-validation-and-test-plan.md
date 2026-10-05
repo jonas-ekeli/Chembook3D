@@ -130,6 +130,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-EN-12 | IM1 on no branch splits into branches 1 and 2, which join again at P on no branch | Each branch's pathway is IM1, TS1-n, IM2-n, P, with the profile relative to IM1; a node on another branch leading into IM1 is not entered, one branchless node leading in is followed, and two leading in stop the trace at IM1 (D67) |
 | T-EN-13 | Branches 1 and 2 split at IM1 (no branch), merge at IM3 (no branch) and split again | Each branch's pathway runs IM1, …, IM3, …; a new branch after IM3 whose parent is branch 1 traces back through IM3 to IM1, and one with both branches as parents starts at IM3. The same when the merge is a reconnection group G with outgoing branch R: branches 1 and 2 run IM1, …, G, then R's nodes; R's own pathway starts at G (D67) |
 | T-EN-14 | Collapse groups {A-S1, B-S1} and {A-S2, B-S2}, then pick A-S1 and A-S2 as representatives | The line between them shows "2 edges" and no energy until both representatives are picked, then ΔG of A-S1 → A-S2 (D70) |
+| T-EN-15 | Turn on the 1 M standard state; view G and G_qh of a node, an edge between two nodes, and an edge where a free species joins | G and G_qh rise by RT ln(V_m / 1 L mol⁻¹) = 1.894 kcal/mol at 298.15 K (and follow the temperature setting); E and H and the one-to-one edge are unchanged; the edge with a joining species falls by one correction; the drop-down, badge and table name 1 M (D95). With it off, every value equals the reference script's (T-EN-05) |
 
 ### Free species (D69)
 
