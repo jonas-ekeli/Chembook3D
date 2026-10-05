@@ -38,7 +38,13 @@ export type SnapshotData = {
   investigation: { name: string }
   settings: Pick<
     Settings,
-    'energy_unit' | 'energy_factors' | 'energy_decimals' | 'qh_temperature' | 'qh_cutoff' | 'hydrogens'
+    | 'energy_unit'
+    | 'energy_factors'
+    | 'energy_decimals'
+    | 'qh_temperature'
+    | 'qh_cutoff'
+    | 'standard_state'
+    | 'hydrogens'
   >
   canvas: Canvas
   /** D85: the pictures in pinned notes, as data URLs by id. */
@@ -82,6 +88,9 @@ export function sharedSettings(data: SnapshotData): Settings {
     crest_count: 0,
     hydrogen_modes: ['all', 'polar', 'none'],
     steric_colours: 'blue',
+    // Copies made before D95 have no standard state: they are at 1 atm.
+    standard_state: data.settings.standard_state ?? '1 atm',
+    standard_states: ['1 atm', '1 M'],
   }
 }
 

@@ -282,7 +282,7 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
             >
               {(levelOption?.types ?? []).map((t) => (
                 <option key={t} value={t}>
-                  {energyTypeName(t, options.temperature, options.cutoff)}
+                  {energyTypeName(t, options.temperature, options.cutoff, options.standard_state)}
                 </option>
               ))}
             </select>

@@ -401,6 +401,9 @@ export type Settings = {
   energy_decimals: Record<string, number>
   qh_temperature: number
   qh_cutoff: number
+  /** D95: the standard state of G and G_qh; "1 M" adds RT ln(V_m / 1 L mol⁻¹) per molecule. */
+  standard_state: StandardState
+  standard_states: StandardState[]
   /** D34: how many of the lowest CREST conformers are ticked on import. */
   crest_count: number
   /** Hydrogens drawn in the 3D views and on structure cards. */
@@ -587,6 +590,7 @@ export type SelectivityResult = {
   temperature: number
   temperature_from_settings: boolean
   cutoff: number
+  standard_state: StandardState
   conformers: 'boltzmann' | 'lowest'
   outcomes: SelectivityOutcomeResult[]
   excess: { label: 'ee' | 'de'; boltzmann: Excess; lowest: Excess; experimental: Excess } | null
@@ -629,6 +633,7 @@ export type TurnoverResult = {
   temperature: number
   temperature_from_settings: boolean
   cutoff: number
+  standard_state: StandardState
   unit: string
   cycle: string[]
   points: TurnoverPoint[]
@@ -659,6 +664,7 @@ export type EnergyOptions = {
   levels: { key: string; label: string; types: EnergyType[] }[]
   temperature: number
   cutoff: number
+  standard_state: StandardState
 }
 
 /** One node's or group's energy in hartree, or null with the reason (EN-3: no fallback). */
@@ -707,6 +713,7 @@ export type Profiles = {
   reference_value: number | null
   temperature: number
   cutoff: number
+  standard_state: StandardState
   profiles: {
     points: ProfilePoint[]
     segments: { transition_id: string; forward: boolean; status: string; direct: boolean }[]
@@ -1060,6 +1067,7 @@ export const api = {
         | 'duplicate_tolerance'
         | 'qh_temperature'
         | 'qh_cutoff'
+        | 'standard_state'
         | 'crest_count'
         | 'hydrogens'
         | 'steric_colours'
@@ -1254,9 +1262,31 @@ export function formatDelta(hartree: number | null, settings: Settings | null): 
 }
 
 /** "G_qh (298.15 K, 100 cm⁻¹)": G_qh is always shown with its parameters (D58). */
-export function energyTypeName(type: EnergyType, temperature?: number, cutoff?: number): string {
+export type StandardState = '1 atm' | '1 M'
+
+/** D95: G(1 M) − G(1 atm) of one molecule in hartree, RT ln(V_m / 1 L mol⁻¹) with V_m = RT / 1 atm;
+ * the backend's `thermochem.standard_state_correction`, for the Settings text only. */
+export function standardStateCorrection(temperature: number): number {
+  const R = 8.31446261815323
+  const joulesPerHartree = 4.184 * 627.5094740631 * 1000
+  return (R * temperature * Math.log(((R * temperature) / 101325) * 1000)) / joulesPerHartree
+}
+
+/** The energy type as shown; G and G_qh name the 1 M standard state when it is chosen (D95). */
+export function energyTypeName(
+  type: EnergyType,
+  temperature?: number,
+  cutoff?: number,
+  standardState?: StandardState,
+): string {
+  const molar = standardState === '1 M'
+  if (type === 'G') {
+    if (!molar) return 'G'
+    return temperature === undefined ? 'G (1 M)' : `G (1 M, ${temperature} K)`
+  }
   if (type !== 'G_qh') return type
-  return temperature === undefined ? 'G_qh' : `G_qh (${temperature} K, ${cutoff} cm⁻¹)`
+  if (temperature === undefined) return molar ? 'G_qh (1 M)' : 'G_qh'
+  return `G_qh (${temperature} K, ${cutoff} cm⁻¹${molar ? ', 1 M' : ''})`
 }
 
 /** Geometry as stored in history entries: [[element, x, y, z], ...]. */

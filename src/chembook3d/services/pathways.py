@@ -367,6 +367,7 @@ def profiles(
         "reference_value": reference,
         "temperature": energies.temperature,
         "cutoff": energies.cutoff,
+        "standard_state": energies.standard_state,
         "profiles": shown,
     }
 
@@ -405,6 +406,9 @@ def table(
     branch_names = {b.id: b.name or "Unnamed branch" for b in session.scalars(select(Branch))}
     label = data["level_label"]
     qh = f"G_qh {data['temperature']:g} K {data['cutoff']:g} cm-1"
+    g = "G"
+    if data["standard_state"] == "1 M":  # D95: the free energies are at 1 mol/L
+        qh, g = f"{qh} 1 M", f"G 1 M ({data['temperature']:g} K)"
     columns = [
         "Label",
         "Step",
@@ -412,7 +416,7 @@ def table(
         "Level",
         "E (hartree)",
         "H (hartree)",
-        "G (hartree)",
+        f"{g} (hartree)",
         f"{qh} (hartree)",
         "Free species",
         f"Δ{energy_type} ({unit})",

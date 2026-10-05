@@ -30,6 +30,7 @@ class EnergyOptionsOut(BaseModel):
     levels: list[EnergyOptionOut]
     temperature: float
     cutoff: float
+    standard_state: str  # D95: "1 atm", or "1 M" when G and G_qh include RT ln(V_m)
 
 
 class ValueOut(BaseModel):
@@ -121,6 +122,7 @@ def energy_options(session: DbSession):
         levels=[EnergyOptionOut(**o) for o in energies.options()],
         temperature=energies.temperature,
         cutoff=energies.cutoff,
+        standard_state=energies.standard_state,
     )
 
 

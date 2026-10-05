@@ -196,6 +196,7 @@ def snapshot_data(request: Request, session: Session, body: SnapshotIn) -> dict[
             "energy_decimals": units.DECIMALS,
             "qh_temperature": settings.qh_temperature,
             "qh_cutoff": settings.qh_cutoff,
+            "standard_state": settings.standard_state,
             "hydrogens": settings.hydrogens,
         },
         "canvas": canvas.model_dump(mode="json"),

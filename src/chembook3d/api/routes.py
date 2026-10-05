@@ -339,6 +339,8 @@ class SettingsOut(BaseModel):
     energy_decimals: dict[str, int]
     qh_temperature: float
     qh_cutoff: float
+    standard_state: str
+    standard_states: list[str]
     crest_count: int
     hydrogens: str
     hydrogen_modes: list[str]
@@ -352,6 +354,7 @@ class SettingsIn(BaseModel):
     duplicate_tolerance: float | None = None
     qh_temperature: float | None = None
     qh_cutoff: float | None = None
+    standard_state: str | None = None
     crest_count: int | None = None
     hydrogens: str | None = None
     steric_colours: str | None = None
@@ -801,6 +804,8 @@ def get_settings():
         energy_decimals=units.DECIMALS,
         qh_temperature=s.qh_temperature,
         qh_cutoff=s.qh_cutoff,
+        standard_state=s.standard_state,
+        standard_states=list(app_settings.STANDARD_STATES),
         crest_count=s.crest_count,
         hydrogens=s.hydrogens,
         hydrogen_modes=list(app_settings.HYDROGEN_MODES),
@@ -831,6 +836,10 @@ def put_settings(body: SettingsIn):
         if body.qh_cutoff < 0:
             raise HTTPException(422, "The G_qh cutoff must not be negative")
         s.qh_cutoff = body.qh_cutoff
+    if body.standard_state is not None:
+        if body.standard_state not in app_settings.STANDARD_STATES:
+            raise HTTPException(422, f"Unknown standard state '{body.standard_state}'")
+        s.standard_state = body.standard_state
     if body.crest_count is not None:
         if body.crest_count < 1:
             raise HTTPException(422, "The number of CREST conformers must be at least 1")

@@ -23,6 +23,9 @@ CREST_COUNT = 10  # D34: the lowest N conformers of a CREST ensemble are ticked 
 HYDROGEN_MODES = ("all", "polar", "none")
 # D84: colours of the steric maps, low to high (the difference map keeps blue–grey–red).
 STERIC_COLOURS = ("blue", "green-yellow-red", "rainbow", "viridis", "grey")
+# D95: the standard state of G and G_qh, the 1 atm ideal gas of the files and the reference
+# script (D57) or 1 mol/L, which adds RT ln(V_m / 1 L mol⁻¹) to each molecule.
+STANDARD_STATES = ("1 atm", "1 M")
 
 
 def config_dir() -> Path:
@@ -42,6 +45,7 @@ class Settings:
     # D58: G_qh temperature (K) and cutoff (cm⁻¹); every G_qh value is shown with them.
     qh_temperature: float = DEFAULT_TEMPERATURE
     qh_cutoff: float = DEFAULT_CUTOFF
+    standard_state: str = "1 atm"
     crest_count: int = CREST_COUNT
     hydrogens: str = "all"
     steric_colours: str = "blue"
@@ -73,6 +77,8 @@ def load() -> Settings:
         settings.crest_count = count
     if data.get("hydrogens") in HYDROGEN_MODES:
         settings.hydrogens = data["hydrogens"]
+    if data.get("standard_state") in STANDARD_STATES:
+        settings.standard_state = data["standard_state"]
     if data.get("steric_colours") in STERIC_COLOURS:
         settings.steric_colours = data["steric_colours"]
     cutoff = data.get("qh_cutoff")
