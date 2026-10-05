@@ -211,6 +211,7 @@ def test_round_trip_through_a_cloud_session(linked_client, remote, fake_claude, 
     # claude --cloud ran in the investigation folder with only the job in its task
     call = json.loads(fake_claude.read_text(encoding="utf-8").splitlines()[0])
     assert call["args"] == ["--cloud", cloud_jobs.task_text(job_id)]
+    assert call["tty"]  # without a terminal, Claude Code creates no cloud session
     assert Path(call["cwd"]).resolve() == folder.resolve()
     # GitHub has the job and the cloud files, in one commit that leaves the database alone
     pushed = git(remote, "show", "--name-only", "--format=", "main").split()
@@ -259,17 +260,48 @@ def test_round_trip_through_a_cloud_session(linked_client, remote, fake_claude, 
     assert staged.json()["program"] == "xTB"
 
 
-def test_a_failed_launch_says_why_and_can_be_retried(linked_client, fake_claude, monkeypatch):
+def test_a_failed_launch_says_why_and_can_be_retried(
+    linked_client, remote, fake_claude, monkeypatch
+):
     # T-CLOUD-05
     job = new_job(linked_client)
     monkeypatch.setenv("FAKE_CLAUDE_CLOUD", "fail")
     out = linked_client.post(f"/api/jobs/{job['id']}/start").json()
     assert out["status"] == "launch_failed"
     assert "organization UUID" in out["launch_error"] and "\x1b" not in out["launch_error"]
+    assert "--cloud" in out["launch_error"]  # how to start it in a terminal instead
+    pushed = git(remote, "rev-parse", "main")
     monkeypatch.delenv("FAKE_CLAUDE_CLOUD")
     out = linked_client.post(f"/api/jobs/{job['id']}/start").json()
     assert out["status"] == "running" and out["launch_error"] is None
     assert len(fake_claude.read_text(encoding="utf-8").splitlines()) == 2
+    assert git(remote, "rev-parse", "main") == pushed  # the job went to GitHub only once
+
+
+def test_a_launch_waiting_for_an_answer_is_stopped(linked_client, fake_claude, monkeypatch):
+    # T-CLOUD-05: nobody sees its terminal, so a question is never answered
+    monkeypatch.setattr(cloud_jobs, "LAUNCH_QUIET", 1.0)
+    monkeypatch.setenv("FAKE_CLAUDE_CLOUD", "ask")
+    job = new_job(linked_client)
+    out = linked_client.post(f"/api/jobs/{job['id']}/start").json()
+    assert out["status"] == "launch_failed", out
+    assert "waiting for an answer" in out["launch_error"]
+    assert "Accessing workspace:" in out["launch_error"]  # what it showed, words kept apart
+    assert "run `claude`" in out["launch_error"]  # and how to answer it once
+    assert "\x1b" not in out["launch_error"]
+
+
+def test_a_launch_that_keeps_following_the_session(linked_client, fake_claude, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_CLOUD", "attach")
+    job = new_job(linked_client)
+    out = linked_client.post(f"/api/jobs/{job['id']}/start").json()
+    assert out["status"] == "running" and out["launcher_running"]
+    assert out["session_id"] == "session_01FakeCloudJob42"
+
+
+def test_launch_command_for_a_terminal():
+    command = cloud_jobs.launch_command("claude", Path("inv"), "2026-10-05-ts-scan")
+    assert "--cloud" in command and cloud_jobs.task_text("2026-10-05-ts-scan") in command
 
 
 def test_waiting_gives_up_after_the_time_asked(linked_client, fake_claude, monkeypatch):
@@ -347,6 +379,10 @@ def test_only_outputs_and_the_result_are_copied(path, allowed):
         "Created cloud session: x\nSession ID: session_01AbCdEf12\nView: https://claude.ai/code/session_01AbCdEf12?from=cli",
         '{"ok":true,"session_id":"session_01AbCdEf12","url":"https://claude.ai/code/session_01AbCdEf12"}',
         "\x1b[2mView: \x1b[0mhttps://claude.ai/code/session_01AbCdEf12",
+        # Windows' ConPTY moves the cursor instead of starting a new line
+        "\x1b[2;1HSession ID: session_01AbCdEf12\x1b[3;1HView: \x1b]8;;"
+        "https://claude.ai/code/session_01AbCdEf12\x1b\\https://claude.ai/code/"
+        "session_01AbCdEf12\x1b]8;;\x1b\\\x1b[4;1HResume with",
     ],
 )
 def test_the_session_is_read_from_what_claude_prints(printed):

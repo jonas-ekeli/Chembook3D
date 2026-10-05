@@ -574,9 +574,10 @@ TOOLS: list[ToolSpec] = [
         "GET",
         "/api/jobs/{job_id}",
         "Where a calculation job stands: draft, starting, launch_failed (with what Claude Code "
-        "said), running, finished (its result.json is on GitHub: status, summary, outputs) or "
-        "fetched. Checks GitHub for the result first. With `wait`, keeps checking for up to "
-        "that many seconds until the result is there; call again to keep waiting.",
+        "said or showed and what the user can do; start it again afterwards), running, "
+        "finished (its result.json is on GitHub: status, summary, outputs) or fetched. Checks "
+        "GitHub for the result first. With `wait`, keeps checking for up to that many seconds "
+        "until the result is there; call again to keep waiting.",
         help={
             "refresh": "Check GitHub for the result (default true).",
             "wait": "Seconds to keep checking until the result is there (0 to 300).",

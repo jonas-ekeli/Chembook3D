@@ -15,11 +15,10 @@ and Claude imports them through the app like any other output file.
 import json
 import os
 import re
-import subprocess
+import shlex
 import sys
 import threading
 import time
-from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -42,11 +41,22 @@ MAX_INSTRUCTIONS = 20000
 MAX_WAIT = 300.0  # seconds one status call may wait for a result
 POLL_EVERY = 20.0  # seconds between fetches while waiting
 LAUNCH_WAIT = 90.0  # seconds `start` waits for `claude --cloud` to name the session
+LAUNCH_QUIET = 45.0  # no session and a screen this long unchanged: it waits for an answer
+LAUNCH_GIVE_UP = 600.0  # no session after this long: stopped
 LAUNCH_LIMIT = 6 * 3600.0  # a launcher still running after this is stopped
+LAUNCH_SIZE = (50, 250)  # rows, columns of its terminal: wide, so a link is never wrapped
 
 _FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 _JOB_ID = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9-]{1,60}$")
-_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
+_ANSI = re.compile(
+    r"\x1b\[[0-9;?<>=!]*[ -/]*[@-~]"  # CSI
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC, ended by BEL or ST
+    r"|\x1b[()][0-9A-Za-z]|\x1b[=>78]"
+)
+# Moving the cursor to another line (Windows' ConPTY draws lines this way) separates text like
+# a line break, moving it along the line (Claude Code places words this way) like a space.
+_CURSOR_LINE = re.compile(r"\x1b\[[0-9;?]*[ABEFHdf]")
+_CURSOR_ALONG = re.compile(r"\x1b\[[0-9;?]*[CG]")
 _SESSION = re.compile(r"\b((?:session|cse)_[A-Za-z0-9]{8,})\b")
 _URL = re.compile(r"https://claude\.ai/code/[^\s\"'<>)\]]+")
 
@@ -272,6 +282,15 @@ def claude_command(executable: str, job_id: str) -> list[str]:
     return argv
 
 
+def launch_command(executable: str | None, folder: Path, job_id: str) -> str:
+    """What the user can type in a terminal to start the session themselves."""
+    task = task_text(job_id)
+    exe = executable or "claude"
+    if sys.platform == "win32":
+        return f'cd "{folder}"; & "{exe}" --cloud "{task}"'
+    return f"cd {shlex.quote(str(folder))}; {shlex.quote(exe)} --cloud {shlex.quote(task)}"
+
+
 def _commit_paths(folder: Path, paths: list[str], message: str) -> None:
     """Commit only these paths, whatever else is changed or staged (the database stays as it
     is until the next sync)."""
@@ -308,6 +327,8 @@ def prepare_start(folder: Path, job_id: str) -> dict[str, Any]:
     branch = sync._git(folder, "symbolic-ref", "--short", "-q", "HEAD", check=False).strip()
     if not branch:
         raise CloudJobError("The investigation folder is not on a branch; sync it first")
+    if record.get("commit") and _on_github(folder, record["commit"]):
+        return record  # pushed by an earlier start whose launch failed: nothing to commit again
     paths = [f"{JOBS_DIR}/{job_id}", *write_cloud_files(folder)]
     first = record["state"] == "draft"
     if first:
@@ -322,30 +343,55 @@ def prepare_start(folder: Path, job_id: str) -> dict[str, Any]:
     return _update(folder, job_id, commit=sync._git(folder, "rev-parse", "HEAD").strip())
 
 
+def _on_github(folder: Path, commit: str) -> bool:
+    """Whether a commit is on GitHub as of the last fetch (`sync.status` fetched just now)."""
+    if not sync._ok(folder, "cat-file", "-e", f"{commit}^{{commit}}"):
+        return False
+    remote = sync._git(folder, "branch", "-r", "--contains", commit, check=False)
+    return any(line.strip() and "->" not in line for line in remote.splitlines())
+
+
 @dataclass
 class Launch:
-    """One `claude --cloud` process and what it said."""
+    """One `claude --cloud` run and what it showed. It runs in a pseudo-terminal: without one,
+    Claude Code refuses to create a cloud session."""
 
     job_id: str
-    process: subprocess.Popen
+    terminal: claude_panel.Terminal | None = None
     started: float = field(default_factory=time.monotonic)
-    lines: deque[str] = field(default_factory=lambda: deque(maxlen=40))
+    screen: str = ""  # the last of what it wrote, terminal codes and all
+    last_output: float = field(default_factory=time.monotonic)
     session_id: str | None = None
     session_url: str | None = None
     exit_code: int | None = None
+    stopped: str | None = None  # why the app stopped it before it named a session
+    ended: bool = False
     named: threading.Event = field(default_factory=threading.Event)
 
     @property
     def running(self) -> bool:
-        return self.exit_code is None
+        return not self.ended
 
     def output(self) -> str:
-        return "\n".join(self.lines).strip()
+        return "\n".join(screen_lines(self.screen)[-40:]).strip()
+
+
+def screen_lines(raw: str) -> list[str]:
+    """Readable lines from what a program wrote to a terminal: no terminal codes, a line
+    redrawn in place only once, and no repeated or empty lines."""
+    text = _ANSI.sub("", _CURSOR_ALONG.sub(" ", _CURSOR_LINE.sub("\n", raw)))
+    lines: list[str] = []
+    for line in re.split(r"\r?\n", text):
+        line = line.split("\r")[-1] if "\r" in line.rstrip("\r") else line.rstrip("\r")
+        line = re.sub(r"[ \t]+", " ", "".join(c for c in line if c >= " " or c == "\t")).strip()
+        if line and (not lines or lines[-1] != line):
+            lines.append(line)
+    return lines
 
 
 def find_session(text: str) -> tuple[str | None, str | None]:
     """The session id and link in what `claude --cloud` printed, if any."""
-    text = _ANSI.sub("", text)
+    text = "\n".join(screen_lines(text))
     url_match = _URL.search(text)
     url = url_match.group(0).rstrip(".,;") if url_match else None
     id_match = _SESSION.search(text) or (_SESSION.search(url) if url else None)
@@ -355,10 +401,22 @@ def find_session(text: str) -> tuple[str | None, str | None]:
     return session, url
 
 
+# Questions a program may ask its terminal, and the answers a plain terminal gives.
+_QUERIES = {
+    "\x1b[6n": "\x1b[1;1R",  # where is the cursor
+    "\x1b[c": "\x1b[?1;2c",  # what kind of terminal
+    "\x1b[0c": "\x1b[?1;2c",
+    "\x1b]11;?\x07": "\x1b]11;rgb:0000/0000/0000\x07",  # background colour
+    "\x1b]11;?\x1b\\": "\x1b]11;rgb:0000/0000/0000\x1b\\",
+}
+
+
 class Launcher:
-    """The `claude --cloud` processes the app started. `claude --cloud` creates the session,
-    prints its id and link and may then keep following it; the app reads what it prints and
-    leaves it running (it is stopped when the app stops, which does not stop the session)."""
+    """The `claude --cloud` runs the app started. `claude --cloud` creates the session,
+    prints its id and link and may then keep following it; the app reads what it shows and
+    leaves it running (it is stopped when the app stops, which does not stop the session). One
+    that names no session is stopped once its screen stays still (it waits for an answer, in
+    a terminal nobody sees) or after LAUNCH_GIVE_UP."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -381,71 +439,71 @@ class Launcher:
             old = self._runs.get(key)
             if old is not None and old.running:
                 return old
-            kwargs: dict[str, Any] = {}
-            if sys.platform == "win32":
-                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-            try:
-                process = subprocess.Popen(
-                    claude_command(executable, job_id),
-                    cwd=folder,
-                    env=claude_panel.environment(),
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    **kwargs,
-                )
-            except OSError as exc:
-                raise CloudJobError(f"Claude Code could not be started: {exc}") from exc
-            run = Launch(job_id, process)
-            self._runs[key] = run
-        threading.Thread(
-            target=self._read, args=(run, on_session, on_end), name="claude-cloud", daemon=True
-        ).start()
-        threading.Thread(
-            target=self._limit, args=(run,), name="claude-cloud-limit", daemon=True
-        ).start()
-        return run
+            run = Launch(job_id)
+            seen = [""]
+            ready = threading.Event()  # run.terminal is set
 
-    def _read(self, run: Launch, on_session: Callable, on_end: Callable) -> None:
-        assert run.process.stdout is not None
-        seen = ""
-        try:
-            for line in run.process.stdout:
-                clean = _ANSI.sub("", line).rstrip()
-                if clean:
-                    run.lines.append(clean)
+            def on_output(text: str | None) -> None:
+                if text is None:
+                    ready.wait(timeout=10)
+                    run.exit_code = run.terminal.exit_code if run.terminal else None
+                    run.ended = True
+                    on_end(run)
+                    run.named.set()
+                    return
+                run.last_output = time.monotonic()
+                run.screen = (run.screen + text)[-20000:]
+                for query, answer in _QUERIES.items():
+                    if query in text and run.terminal is not None:
+                        run.terminal.write(answer)
                 if run.session_id is None:
-                    seen = (seen + line)[-4000:]
-                    session, url = find_session(seen)
+                    seen[0] = (seen[0] + text)[-8000:]
+                    session, url = find_session(seen[0])
                     if session:
                         run.session_id, run.session_url = session, url
                         on_session(run)
                         run.named.set()
-        finally:
-            run.exit_code = run.process.wait()
-            run.process.stdout.close()
-            on_end(run)
-            run.named.set()
 
-    def _limit(self, run: Launch) -> None:
-        try:
-            run.process.wait(timeout=LAUNCH_LIMIT)
-        except subprocess.TimeoutExpired:
-            run.process.kill()
+            rows, cols = LAUNCH_SIZE
+            try:
+                run.terminal = claude_panel.Terminal(
+                    claude_command(executable, job_id), Path(folder), rows, cols, on_output
+                )
+            except OSError as exc:
+                raise CloudJobError(f"Claude Code could not be started: {exc}") from exc
+            finally:
+                ready.set()
+            self._runs[key] = run
+        threading.Thread(
+            target=self._watch, args=(run,), name="claude-cloud-watch", daemon=True
+        ).start()
+        return run
+
+    def _watch(self, run: Launch) -> None:
+        """Stop a run that waits for an answer, names no session in time, or runs too long."""
+        while not run.ended:
+            now = time.monotonic()
+            if run.session_id is None and now - run.last_output > LAUNCH_QUIET:
+                run.stopped = (
+                    f"It showed the same screen for {LAUNCH_QUIET:.0f} s without naming a "
+                    "session, so it was probably waiting for an answer"
+                )
+            elif run.session_id is None and now - run.started > LAUNCH_GIVE_UP:
+                run.stopped = f"It named no session in {LAUNCH_GIVE_UP / 60:.0f} minutes"
+            elif now - run.started > LAUNCH_LIMIT:
+                run.stopped = "It ran too long"
+            if run.stopped:
+                assert run.terminal is not None
+                run.terminal.close()
+                return
+            time.sleep(min(1.0, LAUNCH_QUIET / 4))
 
     def close_all(self) -> None:
         with self._lock:
             runs = list(self._runs.values())
         for run in runs:
-            if run.running:
-                run.process.terminate()
-                try:
-                    run.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    run.process.kill()
+            if run.running and run.terminal is not None:
+                run.terminal.close()
 
 
 def start_job(folder: Path, job_id: str, launcher: Launcher, wait: float = LAUNCH_WAIT) -> dict:
@@ -474,12 +532,26 @@ def start_job(folder: Path, job_id: str, launcher: Launcher, wait: float = LAUNC
     def on_end(run: Launch) -> None:
         if run.session_id is None and not read_job(folder, job_id).get("session_id"):
             said = run.output() or "nothing"
-            _update(
-                folder,
-                job_id,
-                launch_error=f"`claude --cloud` ended (exit code {run.exit_code}) without "
-                f"naming a session. It said: {said[-1500:]}",
+            why = (
+                f"{run.stopped}. It showed"
+                if run.stopped
+                else f"`claude --cloud` ended (exit code {run.exit_code}) without naming a "
+                "session. It said"
             )
+            if run.stopped and "trust this folder" in said:
+                advice = (
+                    "Claude Code first asks whether you trust the investigation folder, and the "
+                    f"app does not answer that for you. Open a terminal in {folder}, run "
+                    '`claude`, choose "Yes, I trust this folder", leave it with /exit and start '
+                    "the job again."
+                )
+            else:
+                advice = (
+                    "To start the session yourself, run this in a terminal: "
+                    f"{launch_command(executable, folder, job_id)}\nThe app finds the result "
+                    "when that session pushes it."
+                )
+            _update(folder, job_id, launch_error=f"{why}: {said[-1500:]}\n\n{advice}")
 
     _update(folder, job_id, launch_error=None)
     run = launcher.launch(folder, job_id, executable, on_session, on_end)
