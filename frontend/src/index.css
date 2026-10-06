@@ -2090,3 +2090,9 @@ pre.basis-text {
 .batch-details-row td {
   background: var(--panel-alt, rgba(0, 0, 0, 0.03));
 }
+/* D98: ties a label moved off its line back to it. */
+.edge-leader {
+  fill: none;
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+}
