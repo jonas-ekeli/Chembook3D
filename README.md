@@ -225,3 +225,18 @@ See [CLAUDE.md](CLAUDE.md) for the layout and the full list of commands.
 - Decisions and open questions (source of truth): [docs/spec/08-decisions-and-open-questions.md](docs/spec/08-decisions-and-open-questions.md)
 - Implementation roadmap: [docs/spec/09-implementation-roadmap.md](docs/spec/09-implementation-roadmap.md)
 - Reference thermochemistry script (oracle for quasi-harmonic G): [docs/reference/thermochem_corr_G16.py](docs/reference/thermochem_corr_G16.py)
+
+## License
+
+Copyright (C) 2026 Jonas Ekeli
+
+Chembook3D is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version. It is distributed in the hope that it will be
+useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
+
+The licence covers the program, not your investigations: the files you import, the notebooks you
+keep and the data in the read-only copies you export stay yours. The test fixtures, the reference script's
+GoodVibes basis and the bundled web libraries keep their own licences; see
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

@@ -3,6 +3,8 @@ name = "chembook3d"
 version = "0.0.1"
 description = "Local-first notebook for computational chemistry mechanism investigations"
 readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
 requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.20.0",
