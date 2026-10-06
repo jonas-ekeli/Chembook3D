@@ -11,6 +11,8 @@ export default defineConfig({
     },
   },
   build: {
+    // The licences of the bundled packages, served beside the app (THIRD-PARTY-NOTICES.md).
+    license: { fileName: 'third-party-licenses.md' },
     // 3Dmol.js is one large library, loaded on demand; the app is served locally.
     chunkSizeWarningLimit: 1000,
     rolldownOptions: {
