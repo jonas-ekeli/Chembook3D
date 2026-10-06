@@ -539,6 +539,21 @@ def run(
                     calculated = set(session.scalars(select(Calculation.node_id).distinct()))
                     planned = [n for n in nodes if n.id not in calculated]
                     target = _closest(planned, _first_geometry(staged), final, tolerance)
+                    if target is None:
+                        # D100: an optimization continuing a node's pre-optimization.
+                        names_so_far = imports.ImportOptions(
+                            basis_names=basis_names, dispersion_names=dispersion_names
+                        )
+                        target = next(
+                            (
+                                n
+                                for n in nodes
+                                if n.id in calculated
+                                and _compatible(n, final.charge, final.multiplicity)
+                                and imports.continues(session, staged, n, names_so_far, tolerance)
+                            ),
+                            None,
+                        )
                     if target is not None:
                         match = "first_geometry"
                 if target is None:

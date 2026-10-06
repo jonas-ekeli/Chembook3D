@@ -252,6 +252,9 @@ class Plan:
     blockers: list[str]
     kind: str = "steps"  # steps | ensemble
     ensemble: dict[str, Any] | None = None
+    # D100: the node's lower-level optimization this file continues from; the node's geometry
+    # becomes the file's result and that optimization is kept as a pre-optimization.
+    continues_from: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -417,6 +420,58 @@ def _finished(step: ParsedStep) -> bool:
     return step.termination == "normal" and step.optimization_converged is not False
 
 
+def ended_on(ended: list[tuple[Any, Any]], rows: list[Any] | None, tolerance: float) -> Any:
+    """The value paired with the latest geometry in `ended` that `rows` matches (D100)."""
+    for ended_rows, value in reversed(ended):
+        if geometry.matches(ended_rows, rows, tolerance):
+            return value
+    return None
+
+
+def continued_optimization(
+    target: Node,
+    steps: list[ParsedStep],
+    resolved: dict[int, _Resolved],
+    chosen_rows: list[Any],
+    tolerance: float,
+) -> dict[str, Any] | None:
+    """D100: a file whose optimization starts from the geometry the node's own optimization
+    ended on, at another level, continues that pre-optimization (an xTB pre-optimization
+    followed by a DFT optimization). Its result becomes the node's geometry."""
+    for step in steps:
+        if step.job_type not in OPTIMIZATION_TYPES or not step.geometries:
+            continue
+        if not geometry.matches(_rows(step.geometries[0]), target.geometry, tolerance):
+            continue
+        if not geometry.matches(_rows(step.final_geometry), chosen_rows, tolerance):
+            continue
+        previous = levels.optimization_at(target, target.geometry, tolerance)
+        if previous is not None and resolved[step.index].identity != levels.fields_of(
+            previous.level
+        ):
+            return {
+                "step": step.index,
+                "calculation_id": previous.id,
+                "level_label": levels.label(previous.level),
+            }
+    return None
+
+
+def continues(
+    session: Session, staged: StagedFile, target: Node, options: ImportOptions, tolerance: float
+) -> bool:
+    """Whether this file continues the node's pre-optimization (D100), for batch matching."""
+    if isinstance(staged.parsed, crest.Ensemble) or not target.geometry:
+        return False
+    steps = staged.parsed.steps
+    with_geometry = [s for s in steps if s.final_geometry]
+    if not with_geometry:
+        return False
+    resolved = {s.index: _resolve_level(session, staged.parsed.program, s, options) for s in steps}
+    chosen_rows = _rows(with_geometry[-1].final_geometry)
+    return continued_optimization(target, steps, resolved, chosen_rows, tolerance) is not None
+
+
 def plan(
     session: Session, staged: StagedFile, options: ImportOptions, store_names: bool = False
 ) -> Plan:
@@ -491,6 +546,23 @@ def plan(
         mode, node_rows = "onto", target.geometry
 
     tolerance = settings.geometry_tolerance
+    resolved = {s.index: _resolve_level(session, staged.parsed.program, s, options) for s in steps}
+    continues_from = None
+    if mode == "onto" and chosen_rows and not geometry.matches(chosen_rows, node_rows, tolerance):
+        continues_from = continued_optimization(target, steps, resolved, chosen_rows, tolerance)
+    if continues_from is not None:
+        node_rows = chosen_rows
+        warnings.append(
+            {
+                "code": "PRE-OPT",
+                "message": (
+                    f"Step {continues_from['step']} starts from the geometry of "
+                    f"'{target.label}', optimized at {continues_from['level_label']}. That "
+                    "optimization is kept as a pre-optimization, and the node's geometry "
+                    f"becomes the result of step {continues_from['step']}."
+                ),
+            }
+        )
     derived_offered = bool(
         mode == "onto" and chosen_rows and not geometry.matches(chosen_rows, node_rows, tolerance)
     )
@@ -511,7 +583,6 @@ def plan(
         )
 
     step_plans: list[StepPlan] = []
-    resolved: dict[int, _Resolved] = {}
     for step in steps:
         rows = _rows(step.final_geometry)
         if rows and geometry.matches(rows, node_rows, tolerance):
@@ -527,7 +598,6 @@ def plan(
             assignment = "derived"
         else:
             assignment = "preview"
-        resolved[step.index] = _resolve_level(session, staged.parsed.program, step, options)
         step_plans.append(
             StepPlan(
                 index=step.index,
@@ -599,33 +669,55 @@ def plan(
             except levels.NameConflict as exc:
                 blockers.append(str(exc))
 
-    # Geometry level of each destination, for composite levels and the freq check.
-    existing_geometry_level = levels.node_geometry_level(target) if mode == "onto" else None
+    # D100: a single point or frequency job takes the level of the optimization that ended on
+    # its geometry, among the node's own and those in this file before it.
     for destination in ("node", "derived"):
-        geometry_level = existing_geometry_level if destination == "node" else None
-        geometry_label = levels.label(geometry_level)
-        geometry_identity = levels.fields_of(geometry_level)
+        ended: list[tuple[list[Any] | None, tuple[Any, str]]] = []
+        if destination == "node" and mode == "onto":
+            ended = [
+                (c.geometry, (levels.fields_of(c.level), levels.label(c.level)))
+                for c in levels.optimizations(target)
+            ]
         for step, step_plan in zip(steps, step_plans, strict=True):
             if step_plan.assignment != destination:
                 continue
             identity = resolved[step.index].identity
+            rows = _rows(step.final_geometry)
             if step.job_type in OPTIMIZATION_TYPES:
-                geometry_identity, geometry_label = identity, step_plan.level_label
-            elif geometry_identity is None or geometry_identity == identity:
+                ended.append((rows, (identity, step_plan.level_label)))
                 continue
-            elif step.job_type == CalculationType.SINGLE_POINT:
-                step_plan.geometry_level_label = geometry_label
+            if rows:
+                source = ended_on(ended, rows, tolerance)
+            else:  # no coordinates printed (A15): at the node's geometry
+                source = ended_on(ended, node_rows, tolerance) or (ended[-1][1] if ended else None)
+            if step.job_type == CalculationType.SINGLE_POINT:
+                if source is None and ended:
+                    warnings.append(
+                        {
+                            "code": "SP-GEOM",
+                            "message": (
+                                f"Step {step.index} is a single point on a geometry that none "
+                                "of the node's optimizations ended on. Set its geometry level "
+                                "by hand in the calculation's details."
+                            ),
+                        }
+                    )
+                elif source is not None and source[0] != identity:
+                    step_plan.geometry_level_label = source[1]
             elif step.job_type == CalculationType.FREQUENCY:
-                warnings.append(
-                    {
-                        "code": "FREQ-LEVEL",
-                        "message": (
-                            f"Step {step.index} is a frequency job at {step_plan.level_label}, "
-                            f"but the geometry was optimized at {geometry_label}. G at the "
-                            "geometry level uses a frequency job at that level (EN-4)."
-                        ),
-                    }
-                )
+                source = source or (ended[-1][1] if ended else None)  # A11
+                if source is not None and source[0] != identity:
+                    warnings.append(
+                        {
+                            "code": "FREQ-LEVEL",
+                            "message": (
+                                f"Step {step.index} is a frequency job at "
+                                f"{step_plan.level_label}, but the geometry was optimized at "
+                                f"{source[1]}. G at the geometry level uses a frequency job at "
+                                "that level (EN-4)."
+                            ),
+                        }
+                    )
 
     for step, step_plan in zip(steps, step_plans, strict=True):
         if step_plan.assignment == "preview":
@@ -741,6 +833,7 @@ def plan(
         suggested=suggested,
         origin=origin,
         blockers=blockers,
+        continues_from=continues_from,
     )
 
 
@@ -1055,6 +1148,11 @@ def _add_tag(session: Session, node: Node, tag: str) -> None:
         _set(session, node, "tags", [*node.tags, tag])
 
 
+def _remove_tag(session: Session, node: Node, tag: str) -> None:
+    if tag in node.tags:
+        _set(session, node, "tags", [t for t in node.tags if t != tag])
+
+
 def _node_fields(plan_: Plan, options: ImportOptions) -> dict[str, Any]:
     fields = dict(plan_.suggested)
     if options.label is not None:
@@ -1124,26 +1222,43 @@ def commit(
             node = target
             if options.status is not None:
                 _set(session, node, "status", options.status)
+            if plan_.continues_from is not None:
+                _set(session, node, "geometry", chosen_rows)  # D100; the history keeps the old
+                if all(
+                    steps[s.index].optimization_converged is not False
+                    for s in plan_.steps
+                    if s.assignment == "node"
+                ):
+                    _remove_tag(session, node, OPTIMIZATION_INCOMPLETE)
 
         derived = None
         if any(p.assignment == "derived" for p in plan_.steps):
             derived = _new_node(session, fields, chosen_rows, chosen, target)
 
         calculation_ids = []
+        tolerance = app_settings.load().geometry_tolerance
         for destination, owner in (("node", node), ("derived", derived)):
             if owner is None:
                 continue
-            geometry_level = levels.node_geometry_level(owner) if owner is target else None
+            # D100: a single point's geometry level is the optimization that ended on its
+            # geometry; one that prints no coordinates is at the node's geometry (A15).
+            ended: list[tuple[Any, levels.LevelOfTheory | None]] = []
+            if owner is target:
+                ended = [(c.geometry, c.level) for c in levels.optimizations(owner)]
             for step_plan in plan_.steps:
                 if step_plan.assignment != destination:
                     continue
                 step = steps[step_plan.index]
+                rows = _rows(step.final_geometry) or owner.geometry
+                geometry_level = ended_on(ended, rows, tolerance) or (
+                    None if step.final_geometry or not ended else ended[-1][1]
+                )
                 calculation = _create_calculation(
                     session, owner, step, step_plan, staged, source, geometry_level
                 )
                 calculation_ids.append(calculation.id)
                 if calculation.type in OPTIMIZATION_TYPES:
-                    geometry_level = calculation.level
+                    ended.append((calculation.geometry, calculation.level))
                 if step.optimization_converged is False:
                     _add_tag(session, owner, OPTIMIZATION_INCOMPLETE)
         session.flush()

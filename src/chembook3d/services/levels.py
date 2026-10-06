@@ -13,8 +13,16 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from chembook3d.models import CalculationType, CustomBasis, CustomDispersion, LevelOfTheory, Node
-from chembook3d.services import history
+from chembook3d import settings as app_settings
+from chembook3d.models import (
+    Calculation,
+    CalculationType,
+    CustomBasis,
+    CustomDispersion,
+    LevelOfTheory,
+    Node,
+)
+from chembook3d.services import geometry, history
 
 LEVEL_FIELDS = ("program", "method", "basis", "dispersion", "solvation_model", "solvent")
 OPTIMIZATION_TYPES = (CalculationType.OPTIMIZATION, CalculationType.TS_OPTIMIZATION)
@@ -94,17 +102,41 @@ def composite_label(level: LevelOfTheory | None, geometry_level: LevelOfTheory |
     return f"{label(level)} // {label(geometry_level)}"
 
 
-def node_geometry_level(node: Node | None) -> LevelOfTheory | None:
-    """FR-CALC-04: the level of the latest optimization on the node."""
+def optimizations(node: Node) -> list[Calculation]:
+    found = [c for c in node.calculations if c.type in OPTIMIZATION_TYPES and c.level is not None]
+    return sorted(found, key=lambda c: (c.created_at, c.step_index or 0))
+
+
+def optimization_at(
+    node: Node | None, rows: list[Any] | None, tolerance: float | None = None
+) -> Calculation | None:
+    """D100: the optimization on the node that ended on this geometry, the latest if several
+    did. A single point or frequency job takes its geometry level from it."""
+    if node is None or not rows:
+        return None
+    if tolerance is None:
+        tolerance = app_settings.load().geometry_tolerance
+    matching = [c for c in optimizations(node) if geometry.matches(c.geometry, rows, tolerance)]
+    return matching[-1] if matching else None
+
+
+def node_geometry_optimization(
+    node: Node | None, tolerance: float | None = None
+) -> Calculation | None:
+    """FR-CALC-04, D100: the optimization the node's geometry came from. A lower-level
+    pre-optimization that a later optimization continued from is not it, whatever order the
+    two were imported in. A node whose geometry matches none of its optimizations (records
+    made before D100) falls back on its latest optimization."""
     if node is None:
         return None
-    optimizations = [
-        c for c in node.calculations if c.type in OPTIMIZATION_TYPES and c.level is not None
-    ]
-    if not optimizations:
-        return None
-    latest = max(optimizations, key=lambda c: (c.created_at, c.step_index or 0))
-    return latest.level
+    return optimization_at(node, node.geometry, tolerance) or next(
+        reversed(optimizations(node)), None
+    )
+
+
+def node_geometry_level(node: Node | None, tolerance: float | None = None) -> LevelOfTheory | None:
+    found = node_geometry_optimization(node, tolerance)
+    return found.level if found else None
 
 
 def all_levels(session: Session) -> list[LevelOfTheory]:
