@@ -95,3 +95,47 @@ test('notes and edges of the nodes in an expanded group', async ({ page }) => {
     await page.request.post(`/api/groups/${group.id}/dissolve`, { data: { restore_branches: true } })
   }
 })
+
+test('edge labels in an expanded group keep clear of each other and of the cards', async ({ page }) => {
+  await openDemo(page)
+  const canvas = await (await page.request.get('/api/canvas')).json()
+  const idOf = (label: string) => canvas.nodes.find((n: { label: string }) => n.label === label).id
+  const members = ['A-S1', 'A-S2', 'A-S3'].map(idOf)
+  const made = await page.request.post('/api/groups/reconnect', { data: { member_ids: members, label: 'GL' } })
+  expect(made.ok()).toBe(true)
+  const group = (await made.json()) as { id: string }
+  try {
+    // One column: the edges leave and enter the members' sides, so their middles (where the
+    // labels used to be drawn) lie behind the cards, and the labels piled up there (D98).
+    expect((await page.request.patch(`/api/groups/${group.id}`, { data: { layout: 'vertical' } })).ok()).toBe(true)
+    await page.reload()
+    await page.getByRole('group', { name: 'Group GL' }).getByRole('button', { name: 'Expand group' }).click()
+    for (const label of ['A-S1', 'A-S2', 'A-S3']) await expect(canvasNode(page, label)).toBeVisible()
+    const transitions = canvas.transitions as { id: string; source_id: string; target_id: string }[]
+    const inside = transitions.filter((t) => members.includes(t.source_id) && members.includes(t.target_id)).map((t) => t.id)
+    expect(inside).toHaveLength(3)
+    for (const id of inside) await expect(page.locator(`.edge-label[data-edge="${id}"]`)).toBeVisible()
+    await expect(page.locator('.edge-label').filter({ hasText: 'ΔG' }).first()).toBeVisible()
+
+    const clashes = () =>
+      page.evaluate((ids) => {
+        type Box = { name: string; r: DOMRect }
+        const box = (el: Element, name: string): Box => ({ name, r: el.getBoundingClientRect() })
+        const labels = ids.map((id) => box(document.querySelector(`.edge-label[data-edge="${id}"]`)!, `label ${id}`))
+        const cards = [...document.querySelectorAll('.react-flow__node-structure')].map((el) =>
+          box(el, el.getAttribute('aria-label') ?? 'card'),
+        )
+        const meet = (a: DOMRect, b: DOMRect) =>
+          Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 &&
+          Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5
+        const found: string[] = []
+        labels.forEach((a, i) => {
+          for (const b of [...labels.slice(i + 1), ...cards]) if (meet(a.r, b.r)) found.push(`${a.name} / ${b.name}`)
+        })
+        return found
+      }, inside)
+    await expect.poll(clashes).toEqual([])
+  } finally {
+    await page.request.post(`/api/groups/${group.id}/dissolve`, { data: { restore_branches: true } })
+  }
+})

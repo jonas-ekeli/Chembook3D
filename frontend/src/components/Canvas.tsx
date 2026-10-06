@@ -16,17 +16,30 @@ import {
   ReactFlow,
   useReactFlow,
   useStore,
+  useStoreApi,
   useUpdateNodeInternals,
   type Connection,
   type Edge,
   type EdgeProps,
+  type InternalNode,
   type Node as FlowNode,
   type NodeChange,
   type NodeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { toPng, toSvg } from 'html-to-image'
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type DragEvent,
+  type MouseEvent,
+} from 'react'
 import {
   balanceText,
   FADED_STATUSES,
@@ -50,6 +63,7 @@ import {
 import { MoleculeSketch } from './MoleculeSketch'
 import { CardNotes, type NoteActions } from './CanvasNotes'
 import { noteTitle } from '../notes'
+import { curveOf, LabelPlacer, leaderEnd, type Rect } from '../labelLayout'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import type { Rotation } from '../chem'
@@ -311,6 +325,35 @@ function useEdgeLevel(source: string, target: string): number {
   })
 }
 
+/** The node cards labels keep clear of: every drawn card, and an expanded group's header. */
+function cardRects(nodes: Iterable<InternalNode>): Rect[] {
+  const rects: Rect[] = []
+  for (const node of nodes) {
+    const { width, height } = node.measured
+    if (node.hidden || !width || !height) continue
+    const { x, y } = node.internals.positionAbsolute
+    const open = node.type === 'cgroup' && (node.data as GroupData).expanded
+    rects.push({ x: Math.round(x), y: Math.round(y), w: Math.round(width), h: Math.round(open ? GROUP_HEADER : height) })
+  }
+  return rects
+}
+
+/**
+ * D98: one placer per canvas puts the edge labels clear of one another and of the cards.
+ * useStoreApi hands each component its own wrapper of the store, so the placer is kept by the
+ * store's getState, which they share.
+ */
+const placers = new WeakMap<object, LabelPlacer>()
+function useLabelPlacer(): LabelPlacer {
+  const { getState } = useStoreApi()
+  let placer = placers.get(getState)
+  if (!placer) {
+    placer = new LabelPlacer(() => cardRects(getState().nodeLookup.values()))
+    placers.set(getState, placer)
+  }
+  return placer
+}
+
 function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
   const { id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd, selected } =
     props
@@ -328,7 +371,24 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
     labelX = (sourceX + 3 * c1[0] + 3 * c2[0] + targetX) / 8
     labelY = (sourceY + 3 * c1[1] + 3 * c2[1] + targetY) / 8
   }
+  const placer = useLabelPlacer()
+  const label = useRef<HTMLDivElement>(null)
+  const placement = useSyncExternalStore(placer.subscribe, () => placer.get(id))
+  // Hand the line and the label's size to the placer after every render; it places again
+  // only when something changed.
+  useLayoutEffect(() => {
+    const curve = curveOf(path)
+    if (!curve || !label.current) return
+    placer.set({ id, curve, w: label.current.offsetWidth, h: label.current.offsetHeight })
+  })
+  useEffect(() => () => placer.remove(id), [placer, id])
   if (!data) return null
+  if (placement) {
+    labelX = placement.x
+    labelY = placement.y
+  }
+  // A label moved off its line is tied to it by a thin leader.
+  const leader = placement && leaderEnd(placement.anchor, placement, placement.w, placement.h)
   // D53: a direct connection is dotted with a "no TS" marker; P9: between branches dashed.
   const dash = data.direct ? '2 5' : data.crossBranch ? '9 5' : undefined
   return (
@@ -344,8 +404,16 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
           opacity: data.faded ? 0.35 : 1,
         }}
       />
+      {placement && leader && (
+        <path
+          className="edge-leader"
+          d={`M ${placement.anchor.x},${placement.anchor.y} L ${leader.x},${leader.y}`}
+          style={{ stroke: data.colour, opacity: data.faded ? 0.35 : 0.8 }}
+        />
+      )}
       <EdgeLabelRenderer>
         <div
+          ref={label}
           className={`edge-label${data.faded ? ' faded' : ''}`}
           data-edge={id}
           style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, zIndex: level || undefined }}
@@ -450,6 +518,16 @@ function CanvasView({
 }) {
   const flow = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
+  const store = useStoreApi()
+  const placer = useLabelPlacer()
+  // Cards that move, appear or are measured can free or block a label's spot.
+  useEffect(() => {
+    const unsubscribe = store.subscribe(() => placer.cardsChanged())
+    return () => {
+      unsubscribe()
+      placer.dispose()
+    }
+  }, [store, placer])
   const wrapper = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
