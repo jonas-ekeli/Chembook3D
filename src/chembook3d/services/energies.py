@@ -91,13 +91,23 @@ def _order(calculation: Calculation) -> tuple:
 
 
 def calculation_key(
-    calculation: Calculation, node_geometry_level_id: str | None
+    calculation: Calculation,
+    node_geometry_level_id: str | None,
+    tolerance: float | None = None,
 ) -> LevelKey | None:
     if calculation.level_id is None:
         return None
     if calculation.type in levels.OPTIMIZATION_TYPES:
         return LevelKey(calculation.level_id, calculation.level_id)
-    geometry = calculation.geometry_level_id or node_geometry_level_id
+    geometry = calculation.geometry_level_id
+    if geometry is None and calculation.geometry:
+        # D100: the optimization that ended on this calculation's geometry.
+        found = levels.optimization_at(calculation.node, calculation.geometry, tolerance)
+        geometry = found.level_id if found else None
+        if geometry is None and calculation.type == CalculationType.SINGLE_POINT:
+            return LevelKey(calculation.level_id, None)  # unknown until set by hand (D100)
+    if geometry is None:
+        geometry = node_geometry_level_id  # no coordinates printed (A15)
     if geometry is None:
         if calculation.type == CalculationType.SINGLE_POINT:
             return LevelKey(calculation.level_id, None)
@@ -134,10 +144,11 @@ class NodeEnergies:
         self.temperature = temperature
         self.cutoff = cutoff
         self.standard_state = standard_state
-        geometry = levels.node_geometry_level(node)
+        tolerance = app_settings.load().geometry_tolerance
+        geometry = levels.node_geometry_level(node, tolerance)
         self.by_key: dict[LevelKey, list[Calculation]] = {}
         for calculation in sorted(node.calculations, key=_order):
-            key = calculation_key(calculation, geometry.id if geometry else None)
+            key = calculation_key(calculation, geometry.id if geometry else None, tolerance)
             if key is not None and calculation.result is not None:
                 self.by_key.setdefault(key, []).append(calculation)
         self._qh: dict[str, thermochem.QuasiHarmonic | thermochem.NotComputable] = {}

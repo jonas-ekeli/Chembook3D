@@ -70,6 +70,8 @@ class InvestigationInfo(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    # Names of the one-off repairs (services/repairs.py) this investigation has had (D100).
+    repairs: Mapped[list[Any]] = mapped_column(default=list)
 
 
 class Node(Base):

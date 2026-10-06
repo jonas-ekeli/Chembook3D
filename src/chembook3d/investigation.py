@@ -9,6 +9,7 @@ synced between Windows and Linux (FR-INV-03, NFR-PORT-01).
 """
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -26,6 +27,8 @@ from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session, sessionmaker
 
 from chembook3d.models import InvestigationInfo, utcnow
+
+log = logging.getLogger(__name__)
 
 DB_NAME = "investigation.sqlite"
 FILES_DIR = "files"
@@ -232,8 +235,10 @@ def create_investigation(folder: Path, name: str) -> Investigation:
     engine = _make_engine(folder / DB_NAME)
     _migrate(engine, folder / DB_NAME)
     sessions = sessionmaker(engine, expire_on_commit=False)
+    from chembook3d.services import repairs  # the services import this module
+
     with sessions.begin() as session:
-        session.add(InvestigationInfo(id=1, name=name))
+        session.add(InvestigationInfo(id=1, name=name, repairs=list(repairs.REPAIRS)))
     _write_lock(folder)
     return Investigation(folder, engine, sessions)
 
@@ -269,5 +274,19 @@ def open_investigation(
         raise
     (folder / FILES_DIR).mkdir(exist_ok=True)
     _remove_orphaned_copies(folder, engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    _run_repairs(folder, sessions)
     _write_lock(folder)
-    return Investigation(folder, engine, sessionmaker(engine, expire_on_commit=False))
+    return Investigation(folder, engine, sessions)
+
+
+def _run_repairs(folder: Path, sessions: sessionmaker[Session]) -> None:
+    """Correct records an earlier version got wrong (D100). A repair that fails is logged and
+    tried again at the next open; it never keeps the investigation from opening."""
+    from chembook3d.services import repairs  # the services import this module
+
+    try:
+        with sessions.begin() as session:
+            repairs.run(session, folder)
+    except Exception:
+        log.exception("a repair of %s failed; it is tried again when it is next opened", folder)

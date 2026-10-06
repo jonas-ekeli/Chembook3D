@@ -53,7 +53,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-CALC-01 | A node holds any number of calculations. Each has a type (optimization, TS optimization, frequency, single point, conformer search, other), program, level of theory, results, source files and notes. | D15 | 2 |
 | FR-CALC-02 | A level of theory is program + method + basis + dispersion + solvation (model and solvent). Two levels are equal only if all five match. | D30 | 2 |
 | FR-CALC-03 | The user can register a named custom basis set, and map a parsed basis description to that name. Equality uses the name. | D35 | 2 |
-| FR-CALC-04 | A single-point calculation records its geometry level: the level of the optimization that produced the node's geometry, taken from that calculation or set by the user. Its composite level is `SP level // geometry level`. | D31 | 2 |
+| FR-CALC-04 | A single-point calculation records its geometry level: the level of the optimization on its node whose final geometry matches the single point's geometry (D100), or set by the user; with no match it has none until the user sets one. Its composite level is `SP level // geometry level`. The node's geometry level is that of the optimization its geometry came from; a lower-level pre-optimization continued by a higher-level one is not it (D100). | D31, D100 | 2 |
 | FR-CALC-05 | The user can edit a calculation's level-of-theory fields and geometry level. Edits are recorded in history, and the original parsed values stay viewable. | D29, P13 | 2 |
 | FR-CALC-06 | The user can inspect each saved custom basis set (elements, contraction, ECP, every exponent and coefficient, the calculations using it) and download it, or chosen elements, as a Gaussian basis file. | D94, A41 | after 5 |
 
