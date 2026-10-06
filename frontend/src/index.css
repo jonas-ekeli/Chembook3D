@@ -2066,3 +2066,27 @@ pre.basis-text {
   word-break: normal;
   white-space: pre;
 }
+
+/* D97: importing a folder of results */
+.batch-table {
+  max-height: 50vh;
+  overflow: auto;
+  margin: 8px 0;
+}
+.batch-table td {
+  vertical-align: top;
+}
+.batch-table select,
+.batch-table input:not([type='checkbox']) {
+  display: block;
+  margin-top: 4px;
+  max-width: 100%;
+}
+.blocker-line {
+  color: #b42318;
+  font-size: 0.85em;
+  margin-top: 4px;
+}
+.batch-details-row td {
+  background: var(--panel-alt, rgba(0, 0, 0, 0.03));
+}

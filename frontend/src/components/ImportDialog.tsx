@@ -49,7 +49,14 @@ function nameFilter(text: string): (name: string) => boolean {
 /** Browse the local disk through the backend (a browser page cannot read paths itself), so
  * the file's own path is kept as its origin path (FR-FILE-02). It starts in the folder a file
  * was last picked from, and the filter shows only names containing its text (D78). */
-function FileBrowser({ onPick }: { onPick: (path: string) => void }) {
+function FileBrowser({
+  onPick,
+  onPickFolder,
+}: {
+  onPick: (path: string) => void
+  /** D97: import every output in the folder shown. */
+  onPickFolder?: (path: string) => void
+}) {
   const [listing, setListing] = useState<FolderListing | null>(null)
   const [path, setPath] = useState('')
   const [filter, setFilter] = useState('')
@@ -84,6 +91,11 @@ function FileBrowser({ onPick }: { onPick: (path: string) => void }) {
         <input aria-label="Folder path" value={path} onChange={(event) => setPath(event.target.value)} />
         <button onClick={() => go(path)}>Go</button>
         {listing?.parent && <button onClick={() => go(listing.parent!)}>Up</button>}
+        {onPickFolder && listing && (
+          <button onClick={() => onPickFolder(listing.path)} title="Read every output in this folder and its subfolders">
+            Import this folder…
+          </button>
+        )}
       </div>
       <input
         type="search"
@@ -121,7 +133,7 @@ function FileBrowser({ onPick }: { onPick: (path: string) => void }) {
   )
 }
 
-function NameField({
+export function NameField({
   request,
   value,
   onCommit,
@@ -292,6 +304,7 @@ export function ImportDialog({
   linked = false,
   onClose,
   onImported,
+  onImportFolder,
 }: {
   file: File | null
   target: Node | null
@@ -308,6 +321,8 @@ export function ImportDialog({
   linked?: boolean
   onClose: () => void
   onImported: (imported: { kind: 'node' | 'group'; id: string }, notice: string) => void
+  /** D97: switch to importing a whole folder (offered when importing new nodes). */
+  onImportFolder?: (folder: string) => void
 }) {
   const [plan, setPlan] = useState<ImportPlan | null>(null)
   const [options, setOptions] = useState<ImportOptions>({
@@ -435,9 +450,19 @@ export function ImportDialog({
             />
           </label>
           <p className="muted">
-            Or pick it from this computer, which also records where it came from:
+            Or pick it from this computer, which also records where it came from
+            {onImportFolder && ', or import every output in a folder at once'}:
           </p>
-          <FileBrowser onPick={fromPath} />
+          <FileBrowser
+            onPick={fromPath}
+            onPickFolder={
+              onImportFolder &&
+              ((folder) => {
+                if (token.current) void api.cancelImport(token.current)
+                onImportFolder(folder)
+              })
+            }
+          />
         </>
       )}
       {!plan && busy && <p className="muted">Reading the file…</p>}

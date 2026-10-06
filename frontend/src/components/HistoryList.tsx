@@ -172,6 +172,11 @@ function describeOther(entry: HistoryEntry): string | null {
     }
     return `${names[entry.field ?? ''] ?? entry.field}: ${show(null, entry.old_value)} → ${show(null, entry.new_value)}`
   }
+  if (entry.record_type === 'batch_import' && value) {
+    // D97: one entry for a whole folder; each file's own records follow it.
+    const files = (value.files as { file: string }[] | undefined) ?? []
+    return `Imported ${files.length} file${files.length === 1 ? '' : 's'} from ${String(value.folder)}: ${files.map((f) => f.file).join(', ')}`
+  }
   if (entry.record_type === 'custom_basis' || entry.record_type === 'custom_dispersion') {
     const what = entry.record_type === 'custom_basis' ? 'custom basis set' : 'custom dispersion'
     if (entry.action === 'create' && value) return `Named a ${what} “${String(value.name)}”`

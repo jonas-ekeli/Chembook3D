@@ -841,6 +841,84 @@ export type ImportResult = {
   group_id: string | null
 }
 
+/** D97: where a file of a batch goes: an existing node, the node another file of the batch
+ * makes, or a new node or group. */
+export type BatchTarget = {
+  kind: 'node' | 'file' | 'new' | 'group'
+  node_id: string | null
+  file_id: string | null
+  label: string
+  file?: string
+}
+
+export type BatchRow = {
+  id: string
+  path: string
+  name: string
+  program: string
+  version: string | null
+  size: number
+  kind: 'steps' | 'ensemble'
+  included: boolean
+  skipped: 'imported_before' | 'same_file' | null
+  skipped_detail: string | null
+  order: number | null
+  match: 'geometry' | 'first_geometry' | 'name' | 'name_close' | 'new' | 'chosen' | 'duplicate' | 'none'
+  target: BatchTarget | null
+  mode: 'new' | 'planned' | 'onto' | null
+  derived: boolean
+  candidates: { node_id: string; label: string }[]
+  duplicates: (BatchTarget & { rmsd: number })[]
+  duplicate_action: 'attach' | 'new' | null
+  label: string | null
+  jobs: string
+  level_label: string | null
+  termination: 'normal' | 'abnormal'
+  atom_count: number
+  steps: Pick<
+    StepPlan,
+    'index' | 'type' | 'level_label' | 'geometry_level_label' | 'termination' | 'optimization_converged' | 'energy' | 'assignment'
+  >[]
+  warnings: Finding[]
+  blockers: string[]
+}
+
+/** D97, FR-IMP-14: the proposed import of a whole folder; nothing is stored until Import. */
+export type BatchPlan = {
+  token: string
+  folder: string
+  recursive: boolean
+  suffixes: string[]
+  origin_device: string
+  rows: BatchRow[]
+  other_count: number
+  unreadable: { path: string; reason: string }[]
+  names: NameRequest[]
+  blockers: string[]
+  counts: { files: number; included: number; new: number; attached: number; finished: number; skipped: number }
+}
+
+export type BatchRowChoice = {
+  included?: boolean | null
+  /** "auto", "new", "node:<id>" or "file:<file id>" */
+  target?: string | null
+  duplicate_action?: 'attach' | 'new' | null
+  label?: string | null
+}
+
+export type BatchOptions = {
+  rows?: Record<string, BatchRowChoice>
+  basis_names?: Record<string, string>
+  dispersion_names?: Record<string, string>
+  origin_device?: string | null
+  suffixes?: string[] | null
+}
+
+export type BatchImported = {
+  imported: number
+  files: { file: string; how: string; node_id: string | null; group_id: string | null; label: string; calculations: number }[]
+}
+
 /** FR-OV-01: the resume overview. */
 export type BranchSummary = {
   id: string | null
@@ -1087,6 +1165,13 @@ export const api = {
   commitImport: (token: string, options: ImportOptions) =>
     request<ImportResult>('POST', `/imports/${token}/commit`, options),
   cancelImport: (token: string) => request<void>('DELETE', `/imports/${token}`),
+  scanFolder: (folder: string, recursive: boolean) =>
+    request<BatchPlan>('POST', '/batch-imports', { folder, recursive }),
+  previewBatch: (token: string, options: BatchOptions) =>
+    request<BatchPlan>('POST', `/batch-imports/${token}/preview`, options),
+  commitBatch: (token: string, options: BatchOptions) =>
+    request<BatchImported>('POST', `/batch-imports/${token}/commit`, options),
+  cancelBatch: (token: string) => request<void>('DELETE', `/batch-imports/${token}`),
 
   calculations: (nodeId: string) => request<Calculation[]>('GET', `/nodes/${nodeId}/calculations`),
   updateCalculation: (

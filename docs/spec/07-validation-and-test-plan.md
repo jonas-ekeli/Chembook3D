@@ -111,6 +111,9 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-IMP-09 | CREST 40 conformers, N = 10 | A group with 10 members; unticking 2 gives 8; removal after import works |
 | T-IMP-11 | Import a separate opt+freq file onto a node that has no freq, where the opt does not move the geometry, then one where it does | First: steps attach to the node. Second: derived-node offer from the geometry-changing step (D52) |
 | T-IMP-10 | ORCA and xTB fixtures | Same checks as T-IMP-01, where the program prints the values |
+| T-IMP-12 | Import a folder holding an opt+freq file, its single point, an output of another structure, an input file, a file imported before and a planned node's output | The single point attaches to the node the opt+freq file creates (in either order), the planned node is finished, the other output is a new node, the input is counted as no output, the old file is skipped; one transaction, one batch history entry |
+| T-IMP-13 | Batch name matching with nodes TS1-2, TS1-2' and TS1-2'' | `TS1-2'_SPQZ.out` goes to TS1-2', `TS1-2''.out` to TS1-2''; `TS1-2__.out` only to TS1-2'' (marked close); a name fitting two nodes waits for a choice |
+| T-IMP-14 | A batch in which one file fails while being written | Nothing is written and no copied file is left (NFR-DATA-01) |
 
 ## 6. Energy tests
 

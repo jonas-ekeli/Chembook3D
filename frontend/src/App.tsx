@@ -30,6 +30,7 @@ import { download } from './util'
 import { FilterMenu } from './components/FilterMenu'
 import { FolderPicker } from './components/FolderPicker'
 import { HistoryList } from './components/HistoryList'
+import { BatchImportDialog } from './components/BatchImportDialog'
 import { ImportDialog } from './components/ImportDialog'
 import { Modal } from './components/Modal'
 import { NodeInspector } from './components/NodeInspector'
@@ -177,6 +178,8 @@ function App() {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
   const [importRequest, setImportRequest] = useState<ImportRequest | null>(null)
+  // D97: the folder whose outputs are being imported at once.
+  const [batchFolder, setBatchFolder] = useState<string | null>(null)
   // D85: the pinned note being written: an existing one by id, or a new one on a node.
   const [noteEditing, setNoteEditing] = useState<{ noteId: string } | { nodeId: string } | null>(null)
   const [inspectorWidth, setInspectorWidth] = useState(520)
@@ -792,6 +795,32 @@ function App() {
             setView('canvas')
             reload()
             nextImport()
+          }}
+          onImportFolder={
+            importRequest.targetId || importRequest.species || importRequest.files.length > 0
+              ? undefined
+              : (folder) => {
+                  setImportRequest(null)
+                  setBatchFolder(folder)
+                }
+          }
+        />
+      )}
+      {batchFolder && investigation && (
+        <BatchImportDialog
+          folder={batchFolder}
+          nodes={[...canvas.nodes, ...canvas.species]}
+          linked={investigation.linked}
+          onClose={() => setBatchFolder(null)}
+          onImported={(result, message) => {
+            setBatchFolder(null)
+            setNotice(message)
+            const first = result.files.find((f) => f.how === 'new' || f.how === 'derived' || f.how === 'group')
+            if (first?.group_id) choose({ kind: 'group', id: first.group_id })
+            else if (first?.node_id) choose({ kind: 'node', id: first.node_id })
+            if (first) setFocus({ id: (first.group_id ?? first.node_id)!, n: Date.now() })
+            setView('canvas')
+            reload()
           }}
         />
       )}
