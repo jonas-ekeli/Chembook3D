@@ -580,6 +580,8 @@ export type Selectivity = {
   temperature: number | null
   conformers: 'boltzmann' | 'lowest'
   excess: 'ee' | 'de' | 'none'
+  /** D103: a node or group; each TS is then balanced by the free species from it (D72). */
+  reference_id: string | null
   notes: string
   outcomes: SelectivityOutcome[]
 }
@@ -599,6 +601,9 @@ export type SelectivityMemberResult = {
   /** Percent of all TSs, and of this outcome's. */
   share: number | null
   share_in_outcome: number | null
+  /** D103: the free species balancing this TS from the reference, and their energy. */
+  species: SpeciesCount[]
+  species_value: number | null
   message: string | null
 }
 
@@ -629,6 +634,8 @@ export type SelectivityResult = {
   cutoff: number
   standard_state: StandardState
   conformers: 'boltzmann' | 'lowest'
+  reference_id: string | null
+  reference_label: string | null
   outcomes: SelectivityOutcomeResult[]
   excess: { label: 'ee' | 'de'; boltzmann: Excess; lowest: Excess; experimental: Excess } | null
   notes: string[]

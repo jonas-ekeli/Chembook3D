@@ -92,7 +92,7 @@ def test_schema_upgrade_backs_up_the_database_first(tmp_path, monkeypatch):
 
     assert upgrades == ["head"]
     backups = list((folder / inv.BACKUP_DIR).iterdir())
-    assert len(backups) == 1 and backups[0].name.startswith("investigation.sqlite.0016.")
+    assert len(backups) == 1 and backups[0].name.startswith("investigation.sqlite.0017.")
     assert b"keep me" in backups[0].read_bytes()
 
 

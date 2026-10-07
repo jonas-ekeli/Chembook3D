@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
-// T-UI-06, FR-SEL-01…06, D83: a selectivity from two TSs selected on the canvas, its result at
+// T-UI-06, FR-SEL-01…07, D83, D103: a selectivity from two TSs selected on the canvas, its result at
 // two temperatures and with only the lowest TS, an experiment, the history, and deleting it.
 const E2E_DIR = process.env.E2E_DIR!
 
@@ -85,12 +85,19 @@ test('selectivity from two transition states', async ({ page }) => {
   const states = result.getByRole('table', { name: 'Transition states' })
   await expect(states.getByRole('button', { name: 'B-S2' })).toBeVisible()
 
+  // D103: free species balanced from a reference. The demo's TSs need none, so the ratio stays.
+  await editor.getByLabel('Selectivity reference').selectOption({ label: 'T-S0' })
+  await expect(result).toContainText('free species balanced from T-S0')
+  await expect(states.getByRole('columnheader', { name: 'Free species' })).toBeVisible()
+  await expect(headline).toContainText('A : B = 98.6 : 1.4')
+
   // S7: in the history.
   await page.getByRole('button', { name: 'History' }).click()
   const history = page.getByRole('list', { name: 'History' })
   await expect(history).toContainText('Created selectivity “Selectivity 1”')
   await expect(history).toContainText('Outcomes: A-S2, B-S2 → A, B-S2')
   await expect(history).toContainText('Conformers: Boltzmann sum → lowest TS only')
+  await expect(history).toContainText('Free species balanced from: — → T-S0')
 
   // Deleting it leaves the TSs as they are.
   await page.getByRole('button', { name: 'Analyses' }).click()

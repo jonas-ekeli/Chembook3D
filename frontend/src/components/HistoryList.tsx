@@ -74,6 +74,7 @@ const ID_FIELDS = new Set([
   'outgoing_branch_id',
   'parent_ids',
   'incoming_branch_ids',
+  'reference_id',
 ])
 
 const STRUCTURE_FIELDS: Record<string, string> = {
@@ -98,6 +99,7 @@ const STRUCTURE_FIELDS: Record<string, string> = {
   outcomes: 'Outcomes',
   path: 'Pathway',
   compare_id: 'Compared with',
+  reference_id: 'Free species balanced from',
 }
 
 const STRUCTURE_TYPES: Record<string, string> = {

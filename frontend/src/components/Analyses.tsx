@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   api,
+  balanceText,
   energyTypeName,
   formatDelta,
   type Canvas,
@@ -209,6 +210,7 @@ function ResultView({
           {result.level_label} · {energyTypeName(result.energy_type, result.temperature, result.cutoff, result.standard_state)} · Boltzmann
           factors at {result.temperature} K
           {result.temperature_from_settings ? ' (the G_qh temperature in Settings)' : ''}
+          {result.reference_label && <> · free species balanced from {result.reference_label}</>}
         </p>
       )}
       {ok ? (
@@ -291,6 +293,7 @@ function ResultView({
             <tr>
               <th>Outcome</th>
               <th>Transition state</th>
+              {result.reference_id && <th>Free species</th>}
               <th>ΔG from lowest ({unit})</th>
               <th>Share of outcome</th>
               <th>Share of all</th>
@@ -307,6 +310,7 @@ function ResultView({
                     </button>
                     {m.group_label && <span className="muted"> in {m.group_label}</span>}
                   </td>
+                  {result.reference_id && <td>{balanceText(m.species) || '—'}</td>}
                   <td className="num" title={m.message ?? undefined}>
                     {m.value === null ? (m.message ?? 'n/a') : formatDelta(m.relative, settings)}
                   </td>
@@ -377,6 +381,9 @@ function SelectivityEditor({
   const level = energyOptions?.levels.find((l) => l.key === selectivity.level)
   const types = level?.types.length ? ENERGY_TYPES.filter((t) => level.types.includes(t) || t === selectivity.energy_type) : ENERGY_TYPES
   const outcomes = selectivity.outcomes
+  const referenceKnown =
+    canvas.nodes.some((n) => n.id === selectivity.reference_id) ||
+    canvas.groups.some((g) => g.id === selectivity.reference_id)
   const freeName = () => {
     for (let n = outcomes.length + 1; ; n++) {
       if (!outcomes.some((o) => o.name === `Outcome ${n}`)) return `Outcome ${n}`
@@ -462,6 +469,41 @@ function SelectivityEditor({
             <option value="none">the ratio only</option>
           </select>
         </label>
+        <label className="field">
+          <span>Free species balanced from</span>
+          <select
+            aria-label="Selectivity reference"
+            value={selectivity.reference_id ?? ''}
+            onChange={(event) => save({ reference_id: event.target.value || null })}
+          >
+            <option value="">None: the transition states have the same atoms</option>
+            {selectivity.reference_id && !referenceKnown && (
+              <option value={selectivity.reference_id}>A node no longer on the canvas</option>
+            )}
+            {canvas.nodes.length > 0 && (
+              <optgroup label="Nodes">
+                {canvas.nodes.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.label || 'Untitled node'}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {canvas.groups.length > 0 && (
+              <optgroup label="Groups">
+                {canvas.groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.label || 'Group'}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </label>
+        <p className="muted small">
+          With a reference, each transition state gets the free species along its route from it, as its node card
+          does, so transition states with different atoms can be compared.
+        </p>
         <p className="muted small">
           Leave the temperature empty to use the G_qh temperature in Settings. G_qh is recomputed at this temperature
           from the stored frequencies; E, H and G are used as read from the files.

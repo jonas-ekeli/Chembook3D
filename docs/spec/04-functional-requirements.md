@@ -210,6 +210,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-SEL-04 | The temperature is the G_qh setting or the selectivity's own; G_qh is recomputed at it from the stored frequencies, E, H and G are used as read and the result says so. | D83, A34 | after 5 |
 | FR-SEL-05 | The result shows each outcome's ΔΔG‡ and predicted percentage, the ee or de for two outcomes, each TS's ΔG and share, and an optional experimental ratio with its ΔΔG‡. | D83, A34 | after 5 |
 | FR-SEL-06 | An Analyses view lists the selectivities; one is made there or from a canvas selection. Creating, changing and deleting one is recorded in the history. | D83, A34 | after 5 |
+| FR-SEL-07 | A selectivity can name a reference node or group; each TS is then balanced by the free species along its route from it (D72), their energies added at the same level and type with no fallback, and the atoms and charge compared include them. A TS not joined to the reference is refused; a species without a value makes the result n/a. | D103, A50 | after 5 |
 
 ## FR-TOF · Turnover (D86)
 

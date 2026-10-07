@@ -6,6 +6,10 @@ transition states, traced back to the calculations.
 - Every TS is valued at one composite level and energy type, with no fallback (EN-3, D27):
   one TS without a value makes the result n/a, with the reason.
 - All TSs must have the same atoms and the same charge, or the selectivity is refused.
+- With a reference (D103), each TS is balanced by the free species along its route from the
+  reference, as its node card is (D69, D72): their energies are added to the TS's, and the
+  atoms and charge compared are the TS's with its species. A TS not joined to the reference
+  is refused; a species without a value makes the result n/a (EN-3).
 - Curtin–Hammett: an outcome's weight is Σ e^(−G/RT) over its TSs ("boltzmann"), or only
   its lowest TS's ("lowest"). Both are computed; the chosen one leads.
 - G_qh is recomputed at the selectivity's temperature from the stored frequencies (S4); E, H
@@ -34,6 +38,7 @@ from chembook3d.models import (
     SelectivityOutcome,
 )
 from chembook3d.services import history
+from chembook3d.services import species as species_service
 from chembook3d.services.energies import ENERGY_TYPES, Energies, LevelKey, key_label
 from chembook3d.services.records import RecordError, get, number_value, text_value
 from chembook3d.units import GAS_CONSTANT, J_PER_MOL_HARTREE
@@ -41,7 +46,16 @@ from chembook3d.units import GAS_CONSTANT, J_PER_MOL_HARTREE
 R_HARTREE = GAS_CONSTANT / J_PER_MOL_HARTREE  # hartree/K, as the reference script's R
 CONFORMERS = ("boltzmann", "lowest")
 EXCESS = ("ee", "de", "none")
-FIELDS = ("name", "level", "energy_type", "temperature", "conformers", "excess", "notes")
+FIELDS = (
+    "name",
+    "level",
+    "energy_type",
+    "temperature",
+    "conformers",
+    "excess",
+    "reference_id",
+    "notes",
+)
 
 
 def list_all(session: Session) -> list[Selectivity]:
@@ -106,6 +120,16 @@ def _field(session: Session, selectivity: Selectivity, field: str, value: Any) -
         if value not in EXCESS:
             raise RecordError("excess must be 'ee', 'de' or 'none'")
         return value
+    if field == "reference_id":
+        if value is None:
+            return None
+        record_id = text_value("reference", value)
+        node = session.get(Node, record_id)
+        if node is None:
+            get(session, GroupNode, record_id, "Reference node or group")
+        elif node.kind != NodeKind.NODE:
+            raise RecordError("a free species cannot be the reference")
+        return record_id
     if field == "notes":
         return text_value("notes", value)
     raise RecordError(f"'{field}' cannot be edited")
@@ -232,26 +256,61 @@ def _log_weight(values: list[float], base: float, temperature: float) -> float:
     return -(lowest - base) / rt + math.log(sum(math.exp(-(v - lowest) / rt) for v in values))
 
 
-def _check_atoms(rows: list[tuple[Node, str]]) -> str | None:
-    """S3: every TS has the same atoms and charge. The reason it is refused, or None."""
-    formulas: dict[str, str] = {}
+def _formula(counts: dict[str, int]) -> str:
+    """A formula that may lack atoms, when a balance takes away more than a TS has."""
+    found = xyz.formula_of(Counter({e: n for e, n in counts.items() if n > 0}))
+    lacking = Counter({e: -n for e, n in counts.items() if n < 0})
+    return f"{found} − {xyz.formula_of(lacking)}" if lacking else found
+
+
+def _check_atoms(
+    session: Session, rows: list[tuple[Node, str]], balances: dict[str, species_service.Balance]
+) -> str | None:
+    """S3: every TS has the same atoms and charge, with the free species of its balance when
+    there is a reference (D103). The reason it is refused, or None."""
+    counts: dict[str, dict[str, int]] = {}
+    charges: dict[str, int | None] = {}
+    named: dict[str, str] = {}
     for node, _ in rows:
         if not node.geometry:
             return f"“{_name_of(node)}” has no structure, so its atoms cannot be compared."
-        formulas[node.id] = xyz.formula_of(Counter(row[0] for row in node.geometry))
+        atoms = dict(Counter(row[0] for row in node.geometry))
+        charge = node.charge
+        balance = balances.get(node.id, {})
+        for species_id, count in balance.items():
+            species = session.get(Node, species_id)
+            if not species.geometry:
+                return (
+                    f"The free species “{species_service.label(species)}” has no structure, "
+                    "so its atoms cannot be compared."
+                )
+            for element, n in Counter(row[0] for row in species.geometry).items():
+                atoms[element] = atoms.get(element, 0) + count * n
+            charge = (
+                None
+                if charge is None or species.charge is None
+                else (charge + count * species.charge)
+            )
+        counts[node.id] = {e: n for e, n in atoms.items() if n}
+        charges[node.id] = charge
+        text = species_service.text(species_service.describe(session, balance))
+        named[node.id] = f"“{_name_of(node)}” {text}" if text else f"“{_name_of(node)}”"
+    with_species = " with their free species" if balances else ""
     first = rows[0][0]
     for node, _ in rows[1:]:
-        if formulas[node.id] != formulas[first.id]:
+        if counts[node.id] != counts[first.id]:
             return (
-                f"The transition states must have the same atoms: “{_name_of(first)}” is "
-                f"{formulas[first.id]}, “{_name_of(node)}” is {formulas[node.id]}."
+                f"The transition states{with_species} must have the same atoms: "
+                f"{named[first.id]} is {_formula(counts[first.id])}, "
+                f"{named[node.id]} is {_formula(counts[node.id])}."
             )
-    charged = [node for node, _ in rows if node.charge is not None]
+    charged = [node for node, _ in rows if charges[node.id] is not None]
     for node in charged[1:]:
-        if node.charge != charged[0].charge:
+        if charges[node.id] != charges[charged[0].id]:
             return (
-                f"The transition states must have the same charge: “{_name_of(charged[0])}” "
-                f"has {charged[0].charge}, “{_name_of(node)}” has {node.charge}."
+                f"The transition states{with_species} must have the same charge: "
+                f"{named[charged[0].id]} has {charges[charged[0].id]}, "
+                f"{named[node.id]} has {charges[node.id]}."
             )
     return None
 
@@ -309,6 +368,8 @@ def result(
         "cutoff": settings.qh_cutoff,
         "standard_state": settings.standard_state,
         "conformers": selectivity.conformers,
+        "reference_id": selectivity.reference_id,
+        "reference_label": None,
         "outcomes": [],
         "excess": None,
         "notes": [],
@@ -350,6 +411,8 @@ def result(
                     "relative": None,
                     "share": None,
                     "share_in_outcome": None,
+                    "species": [],
+                    "species_value": None,
                     "message": None,
                 }
             )
@@ -370,7 +433,36 @@ def result(
             notes.append(message)
     if len(found["outcomes"]) < 2 or any(not o["members"] for o in found["outcomes"]):
         return stop("incomplete", "Add at least two outcomes, each with a transition state.")
-    refused = _check_atoms(rows)
+    # D103: the balance of every TS along its route from the reference (D72).
+    balances: dict[str, species_service.Balance] = {}
+    if selectivity.reference_id is not None:
+        reference = session.get(Node, selectivity.reference_id) or session.get(
+            GroupNode, selectivity.reference_id
+        )
+        if reference is None:
+            return stop(
+                "n/a",
+                "The reference is no longer in the investigation. Choose another, or none.",
+            )
+        found["reference_label"] = reference.label or (
+            "Group" if isinstance(reference, GroupNode) else "Untitled node"
+        )
+        graph = species_service.balances_from(session, reference.id)
+        apart = [_name_of(node) for node, _ in rows if node.id not in graph]
+        if apart:
+            names = ", ".join(f"“{name}”" for name in apart)
+            verb, own = ("is", "its") if len(apart) == 1 else ("are", "their")
+            return stop(
+                "refused",
+                f"{names} {verb} not joined to the reference “{found['reference_label']}” by "
+                f"transitions, so {own} free species are not known. Choose another reference, "
+                "or none.",
+            )
+        balances = {node.id: graph[node.id] for node, _ in rows}
+        for outcome in found["outcomes"]:
+            for member in outcome["members"]:
+                member["species"] = species_service.describe(session, balances[member["node_id"]])
+    refused = _check_atoms(session, rows, balances)
     if refused:
         return stop("refused", refused)
     if selectivity.level is None:
@@ -393,8 +485,20 @@ def result(
             if value.value is None:
                 member["message"] = value.message
                 missing.append(f"“{member['label']}” ({value.message})")
-            elif value.details.get("job_temperature") is not None:
+                continue
+            if value.details.get("job_temperature") is not None:
                 job_temperatures.add(value.details["job_temperature"])
+            balance = balances.get(member["node_id"], {})
+            added, message = species_service.energy(
+                session, energies, balance, key, selectivity.energy_type
+            )
+            if message is not None:
+                member["value"] = None
+                member["message"] = message
+                missing.append(f"“{member['label']}” ({message})")
+            elif balance:
+                member["species_value"] = added
+                member["value"] = value.value + added
     if missing:
         return stop("n/a", f"No {selectivity.energy_type} at this level for {', '.join(missing)}.")
     if selectivity.energy_type == "E":
