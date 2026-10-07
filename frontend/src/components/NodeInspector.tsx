@@ -18,6 +18,7 @@ import { Notes, TextField } from './Fields'
 import { PopOut, PopOutButton } from './PopOut'
 import { usePopOut } from '../popOut'
 import { HistoryList } from './HistoryList'
+import { UndoImportDialog } from './UndoImportDialog'
 import { Modal } from './Modal'
 import { PinnedNotesSection } from './NoteContent'
 import { SplitDialog } from './PathwayInspectors'
@@ -155,6 +156,7 @@ export function NodeInspector({
   const [movie, setMovie] = useState<Movie | null>(null)
   const [vibrationPicker, setVibrationPicker] = useState(0)
   const [poppedOut, setPoppedOut] = usePopOut()
+  const [undoing, setUndoing] = useState<HistoryEntry | null>(null)
 
   useEffect(() => {
     api.history(node.id).then(setHistory, (err: unknown) => setError(String(err)))
@@ -529,8 +531,21 @@ export function NodeInspector({
 
       <section aria-label="Node history">
         <h3>History of this node</h3>
-        <HistoryList entries={history} names={recordNames(canvas)} onRestore={restore} />
+        <HistoryList entries={history} names={recordNames(canvas)} onRestore={restore} onUndo={setUndoing} />
       </section>
+
+      {undoing && (
+        <UndoImportDialog
+          entry={undoing}
+          onClose={() => setUndoing(null)}
+          onDone={(result) => {
+            setUndoing(null)
+            // D102: undoing the import that made this node deletes it.
+            if (result.files.some((f) => f.deleted.some((d) => d.id === node.id))) onDeleted()
+            else onChanged(node, `Undid the import of ${result.files.map((f) => f.file).join(', ')}.`)
+          }}
+        />
+      )}
 
       {confirmDelete && (
         <Modal

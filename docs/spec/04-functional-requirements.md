@@ -288,6 +288,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-HIST-01 | Every change to a record (create, update with old and new values, delete) is appended to the history with a timestamp and a source (manual or import). | D29 | 1 |
 | FR-HIST-02 | History is viewable per record and for the whole investigation. | D29, D45 | 1 |
 | FR-HIST-03 | History entries are never edited or deleted by normal use. Reverting a change is done by making a new change (P15). | D29 | 1 |
+| FR-HIST-04 | An import, of one file or of a batch, can be undone from its history entry: its calculations, the stored copy and the nodes it created go, and what it changed on its node is put back. A dialog lists what will change first; the undo is refused, naming what depends on the import, when later work builds on it. | D102, A49 | later |
 | FR-OV-01 | The overview shows per-branch status and node counts by status, open items (planned, running, failed, warnings, direct connections), recent changes, and notes per step. Clicking an item navigates to it. | D45 | 5 |
 
 ## FR-SET · Settings

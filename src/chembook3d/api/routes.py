@@ -37,7 +37,7 @@ from chembook3d.models import (
     Node,
     SourceFile,
 )
-from chembook3d.services import basis_sets, energies, history, imports, levels
+from chembook3d.services import basis_sets, energies, history, import_undo, imports, levels
 from chembook3d.services import files as file_service
 from chembook3d.services import nodes as node_service
 from chembook3d.services import species as species_service
@@ -324,6 +324,8 @@ class HistoryOut(BaseModel):
     old_value: Any
     new_value: Any
     source: str
+    # D102: "import" or "batch" when the entry's import can still be undone
+    undo: str | None = None
 
 
 class SettingsOut(BaseModel):
@@ -429,8 +431,15 @@ def _node_out(session: Session, node: Node) -> NodeOut:
     )
 
 
-def _history_out(entry: HistoryEntry) -> HistoryOut:
-    return HistoryOut.model_validate(entry, from_attributes=True)
+def _history_out(entry: HistoryEntry, undo: dict[int, str] | None = None) -> HistoryOut:
+    out = HistoryOut.model_validate(entry, from_attributes=True)
+    out.undo = (undo or {}).get(entry.id)
+    return out
+
+
+def _history_list(session: Session, entries: list[HistoryEntry]) -> list[HistoryOut]:
+    undo = import_undo.undo_kinds(session, entries)
+    return [_history_out(e, undo) for e in entries]
 
 
 def _xyz_error(exc: xyz.XyzParseError) -> HTTPException:
@@ -783,7 +792,7 @@ def delete_node(node_id: str, session: DbSession):
 
 @router.get("/history", response_model=list[HistoryOut])
 def get_history(session: DbSession, record_id: str | None = None, limit: int = 200):
-    return [_history_out(e) for e in history.entries(session, record_id, min(limit, 1000))]
+    return _history_list(session, history.entries(session, record_id, min(limit, 1000)))
 
 
 # ---------- settings ----------

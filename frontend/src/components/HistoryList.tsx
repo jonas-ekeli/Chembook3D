@@ -206,8 +206,33 @@ function describeNote(entry: HistoryEntry): string | null {
   return `Pinned note${named} ${field}: ${String(before)} → ${String(after)}`
 }
 
+/** D102: an import undone, one file or a whole batch. */
+function describeUndo(entry: HistoryEntry): string | null {
+  if (entry.action === 'undo_import') {
+    const value = entry.old_value as {
+      file?: string
+      calculations?: unknown[]
+      deleted?: unknown[]
+      group?: { label: string } | null
+    } | null
+    const count = value?.calculations?.length ?? 0
+    const deleted = value?.deleted?.length ?? 0
+    let text = `Undid the import of ${String(value?.file ?? 'a file')}: ${count} calculation${count === 1 ? '' : 's'} removed`
+    if (value?.group) text += `, group “${value.group.label || 'Group'}” deleted`
+    else if (deleted) text += `, ${deleted} node${deleted === 1 ? '' : 's'} it made deleted`
+    return text
+  }
+  if (entry.record_type === 'batch_import' && entry.action === 'undo') {
+    const value = entry.old_value as { folder?: string; files?: string[] } | null
+    const files = value?.files ?? []
+    return `Undid the batch import from ${String(value?.folder ?? 'a folder')}: ${files.join(', ')}`
+  }
+  return null
+}
+
 function describe(entry: HistoryEntry, names: Names): string {
-  const other = describeNote(entry) ?? describeOther(entry) ?? describeStructure(entry, names)
+  const other =
+    describeUndo(entry) ?? describeNote(entry) ?? describeOther(entry) ?? describeStructure(entry, names)
   if (other !== null) return other
   if (entry.action === 'split') return `Split into branches ${named(names, entry.new_value)}`
   if (entry.action === 'create') {
@@ -274,12 +299,15 @@ export function HistoryList({
   names: known,
   onRestore,
   onSelect,
+  onUndo,
 }: {
   entries: HistoryEntry[]
   labels?: Map<string, string>
   names?: Names
   onRestore?: (entry: HistoryEntry) => void
   onSelect?: (recordId: string) => void
+  /** D102: undo the import an entry records (one file, or a whole batch) */
+  onUndo?: (entry: HistoryEntry) => void
 }) {
   const names = known ?? labels ?? new Map<string, string>()
   if (entries.length === 0) return <p className="muted">No changes recorded yet.</p>
@@ -300,6 +328,11 @@ export function HistoryList({
           {onRestore && canRestore(entry) && (
             <button className="small" onClick={() => onRestore(entry)}>
               Restore old value
+            </button>
+          )}
+          {onUndo && entry.undo && (
+            <button className="small" onClick={() => onUndo(entry)}>
+              {entry.undo === 'batch' ? 'Undo batch' : 'Undo import'}
             </button>
           )}
         </li>

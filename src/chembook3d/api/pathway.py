@@ -19,7 +19,7 @@ from chembook3d.api.routes import (
     NodeOut,
     WarningOut,
     _get_node,
-    _history_out,
+    _history_list,
     _investigation,
     _node_out,
 )
@@ -412,7 +412,7 @@ def overview(session: DbSession, since: date | None = None):
     return OverviewOut(
         branches=[BranchSummaryOut(**asdict(b)) for b in found.branches],
         open_items=[OpenItemOut(**asdict(i)) for i in found.open_items],
-        recent=[_history_out(e) for e in found.recent],
+        recent=_history_list(session, found.recent),
         steps=[StepNotesOut(**asdict(s)) for s in found.steps],
         group_count=found.group_count,
     )

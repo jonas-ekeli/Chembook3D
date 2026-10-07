@@ -652,6 +652,8 @@ def run(
                         "group_id": group.id if group else None,
                         "label": (group.label if group else node.label if node else "") or "",
                         "calculations": len(result.calculation_ids),
+                        # D102: so the batch can be undone file by file
+                        "source_file_id": result.source_file_id,
                     }
                 )
 

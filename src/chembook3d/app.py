@@ -14,6 +14,7 @@ from chembook3d.api.batch_imports import router as batch_router
 from chembook3d.api.claude import Panel
 from chembook3d.api.claude import router as claude_router
 from chembook3d.api.energies import router as energy_router
+from chembook3d.api.import_undo import router as undo_router
 from chembook3d.api.jobs import router as job_router
 from chembook3d.api.live import ChangeTracker, LiveState
 from chembook3d.api.live import router as live_router
@@ -104,6 +105,7 @@ def create_app() -> FastAPI:
 
     app.include_router(router)
     app.include_router(batch_router)
+    app.include_router(undo_router)
     app.include_router(pathway_router)
     app.include_router(energy_router)
     app.include_router(snapshot_router)

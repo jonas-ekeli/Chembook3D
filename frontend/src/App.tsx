@@ -30,6 +30,7 @@ import { download } from './util'
 import { FilterMenu } from './components/FilterMenu'
 import { FolderPicker } from './components/FolderPicker'
 import { HistoryList } from './components/HistoryList'
+import { UndoImportDialog } from './components/UndoImportDialog'
 import { BatchImportDialog } from './components/BatchImportDialog'
 import { ImportDialog } from './components/ImportDialog'
 import { Modal } from './components/Modal'
@@ -176,6 +177,7 @@ function App() {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [undoing, setUndoing] = useState<HistoryEntry | null>(null) // D102
   const [refreshKey, setRefreshKey] = useState(0)
   const [importRequest, setImportRequest] = useState<ImportRequest | null>(null)
   // D97: the folder whose outputs are being imported at once.
@@ -1280,7 +1282,23 @@ function App() {
         ) : (
           <main className="main history-view">
             <h2>Investigation history</h2>
-            <HistoryList entries={history} labels={labels} names={names} onSelect={(id) => selectNode(id, true)} />
+            <HistoryList
+              entries={history}
+              labels={labels}
+              names={names}
+              onSelect={(id) => selectNode(id, true)}
+              onUndo={setUndoing}
+            />
+            {undoing && (
+              <UndoImportDialog
+                entry={undoing}
+                onClose={() => setUndoing(null)}
+                onDone={() => {
+                  setUndoing(null)
+                  reload()
+                }}
+              />
+            )}
           </main>
         )}
           <ClaudePanel

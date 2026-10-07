@@ -42,7 +42,7 @@ from chembook3d.models import (
 )
 from chembook3d.services import branches as branch_service
 from chembook3d.services import groups as group_service
-from chembook3d.services import history
+from chembook3d.services import history, import_undo
 from chembook3d.services import nodes as node_service
 from chembook3d.services import species as species_service
 from chembook3d.services import transitions as transition_service
@@ -459,6 +459,30 @@ def _describe_note(session: Session, params: dict[str, Any]) -> str:
     return f"Delete the note {title}on node “{_label(node)}”"
 
 
+def _describe_undo(session: Session, params: dict[str, Any]) -> str:
+    """D102: only one file's import; a batch is undone from the app's history."""
+    try:
+        entry_id = int(params["entry_id"])
+    except ValueError as exc:
+        raise RecordError("entry_id must be the id of a history entry") from exc
+    try:
+        found = import_undo.preview_import(session, entry_id)
+    except import_undo.UndoNotPossible as exc:
+        raise RecordError(str(exc)) from exc
+    if found.blockers:
+        raise RecordError("This import cannot be undone: " + "; ".join(found.blockers))
+    summary = found.as_dict()
+    parts = [_count(len(summary["calculations"]), "calculation")]
+    if summary["group"]:
+        parts.append(f"the group “{summary['group']['label']}” with its members")
+    elif summary["deleted"]:
+        parts.append(_count(len(summary["deleted"]), "node") + " it made")
+    text = f"Undo the import of {summary['file']}: remove {_listing(parts)}"
+    if summary["restored"]:
+        text += " and put back what it changed on the node"
+    return text
+
+
 def _describe_named(model: type, what: str, param: str) -> Callable[[Session, dict], str]:
     def describe(session: Session, params: dict[str, Any]) -> str:
         record = get(session, model, params[param], what)
@@ -498,6 +522,7 @@ ACTIONS: dict[str, Action] = {
         "/api/steric-profiles/{profile_id}",
         _describe_named(StericProfile, "Steric profile", "profile_id"),
     ),
+    "undo_import": Action("POST", "/api/history/{entry_id}/undo", _describe_undo),
     "delete_alignment_set": Action(
         "DELETE",
         "/api/alignment-sets/{set_id}",
