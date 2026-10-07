@@ -36,7 +36,11 @@ function hideHydrogens(model: import('3dmol').GLModel, xyz: string, mode: Hydrog
  * For overlays (D80), a model can be hidden without losing the view, `picking` collects
  * alignment atoms, and `imageRef` is given a function returning the view as a PNG data URL.
  *
- * `corner` is drawn in the view's upper right corner (the pop-out button, D82). */
+ * `corner` is drawn in the view's upper right corner (the pop-out button, D82).
+ *
+ * With `trajectory` (D101), the first model is a movie of the structures in `frames` (xyz
+ * texts with the same atoms), showing the one at `index`; measuring follows that structure.
+ * `below` is drawn under the view, inside the pop-out with it (the movie's controls). */
 export function Viewer3D({
   models,
   vibration = null,
@@ -45,6 +49,8 @@ export function Viewer3D({
   picking,
   imageRef,
   corner,
+  trajectory = null,
+  below,
 }: {
   models: ViewerModel[]
   vibration?: { xyz: string; amplitude?: number } | null
@@ -53,6 +59,8 @@ export function Viewer3D({
   picking?: AtomPicking
   imageRef?: MutableRefObject<(() => string) | null>
   corner?: ReactNode
+  trajectory?: { frames: string[]; index: number } | null
+  below?: ReactNode
 }) {
   const hydrogens = useContext(HydrogenDisplay)
   const host = useRef<HTMLDivElement>(null)
@@ -65,10 +73,14 @@ export function Viewer3D({
   const structures = models.map((m) => m.xyz).join('\n')
   const key = models.map((m) => `${m.colour ?? ''}:${m.hidden ? 'hidden' : ''}:${m.xyz}`).join('\n')
   const built = useRef<string | null>(null)
+  const click = useRef<((atom: { serial?: number; index?: number }) => void) | null>(null)
   // The click handler is made once per build; it reads the current picking through this.
   const pickingRef = useRef(picking)
   pickingRef.current = picking
-  const atoms = useMemo(() => (models[0] ? parseXyz(models[0].xyz) : []), [models])
+  const movie = vibration ? null : trajectory
+  const frames = useMemo(() => movie?.frames.join('') ?? '', [movie?.frames])
+  const shownXyz = movie ? movie.frames[movie.index] : models[0]?.xyz
+  const atoms = useMemo(() => (shownXyz ? parseXyz(shownXyz) : []), [shownXyz])
   const empty = models.length === 0
   // The orientation to show: applied when the structure or the saved orientation changes,
   // not when a vibration starts or stops, so the user's own turning is kept then.
@@ -78,16 +90,27 @@ export function Viewer3D({
   // Models: rebuilt only when the structures or the vibration change.
   useEffect(() => {
     let cancelled = false
-    setPicks([])
+    // Picked atoms are kept while a movie of the same structure starts, stops or changes (D101).
+    if (built.current !== structures) setPicks([])
     if (empty) return
     import('3dmol')
       .then(($3Dmol) => {
         if (cancelled || !host.current) return
         if (!viewer.current) viewer.current = $3Dmol.createViewer(host.current, { backgroundColor: 'white' })
         const v = viewer.current
-        // Showing or hiding a structure keeps the user's view; new structures are zoomed to.
+        // Showing or hiding a structure, or starting or stopping a movie of it (D101), keeps
+        // the user's view; new structures are zoomed to.
         const kept = !vibration && built.current === structures ? v.getView() : null
         built.current = vibration ? null : structures
+        click.current = (atom: { serial?: number; index?: number }) => {
+          const index = atom.serial ?? atom.index
+          if (index === undefined) return
+          if (pickingRef.current) {
+            pickingRef.current.onToggle(index)
+            return
+          }
+          setPicks((current) => (current.length >= 4 ? [index] : current.includes(index) ? current : [...current, index]))
+        }
         v.stopAnimate()
         v.clear()
         if (vibration) {
@@ -98,7 +121,7 @@ export function Viewer3D({
           v.animate({ loop: 'backAndForth', reps: 0, interval: 40 })
         } else {
           models.forEach((m, index) => {
-            const model = v.addModel(m.xyz, 'xyz')
+            const model = index === 0 && frames ? v.addModelsAsFrames(frames, 'xyz') : v.addModel(m.xyz, 'xyz')
             if (m.hidden) {
               model.setStyle({}, {})
               return
@@ -107,15 +130,7 @@ export function Viewer3D({
             model.setStyle({}, { stick: { radius: index ? 0.1 : 0.14, ...colour }, sphere: { scale: index ? 0.18 : 0.25, ...colour } })
             hideHydrogens(model, m.xyz, hydrogens)
           })
-          v.setClickable({ model: 0 }, true, (atom: { serial?: number; index?: number }) => {
-            const index = atom.serial ?? atom.index
-            if (index === undefined) return
-            if (pickingRef.current) {
-              pickingRef.current.onToggle(index)
-              return
-            }
-            setPicks((current) => (current.length >= 4 ? [index] : current.includes(index) ? current : [...current, index]))
-          })
+          v.setClickable({ model: 0 }, true, click.current)
         }
         if (kept) v.setView(kept)
         else v.zoomTo()
@@ -131,7 +146,21 @@ export function Viewer3D({
     }
     // `key` stands for `models`, which is a new array on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, vibration, empty, hydrogens])
+  }, [key, vibration, empty, hydrogens, frames])
+
+  // D101: the movie's structure. Clicks are set per structure, as 3Dmol keeps them per atom.
+  const frameIndex = movie?.index ?? 0
+  const frameCount = movie?.frames.length ?? 0
+  useEffect(() => {
+    const v = viewer.current
+    const model = v?.getModel(0)
+    // Only the movie's own model: until it is built, the view may still hold another one.
+    if (!v || !model || !ready || !frameCount || model.getNumFrames() !== frameCount) return
+    void model.setFrame(frameIndex).then(() => {
+      if (click.current) model.setClickable({}, true, click.current)
+      v.render()
+    })
+  }, [ready, frames, frameIndex, frameCount])
 
   // Orientation: the saved one, or the default the structure card uses.
   useEffect(() => {
@@ -238,6 +267,7 @@ export function Viewer3D({
         {empty && <p className="muted viewer-empty">No coordinates yet.</p>}
         {corner && <div className="viewer-corner">{corner}</div>}
       </div>
+      {below}
       {!empty && !vibration && !picking && (
         <div className="measure" aria-label="Measure">
           <span className="muted small">Click 2–4 atoms, or type their numbers:</span>

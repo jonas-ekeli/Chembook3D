@@ -976,6 +976,7 @@ function App() {
         isReference={referenceId === selectedNode.id}
         onUseAsReference={() => setReferenceId(selectedNode.id)}
         onEditNote={(noteId) => setNoteEditing(noteId ? { noteId } : { nodeId: selectedNode.id })}
+        settings={settings}
       />
     )
   } else if (selectedGroup) {

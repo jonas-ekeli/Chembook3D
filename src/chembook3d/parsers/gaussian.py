@@ -181,6 +181,7 @@ _TEMPERATURE_RE = re.compile(
 )
 _CHARGE_RE = re.compile(r"^ Charge =\s*(-?\d+) Multiplicity =\s*(\d+)")
 _ORIENTATIONS = ("Input orientation:", "Z-Matrix orientation:", "Standard orientation:")
+_SCAN_POINT_RE = re.compile(r"^ Step number\s+\d+ out of a maximum of\s+\d+ on scan point\s+(\d+)")
 
 
 def _is_dashes(line: str) -> bool:
@@ -300,6 +301,10 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
         step.route = parse_route(route_text)
 
     orientations: dict[str, list[list[Atom]]] = {name: [] for name in _ORIENTATIONS}
+    # D101: per orientation, the energy and scan point of each structure and the converged ones.
+    energies: dict[str, list[float | None]] = {name: [] for name in _ORIENTATIONS}
+    points: dict[str, list[int | None]] = {name: [] for name in _ORIENTATIONS}
+    converged: dict[str, list[int]] = {name: [] for name in _ORIENTATIONS}
     basis: dict[int, str] = {}
     ecp: dict[int, str] = {}
     frequencies: list[float] = []
@@ -312,11 +317,27 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
             atoms, i = _read_orientation(lines, i)
             if atoms:
                 orientations[line.strip()].append(atoms)
+                energies[line.strip()].append(None)
+                points[line.strip()].append(None)
             continue
         elif line.startswith(" SCF Done:"):
             step.scf_energy = float(line.split()[4])
+            for name in _ORIENTATIONS:
+                if energies[name]:
+                    energies[name][-1] = step.scf_energy
         elif "Optimization completed." in line or "-- Stationary point found." in line:
             step.optimization_converged = True
+            for name in _ORIENTATIONS:
+                last = len(orientations[name]) - 1
+                if last >= 0 and last not in converged[name]:
+                    converged[name].append(last)
+        elif (match := _SCAN_POINT_RE.match(line)) is not None:
+            step.scan = "relaxed"
+            for name in _ORIENTATIONS:
+                if points[name]:
+                    points[name][-1] = int(match.group(1))
+        elif line.startswith(" Summary of the potential surface scan"):
+            step.scan = "rigid"
         elif line.startswith(" General basis read from cards"):
             basis = _read_general_basis(lines, i)
         elif line.strip() == "Pseudopotential Parameters":
@@ -359,7 +380,13 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
     for name in _ORIENTATIONS:
         if orientations[name]:
             step.geometries = orientations[name]
+            step.geometry_energies = energies[name]
+            step.geometry_points = points[name]
+            step.converged_geometries = converged[name]
             break
+    if step.scan == "rigid":  # every structure of a rigid scan is one of its points
+        step.geometry_points = list(range(1, len(step.geometries) + 1))
+        step.converged_geometries = list(range(len(step.geometries)))
     if step.job_type in ("optimization", "ts_optimization") and not step.optimization_converged:
         step.optimization_converged = False
     elif step.job_type not in ("optimization", "ts_optimization"):

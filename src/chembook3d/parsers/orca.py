@@ -238,6 +238,8 @@ def _parse_block(lines: list[str], step: ParsedStep, geometries: bool = True) ->
     frequencies: list[tuple[int, float]] = []
     first_vibration: int | None = None
     modes: list = []
+    point: int | None = None  # D101: the relaxed scan step being read
+    final_evaluation = False  # the next structure is the converged one, printed again
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -246,18 +248,34 @@ def _parse_block(lines: list[str], step: ParsedStep, geometries: bool = True) ->
             atoms, i = _read_coordinates(lines, i)
             if atoms and geometries:
                 step.geometries.append(atoms)
+                step.geometry_energies.append(None)
+                step.geometry_points.append(point)
+                if final_evaluation and step.converged_geometries:
+                    step.converged_geometries[-1] = len(step.geometries) - 1
+                final_evaluation = False
             continue
         if line.startswith("FINAL SINGLE POINT ENERGY"):
             try:
                 energies.append(float(line.split()[4]))
             except (IndexError, ValueError):
                 pass
+            else:
+                if step.geometry_energies:
+                    step.geometry_energies[-1] = energies[-1]
+        elif match := re.search(r"RELAXED SURFACE SCAN STEP\s+(\d+)", line):
+            step.scan, point = "relaxed", int(match.group(1))
+        elif stripped == "* Parameter Scan Calculation *":
+            step.scan = "rigid"
+        elif "FINAL ENERGY EVALUATION AT THE STATIONARY POINT" in line:
+            final_evaluation = True
         elif step.charge is None and line.startswith(" Total Charge") and "...." in line:
             step.charge = int(line.split()[-1])
         elif step.multiplicity is None and line.startswith(" Multiplicity") and "...." in line:
             step.multiplicity = int(line.split()[-1])
         elif "THE OPTIMIZATION HAS CONVERGED" in line:
             step.optimization_converged = True
+            if step.geometries:
+                step.converged_geometries.append(len(step.geometries) - 1)
         elif "The optimization did not converge" in line:
             step.optimization_converged = False
         elif stripped == "VIBRATIONAL FREQUENCIES" and not frequencies:
@@ -295,6 +313,9 @@ def _parse_block(lines: list[str], step: ParsedStep, geometries: bool = True) ->
         i += 1
     if energies:
         step.scf_energy = energies[-1]
+    if step.scan == "rigid":  # every structure of a rigid scan is one of its points
+        step.geometry_points = list(range(1, len(step.geometries) + 1))
+        step.converged_geometries = list(range(len(step.geometries)))
     return {"frequencies": frequencies, "first": first_vibration, "modes": modes}
 
 
