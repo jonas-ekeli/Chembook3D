@@ -52,7 +52,8 @@ Investigation
  ├── AlignmentSet ── per node: atom numbers   (D80; layout-like, no history)
  ├── StericProfile ── settings; per node: centre, orientation, left-out atoms, last result
  │                    (D81; layout-like, no history)
- ├── Selectivity ── settings (level, energy type, temperature, conformers); outcomes:
+ ├── Selectivity ── settings (level, energy type, temperature, conformers, reference Node|GroupNode
+ │                  for free species, D103); outcomes:
  │                  [name, TS Node|GroupNode[1..n], experimental amount][2..n]   (D83; in the history)
  ├── NodeNote ── per node: corner, colour, title, formatted text, width, collapsed;
  │               on the corner or floating (with a line or not, offset), height (D87);

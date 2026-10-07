@@ -29,6 +29,7 @@ class SelectivityOut(BaseModel):
     temperature: float | None  # None: the G_qh temperature setting
     conformers: str
     excess: str
+    reference_id: str | None  # D103: TSs balanced by free species from this node or group
     notes: str
     outcomes: list[OutcomeOut]
 
@@ -46,6 +47,7 @@ class SelectivityIn(BaseModel):
     temperature: float | None = None
     conformers: str | None = None
     excess: str | None = None
+    reference_id: str | None = None
     notes: str | None = None
     outcomes: list[OutcomeIn] | None = None
 
@@ -59,6 +61,7 @@ def _out(selectivity: Selectivity) -> SelectivityOut:
         temperature=selectivity.temperature,
         conformers=selectivity.conformers,
         excess=selectivity.excess,
+        reference_id=selectivity.reference_id,
         notes=selectivity.notes,
         outcomes=[OutcomeOut(**o) for o in selectivity_service.outcomes_value(selectivity)],
     )

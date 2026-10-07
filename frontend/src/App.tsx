@@ -910,7 +910,13 @@ function App() {
         const taken = new Set(existing.map((s) => s.name))
         let n = existing.length + 1
         while (taken.has(`Selectivity ${n}`)) n++
-        return api.createSelectivity({ name: `Selectivity ${n}`, level: levelKey, outcomes })
+        return api.createSelectivity({
+          name: `Selectivity ${n}`,
+          level: levelKey,
+          // D103: balanced from the energy view's reference, as the node cards are
+          reference_id: referenceId,
+          outcomes,
+        })
       })
       .then(
         (created) => {

@@ -664,6 +664,8 @@ TOOLS: list[ToolSpec] = [
             "amount}.",
             "conformers": "'boltzmann' (sum over each outcome's TSs) or 'lowest'.",
             "excess": "'ee', 'de' or 'none' (ratio only).",
+            "reference_id": "Optional node or group: each TS is then balanced by the free "
+            "species along its route from it, as its node card is. null for none.",
         },
     ),
     T(
@@ -677,6 +679,8 @@ TOOLS: list[ToolSpec] = [
             "amount}.",
             "conformers": "'boltzmann' or 'lowest'.",
             "excess": "'ee', 'de' or 'none'.",
+            "reference_id": "Optional node or group: each TS is then balanced by the free "
+            "species along its route from it, as its node card is. null for none.",
         },
     ),
     T(

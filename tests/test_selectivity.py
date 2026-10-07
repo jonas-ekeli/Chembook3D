@@ -8,8 +8,9 @@ import pytest
 from chembook3d import thermochem
 from chembook3d.units import GAS_CONSTANT, J_PER_MOL_HARTREE
 from tests import gaussian_text as g
-from tests.test_energies import import_file, level_key, settings
+from tests.test_energies import add_energies, import_file, level_key, settings
 from tests.test_pathway import get, history, node, patch, post
+from tests.test_species import COMPLEX, ETHYLENE, PROPENE, RU_CH2, RU_CHCH3, put, xyz
 
 KCAL = 627.5094740631
 R = GAS_CONSTANT / J_PER_MOL_HARTREE  # hartree/K
@@ -319,3 +320,113 @@ def test_selectivities_are_in_the_history_and_follow_deleted_nodes(open_client):
     assert open_client.delete(f"/api/selectivities/{sid}").status_code == 204
     assert get(open_client, "/selectivities") == []
     assert history(open_client, sid)[0]["action"] == "delete"
+
+
+def test_a_reference_balances_each_transition_state_by_its_free_species(open_client):
+    # T-SEL-09, D103: TS-b lies after ethylene has left, so it has fewer atoms than TS-a. From
+    # the reference A, its balance adds ethylene back (D72), and the TSs compare.
+    ids = {}
+    for name, atoms, role in (
+        ("A", RU_CH2, "minimum"),
+        ("B", COMPLEX, "minimum"),
+        ("TS-a", COMPLEX, "transition_state"),
+        ("C", RU_CHCH3, "minimum"),
+        ("TS-b", RU_CHCH3, "transition_state"),
+        ("Apart", RU_CHCH3, "transition_state"),
+    ):
+        ids[name] = node(open_client, label=name, role=role, charge=0, xyz=xyz(*atoms))["id"]
+    for name, atoms in (("propene", PROPENE), ("ethylene", ETHYLENE)):
+        ids[name] = node(open_client, label=name, kind="species", charge=0, xyz=xyz(*atoms))["id"]
+    edges = {
+        pair: post(
+            open_client, "/transitions", {"source_id": ids[pair[0]], "target_id": ids[pair[1]]}
+        )["id"]
+        for pair in (("A", "B"), ("B", "TS-a"), ("B", "C"), ("C", "TS-b"))
+    }
+    put(
+        open_client,
+        f"/transitions/{edges[('A', 'B')]}/species",
+        {"species_id": ids["propene"], "direction": "joins"},
+    )
+    put(
+        open_client,
+        f"/transitions/{edges[('B', 'C')]}/species",
+        {"species_id": ids["ethylene"], "direction": "leaves"},
+    )
+    energies = {
+        "A": -100.0,
+        "propene": -10.0,
+        "B": -110.01,
+        "TS-a": -109.99,
+        "C": -94.99,
+        "TS-b": -94.96,
+    }
+    for name, value in energies.items():
+        add_energies(open_client, ids[name], value)
+    svp = level_key(open_client, "Gaussian B3LYP/def2SVP")
+    body = {
+        "name": "Route",
+        "level": svp,
+        "energy_type": "E",
+        "outcomes": [
+            {"name": "a", "members": [ids["TS-a"]]},
+            {"name": "b", "members": [ids["TS-b"]]},
+        ],
+    }
+    created = post(open_client, "/selectivities", body)
+    assert created["reference_id"] is None
+
+    # Without a reference the atoms differ, as before.
+    found = result(open_client, created["id"])
+    assert found["status"] == "refused" and "same atoms" in found["message"]
+
+    patched = patch(open_client, f"/selectivities/{created['id']}", {"reference_id": ids["A"]})
+    assert patched["reference_id"] == ids["A"]
+    # The species has no value yet: n/a, with no fallback (EN-3).
+    found = result(open_client, created["id"])
+    assert found["status"] == "n/a" and "ethylene" in found["message"]
+    assert found["reference_label"] == "A"
+
+    add_energies(open_client, ids["ethylene"], -15.02)
+    found = result(open_client, created["id"])
+    assert found["status"] == "ok", found["message"]
+    outcomes = by_name(found)
+    a, b = outcomes["a"]["members"][0], outcomes["b"]["members"][0]
+    # Both are balanced to A's atoms: propene is taken from each, ethylene added to TS-b.
+    assert [(s["label"], s["count"]) for s in a["species"]] == [("propene", -1)]
+    assert [(s["label"], s["count"]) for s in b["species"]] == [("propene", -1), ("ethylene", 1)]
+    assert a["value"] == pytest.approx(-109.99 + 10.0)
+    assert b["species_value"] == pytest.approx(10.0 - 15.02)
+    assert b["value"] == pytest.approx(-94.96 + 10.0 - 15.02)
+    ddg = (-94.96 - 15.02) - (-109.99)  # 0.01 hartree, b above a
+    assert outcomes["b"]["boltzmann_ddg"] == pytest.approx(ddg)
+    rt = R * 298.15
+    assert outcomes["a"]["boltzmann_percent"] == pytest.approx(100 / (1 + math.exp(-ddg / rt)))
+
+    # A TS with no route from the reference is refused, with the way out.
+    patch(
+        open_client,
+        f"/selectivities/{created['id']}",
+        {
+            "outcomes": [
+                {"name": "a", "members": [ids["TS-a"]]},
+                {"name": "b", "members": [ids["TS-b"], ids["Apart"]]},
+            ]
+        },
+    )
+    found = result(open_client, created["id"])
+    assert found["status"] == "refused"
+    assert "“Apart” is not joined to the reference “A”" in found["message"]
+
+    # A free species cannot be the reference; the change is in the history.
+    response = open_client.patch(
+        f"/api/selectivities/{created['id']}", json={"reference_id": ids["ethylene"]}
+    )
+    assert response.status_code == 422 and "free species" in response.json()["detail"]
+    entry = next(e for e in history(open_client, created["id"]) if e["field"] == "reference_id")
+    assert entry["old_value"] is None and entry["new_value"] == ids["A"]
+
+    # A deleted reference leaves the result n/a, not an error.
+    open_client.delete(f"/api/nodes/{ids['A']}")
+    found = result(open_client, created["id"])
+    assert found["status"] == "n/a" and "reference is no longer" in found["message"]

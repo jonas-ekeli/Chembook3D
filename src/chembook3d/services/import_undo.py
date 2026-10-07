@@ -38,6 +38,7 @@ from chembook3d.models import (
     HistoryEntry,
     Node,
     NodeNote,
+    Selectivity,
     SelectivityMember,
     SourceFile,
     StericProfileAtoms,
@@ -402,7 +403,10 @@ def _depends_on_created(
             or_(SelectivityMember.node_id.in_(ids), SelectivityMember.group_id.in_(ends))
         )
     ).all()
-    if members:
+    references = session.scalars(
+        select(Selectivity).where(Selectivity.reference_id.in_(ends))
+    ).all()
+    if members or references:
         blockers.append("A selectivity counts what this import made")
     if any(set(t.path or []) & set(ends) for t in session.scalars(select(Turnover))):
         blockers.append("A turnover's pathway goes through what this import made")

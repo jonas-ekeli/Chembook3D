@@ -568,6 +568,9 @@ class Selectivity(Base):
     excess: Mapped[str] = mapped_column(String(8), default="ee")  # ee | de | none
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    # D103: a node or group id; every TS is then balanced by the free species along its route
+    # from it (D72). No foreign key, as it may be either; a deleted one makes the result n/a.
+    reference_id: Mapped[str | None] = mapped_column(String(32), default=None)
 
     outcomes: Mapped[list["SelectivityOutcome"]] = relationship(
         cascade="all, delete-orphan",
