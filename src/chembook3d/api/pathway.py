@@ -7,7 +7,7 @@ from dataclasses import asdict
 from datetime import date, datetime, time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,7 @@ from chembook3d.api.routes import (
     WarningOut,
     _get_node,
     _history_out,
+    _investigation,
     _node_out,
 )
 from chembook3d.models import (
@@ -34,7 +35,7 @@ from chembook3d.models import (
 from chembook3d.services import alignment as alignment_service
 from chembook3d.services import branches as branch_service
 from chembook3d.services import groups as group_service
-from chembook3d.services import layout
+from chembook3d.services import layout, trajectory
 from chembook3d.services import nodes as node_service
 from chembook3d.services import notes as note_service
 from chembook3d.services import overview as overview_service
@@ -206,6 +207,21 @@ class ModesOut(BaseModel):
     frequencies: list[float]
     order: list[int]  # mode indices, imaginary first (FR-3D-03)
     modes: list[list[list[float]]]  # [mode][atom][dx, dy, dz]
+
+
+class StepFrameOut(BaseModel):
+    geometry: list[list[Any]]  # [[element, x, y, z], ...], placed on the final geometry
+    energy: float | None  # hartree
+    point: int | None  # scan point, 1-based
+    converged: bool
+
+
+class StepsOut(BaseModel):
+    """D101: the structures of an optimization or scan, for the movie in the 3D view."""
+
+    scan: str | None  # "relaxed", "rigid" or None
+    points: int
+    frames: list[StepFrameOut]
 
 
 class OverlayIn(BaseModel):
@@ -615,6 +631,32 @@ def calculation_modes(calculation_id: str, session: DbSession):
         frequencies=frequencies,
         order=order,
         modes=result.normal_modes,
+    )
+
+
+@router.get("/calculations/{calculation_id}/steps", response_model=StepsOut)
+def calculation_steps(calculation_id: str, request: Request, session: DbSession):
+    """D101: every structure of the calculation's step with its energy, read again from the
+    copied output file."""
+    calculation = session.get(Calculation, calculation_id)
+    if calculation is None:
+        raise HTTPException(404, "Calculation not found")
+    try:
+        steps = trajectory.read_steps(_investigation(request).folder, calculation)
+    except trajectory.StepsUnavailable as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return StepsOut(
+        scan=steps.scan,
+        points=steps.points,
+        frames=[
+            StepFrameOut(
+                geometry=[[e, round(x, 6), round(y, 6), round(z, 6)] for e, x, y, z in f.rows],
+                energy=f.energy,
+                point=f.point,
+                converged=f.converged,
+            )
+            for f in steps.frames
+        ],
     )
 
 

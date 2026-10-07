@@ -11,6 +11,7 @@ import {
   type Node,
   type NodeDeletePreview,
   type NodeFields,
+  type Settings,
 } from '../api'
 import { CalculationList } from './CalculationList'
 import { Notes, TextField } from './Fields'
@@ -23,6 +24,7 @@ import { SplitDialog } from './PathwayInspectors'
 import { StericsSection } from './Sterics'
 import { recordNames } from '../names'
 import { Vibrations } from './Vibrations'
+import { StepMovie, type Movie } from './StepMovie'
 import { Viewer3D } from './Viewer3D'
 import { XyzEditor } from './XyzEditor'
 
@@ -118,6 +120,7 @@ export function NodeInspector({
   isReference,
   onUseAsReference,
   onEditNote,
+  settings,
 }: {
   node: Node
   canvas: Canvas
@@ -135,6 +138,8 @@ export function NodeInspector({
   onUseAsReference: () => void
   /** D85: write a pinned note; null for a new one. */
   onEditNote: (noteId: string | null) => void
+  /** The display unit for the step movie's energies (D101). */
+  settings: Settings | null
 }) {
   const nodes = [...canvas.nodes, ...canvas.species]
   // D69: a free species has no step, branch, group or edges; transitions list it instead.
@@ -145,6 +150,10 @@ export function NodeInspector({
   const [confirmDelete, setConfirmDelete] = useState<NodeDeletePreview | null>(null)
   const [splitting, setSplitting] = useState(false)
   const [vibration, setVibration] = useState<{ xyz: string } | null>(null)
+  // D101: the movie of an optimization's structures; choosing one stops a vibration (the
+  // vibration picker is started afresh), and choosing a vibration stops the movie.
+  const [movie, setMovie] = useState<Movie | null>(null)
+  const [vibrationPicker, setVibrationPicker] = useState(0)
   const [poppedOut, setPoppedOut] = usePopOut()
 
   useEffect(() => {
@@ -407,9 +416,20 @@ export function NodeInspector({
               rotation={node.view_rotation}
               onSaveRotation={isSpecies ? undefined : (view_rotation) => update({ view_rotation })}
               corner={<PopOutButton popped={poppedOut} onClick={() => setPoppedOut(!poppedOut)} />}
+              trajectory={movie}
+              below={
+                <StepMovie
+                  nodeId={node.id}
+                  refreshKey={refreshKey}
+                  settings={settings}
+                  vibrating={vibration !== null}
+                  onShow={setMovie}
+                  onStart={() => setVibrationPicker((n) => n + 1)}
+                />
+              }
             />
           </PopOut>
-          <Vibrations nodeId={node.id} refreshKey={refreshKey} onChange={setVibration} />
+          <Vibrations key={vibrationPicker} nodeId={node.id} refreshKey={refreshKey} onChange={setVibration} />
           <XyzEditor
             key={node.xyz ?? ''}
             node={node}

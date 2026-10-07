@@ -290,6 +290,10 @@ export type GroupDeletePreview = {
 
 export type Modes = { xyz: string; frequencies: number[]; order: number[]; modes: number[][][] }
 
+/** D101: one structure of an optimization or scan, turned onto the calculation's final geometry. */
+export type StepFrame = { geometry: GeometryRows; energy: number | null; point: number | null; converged: boolean }
+export type Steps = { scan: 'relaxed' | 'rigid' | null; points: number; frames: StepFrame[] }
+
 /** D80: all atoms (when they correspond), chosen atoms, or the stored coordinates. */
 export type OverlayAlign = 'all' | 'atoms' | 'none'
 
@@ -1286,6 +1290,7 @@ export const api = {
   },
 
   modes: (calculationId: string) => request<Modes>('GET', `/calculations/${calculationId}/modes`),
+  steps: (calculationId: string) => request<Steps>('GET', `/calculations/${calculationId}/steps`),
   overlay: (body: OverlayRequest) => request<Overlay>('POST', '/overlay', body),
   alignmentSets: () => request<AlignmentSet[]>('GET', '/alignment-sets'),
   createAlignmentSet: (name: string, atoms: Record<string, number[]>) =>
