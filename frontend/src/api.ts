@@ -381,11 +381,44 @@ export type HistoryEntry = {
   record_id: string
   // split, reconnect, add_members, remove_member and dissolve are the structural actions INV-3
   // records as one entry each
-  action: 'create' | 'update' | 'delete' | 'split' | 'reconnect' | 'add_members' | 'remove_member' | 'dissolve'
+  // undo_import (one file) and undo (a batch) undo an import (D102)
+  action:
+    | 'create'
+    | 'update'
+    | 'delete'
+    | 'split'
+    | 'reconnect'
+    | 'add_members'
+    | 'remove_member'
+    | 'dissolve'
+    | 'undo_import'
+    | 'undo'
   field: string | null
   old_value: unknown
   new_value: unknown
   source: string
+  /** D102: the entry's import can still be undone, one file or a whole batch */
+  undo?: 'import' | 'batch' | null
+}
+
+/** D102: what undoing one imported file removes and puts back. */
+export type UndoFile = {
+  source_file_id: string
+  file: string
+  blockers: string[]
+  calculations: { type: string; level: string; step: number; node_id: string }[]
+  deleted: { id: string; label: string }[]
+  group: { id: string; label: string } | null
+  restored: { node_id: string; label: string; field: string }[]
+  kept: { node_id: string; label: string; field: string; value: unknown }[]
+  tags: { node_id: string; label: string; removed: string[]; added: string[] }[]
+}
+
+export type UndoPreview = {
+  kind: 'import' | 'batch'
+  folder: string | null
+  blockers: string[]
+  files: UndoFile[]
 }
 
 export type Settings = {
@@ -1130,6 +1163,9 @@ export const api = {
       'GET',
       recordId ? `/history?record_id=${encodeURIComponent(recordId)}` : '/history',
     ),
+
+  undoPreview: (entryId: number) => request<UndoPreview>('GET', `/history/${entryId}/undo`),
+  undoImport: (entryId: number) => request<UndoPreview>('POST', `/history/${entryId}/undo`),
 
   overview: (since?: string | null) =>
     request<Overview>('GET', since ? `/overview?since=${encodeURIComponent(since)}` : '/overview'),

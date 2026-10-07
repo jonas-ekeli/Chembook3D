@@ -43,7 +43,7 @@ NOT_OFFERED = re.compile(
     r"|source-files/[^/]+/(open|download)|imports|batch-imports(/.*)?|note-images(/.*)?|health"
     r"|live|selection$|confirmations(/.*)?|nodes/[^/]+/delete-preview"
     r"|groups/[^/]+/delete-preview|steric-profiles/[^/]+/(difference|table\.csv)"
-    r"|energies/table\.csv|turnovers/[^/]+/table\.csv|custom-bases/[^/]+/file"
+    r"|energies/table\.csv|history/[^/]+/undo|turnovers/[^/]+/table\.csv|custom-bases/[^/]+/file"
     r"|claude(/.*)?)$"  # the Claude panel (D92): Claude never starts terminals
 )
 

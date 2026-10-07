@@ -759,6 +759,10 @@ CONFIRM_DESCRIPTIONS = {
     "delete_branch": "Delete a branch; its nodes stay with no branch.",
     "delete_transition": "Delete a transition (edge).",
     "remove_coordinates": "Remove the coordinates of a node with no calculations (D90).",
+    "undo_import": "Undo the import of one file (D102): give the id of a history entry of type "
+    "'calculation' and action 'create' whose `undo` is 'import'. Its calculations, the nodes it "
+    "made and the stored copy go, and what it changed on its node is put back. Refused, with "
+    "what depends on it, when later work builds on the import.",
     "delete_note": "Delete a note pinned to a node.",
     "delete_selectivity": "Delete a saved selectivity.",
     "delete_turnover": "Delete a saved turnover.",

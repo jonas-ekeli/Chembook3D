@@ -213,3 +213,42 @@ test('the file browser starts where the last file was picked and filters by name
   await expect(files.getByRole('listitem')).toHaveCount(3)
   await dialog.getByRole('button', { name: 'Cancel' }).click()
 })
+
+test('an import is undone from the node history', async ({ page }) => {
+  // D102, T-IMP-18
+  await newInvestigation(page, 'Undo test')
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Upload a file').setInputFiles(join(FIXTURES, 'aminationTS-full-unfrz-c1.log'))
+  await expect(dialog.getByLabel('Import preview')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  const inspector = page.getByLabel('Node inspector')
+  const calculations = inspector.getByRole('list', { name: 'Calculations' })
+  await expect(calculations.getByRole('listitem')).toHaveCount(2)
+
+  await inspector.getByRole('button', { name: 'Import onto node…' }).click()
+  await dialog.getByLabel('Upload a file').setInputFiles(join(FIXTURES, 'aminationTS-full-unfrz-c1_sp_tzpop.log'))
+  await expect(dialog.getByLabel('Import preview')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(calculations.getByRole('listitem')).toHaveCount(3)
+
+  // The newest line is the single point's; undoing it leaves the TS job as it was.
+  const history = inspector.getByRole('list', { name: 'History' })
+  await history.getByRole('button', { name: 'Undo import' }).first().click()
+  const undo = page.getByRole('dialog', { name: 'Undo import?' })
+  await expect(undo).toContainText('Removes 1 calculation (single point)')
+  await undo.getByRole('button', { name: 'Undo import' }).click()
+  await expect(undo).toHaveCount(0)
+  await expect(calculations.getByRole('listitem')).toHaveCount(2)
+  await expect(history).toContainText('Undid the import of aminationTS-full-unfrz-c1_sp_tzpop.log')
+
+  // Undoing the import that made the node deletes it.
+  await history.getByRole('button', { name: 'Undo import' }).first().click()
+  await expect(undo).toContainText('Deletes the node it made: “aminationTS-full-unfrz-c1”')
+  await undo.getByRole('button', { name: 'Undo import' }).click()
+  await expect(page.getByText('No nodes yet.')).toBeVisible()
+  await page.getByRole('button', { name: 'History' }).click()
+  await expect(page.getByRole('list', { name: 'History' })).toContainText(
+    'Undid the import of aminationTS-full-unfrz-c1.log',
+  )
+})
