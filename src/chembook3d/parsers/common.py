@@ -31,6 +31,14 @@ class ParsedStep:
     charge: int | None = None
     multiplicity: int | None = None
     geometries: list[list[Atom]] = field(default_factory=list)
+    # D101: per structure in `geometries`, the SCF energy computed on it and, in a scan, the
+    # point it belongs to (1-based); `converged_geometries` holds the indexes (0-based) of the
+    # structures on which an optimization, or one scan point's optimization, converged.
+    # Structures a step only inherited (Geom=Check) have no entries.
+    geometry_energies: list[float | None] = field(default_factory=list)
+    geometry_points: list[int | None] = field(default_factory=list)
+    converged_geometries: list[int] = field(default_factory=list)
+    scan: str | None = None  # "relaxed" (an optimization per point) or "rigid"
     scf_energy: float | None = None
     optimization_converged: bool | None = None  # None when the step is not an optimization
     termination: str = "abnormal"  # normal | abnormal (05 §3.1: missing means abnormal)

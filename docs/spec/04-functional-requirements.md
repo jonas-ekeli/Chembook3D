@@ -187,6 +187,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-3D-05 | No geometry editing in the viewer. | X3 | — |
 | FR-3D-06 | Copy xyz to the clipboard and save a .xyz file from the node inspector. | D39 | 1 |
 | FR-3D-07 | Named alignment sets keep each node's alignment atoms in the investigation, to reuse and extend. | D80, A31 | after 5 |
+| FR-3D-08 | Play the structures of an optimization or scan as a movie in the node's 3D view, with each structure's energy; for a scan, optionally only the converged structure of each point. | D101, A48 | after 5 |
 
 ## FR-STER · Buried volume and steric maps (D81)
 

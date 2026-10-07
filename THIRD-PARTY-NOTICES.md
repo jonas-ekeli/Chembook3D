@@ -12,7 +12,7 @@ and commit.
 
 | Folder | From | Licence |
 |---|---|---|
-| `gaussian/` | [GoodVibes](https://github.com/patonlab/GoodVibes) | MIT |
+| `gaussian/` | [GoodVibes](https://github.com/patonlab/GoodVibes); the two `dvb_scan_*` files from [cclib](https://github.com/cclib/cclib) | MIT; BSD-3-Clause |
 | `orca/`, `xtb/` | [cclib](https://github.com/cclib/cclib) | BSD-3-Clause |
 | `crest/` | [CENSO](https://github.com/grimme-lab/CENSO) | LGPL-3.0 |
 | `sterics/` | [morfeus](https://github.com/digital-chemistry-laboratory/morfeus) | MIT |
