@@ -26,12 +26,14 @@ class RowChoiceIn(BaseModel):
     target: str | None = None
     duplicate_action: str | None = None
     label: str | None = None
+    basis: str | None = None  # D104
 
 
 class BatchOptionsIn(BaseModel):
     rows: dict[str, RowChoiceIn] = {}
     basis_names: dict[str, str] = {}
     dispersion_names: dict[str, str] = {}
+    missing_basis: str | None = None  # D104: for every file that names no basis set
     origin_device: str | None = None
     suffixes: list[str] | None = None
 
@@ -48,6 +50,7 @@ def _options(body: BatchOptionsIn | None) -> batch_import.BatchOptions:
         rows={k: batch_import.RowChoice(**v.model_dump()) for k, v in body.rows.items()},
         basis_names=body.basis_names,
         dispersion_names=body.dispersion_names,
+        missing_basis=body.missing_basis,
         origin_device=body.origin_device,
         suffixes=body.suffixes,
     )

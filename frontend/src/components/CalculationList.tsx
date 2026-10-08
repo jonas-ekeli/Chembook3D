@@ -57,8 +57,13 @@ function LevelEditor({
               value={draft[key]}
               onChange={(event) => setDraft({ ...draft, [key]: event.target.value })}
             />
-            {calculation.parsed_level && (parsed[key] ?? '') !== draft[key] && (
-              <small className="muted">parsed: {String(parsed[key] ?? '') || '—'}</small>
+            {calculation.parsed_level && key === 'basis' && parsed.basis_given ? (
+              <small className="muted">not in the file; given at import</small>
+            ) : (
+              calculation.parsed_level &&
+              (parsed[key] ?? '') !== draft[key] && (
+                <small className="muted">parsed: {String(parsed[key] ?? '') || '—'}</small>
+              )
             )}
           </label>
         ))}
@@ -326,6 +331,11 @@ export function CalculationList({
             <span className="calc-level">
               {c.composite_label}
               {c.level_edited && <span className="badge">edited</span>}
+              {!!c.parsed_level?.basis_given && (
+                <span className="badge" title="The file names no basis set; it was given at import (D104)">
+                  basis given
+                </span>
+              )}
             </span>
             <span className="mono">{hartree(c.result?.energy, 8)}</span>
             {c.result?.g !== null && c.result?.g !== undefined && <span className="mono">G {hartree(c.result.g)}</span>}

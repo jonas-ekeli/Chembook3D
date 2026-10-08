@@ -239,6 +239,7 @@ class RowChoice:
     target: str | None = None
     duplicate_action: str | None = None  # "attach" or "new" for a possible duplicate
     label: str | None = None  # a new node's label
+    basis: str | None = None  # D104: this file's basis set, if it names none; overrides the batch's
 
 
 @dataclass
@@ -246,6 +247,8 @@ class BatchOptions:
     rows: dict[str, RowChoice] = field(default_factory=dict)
     basis_names: dict[str, str] = field(default_factory=dict)
     dispersion_names: dict[str, str] = field(default_factory=dict)
+    # D104: the basis set for every file that names none (ChkBasis from another job)
+    missing_basis: str | None = None
     origin_device: str | None = None
     suffixes: list[str] | None = None
 
@@ -278,6 +281,8 @@ class RowPlan:
     steps: list[dict[str, Any]]
     warnings: list[dict[str, Any]]
     blockers: list[str]
+    basis_missing: bool = False  # D104: a step's method needs a basis set the file never names
+    basis_given: str | None = None  # the basis set it gets at import instead
 
 
 @dataclass
@@ -293,6 +298,7 @@ class BatchPlan:
     names: list[dict[str, Any]]
     blockers: list[str]
     counts: dict[str, int]
+    missing_basis: str = ""  # D104
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -335,6 +341,13 @@ def _first_geometry(staged: imports.StagedFile) -> list[list[Any]] | None:
 def _final(staged: imports.StagedFile):
     with_geometry = [s for s in staged.parsed.steps if s.final_geometry]
     return with_geometry[-1] if with_geometry else None
+
+
+def _basis_missing(staged: imports.StagedFile) -> bool:
+    """D104: the file names no basis set for a step whose method needs one."""
+    if isinstance(staged.parsed, crest.Ensemble):
+        return False
+    return any(imports.basis_not_named(staged.parsed.program, s) for s in staged.parsed.steps)
 
 
 def _has_optimization(staged: imports.StagedFile) -> bool:
@@ -439,6 +452,11 @@ def run(
     def choice(item: BatchFile) -> RowChoice:
         return options.rows.get(item.id) or RowChoice()
 
+    def basis_for(item: BatchFile) -> str | None:
+        """D104: the file's own basis set if given, else the batch's."""
+        own = (choice(item).basis or "").strip()
+        return own or (options.missing_basis or "").strip() or None
+
     def included(item: BatchFile) -> bool:
         chosen = choice(item).included
         return chosen if chosen is not None else item.id not in skipped
@@ -542,7 +560,9 @@ def run(
                     if target is None:
                         # D100: an optimization continuing a node's pre-optimization.
                         names_so_far = imports.ImportOptions(
-                            basis_names=basis_names, dispersion_names=dispersion_names
+                            basis_names=basis_names,
+                            dispersion_names=dispersion_names,
+                            missing_basis=basis_for(item),
                         )
                         target = next(
                             (
@@ -584,6 +604,7 @@ def run(
                 or ("new" if target_text == "new" else None),
                 basis_names=basis_names,
                 dispersion_names=dispersion_names,
+                missing_basis=basis_for(item),
                 label=chosen.label if chosen.label is not None and chosen.label.strip() else None,
                 origin_device=device,
                 pos_x=pos[0],
@@ -720,6 +741,8 @@ def run(
                 ],
                 warnings=[] if plan_ is None else plan_.warnings,
                 blockers=blockers,
+                basis_missing=_basis_missing(staged),
+                basis_given=basis_for(item) if _basis_missing(staged) else None,
             )
 
         for item in ordered:
@@ -753,6 +776,7 @@ def run(
                 steps=[],
                 warnings=[],
                 blockers=[],
+                basis_missing=_basis_missing(staged),
             )
 
         batch_blockers: list[str] = []
@@ -799,6 +823,7 @@ def run(
         "attached": sum(r.included and r.mode == "onto" for r in in_order),
         "finished": sum(r.included and r.mode == "planned" for r in in_order),
         "skipped": sum(r.skipped is not None for r in in_order),
+        "basis_missing": sum(r.included and r.basis_missing for r in in_order),
     }
     return (
         BatchPlan(
@@ -813,6 +838,7 @@ def run(
             names=list(names.values()),
             blockers=batch_blockers,
             counts=counts,
+            missing_basis=(options.missing_basis or "").strip(),
         ),
         result_out,
     )

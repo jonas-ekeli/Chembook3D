@@ -242,6 +242,38 @@ def custom_single_point() -> str:
     )
 
 
+def checkpoint_ts(dz: float) -> str:
+    """A TS search and its frequency job that read the basis set from another job's checkpoint
+    (ChkBasis in the first step), so the file names no basis set at all (D104)."""
+    start = moved(METHYL_IODIDE, dz)
+    end = moved(METHYL_IODIDE, dz + 0.01)
+    pbe = "#P PBEPBE/ChkBasis Geom=Check Guess=Read EmpiricalDispersion=GD3BJ"
+    return output(
+        step(
+            f"{pbe} Opt=(TS,CalcFC,NoEigenTest)",
+            [start, end],
+            -52.44,
+            title="TS search from the pre-optimization's checkpoint",
+            converged=True,
+            terminate=False,
+        ),
+        step(
+            f"{pbe.replace('Geom=Check', 'Geom=AllCheck')} Freq",
+            [end],
+            -52.44,
+            title="Freq",
+            frequencies=[-400.0, 60.0, 180.0, 540.0, 880.0, 1250.0, 1420.0, 2950.0, 3050.0],
+            internal=True,
+        ),
+    )
+
+
+CHECKPOINT_FILES = {
+    "TS_a_chk.out": lambda: checkpoint_ts(0.4),
+    "TS_b_chk.out": lambda: checkpoint_ts(0.8),
+}
+
+
 CUSTOM_FILES = {
     "MeI_min.out": lambda: custom_chain(),
     "MeI_TS.out": lambda: custom_chain(ts=True),
@@ -250,7 +282,9 @@ CUSTOM_FILES = {
 
 
 if __name__ == "__main__":
-    folder = Path(sys.argv[1])
+    # `python -m tests.gaussian_text [--checkpoint] <folder>`
+    files = CHECKPOINT_FILES if sys.argv[1] == "--checkpoint" else CUSTOM_FILES
+    folder = Path(sys.argv[-1])
     folder.mkdir(parents=True, exist_ok=True)
-    for name, make in CUSTOM_FILES.items():
+    for name, make in files.items():
         (folder / name).write_text(make(), encoding="utf-8")

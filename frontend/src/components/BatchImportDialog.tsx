@@ -114,6 +114,8 @@ export function BatchImportDialog({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(true)
   const [open, setOpen] = useState<Set<string>>(new Set())
+  const [bases, setBases] = useState<string[]>([])
+  const [basisDraft, setBasisDraft] = useState('')
   const token = useRef<string | null>(null)
   // Only the latest request's answer may replace the table (quick successive changes).
   const latest = useRef(0)
@@ -160,6 +162,14 @@ export function BatchImportDialog({
     started.current = true
     scan(true, {})
   }, [scan])
+
+  // D104: basis sets offered for files that name none: those in levels and the saved custom ones.
+  useEffect(() => {
+    void Promise.all([api.levels().catch(() => []), api.customBases().catch(() => [])]).then(([levels, custom]) => {
+      const names = new Set([...levels.map((l) => l.basis), ...custom.map((b) => b.name)].filter(Boolean))
+      setBases([...names].sort((a, b) => a.localeCompare(b)))
+    })
+  }, [])
 
   const change = (next: BatchOptions) => {
     const merged = { ...options, ...next }
@@ -210,6 +220,7 @@ export function BatchImportDialog({
   // Other files whose import makes a new node can be chosen as a target too.
   const makers = plan?.rows.filter((r) => r.included && r.kind === 'steps' && r.target?.kind === 'new') ?? []
   const counts = plan?.counts
+  const applyBasis = () => change({ missing_basis: basisDraft.trim() })
 
   return (
     <Modal
@@ -272,6 +283,38 @@ export function BatchImportDialog({
                 </ul>
               </details>
             )}
+            {(counts.basis_missing > 0 || plan.missing_basis) && (
+              <section className="fields column batch-basis" aria-label="Files without a basis set">
+                <h3>
+                  {counts.basis_missing} file{counts.basis_missing === 1 ? ' names' : 's name'} no basis set
+                </h3>
+                <small className="muted">
+                  They read it from a checkpoint (ChkBasis) or do not name it. Give it once for all of them; a file's own
+                  field in the table overrides it. Left blank, it can be set later in each calculation's details.
+                </small>
+                <div className="batch-basis-row">
+                  <input
+                    aria-label="Basis set for files without one"
+                    list="batch-basis-sets"
+                    placeholder="e.g. def2-SVP or a saved custom basis set"
+                    value={basisDraft}
+                    onChange={(event) => setBasisDraft(event.target.value)}
+                    onKeyDown={(event) => event.key === 'Enter' && applyBasis()}
+                  />
+                  <button onClick={applyBasis} disabled={basisDraft.trim() === plan.missing_basis}>
+                    Apply to all
+                  </button>
+                </div>
+                {plan.missing_basis && (
+                  <small className="muted">{plan.missing_basis} is used for every file below without its own.</small>
+                )}
+                <datalist id="batch-basis-sets">
+                  {bases.map((b) => (
+                    <option key={b} value={b} />
+                  ))}
+                </datalist>
+              </section>
+            )}
             <div className="batch-table">
               <table className="steps" aria-label="Files">
                 <thead>
@@ -310,6 +353,23 @@ export function BatchImportDialog({
                             {row.jobs}
                             {row.termination !== 'normal' && <span className="badge warn">Abnormal</span>}
                             {row.level_label && <div className="muted small">{row.level_label}</div>}
+                            {row.included && row.basis_missing && (
+                              <>
+                                {!row.basis_given && <span className="badge warn">no basis set</span>}
+                                <input
+                                  aria-label={`Basis set for ${row.path}`}
+                                  list="batch-basis-sets"
+                                  placeholder={plan.missing_basis || 'Basis set'}
+                                  defaultValue={choice?.basis ?? ''}
+                                  key={`${row.id}-basis-${choice?.basis ?? ''}`}
+                                  onBlur={(event) =>
+                                    event.target.value.trim() !== (choice?.basis ?? '') &&
+                                    choose(row, { basis: event.target.value.trim() })
+                                  }
+                                  onKeyDown={(event) => event.key === 'Enter' && event.currentTarget.blur()}
+                                />
+                              </>
+                            )}
                           </td>
                           <td>
                             {row.included && (

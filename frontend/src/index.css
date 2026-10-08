@@ -2087,6 +2087,18 @@ pre.basis-text {
   font-size: 0.85em;
   margin-top: 4px;
 }
+.batch-basis {
+  margin: 8px 0;
+}
+.batch-basis-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.batch-basis-row input {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
 .batch-details-row td {
   background: var(--panel-alt, rgba(0, 0, 0, 0.03));
 }
