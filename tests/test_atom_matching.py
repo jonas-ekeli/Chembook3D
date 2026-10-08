@@ -16,7 +16,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 def frames(path: Path) -> list[list[list]]:
     """Every structure of a (multi-)xyz file as rows."""
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     out, i = [], 0
     while i < len(lines):
         if not lines[i].strip():

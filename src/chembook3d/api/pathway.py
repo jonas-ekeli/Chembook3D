@@ -704,14 +704,9 @@ def use_step(calculation_id: str, frame: int, request: Request, session: DbSessi
     return GeometryOut(node=_node_out(session, result.node), derived=result.derived)
 
 
-@router.post("/atom-match", response_model=AtomMatchOut)
-def atom_match(body: AtomMatchIn, session: DbSession):
-    """D113, A59: the end's atoms matched to the start's numbering; nothing is stored."""
-    start, end, result = atom_matching.match_nodes(session, body.start_id, body.end_id, body.pairs)
-    atoms = [
-        xyz.Atom(e, x, y, z)
-        for e, x, y, z in atom_matching.renumbered(start.geometry, end.geometry, result.mapping)
-    ]
+def atom_match_out(start: Node, end: Node, result: atom_matching.Match) -> AtomMatchOut:
+    rows = atom_matching.renumbered(start.geometry, end.geometry, result.mapping)
+    atoms = [xyz.Atom(e, x, y, z) for e, x, y, z in rows]
     return AtomMatchOut(
         start_id=start.id,
         end_id=end.id,
@@ -720,6 +715,13 @@ def atom_match(body: AtomMatchIn, session: DbSession):
         renumbered_xyz=xyz.format_xyz(atoms, comment=f"{end.label} in the order of {start.label}"),
         **atom_matching.summary(result),
     )
+
+
+@router.post("/atom-match", response_model=AtomMatchOut)
+def atom_match(body: AtomMatchIn, session: DbSession):
+    """D113, A59: the end's atoms matched to the start's numbering; nothing is stored."""
+    start, end, result = atom_matching.match_nodes(session, body.start_id, body.end_id, body.pairs)
+    return atom_match_out(start, end, result)
 
 
 @router.post("/overlay", response_model=OverlayOut)

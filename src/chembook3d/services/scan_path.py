@@ -1,0 +1,564 @@
+"""A scan path between two connected nodes, run as a cloud calculation job (D114, A60).
+
+The user selects two nodes (or groups) joined by an edge and presses "Scan path…". `plan`
+checks the ends, matches the end's atoms to the start's numbering (D113) and, for an end that
+is a transition state, suggests the coordinates to hold at its values so xTB does not relax
+it away: from its imaginary mode when it has a frequency job, otherwise the partial bonds of
+the guess and the coordinates that differ most from the other end, for the user to tick.
+`create_job` writes the cloud job (D93): the start, the end renumbered in the start's order,
+the match, the held coordinates and settings, and instructions that let the cloud session
+design the path itself with GFN2-xTB relaxed scans and the helper `pathtools.py`. Its result,
+`outputs/path.xyz`, imports as a scan path (D112).
+"""
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
+
+from chembook3d import cloud_jobs, pathtools
+from chembook3d.models import GroupNode, Node, Role, Transition
+from chembook3d.services import atom_matching
+from chembook3d.services.records import RecordError, get
+
+# xTB's ALPB solvents, and the names other programs give some of them (Gaussian, ORCA).
+ALPB_SOLVENTS = {
+    "acetone", "acetonitrile", "aniline", "benzaldehyde", "benzene", "ch2cl2", "chcl3", "cs2",
+    "dioxane", "dmf", "dmso", "ether", "ethylacetate", "furane", "hexandecane", "hexane",
+    "methanol", "nitromethane", "octanol", "woctanol", "phenol", "toluene", "thf", "water",
+}  # fmt: skip
+SOLVENT_NAMES = {
+    "dichloromethane": "ch2cl2", "methylenechloride": "ch2cl2", "chloroform": "chcl3",
+    "trichloromethane": "chcl3", "tetrahydrofuran": "thf", "diethylether": "ether",
+    "n,n-dimethylformamide": "dmf", "dimethylformamide": "dmf", "dimethylsulfoxide": "dmso",
+    "1,4-dioxane": "dioxane", "carbondisulfide": "cs2", "h2o": "water",
+    "ethylethanoate": "ethylacetate",
+    "n-hexane": "hexane", "1-octanol": "octanol", "n-octanol": "octanol", "furan": "furane",
+    "hexadecane": "hexandecane", "n-hexadecane": "hexandecane", "mecn": "acetonitrile",
+}  # fmt: skip
+
+MODE_SHARE = 0.35  # a distance is suggested when it changes this much of the most-changing one
+MAX_SUGGESTED = 6
+PARTIAL = (1.2, 1.8)  # × the sum of covalent radii: a bond forming or breaking at a TS
+KINDS = {2: "distance", 3: "angle", 4: "dihedral"}
+MAX_HELD = 12
+
+
+@dataclass
+class End:
+    node: Node
+    group: GroupNode | None  # the group selected, when its member stands for it
+    members: list[Node] = field(default_factory=list)  # the group's members with coordinates
+
+    @property
+    def name(self) -> str:
+        return self.node.label or "Untitled node"
+
+    def ids(self) -> set[str]:
+        """The ids an edge to this end can name: the node, and the group it is in."""
+        found = {self.node.id}
+        if self.group is not None:
+            found.add(self.group.id)
+        if self.node.group_id:
+            found.add(self.node.group_id)
+        return found
+
+
+def _members(session: Session, group: GroupNode) -> list[Node]:
+    query = select(Node).where(Node.group_id == group.id).order_by(Node.group_position, Node.seq)
+    return [n for n in session.scalars(query) if n.geometry]
+
+
+def resolve(session: Session, item_id: str, member_id: str | None = None) -> End:
+    """A node, or a group standing for its representative (or `member_id`, one of its
+    members)."""
+    group = session.get(GroupNode, item_id)
+    if group is None:
+        return End(get(session, Node, item_id, "Node"), None)
+    members = _members(session, group)
+    if not members:
+        raise RecordError(f"no member of group “{group.label or 'Group'}” has coordinates")
+    chosen = member_id or group.representative_id
+    node = next((n for n in members if n.id == chosen), None)
+    if member_id and node is None:
+        raise RecordError("the member chosen is not in that group or has no coordinates")
+    return End(node or members[0], group, members)
+
+
+def edge_between(session: Session, a: End, b: End) -> Transition | None:
+    """An edge joining the two ends, in either direction, through their groups too (D108)."""
+    ids_a, ids_b = a.ids(), b.ids()
+    query = select(Transition).where(
+        or_(
+            Transition.source_node_id.in_(ids_a | ids_b),
+            Transition.source_group_id.in_(ids_a | ids_b),
+        )
+    )
+    for edge in session.scalars(query.order_by(Transition.seq)):
+        if (edge.source_id in ids_a and edge.target_id in ids_b) or (
+            edge.source_id in ids_b and edge.target_id in ids_a
+        ):
+            return edge
+    return None
+
+
+def solvent_of(node: Node) -> str | None:
+    """xTB's ALPB name for the solvent of the node's latest calculation, if it has one."""
+    for calc in sorted(node.calculations, key=lambda c: c.created_at, reverse=True):
+        level = calc.level
+        if level is None or not level.solvent:
+            continue
+        name = level.solvent.strip().lower().replace(" ", "")
+        name = SOLVENT_NAMES.get(name, name)
+        return name if name in ALPB_SOLVENTS else None
+    return None
+
+
+def imaginary_mode(node: Node) -> tuple[float, list[list[float]]] | None:
+    """The node's latest imaginary mode (wavenumber, [atom][xyz]) for its own geometry."""
+    calcs = sorted(node.calculations, key=lambda c: c.created_at, reverse=True)
+    for calc in calcs:
+        result = calc.result
+        if result is None or not result.frequencies or result.frequencies[0] >= 0:
+            continue
+        modes = result.normal_modes
+        if not modes or len(modes[0]) != len(node.geometry or []):
+            continue
+        return float(result.frequencies[0]), modes[0]
+    return None
+
+
+def has_frequency_job(node: Node) -> bool:
+    return any(c.result is not None and c.result.frequencies for c in node.calculations)
+
+
+def value(rows: list[list[Any]], atoms: list[int]) -> float:
+    """A distance (Å), angle or dihedral (degrees) of 1-based atoms."""
+    return pathtools.measure(rows, [a - 1 for a in atoms])
+
+
+def _radii(rows) -> np.ndarray:
+    return np.array([atom_matching.RADII.get(r[0], atom_matching.DEFAULT_RADIUS) for r in rows])
+
+
+def _distances(rows) -> np.ndarray:
+    xyz = np.array([r[1:4] for r in rows], dtype=float)
+    return np.linalg.norm(xyz[:, None, :] - xyz[None, :, :], axis=2)
+
+
+def _close_in_graph(adjacency: np.ndarray) -> np.ndarray:
+    """Pairs at most two bonds apart (bonded or sharing a neighbour)."""
+    a = adjacency.astype(int)
+    return (a + a @ a) > 0
+
+
+def suggest(
+    ts_rows: list[list[Any]],
+    other_rows: list[list[Any]],
+    mode: list[list[float]] | None,
+    changed: list[list[int]],
+) -> list[dict[str, Any]]:
+    """Coordinates to hold at a TS end (1-based, in the start's numbering), ticked when they
+    come from the imaginary mode; the partial bonds and largest differences of a guess are left
+    for the user to tick (D114)."""
+    n = len(ts_rows)
+    d = _distances(ts_rows)
+    radii = _radii(ts_rows)
+    reach = radii[:, None] + radii[None, :]
+    found: dict[tuple[int, int], dict[str, Any]] = {}
+
+    def add(i: int, j: int, ticked: bool, why: str) -> None:
+        key = (min(i, j), max(i, j))
+        if key in found or len(found) >= MAX_SUGGESTED:
+            return
+        atoms = [key[0] + 1, key[1] + 1]
+        found[key] = {"kind": "distance", "atoms": atoms, "ticked": ticked, "why": why}
+
+    if mode is not None:
+        u = np.array(mode, dtype=float)
+        xyz = np.array([r[1:4] for r in ts_rows], dtype=float)
+        candidates = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                if d[i, j] < PARTIAL[1] * reach[i, j]:
+                    along = np.dot(u[i] - u[j], xyz[i] - xyz[j]) / d[i, j]
+                    candidates.append((abs(along), i, j))
+        candidates.sort(reverse=True)
+        if candidates and candidates[0][0] > 0:
+            top = candidates[0][0]
+            for share, i, j in candidates:
+                if share < MODE_SHARE * top:
+                    break
+                add(i, j, True, "changes along the imaginary mode")
+        for a, b in changed:
+            add(a - 1, b - 1, False, "a bond that forms or breaks between the ends")
+        return list(found.values())
+
+    for a, b in changed:
+        i, j = a - 1, b - 1
+        if PARTIAL[0] * reach[i, j] <= d[i, j] < PARTIAL[1] * reach[i, j]:
+            add(i, j, False, "a partial bond of the guess that forms or breaks")
+    close = _close_in_graph(
+        atom_matching.bonds(np.array([r[1:4] for r in ts_rows]), [r[0] for r in ts_rows])
+    )
+    partial = [
+        (d[i, j] / reach[i, j], i, j)
+        for i in range(n)
+        for j in range(i + 1, n)
+        if PARTIAL[0] * reach[i, j] <= d[i, j] < PARTIAL[1] * reach[i, j] and not close[i, j]
+    ]
+    other = _distances(other_rows)
+    partial.sort(key=lambda item: -abs(other[item[1], item[2]] - d[item[1], item[2]]))
+    for _, i, j in partial[:3]:
+        add(i, j, False, "a partial bond of the guess")
+    for a, b in changed:
+        add(a - 1, b - 1, False, "a bond that forms or breaks between the ends")
+    return list(found.values())
+
+
+def _charge_multiplicity(start: End, end: End) -> tuple[int, int]:
+    values = {}
+    for what in ("charge", "multiplicity"):
+        a, b = getattr(start.node, what), getattr(end.node, what)
+        if a is not None and b is not None and a != b:
+            raise RecordError(
+                f"“{start.name}” and “{end.name}” have different {what}s ({a} and {b}); a path "
+                "keeps the same electrons"
+            )
+        known = a if a is not None else b
+        if known is None:
+            raise RecordError(
+                f"neither “{start.name}” nor “{end.name}” has a {what}; set it on either node"
+            )
+        values[what] = known
+    return values["charge"], values["multiplicity"]
+
+
+@dataclass
+class Plan:
+    start: End
+    end: End
+    edge: Transition
+    match: atom_matching.Match
+    renumbered: list[list[Any]]
+    charge: int
+    multiplicity: int
+    solvent: str | None
+    ts_ends: list[dict[str, Any]]
+
+
+def plan(
+    session: Session,
+    start_id: str,
+    end_id: str,
+    pairs: list[list[int]] | None = None,
+    start_member_id: str | None = None,
+    end_member_id: str | None = None,
+) -> Plan:
+    """D114: the checks, the atom match and the suggested TS coordinates for a scan path."""
+    if start_id == end_id:
+        raise RecordError("choose two different structures")
+    start = resolve(session, start_id, start_member_id)
+    end = resolve(session, end_id, end_member_id)
+    if start.node.id == end.node.id:
+        raise RecordError("both ends are the same structure")
+    for item in (start, end):
+        if not item.node.geometry:
+            raise RecordError(f"“{item.name}” has no coordinates")
+    edge = edge_between(session, start, end)
+    if edge is None:
+        raise RecordError("a scan path runs along an edge; draw one between the two first")
+    a, b = start.node.geometry, end.node.geometry
+    if len(a) != len(b):
+        raise RecordError(
+            f"“{start.name}” has {len(a)} atoms and “{end.name}” {len(b)}: a species joins or "
+            "leaves on this edge, which a scan path cannot follow yet"
+        )
+    charge, multiplicity = _charge_multiplicity(start, end)
+    match = atom_matching.match(a, b, atom_matching.pairs_from(pairs or []))
+    renumbered = atom_matching.renumbered(a, b, match.mapping)
+    changed = [[i + 1, j + 1] for i, j in match.formed + match.broken]
+    ts_ends = []
+    # The end in the start's order as it is stored (not fitted), so its mode vectors fit it.
+    reordered = [b[j] for j in match.mapping]
+    for which, item, rows, other in (
+        ("start", start, a, renumbered),
+        ("end", end, reordered, a),
+    ):
+        if item.node.role != Role.TRANSITION_STATE:
+            continue
+        mode = imaginary_mode(item.node)
+        renumbered_mode = None
+        wavenumber = None
+        if mode is not None:
+            wavenumber, vectors = mode
+            renumbered_mode = vectors if which == "start" else [vectors[j] for j in match.mapping]
+        suggested = suggest(rows, other, renumbered_mode, changed)
+        for row in suggested:
+            row["start_value"] = value(a, row["atoms"])
+            row["end_value"] = value(renumbered, row["atoms"])
+        ts_ends.append(
+            {
+                "end": which,
+                "node_id": item.node.id,
+                "label": item.name,
+                "imaginary": wavenumber,
+                "guess": mode is None,
+                "frequency_job": has_frequency_job(item.node),
+                "suggested": suggested,
+            }
+        )
+    solvent = solvent_of(start.node) or solvent_of(end.node)
+    return Plan(start, end, edge, match, renumbered, charge, multiplicity, solvent, ts_ends)
+
+
+def check_held(plan_: Plan, held: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The coordinates to hold, checked: which TS end, 2 to 4 atoms of the structure; with
+    their values at that end."""
+    ts = {t["end"]: t for t in plan_.ts_ends}
+    if len(held) > MAX_HELD:
+        raise RecordError(f"hold at most {MAX_HELD} coordinates")
+    count = len(plan_.start.node.geometry)
+    out = []
+    for row in held:
+        which, atoms = row.get("end"), row.get("atoms")
+        if which not in ts:
+            raise RecordError("coordinates are held only at an end that is a transition state")
+        if (
+            not isinstance(atoms, list)
+            or len(atoms) not in KINDS
+            or not all(isinstance(x, int) and 1 <= x <= count for x in atoms)
+            or len(set(atoms)) != len(atoms)
+        ):
+            raise RecordError(f"a held coordinate names 2 to 4 different atoms from 1 to {count}")
+        rows = plan_.start.node.geometry if which == "start" else plan_.renumbered
+        out.append(
+            {"end": which, "kind": KINDS[len(atoms)], "atoms": atoms, "value": value(rows, atoms)}
+        )
+    missing = [
+        t["label"]
+        for t in plan_.ts_ends
+        if t["guess"] and not any(r["end"] == t["end"] for r in out)
+    ]
+    if missing:
+        raise RecordError(
+            f"“{missing[0]}” is a TS guess with no imaginary mode to read: tick the coordinates "
+            "that make it a TS"
+        )
+    return out
+
+
+def _xyz(rows, comment: str) -> str:
+    return pathtools.format_frame(rows, comment)
+
+
+def _held_text(held: list[dict[str, Any]], plan_: Plan) -> str:
+    if not held:
+        return "Neither end is a transition state: no coordinate is held."
+    lines = []
+    for row in held:
+        name = plan_.start.name if row["end"] == "start" else plan_.end.name
+        unit = "Å" if row["kind"] == "distance" else "°"
+        atoms = "–".join(str(a) for a in row["atoms"])
+        lines.append(
+            f"- At the {row['end']} (“{name}”, a TS): {row['kind']} {atoms} = "
+            f"{row['value']:.3f} {unit}"
+        )
+    return "\n".join(lines)
+
+
+INSTRUCTIONS = """\
+This is a **scan path job** (Chembook3D D114). Find the best path of relaxed GFN2-xTB
+structures from `inputs/start.xyz` to `inputs/end.xyz` and return it as `outputs/path.xyz`.
+Chembook3D imports it as a new node whose scan plays as a movie (D112). Paths here are
+relative to this job's folder, where the commands below are run from; the helper is
+`../../.claude/chembook3d/pathtools.py` from there (Python, standard library only).
+
+## The two ends
+
+- `inputs/start.xyz`: “{start}”{start_ts}.
+- `inputs/end.xyz`: “{end}”{end_ts}, renumbered by the app in the start's atom order and fitted
+  on the start. The atoms correspond one to one; never renumber them.
+- `inputs/mapping.json`: the match. `formed` and `broken` are the bonds (1-based, start
+  numbering) that form and break between the ends by the app's rule; `mapping` gives each
+  start atom's number in the end's own file.
+- `inputs/path.json`: the settings below, machine-readable.
+
+Charge {charge}, multiplicity {multiplicity}: run every xtb call with
+`--gfn 2 --chrg {charge} --uhf {uhf}{solvent_flag}`{solvent_text}.
+
+## Coordinates the user holds at a TS end
+
+{held}
+
+At a TS end, a structure is a TS only along these coordinates, so they must stay at those
+values (within 0.05 Å or 2°) while the path leaves or reaches that end: put them in `$constrain`
+during every stage that touches that end, and change them only after leaving it. Everything
+else is yours to choose.
+
+## What you design
+
+You decide how to get from start to end: which distances, angles and dihedrals to drive,
+whether in one concerted scan (`$scan` with `mode=concerted`) or in stages run one after
+another (each stage starting from the last structure of the one before, for example a rotation
+first and then the bond changes), in which direction (a stage scanned from the end back to
+the start is turned round when joined), the number of points (about 10 to 30 per stage) and the
+force constants (`$constrain` `force constant=`, 0.5 to 2 Eh/bohr²; xTB's restraints lag their
+targets a little). Run each stage with `xtb <structure>.xyz --opt --input scan.inp ... >
+scan.out 2>&1`; xTB writes the optimised structure of each point to `xtbscan.log`.
+
+`python3 ../../.claude/chembook3d/pathtools.py diff inputs/start.xyz inputs/end.xyz` lists the
+bonds that form and break and the distances and dihedrals that change most; start there.
+`pathtools.py measure`, `rmsd` and `join` help along the way.
+
+Try several strategies (at least two different designs, more when the first ones fail), for
+example one concerted scan of the forming and breaking bonds; stages with the large dihedral
+changes first; the same scanned from the end back; and xTB's own path finder
+(`xtb start.xyz --path end.xyz --input path.inp`, which needs no coordinates) as a candidate.
+Check each candidate with
+
+    python3 ../../.claude/chembook3d/pathtools.py check path.xyz inputs/start.xyz \\
+        inputs/end.xyz --mapping inputs/mapping.json
+
+and keep the best: one that reaches the end (`end_rmsd` at most 0.5 Å after fitting), forms or
+breaks no bond other than those in `mapping.json`, has no jump between neighbouring structures
+(`largest_jump` at most 0.5 Å), keeps the held coordinates, and among those the lowest highest
+point. If none reaches the end, return the closest and say so.
+{guess_check}
+## What to return
+
+- `outputs/path.xyz`: the best path, every structure of every stage in order, made with
+  `pathtools.py join outputs/path.xyz stage-1/xtbscan.log stage-2/xtbscan.log --call "<the
+  stage's xtb command line>" ...` (one `--call` per stage, `--reverse <n>` for a stage scanned
+  backwards), so each comment line reads `energy: <Eh> stage: <n> call: <xtb command line>`.
+- `outputs/stage-<n>/`: each stage of the best path, its `scan.out`, `xtbscan.log` and
+  `scan.inp`.
+- `outputs/alternatives/<k>/path.xyz`: the other candidates that got furthest, with a line on
+  each in the summary.
+- `result.json` as `.claude/CLAUDE.md` says, with `outputs` listing `outputs/path.xyz` first,
+  and also:
+
+  ```json
+  "path": {{
+    "reached_end": true,
+    "end_rmsd": 0.21,
+    "top": 14,
+    "barrier_kcal": 18.2,
+    "design": "What the best path drives, stage by stage, and why.",
+    "stages": [{{"coordinates": ["distance 3-7 2.10 -> 1.54"], "points": 20,
+                 "force_constant": 1.0, "direction": "forward"}}],
+    "tried": ["What else was tried and how it failed."],
+    "ts_check": null
+  }}
+  ```
+
+  `summary` says in two or three sentences what the best path does and how close it came.
+"""
+
+GUESS_CHECK = """
+## A TS end that is only a guess
+
+{names} has no frequency job, so the user ticked the coordinates that make it a TS. Run an xTB
+frequency job on it (`xtb <ts>.xyz --hess`) and say in `path.ts_check` whether its imaginary
+mode (if it has one) runs along the held coordinates. This is a warning only: never change the
+held coordinates.
+"""
+
+
+def create_job(
+    folder: Path,
+    investigation: str,
+    plan_: Plan,
+    held: list[dict[str, Any]],
+    solvent: str | None,
+) -> dict[str, Any]:
+    """D114: the scan path job folder, ready to start (D93). The database is not changed."""
+    if solvent:
+        solvent = SOLVENT_NAMES.get(solvent.strip().lower(), solvent.strip().lower())
+        if solvent not in ALPB_SOLVENTS:
+            raise RecordError(f"xTB's ALPB has no solvent “{solvent}”")
+    held = check_held(plan_, held)
+    start, end, match = plan_.start, plan_.end, plan_.match
+    summary = atom_matching.summary(match)
+    mapping = {
+        "start": {"node_id": start.node.id, "label": start.name},
+        "end": {"node_id": end.node.id, "label": end.name},
+        **{k: summary[k] for k in ("mapping", "formed", "broken", "inverted", "fixed", "rmsd")},
+    }
+    settings = {
+        "charge": plan_.charge,
+        "multiplicity": plan_.multiplicity,
+        "uhf": plan_.multiplicity - 1,
+        "solvent": solvent,
+        "held": held,
+    }
+    ts_of = {t["end"]: t for t in plan_.ts_ends}
+
+    def ts_note(which: str) -> str:
+        t = ts_of.get(which)
+        if t is None:
+            return ""
+        if t["guess"]:
+            return ", a transition state guess (no frequency job)"
+        return f", a transition state (imaginary mode {abs(t['imaginary']):.0f}i cm⁻¹)"
+
+    guesses = [f"“{t['label']}”" for t in plan_.ts_ends if t["guess"]]
+    text = INSTRUCTIONS.format(
+        start=start.name,
+        end=end.name,
+        start_ts=ts_note("start"),
+        end_ts=ts_note("end"),
+        charge=plan_.charge,
+        multiplicity=plan_.multiplicity,
+        uhf=plan_.multiplicity - 1,
+        solvent_flag=f" --alpb {solvent}" if solvent else "",
+        solvent_text=f" (ALPB {solvent})" if solvent else " (gas phase)",
+        held=_held_text(held, plan_),
+        guess_check=GUESS_CHECK.format(names=" and ".join(guesses)) if guesses else "",
+    )
+    inputs = [
+        cloud_jobs.InputFile(
+            name="start.xyz",
+            text=_xyz(start.node.geometry, start.name),
+            description=f"the start, node “{start.name}”, {len(start.node.geometry)} atoms",
+            node_id=start.node.id,
+        ),
+        cloud_jobs.InputFile(
+            name="end.xyz",
+            text=_xyz(plan_.renumbered, f"{end.name} in the atom order of {start.name}"),
+            description=f"the end, node “{end.name}”, renumbered in the start's order",
+            node_id=end.node.id,
+        ),
+        cloud_jobs.InputFile(
+            name="mapping.json",
+            text=json.dumps(mapping, indent=2),
+            description="the atom match (D113)",
+        ),
+        cloud_jobs.InputFile(
+            name="path.json",
+            text=json.dumps(settings, indent=2),
+            description="charge, multiplicity, solvent and the coordinates held at a TS end",
+        ),
+    ]
+    extra = {
+        "kind": "scan_path",
+        "scan_path": {
+            "start_id": start.node.id,
+            "end_id": end.node.id,
+            "start_label": start.name,
+            "end_label": end.name,
+            "edge_id": plan_.edge.id,
+            **settings,
+        },
+    }
+    name = f"Path {start.name} to {end.name}"
+    if len(name) > 80:
+        name = name[:79] + "…"
+    try:
+        return cloud_jobs.create_job(folder, name, text, inputs, investigation, extra)
+    except cloud_jobs.CloudJobError as exc:
+        raise RecordError(str(exc)) from exc

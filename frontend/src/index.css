@@ -2261,3 +2261,32 @@ pre.basis-text {
     grid-template-columns: 1fr;
   }
 }
+
+/* D114: the scan path dialog */
+.scan-path-section {
+  margin-top: 0.75rem;
+}
+table.scan-path-held {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+table.scan-path-held th,
+table.scan-path-held td {
+  text-align: left;
+  padding: 0.15rem 0.6rem 0.15rem 0;
+}
+table.scan-path-held td.num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.scan-path-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+}
+.scan-path-add select,
+.scan-path-add input {
+  width: auto;
+}

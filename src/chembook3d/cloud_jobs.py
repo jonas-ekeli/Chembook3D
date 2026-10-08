@@ -197,9 +197,15 @@ def _job_md(job_id: str, name: str, investigation: str, inputs: list[InputFile],
 
 
 def create_job(
-    folder: Path, name: str, instructions: str, inputs: list[InputFile], investigation: str
+    folder: Path,
+    name: str,
+    instructions: str,
+    inputs: list[InputFile],
+    investigation: str,
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Write a new job folder on this computer. Nothing leaves it until `start_job`."""
+    """Write a new job folder on this computer. Nothing leaves it until `start_job`. `extra`
+    goes into the record as it is (a scan path's ends, D114)."""
     name = " ".join(name.split())
     if not name or len(name) > 80:
         raise CloudJobError("Give the job a short name (up to 80 characters)")
@@ -238,6 +244,7 @@ def create_job(
         "session_url": None,
         "launch_error": None,
         "fetched": None,
+        **(extra or {}),
     }
     _save_job(folder, record)
     return record
@@ -264,6 +271,7 @@ def write_cloud_files(folder: Path) -> list[str]:
     folder = Path(folder)
     wanted = {
         cloud_templates.SETUP_SCRIPT: cloud_templates.SETUP_TEXT,
+        cloud_templates.PATHTOOLS: cloud_templates.PATHTOOLS_TEXT,
         cloud_templates.INSTRUCTIONS: cloud_templates.instructions_text(
             cloud_templates.github_https(sync.remote_url(folder))
         ),
