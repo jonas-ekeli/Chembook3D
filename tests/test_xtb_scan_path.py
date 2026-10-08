@@ -83,13 +83,14 @@ def test_the_xtb_output_beside_it_gives_the_level(tmp_path):
     other = output.replace("--input scan.inp", "--input scan.inp --alpb water").replace(
         "-0.01019694390298", "-0.51019694390298"
     )
-    (tmp_path / "a.out").write_text(other.replace("--alpb water", "--alpb hexane"))
+    hexane = other.replace("--alpb water", "--alpb hexane")
+    (tmp_path / "a.out").write_text(hexane, encoding="utf-8")
     water = output.replace("--input scan.inp", "--input scan.inp --alpb water")
-    (tmp_path / "b.out").write_text(water)
+    (tmp_path / "b.out").write_text(water, encoding="utf-8")
     (step,) = imports.read_file(scan_text(), "xtbscan.log", tmp_path).steps
     assert (step.route.solvation_model, step.route.solvent) == ("ALPB", "water")
     # None matches: xTB's defaults.
-    (tmp_path / "b.out").write_text(other)
+    (tmp_path / "b.out").write_text(other, encoding="utf-8")
     (step,) = imports.read_file(scan_text(), "xtbscan.log", tmp_path).steps
     assert step.route.solvation_model is None and step.missing
 
