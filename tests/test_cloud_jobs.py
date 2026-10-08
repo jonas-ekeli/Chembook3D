@@ -308,6 +308,8 @@ def test_a_question_stays_until_answered(monkeypatch):
     assert run.waiting
     run.answer("\x1b[?1;2c")  # the panel's terminal reporting itself, not the user
     run.answer("\x1b[24;80R")
+    run.answer("\x1b[I")  # the panel taking focus
+    run.answer("\x1b]11;rgb:0000/0000/0000\x1b\\")
     assert run.waiting
     run.answer("\r")
     assert not run.waiting
