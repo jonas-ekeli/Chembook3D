@@ -197,6 +197,7 @@ def snapshot_data(request: Request, session: Session, body: SnapshotIn) -> dict[
             "qh_cutoff": settings.qh_cutoff,
             "standard_state": settings.standard_state,
             "hydrogens": settings.hydrogens,
+            "profile_style": settings.profile_style,
         },
         "canvas": canvas.model_dump(mode="json"),
         # D85: the pictures in the notes, as data URLs the viewer shows without a server.

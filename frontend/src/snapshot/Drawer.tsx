@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { energyTypeName, type EnergyType, type Settings } from '../api'
-import { ProfileChart } from '../components/EnergyDrawer'
+import { ProfileChart } from '../components/ProfileChart'
+import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
 import { closesCycle, download } from '../util'
 import { tableCsv, type SnapshotData } from './data'
 
@@ -55,29 +56,11 @@ export function SnapshotDrawer({
   const shown = level && reference ? data.profiles[`${level}|${type}|${reference}`] : undefined
 
   const exportSvg = () => {
-    if (!svgRef.current) return
-    const text = new XMLSerializer().serializeToString(svgRef.current)
-    const url = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }))
-    download(url, 'energy-profile.svg')
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    if (svgRef.current) saveProfileSvg(svgRef.current)
   }
 
   const exportPng = () => {
-    if (!svgRef.current) return
-    const text = new XMLSerializer().serializeToString(svgRef.current)
-    const image = new Image()
-    const scale = 2
-    image.onload = () => {
-      const canvasEl = document.createElement('canvas')
-      canvasEl.width = 960 * scale
-      canvasEl.height = 360 * scale
-      const context = canvasEl.getContext('2d')!
-      context.fillStyle = '#ffffff'
-      context.fillRect(0, 0, canvasEl.width, canvasEl.height)
-      context.drawImage(image, 0, 0, canvasEl.width, canvasEl.height)
-      download(canvasEl.toDataURL('image/png'), 'energy-profile.png')
-    }
-    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`
+    if (svgRef.current) saveProfilePng(svgRef.current, styleOf(settings), () => undefined)
   }
 
   const exportCsv = () => {

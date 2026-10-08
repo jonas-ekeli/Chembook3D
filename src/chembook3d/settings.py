@@ -30,6 +30,83 @@ STANDARD_STATES = ("1 atm", "1 M")
 # batch import (* and ? as in the file filter, D78).
 BATCH_SUFFIXES = ("_SP*", "_freq", "_opt", "_irc")
 
+# D106: how energy profiles are drawn, in the app and in the PNG and SVG saved from them. Each
+# key takes one of the listed choices or a number within its bounds; "Screen" is the look
+# before D106 and the default.
+PROFILE_CHOICES: dict[str, tuple[str, ...]] = {
+    "font": ("system", "arial", "helvetica", "times"),
+    "colours": ("branch", "colour-blind", "grey", "black"),
+    "text": ("soft", "black"),
+    "connector": ("straight", "curved"),
+    "dash": ("solid", "dashed", "dotted", "by-pathway"),
+    "value_position": ("above", "below", "hidden"),
+    "name_position": ("below", "above", "hidden"),
+    "brackets": ("none", "round", "square"),
+    "decimals": ("unit", "0", "1", "2", "3"),
+    "legend": ("top-right", "top-left", "hidden"),
+    "background": ("white", "none"),
+}
+PROFILE_NUMBERS: dict[str, tuple[float, float]] = {
+    "width": (300, 4000),
+    "height": (150, 3000),
+    "font_size": (6, 32),
+    "level_width": (6, 200),
+    "level_thickness": (0.5, 12),
+    "connector_width": (0.25, 8),
+    "png_scale": (1, 8),
+}
+PROFILE_FLAGS = ("title", "grid", "y_axis", "step_names")
+PROFILE_PRESETS: dict[str, dict] = {
+    "screen": {
+        "width": 960,
+        "height": 360,
+        "font": "system",
+        "font_size": 11,
+        "colours": "branch",
+        "text": "soft",
+        "level_width": 60,
+        "level_thickness": 3.5,
+        "connector": "straight",
+        "dash": "solid",
+        "connector_width": 1.4,
+        "value_position": "above",
+        "name_position": "below",
+        "brackets": "none",
+        "decimals": "unit",
+        "title": True,
+        "legend": "top-right",
+        "grid": True,
+        "y_axis": True,
+        "step_names": True,
+        "background": "white",
+        "png_scale": 2,
+    },
+    "publication": {
+        "width": 960,
+        "height": 480,
+        "font": "arial",
+        "font_size": 12,
+        "colours": "colour-blind",
+        "text": "black",
+        "level_width": 50,
+        "level_thickness": 3,
+        "connector": "curved",
+        "dash": "solid",
+        "connector_width": 1.5,
+        "value_position": "above",
+        "name_position": "below",
+        "brackets": "none",
+        "decimals": "1",
+        "title": False,
+        "legend": "top-left",
+        "grid": False,
+        "y_axis": True,
+        "step_names": True,
+        "background": "none",
+        "png_scale": 4,
+    },
+}
+
 
 def config_dir() -> Path:
     override = os.environ.get("CHEMBOOK3D_CONFIG_DIR")
@@ -53,6 +130,26 @@ class Settings:
     hydrogens: str = "all"
     steric_colours: str = "blue"
     batch_suffixes: list[str] = field(default_factory=lambda: list(BATCH_SUFFIXES))
+    profile_style: dict = field(default_factory=lambda: dict(PROFILE_PRESETS["screen"]))
+
+
+def clean_profile_style(data: object) -> dict:
+    """A full profile style (D106) from `data`: each known key with a valid value is kept (a
+    number is clamped to its bounds), every other key takes the "Screen" default."""
+    data = data if isinstance(data, dict) else {}
+    style = dict(PROFILE_PRESETS["screen"])
+    for key, choices in PROFILE_CHOICES.items():
+        if data.get(key) in choices:
+            style[key] = data[key]
+    for key, (low, high) in PROFILE_NUMBERS.items():
+        value = data.get(key)
+        if isinstance(value, int | float) and not isinstance(value, bool) and value == value:
+            value = min(high, max(low, value))
+            style[key] = round(value) if key in ("width", "height", "png_scale") else value
+    for key in PROFILE_FLAGS:
+        if isinstance(data.get(key), bool):
+            style[key] = data[key]
+    return style
 
 
 def _path() -> Path:
@@ -88,6 +185,8 @@ def load() -> Settings:
     suffixes = data.get("batch_suffixes")
     if isinstance(suffixes, list) and all(isinstance(s, str) for s in suffixes):
         settings.batch_suffixes = [s.strip() for s in suffixes if s.strip()]
+    if "profile_style" in data:
+        settings.profile_style = clean_profile_style(data["profile_style"])
     cutoff = data.get("qh_cutoff")
     if isinstance(cutoff, int | float) and not isinstance(cutoff, bool) and cutoff >= 0:
         settings.qh_cutoff = float(cutoff)

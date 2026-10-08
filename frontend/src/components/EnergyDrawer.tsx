@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   api,
-  balanceText,
   energyTypeName,
-  formatDelta,
   type Canvas,
   type EnergyTable,
   type EnergyType,
@@ -13,7 +11,10 @@ import {
   type Settings,
   type ViewState,
 } from '../api'
+import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
 import { closesCycle, download } from '../util'
+import { ProfileChart } from './ProfileChart'
+import { ProfileStyleDialog } from './ProfileStyleDialog'
 import { CompareStericsDialog } from './Sterics'
 
 const NO_BRANCH = '#98a2b3'
@@ -31,270 +32,31 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-const MARK = { fontWeight: 700, fill: '#b42318' } as const
+// D106: the drawer's height and whether its pathways list shows, remembered by the browser.
+const LAYOUT = 'chembook3d.drawer'
+type Layout = { height: number; pathways: boolean }
+const DEFAULT_LAYOUT: Layout = { height: 380, pathways: true }
 
-/** Round numbers for the y axis. */
-function ticks(min: number, max: number, count = 5): number[] {
-  const span = max - min || 1
-  const raw = span / count
-  const magnitude = 10 ** Math.floor(Math.log10(raw))
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((s) => s >= raw) ?? raw
-  const found = []
-  for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-9; v += step) found.push(Number(v.toFixed(10)))
-  return found
-}
-
-/** FR-EN-05, FR-EN-09: X(n) − X(ref) along each pathway, overlaid in branch colours. A direct
- * connection is a dotted connector labelled "no TS", never a barrier (D53, INV-8). */
-export function ProfileChart({
-  data,
-  colours,
-  names,
-  settings,
-  svgRef,
-  marks,
-}: {
-  data: Profiles
-  colours: string[]
-  names: string[]
-  settings: Settings | null
-  svgRef: RefObject<SVGSVGElement | null>
-  /** Short tags after a point's name, keyed `profile:point`, such as the TDTS and TDI (D86). */
-  marks?: Map<string, string>
-}) {
-  const unit = settings?.energy_unit ?? 'kcal/mol'
-  const factor = settings?.energy_factors[unit] ?? 1
-  const W = 960
-  const H = 360
-  const margin = { left: 70, right: 24, top: 48, bottom: 56 }
-  const plotW = W - margin.left - margin.right
-  const plotH = H - margin.top - margin.bottom
-
-  // Line the pathways up by reaction step when every one of them moves forward through the
-  // steps; otherwise by position along the pathway.
-  const byStep = data.profiles.every((p) =>
-    p.points.every(
-      (pt, i) =>
-        pt.step_position !== null && (i === 0 || pt.step_position > (p.points[i - 1].step_position ?? Infinity)),
-    ),
-  )
-  const slots = byStep
-    ? [...new Set(data.profiles.flatMap((p) => p.points.map((pt) => pt.step_position as number)))].sort((a, b) => a - b)
-    : Array.from({ length: Math.max(...data.profiles.map((p) => p.points.length)) }, (_, i) => i)
-  const slotOf = (profileIndex: number, pointIndex: number) =>
-    byStep ? slots.indexOf(data.profiles[profileIndex].points[pointIndex].step_position as number) : pointIndex
-  const slotW = plotW / Math.max(1, slots.length)
-  const half = Math.min(30, slotW * 0.3)
-  const x = (slot: number) => margin.left + slotW * (slot + 0.5)
-
-  const values = data.profiles.flatMap((p) => p.points.map((pt) => pt.relative).filter((v): v is number => v !== null))
-  const shown = [0, ...values.map((v) => v * factor)]
-  let lo = Math.min(...shown)
-  let hi = Math.max(...shown)
-  const pad = (hi - lo || 1) * 0.12
-  lo -= pad
-  hi += pad
-  const y = (v: number) => margin.top + plotH - ((v * factor - lo) / (hi - lo)) * plotH
-  const yTicks = ticks(lo, hi)
-  const decimals = settings?.energy_decimals[unit] ?? 2
-  const typeName = energyTypeName(data.type, data.temperature, data.cutoff, data.standard_state)
-  const reference = data.profiles.flatMap((p) => p.points).find((p) => p.id === data.reference_id)
-  // Label placement. A node shared by overlaid pathways is labelled once. Where bars in one
-  // column lie close together, their labels go beside them, stacked so none overlap.
-  type Label = { x: number; y: number; anchor: 'middle' | 'start'; text: string; beside: boolean } | null
-  const labels = new Map<string, Label>()
-  slots.forEach((_, slot) => {
-    const here: { key: string; id: string; y: number; text: string }[] = []
-    data.profiles.forEach((profile, pi) =>
-      profile.points.forEach((point, i) => {
-        if (point.relative === null || slotOf(pi, i) !== slot) return
-        const key = `${pi}:${i}`
-        if (here.some((h) => h.id === point.id)) {
-          labels.set(key, null) // already labelled for an earlier pathway
-          return
-        }
-        const value = formatDelta(point.relative, settings)
-        const closing = i === profile.points.length - 1 && closesCycle(profile.points.map((p) => p.id))
-        here.push({
-          key,
-          id: point.id,
-          y: y(point.relative),
-          text: `${value}|${point.label}${point.is_ts ? ' ‡' : ''}${closing ? ' ↻' : ''}`,
-        })
-      }),
-    )
-    here.sort((a, b) => a.y - b.y)
-    const crowded = here.some((h, n) => n > 0 && h.y - here[n - 1].y < 18)
-    let last = -Infinity
-    for (const h of here) {
-      const cx = x(slot)
-      if (!crowded) {
-        labels.set(h.key, { x: cx, y: h.y, anchor: 'middle', text: h.text, beside: false })
-      } else {
-        last = Math.max(h.y + 4, last + 12)
-        labels.set(h.key, { x: cx + half + 4, y: last, anchor: 'start', text: h.text, beside: true })
-      }
+function loadLayout(): Layout {
+  try {
+    const stored = JSON.parse(localStorage.getItem(LAYOUT) ?? 'null') as Partial<Layout> | null
+    return {
+      height: typeof stored?.height === 'number' ? stored.height : DEFAULT_LAYOUT.height,
+      pathways: stored?.pathways !== false,
     }
-  })
-  return (
-    <svg
-      ref={svgRef}
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox={`0 0 ${W} ${H}`}
-      width={W}
-      height={H}
-      role="img"
-      aria-label="Energy profile"
-      fontFamily="system-ui, sans-serif"
-      className="profile-chart"
-    >
-      <rect x={0} y={0} width={W} height={H} fill="#ffffff" />
-      <text x={margin.left} y={18} fontSize={13} fontWeight={600} fill="#1c2430">
-        Δ{typeName} at {data.level_label}
-      </text>
-      <text x={margin.left} y={34} fontSize={11} fill="#667085">
-        relative to {reference?.label ?? '—'}
-        {data.reference_value === null ? ' (no value at this level)' : ''}
-      </text>
-      <g aria-label="Legend">
-        {names.map((name, i) => (
-          <g key={i} transform={`translate(${W - margin.right - 200}, ${12 + i * 14})`}>
-            <rect width={14} height={4} y={3} fill={colours[i]} />
-            <text x={20} y={9} fontSize={11} fill="#1c2430">
-              {name}
-            </text>
-          </g>
-        ))}
-      </g>
-      {yTicks.map((t) => (
-        <g key={t}>
-          <line
-            x1={margin.left}
-            x2={W - margin.right}
-            y1={y(t / factor)}
-            y2={y(t / factor)}
-            stroke={t === 0 ? '#98a2b3' : '#eaecf0'}
-          />
-          <text x={margin.left - 6} y={y(t / factor) + 4} fontSize={11} textAnchor="end" fill="#667085">
-            {t.toFixed(Math.max(0, decimals - 1))}
-          </text>
-        </g>
-      ))}
-      <text
-        transform={`translate(16, ${margin.top + plotH / 2}) rotate(-90)`}
-        fontSize={12}
-        textAnchor="middle"
-        fill="#1c2430"
-      >
-        Δ{data.type} ({unit})
-      </text>
-      {byStep &&
-        slots.map((position, i) => {
-          const name = data.profiles.flatMap((p) => p.points).find((pt) => pt.step_position === position)?.step_name
-          return (
-            <text key={position} x={x(i)} y={H - 12} fontSize={11} textAnchor="middle" fill="#667085">
-              {name || `step ${position}`}
-            </text>
-          )
-        })}
-      {data.profiles.map((profile, pi) => (
-        <g key={pi} aria-label={`Profile ${names[pi]}`}>
-          {profile.segments.map((segment, si) => {
-            const a = profile.points[si]
-            const b = profile.points[si + 1]
-            if (a.relative === null || b.relative === null) return null
-            const x1 = x(slotOf(pi, si)) + half
-            const x2 = x(slotOf(pi, si + 1)) - half
-            const y1 = y(a.relative)
-            const y2 = y(b.relative)
-            return (
-              <g key={si} data-direct={segment.direct ? 'true' : undefined}>
-                <line
-                  x1={x1}
-                  y1={y1}
-                  x2={x2}
-                  y2={y2}
-                  stroke={colours[pi]}
-                  strokeWidth={segment.direct ? 2 : 1.4}
-                  strokeDasharray={segment.direct ? '2 5' : undefined}
-                  strokeLinecap="round"
-                />
-                {segment.direct && (
-                  <g aria-label="no TS">
-                    <rect
-                      x={(x1 + x2) / 2 - 20}
-                      y={(y1 + y2) / 2 - 17}
-                      width={40}
-                      height={14}
-                      rx={7}
-                      fill="#fff4e5"
-                      stroke="#fdb022"
-                    />
-                    <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 6.5} fontSize={10} textAnchor="middle" fill="#93370d">
-                      no TS
-                    </text>
-                  </g>
-                )}
-              </g>
-            )
-          })}
-          {profile.points.map((point, i) => {
-            const cx = x(slotOf(pi, i))
-            if (point.relative === null) {
-              return (
-                <text key={i} x={cx} y={margin.top + 10} fontSize={10} textAnchor="middle" fill="#98a2b3">
-                  <title>{point.message ?? point.species_message ?? 'no value'}</title>
-                  {point.label}: n/a
-                </text>
-              )
-            }
-            const label = labels.get(`${pi}:${i}`)
-            const [value, name] = label ? label.text.split('|') : ['', '']
-            const mark = marks?.get(`${pi}:${i}`)
-            return (
-              <g key={i}>
-                <line
-                  x1={cx - half}
-                  x2={cx + half}
-                  y1={y(point.relative)}
-                  y2={y(point.relative)}
-                  stroke={colours[pi]}
-                  strokeWidth={3.5}
-                  strokeLinecap="round"
-                >
-                  {point.species.length > 0 && (
-                    <title>
-                      {/* D69: the free species added or subtracted to balance this point */}
-                      {`${point.label} ${balanceText(point.species)}`}
-                    </title>
-                  )}
-                </line>
-                {label && label.beside && (
-                  <text x={label.x} y={label.y} fontSize={10.5} textAnchor="start">
-                    <tspan fill={colours[pi]}>{value}</tspan>
-                    <tspan fill="#667085"> {name}</tspan>
-                    {mark && <tspan {...MARK}> {mark}</tspan>}
-                  </text>
-                )}
-                {label && !label.beside && (
-                  <>
-                    <text x={label.x} y={label.y - 6} fontSize={11} textAnchor="middle" fill={colours[pi]}>
-                      {value}
-                    </text>
-                    <text x={label.x} y={label.y + 15} fontSize={10} textAnchor="middle" fill="#667085">
-                      {name}
-                      {mark && <tspan {...MARK}> {mark}</tspan>}
-                    </text>
-                  </>
-                )}
-              </g>
-            )
-          })}
-        </g>
-      ))}
-    </svg>
-  )
+  } catch {
+    return DEFAULT_LAYOUT
+  }
 }
+
+/** Between a strip that still shows the drawer's head and most of the window. */
+function drawerHeight(height: number): number {
+  return Math.round(Math.min(Math.max(180, window.innerHeight - 140), Math.max(180, height)))
+}
+
+// Zoom steps of the profile, as a share of the figure's own size (D106).
+const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+const clampZoom = (zoom: number) => Math.min(4, Math.max(0.5, zoom))
 
 /** WF-08 bottom drawer: pathways chosen along edges, the energy profile and the energy table. */
 export function EnergyDrawer({
@@ -308,6 +70,7 @@ export function EnergyDrawer({
   refreshKey,
   onReference,
   onSelectNode,
+  onSettings,
   onPathsChange,
   onTurnover,
   saved,
@@ -323,6 +86,8 @@ export function EnergyDrawer({
   refreshKey: number
   onReference: (id: string | null) => void
   onSelectNode: (id: string) => void
+  /** D106: the app's settings after the profile style was saved. */
+  onSettings?: (settings: Settings) => void
   /** The pathways shown, for the read-only copy (D79). */
   onPathsChange?: (paths: DrawerPath[]) => void
   /** D86: a saved turnover from a closed pathway, opened in the Analyses view. */
@@ -341,6 +106,83 @@ export function EnergyDrawer({
   const [error, setError] = useState<string | null>(null)
   const [sterics, setSterics] = useState<string[] | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  // D106: drawer height, pathways list, zoom (null fits the profile to the drawer), style dialog.
+  const [layout, setLayout] = useState(loadLayout)
+  const [zoom, setZoom] = useState<number | null>(null)
+  const [styling, setStyling] = useState(false)
+  const mainRef = useRef<HTMLDivElement>(null)
+  const resizing = useRef<{ y: number; height: number } | null>(null)
+  const panning = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
+  const anchor = useRef<{ fx: number; fy: number; px: number; py: number } | null>(null)
+  const wheelZoom = useRef<(event: WheelEvent) => void>(() => undefined)
+  const style = styleOf(settings)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAYOUT, JSON.stringify(layout))
+    } catch {
+      // the browser keeps nothing; the drawer still works
+    }
+  }, [layout])
+
+  /** The zoom at which the figure fills the drawer. */
+  const fitScale = () => {
+    const el = mainRef.current
+    if (!el) return 1
+    return Math.min((el.clientWidth - 32) / style.width, (el.clientHeight - 16) / style.height)
+  }
+  /** Zoom keeping the point under `at` (the middle by default) where it is. */
+  const zoomTo = (next: number, at?: { px: number; py: number }) => {
+    const el = mainRef.current
+    if (el) {
+      const px = at?.px ?? el.clientWidth / 2
+      const py = at?.py ?? el.clientHeight / 2
+      anchor.current = {
+        fx: (el.scrollLeft + px) / Math.max(1, el.scrollWidth),
+        fy: (el.scrollTop + py) / Math.max(1, el.scrollHeight),
+        px,
+        py,
+      }
+    }
+    setZoom(clampZoom(next))
+  }
+  const zoomIn = () => {
+    const current = zoom ?? fitScale()
+    zoomTo(ZOOMS.find((z) => z > current + 1e-6) ?? 4)
+  }
+  const zoomOut = () => {
+    const current = zoom ?? fitScale()
+    zoomTo([...ZOOMS].reverse().find((z) => z < current - 1e-6) ?? 0.5)
+  }
+  useLayoutEffect(() => {
+    const el = mainRef.current
+    const at = anchor.current
+    anchor.current = null
+    if (!el || !at || zoom === null) return
+    el.scrollLeft = at.fx * el.scrollWidth - at.px
+    el.scrollTop = at.fy * el.scrollHeight - at.py
+  }, [zoom])
+  // Ctrl + wheel zooms about the pointer, through a listener that may cancel the browser's zoom.
+  useEffect(() => {
+    wheelZoom.current = (event) => {
+      const el = mainRef.current
+      if (!el) return
+      const box = el.getBoundingClientRect()
+      const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15
+      zoomTo((zoom ?? fitScale()) * factor, { px: event.clientX - box.left, py: event.clientY - box.top })
+    }
+  })
+  useEffect(() => {
+    const el = mainRef.current
+    if (!el || tab !== 'profile') return
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+      wheelZoom.current(event)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [tab])
 
   const labels = useMemo(() => {
     const found = new Map<string, string>()
@@ -443,30 +285,11 @@ export function EnergyDrawer({
   const shownTable = request ? table : null
 
   const exportSvg = () => {
-    if (!svgRef.current) return
-    const text = new XMLSerializer().serializeToString(svgRef.current)
-    const url = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }))
-    download(url, 'energy-profile.svg')
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    if (svgRef.current) saveProfileSvg(svgRef.current)
   }
 
   const exportPng = () => {
-    if (!svgRef.current) return
-    const text = new XMLSerializer().serializeToString(svgRef.current)
-    const image = new Image()
-    const scale = 2
-    image.onload = () => {
-      const canvasEl = document.createElement('canvas')
-      canvasEl.width = 960 * scale
-      canvasEl.height = 360 * scale
-      const context = canvasEl.getContext('2d')!
-      context.fillStyle = '#ffffff'
-      context.fillRect(0, 0, canvasEl.width, canvasEl.height)
-      context.drawImage(image, 0, 0, canvasEl.width, canvasEl.height)
-      download(canvasEl.toDataURL('image/png'), 'energy-profile.png')
-    }
-    image.onerror = () => setError('Could not export the profile image')
-    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`
+    if (svgRef.current) saveProfilePng(svgRef.current, style, () => setError('Could not export the profile image'))
   }
 
   const exportCsv = () => {
@@ -481,9 +304,44 @@ export function EnergyDrawer({
     )
   }
 
+  const errorLine = error && (
+    <p role="alert" className="error small">
+      {error}
+    </p>
+  )
+
   return (
-    <section className="drawer" aria-label="Energy drawer">
+    <section className="drawer" aria-label="Energy drawer" style={{ height: drawerHeight(layout.height) }}>
+      <div
+        className="drawer-resize"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Drawer height"
+        title="Drag to make the drawer taller or shorter"
+        tabIndex={0}
+        onPointerDown={(event) => {
+          resizing.current = { y: event.clientY, height: drawerHeight(layout.height) }
+          event.currentTarget.setPointerCapture(event.pointerId)
+        }}
+        onPointerMove={(event) => {
+          const start = resizing.current
+          if (start) setLayout((l) => ({ ...l, height: drawerHeight(start.height + start.y - event.clientY) }))
+        }}
+        onPointerUp={() => (resizing.current = null)}
+        onKeyDown={(event) => {
+          const step = event.key === 'ArrowUp' ? 40 : event.key === 'ArrowDown' ? -40 : 0
+          if (step) setLayout((l) => ({ ...l, height: drawerHeight(drawerHeight(l.height) + step) }))
+        }}
+      />
       <div className="drawer-head">
+        <button
+          className="small"
+          aria-pressed={layout.pathways}
+          onClick={() => setLayout((l) => ({ ...l, pathways: !l.pathways }))}
+          title="Show or hide the pathways list, so the profile can take the drawer's full width"
+        >
+          Pathways
+        </button>
         <div className="segmented" role="group" aria-label="Drawer tab">
           <button aria-pressed={tab === 'profile'} onClick={() => setTab('profile')}>
             Energy profile
@@ -498,6 +356,46 @@ export function EnergyDrawer({
         <span className="spacer" />
         {tab === 'profile' ? (
           <>
+            <div className="zoom" role="group" aria-label="Zoom">
+              <button
+                className="small"
+                onClick={zoomOut}
+                disabled={!shownProfiles}
+                aria-label="Zoom out"
+                title="Zoom out (Ctrl + wheel)"
+              >
+                −
+              </button>
+              <span className="muted small zoom-level" aria-label="Zoom level">
+                {zoom === null ? 'Fit' : `${Math.round(zoom * 100)} %`}
+              </span>
+              <button
+                className="small"
+                onClick={zoomIn}
+                disabled={!shownProfiles}
+                aria-label="Zoom in"
+                title="Zoom in (Ctrl + wheel)"
+              >
+                +
+              </button>
+              <button
+                className="small"
+                aria-pressed={zoom === null}
+                onClick={() => setZoom(null)}
+                disabled={!shownProfiles}
+                title="Fit the profile to the drawer"
+              >
+                Fit
+              </button>
+            </div>
+            <button
+              className="small"
+              onClick={() => setStyling(true)}
+              disabled={!settings}
+              title="Size, font, colours, connectors and labels of the profile and its saved images (D106)"
+            >
+              Style…
+            </button>
             <button className="small" onClick={exportPng} disabled={!shownProfiles}>
               Save profile as PNG
             </button>
@@ -512,121 +410,146 @@ export function EnergyDrawer({
         )}
       </div>
       <div className="drawer-body">
-        <div className="pathways" aria-label="Pathways">
-          {livePaths.map((path, index) => (
-            <div key={index} className="pathway" role="group" aria-label={`Pathway ${names[index]}`}>
-              <div className="pathway-head">
-                <span className="swatch" style={{ background: colours[index] }} />
-                <strong>{names[index]}</strong>
-                <span className="spacer" />
-                <button
-                  className="small"
-                  disabled={path.ids.length < 2}
-                  onClick={() => replace(index, { ...path, ids: path.ids.slice(0, -1), choices: [] })}
-                  title="Remove the last node"
-                >
-                  Undo step
-                </button>
-                {onTurnover && closesCycle(path.ids) && (
+        {layout.pathways && (
+          <div className="pathways" aria-label="Pathways">
+            {livePaths.map((path, index) => (
+              <div key={index} className="pathway" role="group" aria-label={`Pathway ${names[index]}`}>
+                <div className="pathway-head">
+                  <span className="swatch" style={{ background: colours[index] }} />
+                  <strong>{names[index]}</strong>
+                  <span className="spacer" />
                   <button
                     className="small"
-                    onClick={() => onTurnover(path.ids, names[index])}
-                    title="TOF of this closed cycle from the energetic-span model (D86)"
+                    disabled={path.ids.length < 2}
+                    onClick={() => replace(index, { ...path, ids: path.ids.slice(0, -1), choices: [] })}
+                    title="Remove the last node"
                   >
-                    Turnover
+                    Undo step
                   </button>
-                )}
-                <button
-                  className="small"
-                  onClick={() => setSterics(path.ids)}
-                  title="Buried volume and steric maps along this pathway; a group counts through its representative (D81)"
-                >
-                  Sterics
-                </button>
-                <button className="small" onClick={() => replace(index, null)} aria-label={`Remove pathway ${names[index]}`}>
-                  ✕
-                </button>
-              </div>
-              <p className="pathway-nodes">
-                {path.ids.map((id, i) => (
-                  <span key={i}>
-                    {i > 0 && ' → '}
-                    <button className="link" onClick={() => onSelectNode(id)}>
-                      {labels.get(id)}
-                    </button>
-                    {i === path.ids.length - 1 && closesCycle(path.ids) && (
-                      <span className="cycle-mark" title="Cycle closed">
-                        {' '}
-                        ↻
-                      </span>
-                    )}
-                  </span>
-                ))}
-              </p>
-              {closesCycle(path.ids) && <p className="muted small">Cycle closed.</p>}
-              {path.choices.length > 0 && (
-                <div className="choices" role="group" aria-label="Continue with">
-                  <span className="muted small">Continue with:</span>
-                  {path.choices.map((choice) => (
+                  {onTurnover && closesCycle(path.ids) && (
                     <button
-                      key={choice.node_id}
                       className="small"
-                      onClick={() => extend(index, [...path.ids, choice.node_id], path.branchId)}
+                      onClick={() => onTurnover(path.ids, names[index])}
+                      title="TOF of this closed cycle from the energetic-span model (D86)"
                     >
-                      {choice.label}
+                      Turnover
                     </button>
-                  ))}
+                  )}
+                  <button
+                    className="small"
+                    onClick={() => setSterics(path.ids)}
+                    title="Buried volume and steric maps along this pathway; a group counts through its representative (D81)"
+                  >
+                    Sterics
+                  </button>
+                  <button className="small" onClick={() => replace(index, null)} aria-label={`Remove pathway ${names[index]}`}>
+                    ✕
+                  </button>
                 </div>
-              )}
-            </div>
-          ))}
-          <div className="pathway-add">
-            <button className="small" onClick={startAtSelection} disabled={!selectedId}>
-              Start at selected node
-            </button>
-            <select
-              aria-label="Add branch pathway"
-              value=""
-              onChange={(event) => event.target.value && addBranch(event.target.value)}
-            >
-              <option value="">Add a branch…</option>
-              {canvas.branches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name || 'Unnamed branch'}
-                </option>
-              ))}
-            </select>
-          </div>
-          {livePaths.length > 0 && (
-            <label className="field">
-              <span>Reference</span>
+                <p className="pathway-nodes">
+                  {path.ids.map((id, i) => (
+                    <span key={i}>
+                      {i > 0 && ' → '}
+                      <button className="link" onClick={() => onSelectNode(id)}>
+                        {labels.get(id)}
+                      </button>
+                      {i === path.ids.length - 1 && closesCycle(path.ids) && (
+                        <span className="cycle-mark" title="Cycle closed">
+                          {' '}
+                          ↻
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </p>
+                {closesCycle(path.ids) && <p className="muted small">Cycle closed.</p>}
+                {path.choices.length > 0 && (
+                  <div className="choices" role="group" aria-label="Continue with">
+                    <span className="muted small">Continue with:</span>
+                    {path.choices.map((choice) => (
+                      <button
+                        key={choice.node_id}
+                        className="small"
+                        onClick={() => extend(index, [...path.ids, choice.node_id], path.branchId)}
+                      >
+                        {choice.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            <div className="pathway-add">
+              <button className="small" onClick={startAtSelection} disabled={!selectedId}>
+                Start at selected node
+              </button>
               <select
-                aria-label="Reference node"
-                value={reference ?? ''}
-                onChange={(event) => onReference(event.target.value || null)}
+                aria-label="Add branch pathway"
+                value=""
+                onChange={(event) => event.target.value && addBranch(event.target.value)}
               >
-                {[...onPaths].map((id) => (
-                  <option key={id} value={id}>
-                    {labels.get(id)}
+                <option value="">Add a branch…</option>
+                {canvas.branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name || 'Unnamed branch'}
                   </option>
                 ))}
               </select>
-            </label>
-          )}
-          {error && (
-            <p role="alert" className="error small">
-              {error}
-            </p>
-          )}
-        </div>
-        <div className="drawer-main">
+            </div>
+            {livePaths.length > 0 && (
+              <label className="field">
+                <span>Reference</span>
+                <select
+                  aria-label="Reference node"
+                  value={reference ?? ''}
+                  onChange={(event) => onReference(event.target.value || null)}
+                >
+                  {[...onPaths].map((id) => (
+                    <option key={id} value={id}>
+                      {labels.get(id)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {errorLine}
+          </div>
+        )}
+        <div
+          ref={mainRef}
+          className={`drawer-main${tab === 'profile' ? (zoom === null ? ' fit' : ' zoomed') : ''}`}
+          onPointerDown={(event) => {
+            const el = mainRef.current
+            if (!el || zoom === null || tab !== 'profile' || event.button !== 0) return
+            panning.current = { x: event.clientX, y: event.clientY, left: el.scrollLeft, top: el.scrollTop }
+            event.currentTarget.setPointerCapture(event.pointerId)
+          }}
+          onPointerMove={(event) => {
+            const el = mainRef.current
+            const start = panning.current
+            if (!el || !start) return
+            el.scrollLeft = start.left - (event.clientX - start.x)
+            el.scrollTop = start.top - (event.clientY - start.y)
+          }}
+          onPointerUp={() => (panning.current = null)}
+        >
+          {!layout.pathways && errorLine}
           {!livePaths.length ? (
             <p className="muted placeholder">
               Add a branch, or select a node on the canvas and start a pathway there. Pathways follow the transitions
               you drew; at a fork you choose how to go on.
             </p>
           ) : tab === 'profile' ? (
-            shownProfiles && <ProfileChart data={shownProfiles} colours={colours} names={names} settings={settings} svgRef={svgRef} />
+            shownProfiles && (
+              <ProfileChart
+                data={shownProfiles}
+                colours={colours}
+                names={names}
+                settings={settings}
+                svgRef={svgRef}
+                size={zoom === null ? undefined : { width: style.width * zoom, height: style.height * zoom }}
+              />
+            )
           ) : (
             shownTable && (
               <table className="energy-table" aria-label="Energy table">
@@ -653,6 +576,14 @@ export function EnergyDrawer({
           )}
         </div>
       </div>
+      {styling && settings && (
+        <ProfileStyleDialog
+          settings={settings}
+          preview={shownProfiles ? { data: shownProfiles, colours, names } : null}
+          onSave={(profile_style) => api.saveSettings({ profile_style }).then((next) => onSettings?.(next))}
+          onClose={() => setStyling(false)}
+        />
+      )}
       {sterics && (
         <CompareStericsDialog
           nodes={pathwayNodes(sterics)}
