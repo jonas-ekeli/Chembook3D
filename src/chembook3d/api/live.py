@@ -64,7 +64,7 @@ QUIET = re.compile(
     r"|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|imports|imports/[^/]+|imports/[^/]+/preview"
     r"|batch-imports|batch-imports/[^/]+|batch-imports/[^/]+/preview"
-    r"|note-images|source-files/[^/]+/open|claude(/.*)?|jobs(/.*)?"
+    r"|note-images|source-files/[^/]+/open|claude(/.*)?|jobs(/.*)?|presence(/.*)?|shutdown"
     r")$"
 )
 

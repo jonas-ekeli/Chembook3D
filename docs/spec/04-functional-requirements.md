@@ -301,3 +301,15 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | ID | Requirement | Trace | Phase |
 |---|---|---|---|
 | FR-SET-01 | Settings: energy unit, CREST default N, duplicate tolerance, default origin device name. G_qh temperature and cutoff. | D28, D34, Q32 | 1–5 |
+
+## FR-RUN · Starting and stopping the app (D107)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-RUN-01 | `chembook3d shortcut` creates a Chembook3D shortcut (Windows desktop and Start menu, Linux app menu, a Windows shortcut for WSL) that starts the app without a terminal; when the app already runs, it only opens a tab. | D107, A54 | after 5 |
+| FR-RUN-02 | Started from the shortcut, the checkout is fast-forwarded only when it is on `main` with no local changes, the interface is rebuilt only when `frontend/` changed since it was last built, Python packages follow `uv.lock`, the server runs with no console window, and a page shows each step until the app is up. Why it was not updated, or why the old interface is shown, is said in the app. | D107 | after 5 |
+| FR-RUN-03 | Started from the shortcut, the server shuts down 10 s after the last tab closes, or after 5 minutes without a tab; started from a terminal it does not. | D107, A54 | after 5 |
+| FR-RUN-04 | "Shut down" in the top bar and on the start screen asks first, closes and pushes the investigation as on Ctrl+C, stops the server, and every tab says it has shut down. Only the app's own page can ask for it; Claude cannot. | D107, D91 | after 5 |
+
+**AC:** create the shortcut, double-click it: the app opens in the browser with no terminal; close the tab: the server stops within about 10 s; start it again and press Shut down: the tab says Chembook3D has shut down.
+

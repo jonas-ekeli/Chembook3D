@@ -162,6 +162,11 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-OPS-03 | Open an investigation already open elsewhere | A lock warning (P22) |
 | T-OPS-04 | Open an investigation from an older schema | A backup is made, then the migration runs (NFR-DATA-03) |
 | T-OPS-05 | Backend reachable from another machine? | No (NFR-SEC-01) |
+| T-RUN-01 | Launcher on `main` behind its remote; on another branch; with local changes | Pulled; not pulled, with the reason shown (FR-RUN-02) |
+| T-RUN-02 | Launcher with an interface built from the current `frontend/` tree, then from an older one | No rebuild; a rebuild (FR-RUN-02) |
+| T-RUN-03 | Launcher when the app already answers on its port | Only a tab opens; nothing is pulled or started (FR-RUN-01) |
+| T-RUN-04 | Started by the launcher, the last tab says goodbye; started from a terminal, the same | The first stops after the grace time; the second keeps running (FR-RUN-03) |
+| T-RUN-05 | Shut down from a page on 127.0.0.1, and from a foreign origin | The first closes the investigation and stops the server; the second is refused (FR-RUN-04) |
 | T-SYNC-01 | Open an investigation saved by a newer schema | The newer-version message; no backup, migration or lock (FR-SYNC-01) |
 | T-SYNC-02 | Link to an empty bare repository, then to one that is not empty | Pushed without the lock file or `backups/`; the second is refused (FR-SYNC-02) |
 | T-SYNC-03 | Clone into a second folder, change and sync there, open the first | The first shows the change (FR-SYNC-03, 04, 05) |
