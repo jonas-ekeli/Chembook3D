@@ -45,6 +45,7 @@ NOT_OFFERED = re.compile(
     r"|groups/[^/]+/delete-preview|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|energies/table\.csv|history/[^/]+/undo|turnovers/[^/]+/table\.csv|custom-bases/[^/]+/file"
     r"|calculations/[^/]+/steps"  # every structure of a job, for the movie (D101, A48)
+    r"|calculations/[^/]+/steps/[^/]+/use"  # "Use this structure" (D112, A58)
     r"|claude(/.*)?"  # the Claude panel (D92): Claude never starts terminals
     r"|presence(/.*)?|shutdown)$"  # D107: tabs coming and going, and the Shut down button
 )

@@ -225,7 +225,11 @@ def set_geometry(session: Session, node_id: str, xyz_text: str) -> GeometryResul
             session.flush()
         return GeometryResult(node, derived=False)
 
-    # ID-5: the original keeps its geometry and calculations; the edit becomes a new node.
+    return GeometryResult(derive(session, node, geometry), derived=True)
+
+
+def derive(session: Session, node: Node, geometry: list[list[Any]]) -> Node:
+    """ID-5: the original keeps its geometry and calculations; the edit becomes a new node."""
     derived = Node(
         label=f"{node.label} (derived)" if node.label else "derived",
         kind=node.kind,
@@ -246,7 +250,7 @@ def set_geometry(session: Session, node_id: str, xyz_text: str) -> GeometryResul
     session.add(derived)
     session.flush()
     history.record(session, "node", derived.id, "create", new=snapshot(derived))
-    return GeometryResult(derived, derived=True)
+    return derived
 
 
 def clear_geometry(session: Session, node: Node) -> Node:

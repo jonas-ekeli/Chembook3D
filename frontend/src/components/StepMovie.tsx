@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
-import { api, CALCULATION_TYPES, formatDelta, geometryToXyz, type Calculation, type Settings, type Steps } from '../api'
+import { api, CALCULATION_TYPES, formatDelta, geometryToXyz, type Calculation, type Node, type Settings, type Steps } from '../api'
 import { hartree } from '../util'
 
 export type Movie = { frames: string[]; index: number }
 
 const SPEEDS = [1, 2, 5, 10, 20, 30]
 
+/** D112: an xTB relaxed scan read from `xtbscan.log` or `path.xyz` (`xtb.SCAN_ROUTE`). */
+const isScanPath = (c: Calculation) => c.program === 'xTB' && c.route.startsWith('relaxed scan')
+
 /** D101, FR-3D-08: play the structures of one of the node's optimizations or scans in its 3D
  * view. `onShow` gives the viewer the structures and the one to show (null: the node's own
  * structure); `onStart` is called when a movie is chosen, so a running vibration stops, and a
- * vibration being shown (`vibrating`) stops the movie. */
+ * vibration being shown (`vibrating`) stops the movie. "Use this structure" (D112) makes the
+ * structure shown the node's geometry, in place on a scan path node and otherwise on a new
+ * derived node, and hands the result to `onUsed`. */
 export function StepMovie({
   nodeId,
   refreshKey,
@@ -17,6 +22,7 @@ export function StepMovie({
   vibrating,
   onShow,
   onStart,
+  onUsed,
 }: {
   nodeId: string
   refreshKey: number
@@ -24,6 +30,7 @@ export function StepMovie({
   vibrating: boolean
   onShow: (movie: Movie | null) => void
   onStart: () => void
+  onUsed: (node: Node, derived: boolean, structure: number) => void
 }) {
   const [calcs, setCalcs] = useState<Calculation[]>([])
   const [calcId, setCalcId] = useState('')
@@ -33,6 +40,7 @@ export function StepMovie({
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(5)
+  const [using, setUsing] = useState(false)
 
   useEffect(() => {
     api.calculations(nodeId).then(
@@ -72,6 +80,9 @@ export function StepMovie({
     const all = steps.frames.map((frame, n) => ({ frame, n }))
     return steps.scan && convergedOnly ? all.filter(({ frame }) => frame.converged) : all
   }, [steps, convergedOnly])
+  // Every structure of an xTB scan is a converged point: nothing to filter (A58).
+  const filterable = steps !== null && steps.scan !== null && steps.frames.some((frame) => !frame.converged)
+  const stages = steps ? new Set(steps.frames.map((frame) => frame.stage).filter((s) => s !== null)).size : 0
   const xyzFrames = useMemo(
     () => shown.map(({ frame, n }) => geometryToXyz(frame.geometry, `structure ${n + 1}`)),
     [shown],
@@ -104,6 +115,23 @@ export function StepMovie({
     setCalcId(id)
     if (id) onStart()
   }
+  const use = () => {
+    const n = shown[at]?.n
+    if (n === undefined) return
+    setPlaying(false)
+    setUsing(true)
+    setError(null)
+    api.useStep(calcId, n).then(
+      (result) => {
+        setUsing(false)
+        onUsed(result.node, result.derived, n + 1)
+      },
+      (err: unknown) => {
+        setUsing(false)
+        setError(err instanceof Error ? err.message : String(err))
+      },
+    )
+  }
 
   return (
     <div className="step-movie" aria-label="Optimization steps">
@@ -111,7 +139,7 @@ export function StepMovie({
         <option value="">No step movie</option>
         {calcs.map((c) => (
           <option key={c.id} value={c.id}>
-            Steps: {CALCULATION_TYPES[c.type] ?? c.type}, {c.composite_label} ({c.result?.geometry_count} structures)
+            Steps: {isScanPath(c) ? 'Relaxed scan' : (CALCULATION_TYPES[c.type] ?? c.type)}, {c.composite_label} ({c.result?.geometry_count} structures)
           </option>
         ))}
       </select>
@@ -152,7 +180,7 @@ export function StepMovie({
                 </option>
               ))}
             </select>
-            {steps.scan && (
+            {filterable && (
               <label className="check" title="One structure per scan point: the one its optimization converged on">
                 <input
                   type="checkbox"
@@ -174,6 +202,12 @@ export function StepMovie({
                 · scan point {current.point} of {steps.points}
               </>
             )}
+            {current?.stage !== null && current?.stage !== undefined && stages > 1 && (
+              <>
+                {' '}
+                · stage {current.stage} of {stages}
+              </>
+            )}
             {current?.converged && ' · converged'}
             {' · '}
             <span className="mono">E = {hartree(current?.energy)}</span>
@@ -187,6 +221,21 @@ export function StepMovie({
               </>
             )}
           </p>
+          <div className="step-use">
+            <button
+              className="small"
+              onClick={use}
+              disabled={using}
+              title={
+                steps.in_place
+                  ? "Make the structure shown this node's geometry"
+                  : 'This node has calculations on its own geometry, so the structure shown becomes a new node derived from it'
+              }
+            >
+              Use this structure
+            </button>{' '}
+            <span className="muted small">{steps.in_place ? 'changes this node' : 'makes a derived node'}</span>
+          </div>
           <EnergyChart
             energies={shown.map(({ frame }) => frame.energy)}
             at={at}

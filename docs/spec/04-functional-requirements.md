@@ -72,7 +72,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-IMP-04 | Partial parsing: every field that could be read is imported. Missing fields are listed as warning W-PARSE on the calculation. The file is still copied. | 05 §3 | 2 |
 | FR-IMP-05 | An import preview shows all parsed values and warnings before anything is written. Cancel writes nothing. | WF-04 | 2 |
 | FR-IMP-06 | Import ORCA output files with the same kinds of results as FR-IMP-01, where ORCA provides them. | D8, A3 | 5 |
-| FR-IMP-07 | Import xTB output files with the same kinds of results, where xTB provides them. | D8, A3 | 5 |
+| FR-IMP-07 | Import xTB output files with the same kinds of results, where xTB provides them; a relaxed scan's `xtbscan.log` and a scan path's `path.xyz` import as a relaxed scan whose node takes the path's top (else its middle point). | D8, A3, D112, A58 | 5 (scans after 5) |
 | FR-IMP-08 | Importing onto a node that has calculations: if the imported geometry does not match the node's (same atom order and elements, coordinates within tolerance), show W-GEOM and offer "create derived node" or cancel. | ID-7 | 2 |
 | FR-IMP-09 | Duplicate check: if a new import matches an existing node's composition, charge and multiplicity, and its geometry is within the configurable tolerance after alignment, show "possible duplicate", with attach, new or cancel. Never merge automatically. | D47, Q32 | 2 |
 | FR-IMP-10 | Import a CREST conformer ensemble. The preview lists conformers with energies. The lowest N are pre-selected (N from settings) and the user can untick any. The result is a group node with one member node per kept conformer and no representative. | D34, D46 | 5 |
@@ -191,7 +191,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-3D-05 | No geometry editing in the viewer. | X3 | — |
 | FR-3D-06 | Copy xyz to the clipboard and save a .xyz file from the node inspector. | D39 | 1 |
 | FR-3D-07 | Named alignment sets keep each node's alignment atoms in the investigation, to reuse and extend. | D80, A31 | after 5 |
-| FR-3D-08 | Play the structures of an optimization or scan as a movie in the node's 3D view, with each structure's energy; for a scan, optionally only the converged structure of each point. | D101, A48 | after 5 |
+| FR-3D-08 | Play the structures of an optimization or scan as a movie in the node's 3D view, with each structure's energy; for a scan, optionally only the converged structure of each point. Take the structure shown as the geometry: in place on a scan path node, otherwise on a new derived node. | D101, A48, D112, A58 | after 5 |
 
 ## FR-STER · Buried volume and steric maps (D81)
 

@@ -5,6 +5,10 @@ Nothing is stored for this: the structures and their energies are read again fro
 calculation's copied output file when asked, so calculations imported before D101 have them
 too. Each structure is turned onto the calculation's final geometry, so the movie does not
 jump about and ends on the structure the node shows.
+
+The structure shown can be taken over as a node's geometry (D112, `use_frame`): in place on a
+scan path node, whose calculations are all xTB relaxed scans read from `xtbscan.log` or
+`path.xyz`; otherwise on a derived node (ID-4, ID-5).
 """
 
 from dataclasses import dataclass
@@ -12,10 +16,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from chembook3d.models import Calculation
+from sqlalchemy.orm import Session
+
+from chembook3d.models import Calculation, CalculationType, Node
+from chembook3d.parsers import xtb
 from chembook3d.parsers.common import ParsedFile
 from chembook3d.services import files as file_service
-from chembook3d.services import geometry, imports
+from chembook3d.services import geometry, history, imports
+from chembook3d.services import nodes as node_service
 
 # Two structures printed one after the other this close (Å, every coordinate) are the same
 # structure printed again: Gaussian repeats the final one after an optimization, ORCA
@@ -33,6 +41,7 @@ class Frame:
     energy: float | None  # hartree, the SCF energy computed on this structure
     point: int | None  # the scan point it belongs to (1-based), None outside a scan
     converged: bool  # an optimization (or a scan point's) converged on this structure
+    stage: int | None = None  # D112: the stage of a scan path that names its stages
 
 
 @dataclass
@@ -83,7 +92,8 @@ def read_steps(folder: Path, calculation: Calculation) -> Steps:
         rows = imports._rows(atoms) or []
         energy = step.geometry_energies[n] if n < len(step.geometry_energies) else None
         point = step.geometry_points[n] if n < len(step.geometry_points) else None
-        frame = Frame(rows, energy, point, n in converged)
+        stage = step.geometry_stages[n] if n < len(step.geometry_stages) else None
+        frame = Frame(rows, energy, point, n in converged, stage)
         if frames and _same(frames[-1].rows, rows):
             # Shown once: the later energy (the final evaluation's) if it has one.
             last = frames[-1]
@@ -99,3 +109,50 @@ def read_steps(folder: Path, calculation: Calculation) -> Steps:
             frame.rows = geometry.place(reference, frame.rows).rows
     points = {f.point for f in frames if f.point is not None}
     return Steps(scan=step.scan, points=len(points), frames=frames)
+
+
+def is_scan_path(calculation: Calculation) -> bool:
+    """D112: a relaxed scan read from an xTB `xtbscan.log` or `path.xyz`."""
+    return (
+        calculation.program == xtb.PROGRAM
+        and calculation.type == CalculationType.OTHER
+        and calculation.route.startswith(xtb.SCAN_ROUTE)
+    )
+
+
+def changes_in_place(node: Node) -> bool:
+    """D112: a scan path node, whose calculations are all such scans, takes a structure of
+    its movie in place; no other result belongs to its coordinates."""
+    return bool(node.calculations) and all(is_scan_path(c) for c in node.calculations)
+
+
+def use_frame(
+    session: Session, folder: Path, calculation: Calculation, frame: int
+) -> node_service.GeometryResult:
+    """D112: the structure `frame` (0-based, as `read_steps` lists them) as the geometry of
+    the calculation's node: in place on a scan path node, where the scan then stands for
+    that point (its geometry and energy), else on a new derived node."""
+    steps = read_steps(folder, calculation)
+    if not 0 <= frame < len(steps.frames):
+        raise StepsUnavailable(f"There is no structure {frame + 1} in this calculation")
+    chosen = steps.frames[frame]
+    rows = [[e, float(x), float(y), float(z)] for e, x, y, z in chosen.rows]
+    node = calculation.node
+    if not changes_in_place(node):
+        return node_service.GeometryResult(node_service.derive(session, node, rows), derived=True)
+    if node.geometry != rows:
+        history.record(session, "node", node.id, "update", "geometry", node.geometry, rows)
+        node.geometry = rows
+    if calculation.geometry != rows:
+        history.record(
+            session, "calculation", calculation.id, "update", "geometry", calculation.geometry, rows
+        )
+        calculation.geometry = rows
+    result = calculation.result
+    if result is not None and result.energy != chosen.energy:
+        history.record(
+            session, "calculation", calculation.id, "update", "energy", result.energy, chosen.energy
+        )
+        result.energy = chosen.energy
+    session.flush()
+    return node_service.GeometryResult(node, derived=False)
