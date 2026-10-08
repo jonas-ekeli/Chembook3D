@@ -11,7 +11,7 @@
 from typing import Any
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from chembook3d.models import GroupNode, Node, NodeKind, Role, Transition
 from chembook3d.services import history
@@ -73,7 +73,16 @@ def touching(session: Session, record_ids: list[str]) -> list[Transition]:
 
 
 def is_ts(end: Endpoint) -> bool:
-    return isinstance(end, Node) and end.role == Role.TRANSITION_STATE
+    """A node marked as a transition state, or a group whose representative is one: the group
+    stands for its representative in energies (EN-7), so it does in edges and profiles too
+    (D111)."""
+    if isinstance(end, Node):
+        return end.role == Role.TRANSITION_STATE
+    if end.representative_id is None:
+        return False
+    session = object_session(end)
+    representative = session.get(Node, end.representative_id) if session else None
+    return representative is not None and representative.role == Role.TRANSITION_STATE
 
 
 def branches_of(end: Endpoint) -> set[str]:

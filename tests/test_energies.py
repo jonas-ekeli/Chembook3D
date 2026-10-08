@@ -855,3 +855,32 @@ def test_a_pathway_carries_on_through_edges_drawn_to_or_from_a_group(open_client
             "/api/energies/profile", json={**body, "paths": [[ids[p] for p in path]]}
         )
         assert response.status_code == 422 and "INV-2" in response.json()["detail"], path
+
+
+def test_a_group_whose_representative_is_a_ts_counts_as_a_ts(open_client):
+    # T-EN-17, D111: a group stands for its representative, so with a TS as representative
+    # its profile point is a TS and its edges are not "no TS".
+    client = open_client
+    ids = {}
+    for name in ("X", "ts1", "ts2", "Y"):
+        role = "minimum" if name in ("X", "Y") else "transition_state"
+        ids[name] = node(client, label=name, role=role)["id"]
+        add_energies(client, ids[name], -100.0)
+    group = post(client, "/groups/reconnect", {"member_ids": [ids["ts1"], ids["ts2"]]})
+    into = edge(client, ids["X"], group["id"])
+    edge(client, group["id"], ids["Y"])
+    body = {"paths": [[ids["X"], group["id"], ids["Y"]]], "level": svp(client), "type": "G"}
+
+    def shown() -> tuple[list[bool], list[bool], bool]:
+        profile = post(client, "/energies/profile", body, status=200)["profiles"][0]
+        canvas = {t["id"]: t for t in get(client, "/transitions")}
+        return (
+            [p["is_ts"] for p in profile["points"]],
+            [s["direct"] for s in profile["segments"]],
+            canvas[into["id"]]["direct"],
+        )
+
+    # With no representative the group is not a TS (and has no value, EN-7).
+    assert shown() == ([False, False, False], [True, True], True)
+    patch(client, f"/groups/{group['id']}", {"representative_id": ids["ts2"]})
+    assert shown() == ([False, True, False], [False, False], False)
