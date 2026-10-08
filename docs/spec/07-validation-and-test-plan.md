@@ -142,6 +142,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-EN-14 | Collapse groups {A-S1, B-S1} and {A-S2, B-S2}, then pick A-S1 and A-S2 as representatives | The line between them shows "2 edges" and no energy until both representatives are picked, then ΔG of A-S1 → A-S2 (D70) |
 | T-EN-15 | Turn on the 1 M standard state; view G and G_qh of a node, an edge between two nodes, and an edge where a free species joins | G and G_qh rise by RT ln(V_m / 1 L mol⁻¹) = 1.894 kcal/mol at 298.15 K (and follow the temperature setting); E and H and the one-to-one edge are unchanged; the edge with a joining species falls by one correction; the drop-down, badge and table name 1 M (D95). With it off, every value equals the reference script's (T-EN-05) |
 | T-EN-16 | Node X → group G {g1, g2} → TS → Y; groups A {a1, a2} and B {b1, b2} joined a1 → b1 and a2 → b2; a reconnection G of IM2-1 and IM2-2 with the edge G → TS3 | From X the pathway stops with G (group), g1 in G and g2 in G; X, g1 continues to TS and Y, as does X, G; from A it runs to B; from a2 to b2 only; from IM2-1 on through TS3; branch 1 still runs TS1-1 → G → TS3. Y → TS → g2 → X is a profile followed backwards, with only g2 → X "no TS"; g1 → G, g1 → g2 and a1 → b2 are refused (D108) |
+| T-EN-17 | Node X → group G {ts1, ts2} → Y, ts1 and ts2 marked TS | With no representative G's point is not a TS and both edges are "no TS" in the profile and the edge list; with ts2 as representative G's point is a TS and neither edge is "no TS" (D111) |
 
 ### Free species (D69)
 
@@ -216,6 +217,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-12 | "no TS" tags and title beside the legend | With the profile 320 wide and pathways A and B, the title's two lines and the legend do not overlap; untick "“no TS” tags" and Save: the direct connections stay dotted but no "no TS" tag is drawn, and the setting is saved (D108) |
 | T-UI-13 | Node names along the bottom | On the demo's profile of pathways A and B choose Node name "Along the bottom": B-S2 ‡ is written once, lower than it was below its level and above its step name; A-S1 and B-S1, in one column, are written on two lines (D109) |
 | T-UI-14 | Close levels keep their label positions | On the demo's profile of pathways A and B (screen style: values above, names below), A-S1 (−3.20) and B-S1 (−2.10) share a column: −2.10 and −3.20 are centred above the levels, B-S1 and A-S1 below them, each list in the order of the levels; with names along the bottom the first name row is within 50 units of the figure's bottom edge (D110) |
+| T-UI-15 | A node shared by overlaid pathways is neutral | On the demo's profile of pathways A and B, both starting at T-S0, T-S0 is named once, its value is drawn once in the text colour, and its level is in the text colour in both pathways (D111) |
 
 ## 8. Performance observation (no targets)
 
