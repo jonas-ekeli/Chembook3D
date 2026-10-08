@@ -27,7 +27,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from chembook3d import units
-from chembook3d.models import Branch, GroupNode, Node, ReactionStep, Role, Transition
+from chembook3d.models import Branch, GroupNode, Node, ReactionStep, Transition
 from chembook3d.services import branches as branch_service
 from chembook3d.services import species as species_service
 from chembook3d.services import transitions as transition_service
@@ -347,7 +347,7 @@ def _point(
         "id": end.id,
         "kind": "node" if is_node else "group",
         "label": _label(end),
-        "is_ts": is_node and end.role == Role.TRANSITION_STATE,
+        "is_ts": transition_service.is_ts(end),
         "step_id": step.id if step else None,
         "step_name": step.name if step else None,
         "step_position": step.position if step else None,

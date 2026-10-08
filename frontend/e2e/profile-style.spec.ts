@@ -165,6 +165,15 @@ test('"no TS" tags can be hidden and the title keeps clear of the legend', async
     for (const label of stacked) expect([label.anchor, label.x]).toEqual(['middle', stacked[0].x])
     for (let n = 1; n < stacked.length; n++) expect(stacked[n].y).toBeGreaterThan(stacked[n - 1].y)
 
+    // T-UI-15, D111: both pathways start at T-S0, so its level and value are in the text colour.
+    const start = chart.locator('text', { hasText: /^T-S0$/ })
+    await expect(start).toHaveCount(1)
+    const zero = chart.locator('text', { hasText: /^\(?[+−-]?0\.00\)?$/ })
+    await expect(zero).toHaveCount(1)
+    expect(await zero.evaluate((el) => el.getAttribute('fill'))).toBe('#1c2430')
+    for (const profile of await chart.locator('g[aria-label^="Profile "]').all())
+      expect(await profile.locator('line').first().getAttribute('stroke')).toBe('#1c2430')
+
     // T-UI-13, D109: node names along the bottom, above the step names, not by the levels.
     await expect(chart.locator('text', { hasText: /^B-S2 ‡$/ })).toHaveCount(1)
     const byLevel = Number(await chart.locator('text', { hasText: /^B-S2 ‡$/ }).getAttribute('y'))

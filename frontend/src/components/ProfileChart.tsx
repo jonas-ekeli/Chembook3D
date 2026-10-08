@@ -111,15 +111,32 @@ export function ProfileChart({
     const closing = i === data.profiles[pi].points.length - 1 && closesCycle(data.profiles[pi].points.map((p) => p.id))
     return `${point.label}${point.is_ts ? ' ‡' : ''}${closing ? ' ↻' : ''}`
   }
+  // D111: a node that several overlaid pathways pass through at the same place and energy (a
+  // common start, say) belongs to none of them, so its level and labels are drawn in the text
+  // colour instead of one pathway's colour.
+  const placeOf = (pi: number, i: number) => {
+    const point = data.profiles[pi].points[i]
+    return `${slotOf(pi, i)}|${point.id}|${point.relative === null ? '' : point.relative.toFixed(8)}`
+  }
+  const pathwaysAt = new Map<string, Set<number>>()
+  data.profiles.forEach((profile, pi) =>
+    profile.points.forEach((_, i) => {
+      const place = placeOf(pi, i)
+      pathwaysAt.set(place, (pathwaysAt.get(place) ?? new Set()).add(pi))
+    }),
+  )
+  const shared = (pi: number, i: number) => (pathwaysAt.get(placeOf(pi, i))?.size ?? 0) > 1
+  const colourAt = (pi: number, i: number) => (shared(pi, i) ? ink : colours[pi])
 
   // D109: node names along the bottom, one line per node in each column (a node shared by
   // overlaid pathways once), in its pathway's colour where a column holds more than one.
-  const bottomNames = slots.map(() => [] as { id: string; name: string; pathway: number }[])
+  const bottomNames = slots.map(() => [] as { id: string; name: string; colour: string }[])
   if (style.name_position === 'bottom')
     data.profiles.forEach((profile, pi) =>
       profile.points.forEach((point, i) => {
         const here = bottomNames[slotOf(pi, i)]
-        if (!here.some((h) => h.id === point.id)) here.push({ id: point.id, name: pointName(pi, i), pathway: pi })
+        if (!here.some((h) => h.id === point.id))
+          here.push({ id: point.id, name: pointName(pi, i), colour: colourAt(pi, i) })
       }),
     )
   const bottomRows = Math.max(0, ...bottomNames.map((h) => h.length))
@@ -193,7 +210,7 @@ export function ProfileChart({
   slots.forEach((_, slot) => {
     const here: {
       key: string
-      id: string
+      place: string
       y: number
       value: string
       name: string
@@ -202,13 +219,14 @@ export function ProfileChart({
       profile.points.forEach((point, i) => {
         if (point.relative === null || slotOf(pi, i) !== slot) return
         const key = `${pi}:${i}`
-        if (here.some((h) => h.id === point.id)) {
+        const place = placeOf(pi, i)
+        if (here.some((h) => h.place === place)) {
           labels.set(key, null) // already labelled for an earlier pathway
           return
         }
         here.push({
           key,
-          id: point.id,
+          place,
           y: y(point.relative),
           value: valueText(point.relative),
           name: pointName(pi, i),
@@ -330,7 +348,7 @@ export function ProfileChart({
             y={H - 12 * s - (stepNames ? row + 4 * s : 0) - (here.length - 1 - k) * row}
             fontSize={f}
             textAnchor="middle"
-            fill={here.length > 1 ? colours[h.pathway] : ink}
+            fill={here.length > 1 ? h.colour : ink}
           >
             {h.name}
           </text>
@@ -419,7 +437,7 @@ export function ProfileChart({
                   y={from + at(k, line)}
                   fontSize={sizeOf(line)}
                   textAnchor="middle"
-                  fill={line === 'value' ? colours[pi] : soft}
+                  fill={line === 'value' ? colourAt(pi, i) : soft}
                 >
                   {line === 'value' ? label.value : label.name}
                   {line === markOn && markSpan}
@@ -433,7 +451,7 @@ export function ProfileChart({
                   x2={cx + half}
                   y1={y(point.relative)}
                   y2={y(point.relative)}
-                  stroke={colours[pi]}
+                  stroke={colourAt(pi, i)}
                   strokeWidth={style.level_thickness}
                   strokeLinecap="round"
                 >
