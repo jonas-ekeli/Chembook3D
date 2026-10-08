@@ -476,6 +476,8 @@ export type ProfileStyle = {
   grid: boolean
   y_axis: boolean
   step_names: boolean
+  /** D108: the "no TS" tag on a direct connection's connector. */
+  edge_tags: boolean
   background: 'white' | 'none'
   png_scale: number
 }
@@ -761,7 +763,15 @@ export type EnergyView = {
   relative: Record<string, { value: number | null; species: SpeciesCount[]; message: string | null; joined: boolean }>
 }
 
-export type PathChoice = { transition_id: string; node_id: string; label: string; status: string }
+export type PathChoice = {
+  transition_id: string
+  node_id: string
+  label: string
+  status: string
+  /** D108: a node or a group; a node's group, when it is in one. */
+  kind?: 'node' | 'group'
+  group_label?: string | null
+}
 export type Pathway = { path: string[]; choices: PathChoice[]; closed: boolean }
 
 export type ProfilePoint = EnergyValue & {

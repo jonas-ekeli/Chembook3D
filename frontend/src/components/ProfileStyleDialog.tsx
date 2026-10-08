@@ -113,7 +113,7 @@ export function ProfileStyleDialog({
       />
     </label>
   )
-  const flag = (key: 'title' | 'grid' | 'y_axis' | 'step_names', label: string) => (
+  const flag = (key: 'title' | 'grid' | 'y_axis' | 'step_names' | 'edge_tags', label: string) => (
     <label className="check">
       <input type="checkbox" checked={style[key]} onChange={(event) => set(key, event.target.checked)} />
       <span>{label}</span>
@@ -202,6 +202,7 @@ export function ProfileStyleDialog({
             {select('connector', 'Connectors')}
             {select('dash', 'Connector line')}
             {number('connector_width', 'Connector thickness', 0.25, 8, 0.25)}
+            {flag('edge_tags', '“no TS” tags')}
           </>,
         )}
         {group(

@@ -27,6 +27,7 @@ export const SCREEN_STYLE: ProfileStyle = {
   grid: true,
   y_axis: true,
   step_names: true,
+  edge_tags: true,
   background: 'white',
   png_scale: 2,
 }
