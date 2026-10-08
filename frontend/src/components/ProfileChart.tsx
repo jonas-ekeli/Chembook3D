@@ -92,14 +92,6 @@ export function ProfileChart({
   // and always at the top left, it goes below the title, so the two never overlap.
   const titleEnd = left + Math.max(textWidth(title, f + 2, family, 600), textWidth(subtitle, f, family)) + 12 * s
   const legendTop = style.title && (style.legend === 'top-left' || titleEnd > legendLeft) ? 44 * s : 12 * s
-  const margin = {
-    left,
-    right,
-    top: Math.max(style.title ? 48 * s : 20 * s, legendRows ? legendTop + legendRows * row + 8 * s : 0),
-    bottom: style.step_names ? 56 * s : 28 * s,
-  }
-  const plotW = W - margin.left - margin.right
-  const plotH = H - margin.top - margin.bottom
 
   // Line the pathways up by reaction step when every one of them moves forward through the
   // steps; otherwise by position along the pathway.
@@ -114,6 +106,32 @@ export function ProfileChart({
     : Array.from({ length: Math.max(...data.profiles.map((p) => p.points.length)) }, (_, i) => i)
   const slotOf = (profileIndex: number, pointIndex: number) =>
     byStep ? slots.indexOf(data.profiles[profileIndex].points[pointIndex].step_position as number) : pointIndex
+  const pointName = (pi: number, i: number) => {
+    const point = data.profiles[pi].points[i]
+    const closing = i === data.profiles[pi].points.length - 1 && closesCycle(data.profiles[pi].points.map((p) => p.id))
+    return `${point.label}${point.is_ts ? ' ‡' : ''}${closing ? ' ↻' : ''}`
+  }
+
+  // D109: node names along the bottom, one line per node in each column (a node shared by
+  // overlaid pathways once), in its pathway's colour where a column holds more than one.
+  const bottomNames = slots.map(() => [] as { id: string; name: string; pathway: number }[])
+  if (style.name_position === 'bottom')
+    data.profiles.forEach((profile, pi) =>
+      profile.points.forEach((point, i) => {
+        const here = bottomNames[slotOf(pi, i)]
+        if (!here.some((h) => h.id === point.id)) here.push({ id: point.id, name: pointName(pi, i), pathway: pi })
+      }),
+    )
+  const bottomRows = Math.max(0, ...bottomNames.map((h) => h.length))
+  const stepNames = byStep && style.step_names
+  const margin = {
+    left,
+    right,
+    top: Math.max(style.title ? 48 * s : 20 * s, legendRows ? legendTop + legendRows * row + 8 * s : 0),
+    bottom: (stepNames || bottomRows ? 56 * s : 28 * s) + (bottomRows ? bottomRows * row + (stepNames ? 4 * s : 0) : 0),
+  }
+  const plotW = W - margin.left - margin.right
+  const plotH = H - margin.top - margin.bottom
   const slotW = plotW / Math.max(1, slots.length)
   const half = Math.min(style.level_width / 2, slotW * 0.45)
   const x = (slot: number) => margin.left + slotW * (slot + 0.5)
@@ -177,13 +195,12 @@ export function ProfileChart({
           labels.set(key, null) // already labelled for an earlier pathway
           return
         }
-        const closing = i === profile.points.length - 1 && closesCycle(profile.points.map((p) => p.id))
         here.push({
           key,
           id: point.id,
           y: y(point.relative),
           value: valueText(point.relative),
-          name: `${point.label}${point.is_ts ? ' ‡' : ''}${closing ? ' ↻' : ''}`,
+          name: pointName(pi, i),
         })
       }),
     )
@@ -299,8 +316,21 @@ export function ProfileChart({
           Δ{data.type} ({unit})
         </text>
       )}
-      {byStep &&
-        style.step_names &&
+      {bottomNames.map((here, slot) =>
+        here.map((h, k) => (
+          <text
+            key={`${slot}:${h.id}`}
+            x={x(slot)}
+            y={H - 12 * s - (stepNames ? row + 4 * s : 0) - (here.length - 1 - k) * row}
+            fontSize={f}
+            textAnchor="middle"
+            fill={here.length > 1 ? colours[h.pathway] : ink}
+          >
+            {h.name}
+          </text>
+        )),
+      )}
+      {stepNames &&
         slots.map((position, i) => {
           const name = data.profiles.flatMap((p) => p.points).find((pt) => pt.step_position === position)?.step_name
           return (
@@ -367,8 +397,9 @@ export function ProfileChart({
             const label = labels.get(`${pi}:${i}`)
             const mark = marks?.get(`${pi}:${i}`)
             const markSpan = mark && <tspan {...MARK}> {mark}</tspan>
-            // The mark goes after the name, or after the value when the name is hidden.
-            const markOn = style.name_position !== 'hidden' ? 'name' : 'value'
+            // The mark goes after the name, or after the value when the name is hidden or along the
+            // bottom.
+            const markOn = above.includes('name') || below.includes('name') ? 'name' : 'value'
             const lines = (side: ('value' | 'name')[], at: (k: number, line: 'value' | 'name') => number) =>
               label &&
               side.map((line, k) => (
@@ -406,7 +437,9 @@ export function ProfileChart({
                 {label && label.beside && (
                   <text x={label.x} y={label.y} fontSize={(f * 10.5) / 11} textAnchor="start">
                     {style.value_position !== 'hidden' && <tspan fill={colours[pi]}>{label.value}</tspan>}
-                    {style.name_position !== 'hidden' && <tspan fill={soft}> {label.name}</tspan>}
+                    {(style.name_position === 'above' || style.name_position === 'below') && (
+                      <tspan fill={soft}> {label.name}</tspan>
+                    )}
                     {markSpan}
                   </text>
                 )}

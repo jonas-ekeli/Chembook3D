@@ -468,7 +468,7 @@ export type ProfileStyle = {
   dash: 'solid' | 'dashed' | 'dotted' | 'by-pathway'
   connector_width: number
   value_position: 'above' | 'below' | 'hidden'
-  name_position: 'below' | 'above' | 'hidden'
+  name_position: 'below' | 'above' | 'bottom' | 'hidden'
   brackets: 'none' | 'round' | 'square'
   decimals: 'unit' | '0' | '1' | '2' | '3'
   title: boolean
