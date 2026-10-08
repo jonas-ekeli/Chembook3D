@@ -687,6 +687,15 @@ def test_a_branch_profile_runs_through_a_reconnection_and_on_into_its_outgoing_b
     # R continues both branches, so the app cannot say which way it came in: it starts at G.
     found = get(client, f"/branches/{group['outgoing_branch_id']}/pathway")
     assert [label[i] for i in found["path"]] == ["G", "TS3", "IM4"]
+    # D108: a conformer in G carries on along G's edge into R.
+    found = post(client, "/pathways/extend", {"path": [ids["IM2-1"]]}, status=200)
+    assert [label[i] for i in found["path"]] == ["IM2-1", "TS3", "IM4"]
+    # Tracing branch 1 from TS1-1, the edge into G leads into G itself (D18); its members are
+    # offered only where the pathway stops.
+    found = post(
+        client, "/pathways/extend", {"path": [ids["TS1-1"]], "branch_id": branches[0]}, status=200
+    )
+    assert [label[i] for i in found["path"]] == ["TS1-1", "G", "TS3", "IM4"]
 
 
 def test_a_branch_cycle_back_to_the_trunk_and_a_fork_that_can_close_it(open_client, energetic):
@@ -788,3 +797,61 @@ def test_overlaid_profiles_share_one_reference(open_client, energetic):
 def test_default_reference_prefix_is_not_part_of_the_level(method, multiplicity, expected):
     # A12: `B3LYP opt freq` gives one level for both steps, so its G is available.
     assert levels.canonical_method(method, multiplicity) == expected
+
+
+def test_a_pathway_carries_on_through_edges_drawn_to_or_from_a_group(open_client):
+    # T-EN-16, D108: a group's edges count for its members and its members' edges for the group.
+    client = open_client
+    ids = {}
+    for name in ("X", "g1", "g2", "TS", "Y", "a1", "a2", "b1", "b2"):
+        role = "transition_state" if name == "TS" else "minimum"
+        ids[name] = node(client, label=name, role=role)["id"]
+        add_energies(client, ids[name], -100.0 + (0.02 if name == "TS" else 0.0))
+
+    def group(label: str, members: list[str]) -> str:
+        body = {"member_ids": [ids[m] for m in members], "label": label}
+        return post(client, "/groups/reconnect", body)["id"]
+
+    ids["G"] = group("G", ["g1", "g2"])
+    ids["A"] = group("A", ["a1", "a2"])
+    ids["B"] = group("B", ["b1", "b2"])
+    edge(client, ids["X"], ids["G"])
+    edge(client, ids["G"], ids["TS"])
+    edge(client, ids["TS"], ids["Y"])
+    edge(client, ids["a1"], ids["b1"])  # conformer to conformer, as in D66
+    edge(client, ids["a2"], ids["b2"])
+    label = {v: k for k, v in ids.items()}
+
+    def extend(*path: str) -> dict:
+        return post(client, "/pathways/extend", {"path": [ids[p] for p in path]}, status=200)
+
+    # An edge into a group is a choice between the group and each of its members.
+    found = extend("X")
+    assert [label[i] for i in found["path"]] == ["X"]
+    assert [(c["label"], c["kind"], c["group_label"]) for c in found["choices"]] == [
+        ("G", "group", None),
+        ("g1", "node", "G"),
+        ("g2", "node", "G"),
+    ]
+    # A member carries on along its group's edges, and so does the group.
+    assert [label[i] for i in extend("X", "g1")["path"]] == ["X", "g1", "TS", "Y"]
+    assert [label[i] for i in extend("X", "G")["path"]] == ["X", "G", "TS", "Y"]
+    # A group carries on along its members' edges to the group they lead into, so collapsed
+    # groups read as one path; a member keeps to its own edges.
+    assert [label[i] for i in extend("A")["path"]] == ["A", "B"]
+    assert [label[i] for i in extend("a2")["path"]] == ["a2", "b2"]
+    # Backwards too: the pathway may be followed against the transitions.
+    reversed_path = [ids["Y"], ids["TS"], ids["g2"], ids["X"]]
+
+    body = {"paths": [reversed_path], "level": svp(client), "type": "G"}
+    profile = post(client, "/energies/profile", body, status=200)["profiles"][0]
+    assert [s["forward"] for s in profile["segments"]] == [False, False, False]
+    # "no TS" is judged on the pathway's points: g2 → X joins two minima, TS → g2 does not.
+    assert [s["direct"] for s in profile["segments"]] == [False, False, True]
+
+    # A member and its own group are one place, and siblings are not joined through it.
+    for path in (["g1", "G"], ["g1", "g2"], ["a1", "b2"]):
+        response = client.post(
+            "/api/energies/profile", json={**body, "paths": [[ids[p] for p in path]]}
+        )
+        assert response.status_code == 422 and "INV-2" in response.json()["detail"], path

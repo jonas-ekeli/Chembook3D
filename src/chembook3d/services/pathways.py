@@ -5,6 +5,9 @@
   nodes per step, and energies are never used to choose a node or an edge (INV-2, EN-10).
 - Extending a pathway follows an outgoing transition only while there is exactly one to
   follow. At a fork (two TS candidates, a split) it stops and lists the choices for the user.
+- A group's transitions count for each of its members, and its members' transitions for the
+  group, so a pathway carries on across an edge drawn to or from a group as well as one drawn
+  node to node (D108). An edge into a group offers the group and each of its members.
 - A pathway visits each node once, except that it may end at a node it has already visited,
   closing a catalytic cycle (A13). The cycle is closed once; a further turnover would only
   repeat the same calculations.
@@ -60,8 +63,62 @@ def _incoming(session: Session, record_id: str) -> list[Transition]:
     return list(session.scalars(query.order_by(Transition.seq)))
 
 
+def _members(session: Session, group_id: str) -> list[Node]:
+    query = select(Node).where(Node.group_id == group_id)
+    order = (Node.group_position.is_(None), Node.group_position, Node.seq)
+    return list(session.scalars(query.order_by(*order)))
+
+
+def _sides(session: Session, end: Endpoint) -> set[str]:
+    """D108: the records whose transitions a pathway may follow at `end`: the end itself, the
+    group a node is in and a group's members."""
+    if isinstance(end, Node):
+        return {end.id} | ({end.group_id} if end.group_id else set())
+    return {end.id} | {m.id for m in _members(session, end.id)}
+
+
+def _same_place(a: Endpoint, b: Endpoint) -> bool:
+    """A record and itself, or a member and its own group: never a step of a pathway."""
+    return (
+        a.id == b.id
+        or (isinstance(a, Node) and a.group_id == b.id)
+        or (isinstance(b, Node) and b.group_id == a.id)
+    )
+
+
+def _leaving(session: Session, sides: set[str]) -> list[Transition]:
+    """Transitions out of any of `sides` to a record outside them (D108), in creation order."""
+    query = select(Transition).where(
+        or_(Transition.source_node_id.in_(sides), Transition.source_group_id.in_(sides))
+    )
+    found = session.scalars(query.order_by(Transition.seq))
+    return [t for t in found if t.target_id not in sides]
+
+
+def _joining(session: Session, a: Endpoint, b: Endpoint) -> Segment | None:
+    """The transition joining a and b: one drawn between them, else one drawn to or from the
+    group either is in or a member of either (D108)."""
+    forward = [t for t in _outgoing(session, a.id) if t.target_id == b.id]
+    if forward:
+        return Segment(forward[0], True)
+    backward = [t for t in _outgoing(session, b.id) if t.target_id == a.id]
+    if backward:
+        return Segment(backward[0], False)
+    if _same_place(a, b):
+        return None
+    sides_a, sides_b = _sides(session, a), _sides(session, b)
+    forward = [t for t in _leaving(session, sides_a) if t.target_id in sides_b]
+    if forward:
+        return Segment(forward[0], True)
+    backward = [t for t in _leaving(session, sides_b) if t.target_id in sides_a]
+    if backward:
+        return Segment(backward[0], False)
+    return None
+
+
 def resolve(session: Session, ids: list[str]) -> list[Segment]:
-    """The transitions joining each neighbour pair. Refuses a pathway with a gap (INV-2)."""
+    """The transitions joining each neighbour pair, directly or through a group (D108).
+    Refuses a pathway with a gap (INV-2)."""
     if not ids:
         raise RecordError("A pathway needs at least one node")
     if len(set(ids[:-1])) != len(ids) - 1:
@@ -72,12 +129,9 @@ def resolve(session: Session, ids: list[str]) -> list[Segment]:
     ends = [transition_service.endpoint(session, record_id) for record_id in ids]
     segments = []
     for a, b in zip(ends, ends[1:], strict=False):
-        forward = [t for t in _outgoing(session, a.id) if t.target_id == b.id]
-        backward = [t for t in _outgoing(session, b.id) if t.target_id == a.id]
-        if forward:
-            segments.append(Segment(forward[0], True))
-        elif backward:
-            segments.append(Segment(backward[0], False))
+        segment = _joining(session, a, b)
+        if segment is not None:
+            segments.append(segment)
         else:
             raise RecordError(
                 f"No transition joins “{_label(a)}” and “{_label(b)}”: a pathway follows "
@@ -107,16 +161,44 @@ def _shared(end: Endpoint) -> bool:
     return not transition_service.branches_of(end)
 
 
-def _choices(session: Session, transitions: list[Transition]) -> list[dict[str, Any]]:
-    found = []
-    for t in transitions:
+def _onward(session: Session, end: Endpoint, members: bool) -> list[tuple[Transition, Endpoint]]:
+    """D108: where a pathway at `end` can go next, each with the transition it follows, in
+    the order the transitions were drawn. Transitions of the group a node is in and of a
+    group's members count too. From a group, an edge from one of its members to a member of
+    another group leads to that group, so collapsed groups read as one path (D66). An edge
+    into a group leads to the group and, with `members`, to each of its members."""
+    sides = _sides(session, end)
+    found: dict[str, tuple[Transition, Endpoint]] = {}
+    for t in _leaving(session, sides):
         target = transition_service.endpoint(session, t.target_id)
+        reached: list[Endpoint] = [target]
+        if isinstance(target, GroupNode):
+            if members:
+                reached += _members(session, target.id)
+        elif isinstance(end, GroupNode) and t.source_id != end.id and target.group_id:
+            reached = [session.get(GroupNode, target.group_id)]  # type: ignore[list-item]
+        for record in reached:
+            if record.id not in found and not _same_place(end, record):
+                found[record.id] = (t, record)
+    return list(found.values())
+
+
+def _choices(session: Session, onward: list[tuple[Transition, Endpoint]]) -> list[dict[str, Any]]:
+    found = []
+    for t, target in onward:
+        group = (
+            session.get(GroupNode, target.group_id)
+            if isinstance(target, Node) and target.group_id
+            else None
+        )
         found.append(
             {
                 "transition_id": t.id,
                 "node_id": target.id,
                 "label": _label(target),
                 "status": target.status if isinstance(target, Node) else t.status,
+                "kind": "node" if isinstance(target, Node) else "group",
+                "group_label": _label(group) if group else None,
             }
         )
     return found
@@ -135,12 +217,15 @@ class Extended:
 
 
 def extend(session: Session, ids: list[str], branch_id: str | None = None) -> Extended:
-    """Follow outgoing transitions from the last node while exactly one leads on. With a
-    branch, only edges into that branch's lineage (its ancestors and descendants) or into a
-    node on no branch (D67) count, so an interconversion into a sibling branch is not
-    followed. Stops at an end, at a fork (listing the choices, which may include nodes already
-    visited) and when the pathway returns to a node it visited, closing a cycle (A13). A
-    closed pathway is complete."""
+    """Follow outgoing transitions from the last node while exactly one leads on, directly or
+    through a group (D108). With a branch, only edges into that branch's lineage (its
+    ancestors and descendants) or into a node on no branch (D67) count, so an interconversion
+    into a sibling branch is not followed, and an edge into a group is followed into the group
+    itself, the reconnection point (D18); its members are offered where the pathway stops.
+    Without a branch an edge into a group is a choice between the group and its members.
+    Stops at an end, at a fork (listing the choices, which may include nodes already visited)
+    and when the pathway returns to a node it visited, closing a cycle (A13). A closed pathway
+    is complete."""
     path = list(ids)
     resolve(session, path)
     if closed(path):
@@ -153,15 +238,16 @@ def extend(session: Session, ids: list[str], branch_id: str | None = None) -> Ex
     def _leads_into(end: Endpoint) -> bool:
         return _in(end, related) or _shared(end)
 
+    def onward(members: bool) -> list[tuple[Transition, Endpoint]]:
+        end = transition_service.endpoint(session, path[-1])
+        found = _onward(session, end, members)
+        return [(t, e) for t, e in found if related is None or _leads_into(e)]
+
     while True:
-        options = [
-            t
-            for t in _outgoing(session, path[-1])
-            if related is None or _leads_into(transition_service.endpoint(session, t.target_id))
-        ]
+        options = onward(members=related is None)
         if len(options) != 1:
-            return Extended(path, _choices(session, options), False)
-        path.append(options[0].target_id)
+            return Extended(path, _choices(session, onward(members=True)), False)
+        path.append(options[0][1].id)
         if closed(path):
             return Extended(path, [], True)
 
@@ -282,7 +368,6 @@ class Prepared:
     species: list[list[list[dict[str, Any]]]]
     ends: dict[str, Endpoint]
     steps: dict[str, ReactionStep]
-    direct: dict[str, bool]
 
 
 def prepare(session: Session, paths: list[list[str]], reference_id: str | None) -> Prepared:
@@ -303,11 +388,6 @@ def prepare(session: Session, paths: list[list[str]], reference_id: str | None) 
         species=[[species_service.describe(session, b) for b in balance] for balance in balances],
         ends={record_id: transition_service.endpoint(session, record_id) for record_id in on_paths},
         steps={s.id: s for s in session.scalars(select(ReactionStep))},
-        direct={
-            s.transition.id: transition_service.describe(session, s.transition)["direct"]
-            for path in segments
-            for s in path
-        },
     )
 
 
@@ -353,9 +433,12 @@ def profiles(
                         "forward": s.forward,
                         "status": s.transition.status,
                         # D53, INV-8: drawn as a dotted "no TS" connector, never as a barrier.
-                        "direct": prepared.direct[s.transition.id],
+                        # Judged on the pathway's own points, which differ from the
+                        # transition's ends where it is drawn to or from a group (D108).
+                        "direct": not transition_service.is_ts(prepared.ends[a])
+                        and not transition_service.is_ts(prepared.ends[b]),
                     }
-                    for s in segments
+                    for s, a, b in zip(segments, path, path[1:], strict=False)
                 ],
             }
         )

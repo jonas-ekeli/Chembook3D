@@ -299,6 +299,7 @@ def test_profile_style_setting(open_client):
                 "width": 99999,
                 "font_size": 14,
                 "title": False,
+                "edge_tags": False,
                 "colours": "pink",
                 "script": "<x>",
             }
@@ -309,6 +310,8 @@ def test_profile_style_setting(open_client):
     assert style["width"] == 4000
     assert style["font_size"] == 14
     assert style["title"] is False
+    assert style["edge_tags"] is False  # D108: "no TS" tags hidden
+    assert settings["profile_style"]["edge_tags"] is True
     assert style["colours"] == "branch"
     assert "script" not in style
     # A later change keeps the earlier ones, and the style survives a reload of the settings.

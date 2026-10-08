@@ -80,9 +80,11 @@ class PathIn(BaseModel):
 
 class ChoiceOut(BaseModel):
     transition_id: str
-    node_id: str
+    node_id: str  # a node or a group
     label: str
     status: str
+    kind: str = "node"  # "node" or "group"
+    group_label: str | None = None  # the group a node is in (D108)
 
 
 class PathOut(BaseModel):

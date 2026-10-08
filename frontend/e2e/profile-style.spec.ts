@@ -117,3 +117,41 @@ test('profile style, saved images and zoom', async ({ page }) => {
     await forgetView(page.request, join(E2E_DIR, 'demo'))
   }
 })
+
+function overlap(a: { x: number; y: number; width: number; height: number }, b: typeof a): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+}
+
+test('"no TS" tags can be hidden and the title keeps clear of the legend', async ({ page }) => {
+  // T-UI-12, D108
+  const screen = (await (await page.request.get('/api/settings')).json()).profile_presets.screen
+  try {
+    // A narrow figure, where the title runs into the legend's corner.
+    await page.request.put('/api/settings', { data: { profile_style: { ...screen, width: 320 } } })
+    await openDemo(page)
+    await page.getByRole('button', { name: 'Profile and table' }).click()
+    const drawer = page.getByLabel('Energy drawer')
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'A' })
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+    const chart = drawer.locator('.drawer-main').getByRole('img', { name: 'Energy profile' })
+    await expect(chart.locator('[data-direct="true"]').first()).toContainText('no TS')
+    const title = chart.locator('text', { hasText: 'relative to T-S0' })
+    const legend = chart.getByLabel('Legend')
+    for (const line of [title, chart.locator('text', { hasText: /^ΔG.* at / })])
+      expect(overlap((await line.boundingBox())!, (await legend.boundingBox())!)).toBe(false)
+    await page.screenshot({ path: 'test-results/profile-title-legend.png' })
+
+    await drawer.getByRole('button', { name: 'Style…' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Profile style' })
+    await dialog.getByLabel('“no TS” tags').uncheck()
+    await dialog.getByRole('button', { name: 'Save' }).click()
+    await expect(dialog).toHaveCount(0)
+    // The connector stays dotted; only the tag goes.
+    await expect(chart.locator('[data-direct="true"]').first()).toBeAttached()
+    await expect(chart).not.toContainText('no TS')
+    expect((await (await page.request.get('/api/settings')).json()).profile_style.edge_tags).toBe(false)
+  } finally {
+    await page.request.put('/api/settings', { data: { profile_style: screen } })
+    await forgetView(page.request, join(E2E_DIR, 'demo'))
+  }
+})

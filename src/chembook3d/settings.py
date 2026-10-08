@@ -32,7 +32,7 @@ BATCH_SUFFIXES = ("_SP*", "_freq", "_opt", "_irc")
 
 # D106: how energy profiles are drawn, in the app and in the PNG and SVG saved from them. Each
 # key takes one of the listed choices or a number within its bounds; "Screen" is the look
-# before D106 and the default.
+# before D106 and the default. `edge_tags` shows the "no TS" tag on a direct connection (D108).
 PROFILE_CHOICES: dict[str, tuple[str, ...]] = {
     "font": ("system", "arial", "helvetica", "times"),
     "colours": ("branch", "colour-blind", "grey", "black"),
@@ -55,7 +55,7 @@ PROFILE_NUMBERS: dict[str, tuple[float, float]] = {
     "connector_width": (0.25, 8),
     "png_scale": (1, 8),
 }
-PROFILE_FLAGS = ("title", "grid", "y_axis", "step_names")
+PROFILE_FLAGS = ("title", "grid", "y_axis", "step_names", "edge_tags")
 PROFILE_PRESETS: dict[str, dict] = {
     "screen": {
         "width": 960,
@@ -78,6 +78,7 @@ PROFILE_PRESETS: dict[str, dict] = {
         "grid": True,
         "y_axis": True,
         "step_names": True,
+        "edge_tags": True,
         "background": "white",
         "png_scale": 2,
     },
@@ -102,6 +103,7 @@ PROFILE_PRESETS: dict[str, dict] = {
         "grid": False,
         "y_axis": True,
         "step_names": True,
+        "edge_tags": True,
         "background": "none",
         "png_scale": 4,
     },

@@ -6,6 +6,7 @@ import {
   type EnergyTable,
   type EnergyType,
   type Node,
+  type PathChoice,
   type Profiles,
   type ProfileRequest,
   type Settings,
@@ -20,7 +21,7 @@ import { CompareStericsDialog } from './Sterics'
 const NO_BRANCH = '#98a2b3'
 const FALLBACK = ['#2459c6', '#c4320a', '#079455', '#6938ef', '#b54708']
 
-type Path = { ids: string[]; choices: { node_id: string; label: string; status: string }[]; branchId: string | null }
+type Path = { ids: string[]; choices: Omit<PathChoice, 'transition_id'>[]; branchId: string | null }
 
 /** A pathway as the read-only copy exports it (D79, A30). */
 export type DrawerPath = { ids: string[]; branch_id: string | null }
@@ -471,8 +472,17 @@ export function EnergyDrawer({
                         key={choice.node_id}
                         className="small"
                         onClick={() => extend(index, [...path.ids, choice.node_id], path.branchId)}
+                        title={
+                          choice.kind === 'group'
+                            ? 'The group, valued by its representative'
+                            : choice.group_label
+                              ? `${choice.label}, a member of ${choice.group_label}`
+                              : undefined
+                        }
                       >
                         {choice.label}
+                        {choice.kind === 'group' && <span className="muted"> (group)</span>}
+                        {choice.group_label && <span className="muted"> in {choice.group_label}</span>}
                       </button>
                     ))}
                   </div>

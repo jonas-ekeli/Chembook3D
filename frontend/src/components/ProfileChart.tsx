@@ -22,8 +22,26 @@ function tickDecimals(values: number[]): number {
 
 const MARK = { fontWeight: 700, fill: '#b42318' } as const
 
+let measure: CanvasRenderingContext2D | null | undefined
+
+/** The width of `text` in the figure's font, measured by the browser; estimated where it
+ * cannot measure. */
+function textWidth(text: string, size: number, family: string, weight = 400): number {
+  if (measure === undefined) {
+    try {
+      measure = document.createElement('canvas').getContext('2d')
+    } catch {
+      measure = null
+    }
+  }
+  if (!measure) return text.length * size * 0.6
+  measure.font = `${weight} ${size}px ${family}`
+  return measure.measureText(text).width
+}
+
 /** FR-EN-05, FR-EN-09: X(n) − X(ref) along each pathway, overlaid in branch colours. A direct
- * connection is a dotted connector labelled "no TS", never a barrier (D53, INV-8). Drawn in the
+ * connection is a dotted connector, never a barrier (D53, INV-8), tagged "no TS" unless the style
+ * hides the tags (D108). Drawn in the
  * profile style of the app's settings (D106), or in `style` when given (the style dialog's
  * preview). `size` sets the size on screen (zoom); the figure itself is always the style's. */
 export function ProfileChart({
@@ -59,13 +77,24 @@ export function ProfileChart({
   const ink = style.text === 'black' ? '#000000' : '#1c2430'
   const soft = style.text === 'black' ? '#000000' : '#667085'
 
+  const family = FONTS[style.font]?.family ?? FONTS.system.family
+  const typeName = energyTypeName(data.type, data.temperature, data.cutoff, data.standard_state)
+  const reference = data.profiles.flatMap((p) => p.points).find((p) => p.id === data.reference_id)
+  const title = `Δ${typeName} at ${data.level_label}`
+  const subtitle = `relative to ${reference?.label ?? '—'}${data.reference_value === null ? ' (no value at this level)' : ''}`
+
+  const left = style.y_axis ? 70 * s : 24 * s
+  const right = 24 * s
   const legendRows = style.legend === 'hidden' ? 0 : names.length
-  const legendTop = style.legend === 'top-left' && style.title ? 44 * s : 12 * s
-  const longest = Math.max(0, ...names.map((n) => n.length))
-  const legendWidth = 28 * s + longest * f * 0.6
+  const legendWidth = 26 * s + Math.max(0, ...names.map((n) => textWidth(n, f, family)))
+  const legendLeft = style.legend === 'top-left' ? left : Math.max(left, W - right - legendWidth)
+  // D108: the legend starts beside the title only where the title ends before it; otherwise,
+  // and always at the top left, it goes below the title, so the two never overlap.
+  const titleEnd = left + Math.max(textWidth(title, f + 2, family, 600), textWidth(subtitle, f, family)) + 12 * s
+  const legendTop = style.title && (style.legend === 'top-left' || titleEnd > legendLeft) ? 44 * s : 12 * s
   const margin = {
-    left: style.y_axis ? 70 * s : 24 * s,
-    right: 24 * s,
+    left,
+    right,
     top: Math.max(style.title ? 48 * s : 20 * s, legendRows ? legendTop + legendRows * row + 8 * s : 0),
     bottom: style.step_names ? 56 * s : 28 * s,
   }
@@ -122,9 +151,6 @@ export function ProfileChart({
     const text = formatDelta(hartree, valueSettings)
     return style.brackets === 'round' ? `(${text})` : style.brackets === 'square' ? `[${text}]` : text
   }
-  const typeName = energyTypeName(data.type, data.temperature, data.cutoff, data.standard_state)
-  const reference = data.profiles.flatMap((p) => p.points).find((p) => p.id === data.reference_id)
-
   // Label placement. A node shared by overlaid pathways is labelled once. Where bars in one
   // column lie close together, their labels go beside them, stacked so none overlap.
   type Label = {
@@ -210,7 +236,7 @@ export function ProfileChart({
       height={H}
       role="img"
       aria-label="Energy profile"
-      fontFamily={FONTS[style.font]?.family ?? FONTS.system.family}
+      fontFamily={family}
       className="profile-chart"
       style={svgStyle}
     >
@@ -218,21 +244,17 @@ export function ProfileChart({
       {style.title && (
         <>
           <text x={margin.left} y={18 * s} fontSize={f + 2} fontWeight={600} fill={ink}>
-            Δ{typeName} at {data.level_label}
+            {title}
           </text>
           <text x={margin.left} y={34 * s} fontSize={f} fill={soft}>
-            relative to {reference?.label ?? '—'}
-            {data.reference_value === null ? ' (no value at this level)' : ''}
+            {subtitle}
           </text>
         </>
       )}
       {legendRows > 0 && (
         <g aria-label="Legend">
           {names.map((name, i) => (
-            <g
-              key={i}
-              transform={`translate(${style.legend === 'top-left' ? margin.left : Math.max(margin.left, W - margin.right - legendWidth)}, ${legendTop + i * row})`}
-            >
+            <g key={i} transform={`translate(${legendLeft}, ${legendTop + i * row})`}>
               <line
                 x1={0}
                 x2={20 * s}
@@ -307,7 +329,7 @@ export function ProfileChart({
                   strokeDasharray={segment.direct ? '2 5' : dashOf(style, pi)}
                   strokeLinecap="round"
                 />
-                {segment.direct && (
+                {segment.direct && style.edge_tags && (
                   <g aria-label="no TS">
                     <rect
                       x={(x1 + x2) / 2 - 20 * s}
