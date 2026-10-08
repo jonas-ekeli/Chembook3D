@@ -10,4 +10,5 @@ export default function globalSetup() {
   const run = (args: string[]) => execFileSync('uv', ['run', 'python', ...args], { cwd: root, stdio: 'inherit' })
   run(['scripts/make_demo.py', join(process.env.E2E_DIR!, 'demo')])
   run(['-m', 'tests.gaussian_text', join(process.env.E2E_DIR!, 'gaussian')])
+  run(['-m', 'tests.gaussian_text', '--checkpoint', join(process.env.E2E_DIR!, 'checkpoint')])
 }

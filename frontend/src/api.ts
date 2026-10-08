@@ -925,6 +925,10 @@ export type BatchRow = {
   >[]
   warnings: Finding[]
   blockers: string[]
+  /** D104: a step's method needs a basis set the file never names (ChkBasis) */
+  basis_missing: boolean
+  /** the basis set it gets at import instead */
+  basis_given: string | null
 }
 
 /** D97, FR-IMP-14: the proposed import of a whole folder; nothing is stored until Import. */
@@ -939,7 +943,17 @@ export type BatchPlan = {
   unreadable: { path: string; reason: string }[]
   names: NameRequest[]
   blockers: string[]
-  counts: { files: number; included: number; new: number; attached: number; finished: number; skipped: number }
+  counts: {
+    files: number
+    included: number
+    new: number
+    attached: number
+    finished: number
+    skipped: number
+    basis_missing: number
+  }
+  /** D104: the basis set given for every file that names none */
+  missing_basis: string
 }
 
 export type BatchRowChoice = {
@@ -948,12 +962,16 @@ export type BatchRowChoice = {
   target?: string | null
   duplicate_action?: 'attach' | 'new' | null
   label?: string | null
+  /** D104: this file's basis set if it names none; overrides the batch's */
+  basis?: string | null
 }
 
 export type BatchOptions = {
   rows?: Record<string, BatchRowChoice>
   basis_names?: Record<string, string>
   dispersion_names?: Record<string, string>
+  /** D104: the basis set for every file that names none */
+  missing_basis?: string | null
   origin_device?: string | null
   suffixes?: string[] | null
 }

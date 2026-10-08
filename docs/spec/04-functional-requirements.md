@@ -80,6 +80,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-IMP-12 | Importing onto a planned node with no calculations replaces its geometry, and the old geometry is kept in history. | D24, ID-6 | 2 |
 | FR-IMP-13 | A frequency job can be imported onto an existing node at any time. If the file contains other steps, the preview lists every step with its geometry: steps matching the node's geometry are attached as calculations; from the first step that changes the geometry, the app offers a derived node. The preview flags a freq whose level differs from the node's geometry level. | D52, ID-7, EN-4 | 2 |
 | FR-IMP-14 | Import a folder of output files at once: scan (optionally with subfolders), propose each file's node by geometry, by a planned node's guess, by file name or as a new node, review and retarget every file in one table, name custom basis sets once, and write all of them in one transaction with one history entry. | D97, A44 | later |
+| FR-IMP-15 | In a batch import, files that name no basis set (ChkBasis from another job's checkpoint) are counted, and one basis set can be given for all of them at once, with a per-file override; the calculation records that the basis set was given at import. | D104, A51 | later |
 
 **AC:**
 - An opt+freq output yields one node with 2 calculations (opt, freq), the geometry from the last step, and G, T and P shown.

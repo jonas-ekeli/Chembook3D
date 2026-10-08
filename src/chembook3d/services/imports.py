@@ -173,6 +173,9 @@ class ImportOptions:
     create_derived: bool = True
     basis_names: dict[str, str] = field(default_factory=dict)  # definition key → name
     dispersion_names: dict[str, str] = field(default_factory=dict)
+    # D104: the basis set for steps whose file names none (ChkBasis from another job's
+    # checkpoint); the file's own basis always wins.
+    missing_basis: str | None = None
     label: str | None = None
     kind: str | None = None  # "species" makes a new node a free species (D69)
     role: str | None = None
@@ -215,6 +218,7 @@ class StepPlan:
     rmsd_to_node: float | None  # Å, to the geometry of the node this step is compared with
     assignment: str  # node | derived | preview
     missing: list[str]
+    basis_given: str | None = None  # D104: given at import, the file names none
 
 
 @dataclass
@@ -273,6 +277,24 @@ class _Resolved:
     # Like `fields`, but an unnamed custom basis or dispersion is stood in for by its
     # definition key, so levels can be compared before the user names them.
     identity: dict[str, str] | None = None
+    basis_given: str | None = None  # D104
+
+
+def basis_not_named(program: str, step: ParsedStep) -> bool:
+    """D104: the file names no basis set for this step (ChkBasis with no earlier step in the
+    file defining one), though its method needs one."""
+    route = step.route
+    return bool(
+        route is not None
+        and route.method
+        and not step.resolved_basis
+        and levels.needs_basis(program, route.method)
+    )
+
+
+def _given_basis(program: str, step: ParsedStep, options: ImportOptions) -> str | None:
+    given = (options.missing_basis or "").strip()
+    return given if given and basis_not_named(program, step) else None
 
 
 def _resolve_level(
@@ -281,20 +303,21 @@ def _resolve_level(
     route = step.route
     if route is None:
         return _Resolved(None, [])
+    given = _given_basis(program, step, options)
     if program != gaussian.PROGRAM:
         # ORCA and xTB: the parser already gives the level as it counts (A12 for ORCA).
         fields = {
             "program": program,
             "method": route.method or "",
-            "basis": step.resolved_basis or "",
+            "basis": step.resolved_basis or given or "",
             "dispersion": route.dispersion or "",
             "solvation_model": route.solvation_model or "",
             "solvent": route.solvent or "",
         }
-        return _Resolved(fields, [], dict(fields))
+        return _Resolved(fields, [], dict(fields), given)
     names: list[NameRequest] = []
     stand_ins: dict[str, str] = {}
-    basis = step.resolved_basis or ""
+    basis = step.resolved_basis or given or ""
     if basis in ("GEN", "GENECP") and step.resolved_basis_definition:
         definition = step.resolved_basis_definition
         prints = gaussian.basis_fingerprints(definition)
@@ -342,7 +365,14 @@ def _resolve_level(
         "solvation_model": route.solvation_model or "",
         "solvent": route.solvent or "",
     }
-    return _Resolved(fields, names, {**fields, **stand_ins})
+    return _Resolved(fields, names, {**fields, **stand_ins}, given)
+
+
+def _still_missing(step: ParsedStep, resolved: _Resolved) -> list[str]:
+    """What the file leaves out, less a basis set given at import (D104)."""
+    if resolved.basis_given:
+        return [m for m in step.missing if m != "basis set"]
+    return list(step.missing)
 
 
 def _level_label(fields: dict[str, str] | None, step: ParsedStep) -> str:
@@ -620,7 +650,8 @@ def plan(
                 thermo={k: v for k, v in step.thermo.items() if not isinstance(v, list)},
                 rmsd_to_node=geometry.aligned_rmsd(rows, node_rows) if rows and node_rows else None,
                 assignment=assignment,
-                missing=step.missing,
+                missing=_still_missing(step, resolved[step.index]),
+                basis_given=resolved[step.index].basis_given,
             )
         )
 
@@ -736,12 +767,12 @@ def plan(
                     ),
                 }
             )
-        if step.missing:
+        if step_plan.missing:
             warnings.append(
                 {
                     "code": "W-PARSE",
                     "message": f"Step {step.index}: not read from the file: "
-                    + ", ".join(step.missing),
+                    + ", ".join(step_plan.missing),
                 }
             )
         if (
@@ -1299,6 +1330,11 @@ def _create_calculation(
                 k: v for k, v in route.iops.items() if k not in gaussian.DISPERSION_IOPS
             },
         }
+        if step_plan.basis_given:
+            # D104: the file names no basis; the one given at import is the level's, and the
+            # parsed level keeps what the file said.
+            parsed_level["basis"] = ""
+            parsed_level["basis_given"] = step_plan.basis_given
     is_single_point = step.job_type == CalculationType.SINGLE_POINT
     calculation = Calculation(
         node_id=node.id,
@@ -1316,7 +1352,7 @@ def _create_calculation(
         charge=step.charge,
         multiplicity=step.multiplicity,
         geometry=_rows(step.final_geometry),
-        parse_warnings=list(step.missing),
+        parse_warnings=list(step_plan.missing),
         source_file_id=source.id,
     )
     session.add(calculation)

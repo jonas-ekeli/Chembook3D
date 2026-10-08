@@ -1,4 +1,5 @@
-"""Batch import of a results folder (D97, A44, FR-IMP-14): T-IMP-12, T-IMP-13, T-IMP-14."""
+"""Batch import of a results folder (D97, A44, FR-IMP-14): T-IMP-12, T-IMP-13, T-IMP-14; a basis
+set for files that name none (D104, FR-IMP-15): T-IMP-20."""
 
 import shutil
 from pathlib import Path
@@ -94,6 +95,7 @@ def test_folder_of_results(open_client, tmp_path):
         "attached": 1,
         "finished": 0,
         "skipped": 0,
+        "basis_missing": 0,
     }
     # The preview wrote nothing.
     assert nodes(open_client) == [] and copied_files(open_client) == []
@@ -361,6 +363,67 @@ def test_custom_basis_named_once_for_the_batch(open_client, tmp_path):
     response = run(open_client, plan, **options)
     assert response.status_code == 200, response.text
     assert sorted(n["label"] for n in nodes(open_client)) == ["MeI_TS", "MeI_min"]
+
+
+# ---------- T-IMP-20 ----------
+
+
+def test_basis_set_for_files_that_name_none(open_client, tmp_path):
+    """D104: TS searches that read the basis set from a pre-optimization's checkpoint get one
+    basis set for the whole batch, a file's own choice overriding it."""
+    folder = tmp_path / "results"
+    folder.mkdir()
+    for name, make in g.CHECKPOINT_FILES.items():
+        (folder / name).write_text(make(), encoding="utf-8")
+    (folder / "water.log").write_text(water_opt(g.WATER), encoding="utf-8")
+
+    plan = scan(open_client, folder)
+    assert plan["counts"]["basis_missing"] == 2 and plan["missing_basis"] == ""
+    assert not row(plan, "water.log")["basis_missing"]
+    ts_a = row(plan, "TS_a_chk.out")
+    assert ts_a["basis_missing"] and ts_a["basis_given"] is None
+    assert ts_a["level_label"].endswith("/?")
+    assert any("basis set" in w["message"] for w in ts_a["warnings"] if w["code"] == "W-PARSE")
+    assert plan["blockers"] == []  # a missing basis set never blocks, as before
+
+    rows = {ts_a["id"]: {"basis": "def2-TZVP"}}
+    plan = preview(open_client, plan, missing_basis=" def2-SVP ", rows=rows)
+    assert plan["missing_basis"] == "def2-SVP"
+    ts_a, ts_b = row(plan, "TS_a_chk.out"), row(plan, "TS_b_chk.out")
+    assert ts_a["basis_given"] == "def2-TZVP" and ts_b["basis_given"] == "def2-SVP"
+    assert "def2-TZVP" in ts_a["level_label"] and "def2-SVP" in ts_b["level_label"]
+    assert not any("basis set" in w["message"] for w in ts_b["warnings"])
+    assert row(plan, "water.log")["basis_given"] is None
+
+    response = run(open_client, plan, missing_basis="def2-SVP", rows=rows)
+    assert response.status_code == 200, response.text
+    by_label = {n["label"]: n["id"] for n in nodes(open_client)}
+    for label, basis in (("TS_a_chk", "def2-TZVP"), ("TS_b_chk", "def2-SVP")):
+        found = calculations(open_client, by_label[label])
+        assert [c["type"] for c in found] == ["ts_optimization", "frequency"]
+        for c in found:
+            assert c["level"]["basis"] == basis
+            # The file's own record keeps that it named none; not counted as an edit.
+            assert c["parsed_level"]["basis"] == ""
+            assert c["parsed_level"]["basis_given"] == basis
+            assert c["parsed_level"]["basis_written"] == "CHKBASIS"
+            assert not c["level_edited"]
+            assert "basis set" not in c["parse_warnings"]
+            assert not any(w["code"] == "W-PARSE" for w in c["warnings"])
+    water = calculations(open_client, by_label["water"])
+    assert {c["level"]["basis"] for c in water} == {"6-31G(D)"}
+
+
+def test_basis_set_left_blank_imports_as_before(open_client, tmp_path):
+    folder = tmp_path / "results"
+    folder.mkdir()
+    (folder / "TS_a_chk.out").write_text(g.CHECKPOINT_FILES["TS_a_chk.out"](), encoding="utf-8")
+    response = run(open_client, scan(open_client, folder), missing_basis="  ")
+    assert response.status_code == 200, response.text
+    (ts,) = nodes(open_client)
+    for c in calculations(open_client, ts["id"]):
+        assert c["level"]["basis"] == "" and "basis set" in c["parse_warnings"]
+        assert "basis_given" not in c["parsed_level"]
 
 
 def test_ensembles_become_groups(open_client, tmp_path):

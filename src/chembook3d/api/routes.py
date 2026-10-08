@@ -997,7 +997,15 @@ def _calculation_out(request: Request, calculation: Calculation) -> CalculationO
     result = calculation.result
     parsed = calculation.parsed_level
     current = levels.fields_of(calculation.level)
-    edited = bool(parsed and current and any(parsed.get(k, "") != v for k, v in current.items()))
+    # D104: a basis set given at import for a file that names none is not an edit.
+    expected = (
+        {**parsed, "basis": parsed.get("basis_given") or parsed.get("basis", "")}
+        if parsed
+        else None
+    )
+    edited = bool(
+        expected and current and any(expected.get(k, "") != v for k, v in current.items())
+    )
     return CalculationOut(
         id=calculation.id,
         node_id=calculation.node_id,
