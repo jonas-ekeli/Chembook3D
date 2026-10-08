@@ -306,6 +306,9 @@ def test_a_question_stays_until_answered(monkeypatch):
     assert run.waiting
     run.last_output = time.monotonic()  # redrawn
     assert run.waiting
+    run.answer("\x1b[?1;2c")  # the panel's terminal reporting itself, not the user
+    run.answer("\x1b[24;80R")
+    assert run.waiting
     run.answer("\r")
     assert not run.waiting
     run.last_output -= 1  # still again: the next question
