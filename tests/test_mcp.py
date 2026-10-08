@@ -30,6 +30,7 @@ READ_POSTS = {
     "/api/energies/profile",
     "/api/energies/table",
     "/api/overlay",
+    "/api/atom-match",
 }
 # Changes that delete nothing and are undone at once, so they do not ask (A38).
 UNASKED_DELETES = {

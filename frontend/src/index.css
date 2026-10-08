@@ -2230,3 +2230,34 @@ pre.basis-text {
 .step-controls select {
   width: auto;
 }
+
+/* D113: atom matching between two ends, side by side */
+.atom-match-views {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+.atom-match-views h3 {
+  margin: 0 0 0.3rem;
+  font-size: 13px;
+  font-weight: 600;
+}
+.atom-match-views .viewer {
+  height: 380px;
+}
+.atom-match-options,
+.atom-match-fixed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.atom-match-options .field select {
+  width: auto;
+}
+@media (max-width: 760px) {
+  .atom-match-views {
+    grid-template-columns: 1fr;
+  }
+}
