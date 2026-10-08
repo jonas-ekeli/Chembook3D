@@ -140,6 +140,8 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-EN-07 | The display unit is kcal/mol by default and changeable in settings (at least kcal/mol, kJ/mol, hartree, eV). | D28, P14 | 4 |
 | FR-EN-08 | Energy values are never user-typed. They come only from calculation results. | EN-1 | 4 |
 | FR-EN-09 | In energy profiles, a direct connection is drawn as a dotted connector labelled "no TS" and never as a barrier. | D53, INV-8 | 4 |
+| FR-EN-10 | The energy profile's style (size, font, colours, levels, connectors straight or curved, label placement, decimals, title, legend, grid, axis, background, PNG resolution) is set in one dialog with a live preview and presets "Screen" and "Publication". It applies to every profile drawn and to its PNG and SVG. | D106 | 4 |
+| FR-EN-11 | The profile in the app can be enlarged: the drawer's height is dragged, the pathways list can be hidden, and the profile zooms (Fit, 50 % to 400 %, Ctrl + wheel) and is dragged about when zoomed. | D106 | 4 |
 
 **AC:**
 - Nodes X and Y have G at level L1, and Y also at L2. With L2 selected, the edge X→Y shows "n/a".

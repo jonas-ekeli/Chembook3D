@@ -12,11 +12,13 @@ import type {
   EnergyView,
   Modes,
   Overview,
+  ProfileStyle,
   Profiles,
   Settings,
   SourceFile,
 } from '../api'
 import type { DrawerPath } from '../components/EnergyDrawer'
+import { SCREEN_STYLE } from '../profileStyle'
 
 /** FR-SHARE-04: an imported file keeps its name, size and checksum; its paths stay behind. */
 export type SharedSourceFile = Pick<SourceFile, 'original_name' | 'size' | 'checksum' | 'imported_at'>
@@ -45,7 +47,10 @@ export type SnapshotData = {
     | 'qh_cutoff'
     | 'standard_state'
     | 'hydrogens'
-  >
+  > & {
+    /** D106: copies made before profile styles have none and draw the "Screen" style. */
+    profile_style?: ProfileStyle
+  }
   canvas: Canvas
   /** D85: the pictures in pinned notes, as data URLs by id. */
   note_images: Record<string, string>
@@ -91,6 +96,8 @@ export function sharedSettings(data: SnapshotData): Settings {
     // Copies made before D95 have no standard state: they are at 1 atm.
     standard_state: data.settings.standard_state ?? '1 atm',
     standard_states: ['1 atm', '1 M'],
+    profile_style: data.settings.profile_style ?? SCREEN_STYLE,
+    profile_presets: { screen: SCREEN_STYLE, publication: SCREEN_STYLE },
   }
 }
 

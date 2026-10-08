@@ -1312,6 +1312,7 @@ table.overlay-legend td {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0; /* a zoomed profile scrolls in the drawer instead of widening the page (D106) */
 }
 .drawer {
   height: 380px;
@@ -1319,11 +1320,29 @@ table.overlay-legend td {
   flex-direction: column;
   border-top: 1px solid var(--border);
   background: var(--panel);
+  position: relative;
+}
+/* D106: drag the drawer's top edge to change its height. */
+.drawer-resize {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: row-resize;
+  z-index: 5;
+  touch-action: none;
+}
+.drawer-resize:hover,
+.drawer-resize:focus-visible {
+  background: rgb(36 89 198 / 0.25);
+  outline: none;
 }
 .drawer-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.4rem 0.75rem;
   padding: 0.4rem 1rem;
   border-bottom: 1px solid var(--border);
 }
@@ -1385,6 +1404,68 @@ table.overlay-legend td {
   width: 100%;
   height: 100%;
   max-width: 1100px;
+}
+/* D106: the drawer's profile fits the drawer, or is zoomed and scrolled (dragged) about. */
+.drawer-main.fit {
+  overflow: hidden;
+}
+.drawer-main .profile-chart {
+  max-width: none;
+}
+.drawer-main.zoomed {
+  cursor: grab;
+}
+.drawer-main.zoomed:active {
+  cursor: grabbing;
+}
+.drawer-main.zoomed .profile-chart {
+  user-select: none;
+}
+.zoom {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.zoom-level {
+  min-width: 3.2rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.style-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.style-preview {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: repeating-conic-gradient(#f2f4f7 0% 25%, #ffffff 0% 50%) 0 0 / 16px 16px;
+  height: 34vh;
+  min-height: 180px;
+  padding: 0.25rem;
+}
+.style-preview .profile-chart {
+  max-width: none;
+}
+.style-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 0.75rem;
+}
+.style-group {
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.6rem 0.6rem;
+  margin: 0;
+}
+.style-group legend {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 0.25rem;
 }
 table.energy-table {
   border-collapse: collapse;

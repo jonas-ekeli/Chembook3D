@@ -17,7 +17,7 @@ import {
   type TurnoverResult,
 } from '../api'
 import { closesCycle, download } from '../util'
-import { ProfileChart } from './EnergyDrawer'
+import { ProfileChart } from './ProfileChart'
 import { Notes, TextField } from './Fields'
 import { Modal } from './Modal'
 

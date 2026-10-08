@@ -58,6 +58,9 @@ def test_copy_is_one_page_with_the_investigation(open_client, page, tmp_path):
 
     data = data_of(response)
     assert data["format"] == "chembook3d-snapshot" and data["investigation"] == {"name": "Test"}
+    # D106: the copy draws its profiles in the app's profile style.
+    open_client.put("/api/settings", json={"profile_style": {"connector": "curved"}})
+    assert data_of(export(open_client))["settings"]["profile_style"]["connector"] == "curved"
     assert [n["id"] for n in data["canvas"]["nodes"]] == [node_id]
     calcs = data["calculations"][node_id]
     assert len(calcs) == len(open_client.get(f"/api/nodes/{node_id}/calculations").json())

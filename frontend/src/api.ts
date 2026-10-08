@@ -448,6 +448,36 @@ export type Settings = {
   hydrogen_modes: HydrogenMode[]
   /** D84: the colours of the steric maps. */
   steric_colours: StericColours
+  /** D106: how energy profiles are drawn, and the presets the style dialog offers. */
+  profile_style: ProfileStyle
+  profile_presets: Record<'screen' | 'publication', ProfileStyle>
+}
+
+/** D106: how an energy profile is drawn, in the app and in the PNG and SVG saved from it. The
+ * backend keeps each value within its choices and bounds (`settings.clean_profile_style`). */
+export type ProfileStyle = {
+  width: number
+  height: number
+  font: 'system' | 'arial' | 'helvetica' | 'times'
+  font_size: number
+  colours: 'branch' | 'colour-blind' | 'grey' | 'black'
+  text: 'soft' | 'black'
+  level_width: number
+  level_thickness: number
+  connector: 'straight' | 'curved'
+  dash: 'solid' | 'dashed' | 'dotted' | 'by-pathway'
+  connector_width: number
+  value_position: 'above' | 'below' | 'hidden'
+  name_position: 'below' | 'above' | 'hidden'
+  brackets: 'none' | 'round' | 'square'
+  decimals: 'unit' | '0' | '1' | '2' | '3'
+  title: boolean
+  legend: 'top-right' | 'top-left' | 'hidden'
+  grid: boolean
+  y_axis: boolean
+  step_names: boolean
+  background: 'white' | 'none'
+  png_scale: number
 }
 
 export type Level = {
@@ -1232,6 +1262,7 @@ export const api = {
         | 'crest_count'
         | 'hydrogens'
         | 'steric_colours'
+        | 'profile_style'
       >
     >,
   ) => request<Settings>('PUT', '/settings', fields),

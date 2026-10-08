@@ -1347,6 +1347,7 @@ function App() {
                 onViewChange={setDrawerView}
                 onTurnover={newTurnover}
                 onSelectNode={(id) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id, true))}
+                onSettings={setSettings}
               />
             </div>
           </div>

@@ -347,6 +347,9 @@ class SettingsOut(BaseModel):
     hydrogens: str
     hydrogen_modes: list[str]
     steric_colours: str
+    # D106: how energy profiles are drawn, and the presets the style dialog offers
+    profile_style: dict[str, Any]
+    profile_presets: dict[str, dict[str, Any]]
 
 
 class SettingsIn(BaseModel):
@@ -360,6 +363,8 @@ class SettingsIn(BaseModel):
     crest_count: int | None = None
     hydrogens: str | None = None
     steric_colours: str | None = None
+    # D106: the keys given replace the current style's; unknown keys and values are dropped
+    profile_style: dict[str, Any] | None = None
 
 
 class FolderEntry(BaseModel):
@@ -819,6 +824,8 @@ def get_settings():
         hydrogens=s.hydrogens,
         hydrogen_modes=list(app_settings.HYDROGEN_MODES),
         steric_colours=s.steric_colours,
+        profile_style=s.profile_style,
+        profile_presets=app_settings.PROFILE_PRESETS,
     )
 
 
@@ -861,6 +868,10 @@ def put_settings(body: SettingsIn):
         if body.steric_colours not in app_settings.STERIC_COLOURS:
             raise HTTPException(422, f"Unknown steric map colours '{body.steric_colours}'")
         s.steric_colours = body.steric_colours
+    if body.profile_style is not None:
+        s.profile_style = app_settings.clean_profile_style(
+            {**s.profile_style, **body.profile_style}
+        )
     app_settings.save(s)
     return get_settings()
 

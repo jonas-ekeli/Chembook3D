@@ -283,3 +283,38 @@ def test_steric_map_colours_setting(open_client):
     assert response.json()["steric_colours"] == "green-yellow-red"
     assert open_client.get("/api/settings").json()["steric_colours"] == "green-yellow-red"
     assert open_client.put("/api/settings", json={"steric_colours": "pink"}).status_code == 422
+
+
+def test_profile_style_setting(open_client):
+    # D106: one profile style for the app, "Screen" unless changed; keys given replace the
+    # current ones, numbers are kept within bounds and anything unknown is dropped.
+    settings = open_client.get("/api/settings").json()
+    assert settings["profile_style"] == settings["profile_presets"]["screen"]
+    assert settings["profile_presets"]["publication"]["connector"] == "curved"
+    response = open_client.put(
+        "/api/settings",
+        json={
+            "profile_style": {
+                "connector": "curved",
+                "width": 99999,
+                "font_size": 14,
+                "title": False,
+                "colours": "pink",
+                "script": "<x>",
+            }
+        },
+    )
+    style = response.json()["profile_style"]
+    assert style["connector"] == "curved"
+    assert style["width"] == 4000
+    assert style["font_size"] == 14
+    assert style["title"] is False
+    assert style["colours"] == "branch"
+    assert "script" not in style
+    # A later change keeps the earlier ones, and the style survives a reload of the settings.
+    open_client.put("/api/settings", json={"profile_style": {"legend": "top-left"}})
+    style = open_client.get("/api/settings").json()["profile_style"]
+    assert (style["connector"], style["legend"], style["width"]) == ("curved", "top-left", 4000)
+    publication = settings["profile_presets"]["publication"]
+    open_client.put("/api/settings", json={"profile_style": publication})
+    assert open_client.get("/api/settings").json()["profile_style"] == publication
