@@ -72,6 +72,9 @@ class InvestigationInfo(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     # Names of the one-off repairs (services/repairs.py) this investigation has had (D100).
     repairs: Mapped[list[Any]] = mapped_column(default=list)
+    # D105: what the notebook showed when last used (energy level, type, reference, filters,
+    # expanded groups, the energy drawer's pathways); view only, not in the history.
+    view_state: Mapped[dict[str, Any]] = mapped_column(default=dict)
 
 
 class Node(Base):

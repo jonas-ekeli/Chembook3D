@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { forgetView } from './demoView.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
 // Synthetic Gaussian files with a custom basis set, written by global-setup.ts
 const CUSTOM = join(E2E_DIR, 'gaussian')
 
 async function openDemo(page: Page) {
+  await forgetView(page.request, join(E2E_DIR, 'demo'))
   await page.goto('/')
   await page.getByRole('button', { name: /^Open/ }).first().click()
   const dialog = page.getByRole('dialog')

@@ -70,7 +70,9 @@ test('a folder of results is imported at once', async ({ page }) => {
   await expect(dialog.getByRole('button', { name: 'Import 2 files' })).toBeEnabled()
   await dialog.getByRole('button', { name: 'Import 2 files' }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByText(/Imported 2 files from/)).toBeVisible()
+  // The notice; the overview's recent changes can show the same words until the new node is on
+  // the canvas and its inspector replaces the overview.
+  await expect(page.getByRole('status').getByText(/Imported 2 files from/)).toBeVisible()
 
   const inspector = page.getByLabel('Node inspector')
   await expect(inspector.getByRole('heading', { name: 'MeI_TS' })).toBeVisible()
@@ -101,7 +103,9 @@ test('files that name no basis set get one for the whole folder', async ({ page 
 
   await dialog.getByRole('button', { name: 'Import 2 files' }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByText(/Imported 2 files from/)).toBeVisible()
+  // The notice; the overview's recent changes can show the same words until the new node is on
+  // the canvas and its inspector replaces the overview.
+  await expect(page.getByRole('status').getByText(/Imported 2 files from/)).toBeVisible()
   await page.getByText('TS_a_chk', { exact: true }).first().click()
   const calculations = page.getByLabel('Node inspector').getByRole('list', { name: 'Calculations' })
   await expect(calculations).toContainText('PBEPBE-GD3BJ/def2-SVP')

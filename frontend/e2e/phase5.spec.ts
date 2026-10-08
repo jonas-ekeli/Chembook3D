@@ -1,10 +1,12 @@
 import { join, resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { forgetView } from './demoView.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
 const FIXTURES = resolve(import.meta.dirname, '..', '..', 'tests', 'fixtures')
 
 async function openDemo(page: Page) {
+  await forgetView(page.request, join(E2E_DIR, 'demo'))
   await page.goto('/')
   await page.getByRole('button', { name: /^Open/ }).first().click()
   const dialog = page.getByRole('dialog')

@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { forgetView } from './demoView.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
 
 async function openDemo(page: Page) {
+  await forgetView(page.request, join(E2E_DIR, 'demo'))
   // Values below are in kcal/mol; an earlier test may have left another unit set.
   await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
   await page.goto('/')

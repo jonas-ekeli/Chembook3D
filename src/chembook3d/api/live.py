@@ -59,7 +59,7 @@ LONGEST_WAIT = 30.0  # one long poll; the caller asks again
 # Requests that change nothing in the investigation, so open tabs need not reload.
 QUIET = re.compile(
     r"^/api/("
-    r"live|selection|confirmations(/.*)?"
+    r"live|selection|view-state|confirmations(/.*)?"
     r"|energies/(profile|table|table\.csv)|pathways/extend|overlay|snapshot"
     r"|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|imports|imports/[^/]+|imports/[^/]+/preview"

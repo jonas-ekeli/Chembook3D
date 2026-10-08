@@ -20,12 +20,13 @@ import {
   type StandardState,
   type SyncConflict,
   type SyncStatus,
+  type ViewState,
 } from './api'
 import { NO_FILTERS, type Filters, type Selection, type ViewMode } from './canvasView'
 import { BasisSetsDialog } from './components/BasisSets'
 import { CanvasPane, type CanvasEnergy } from './components/Canvas'
 import { ClaudePanel } from './components/ClaudePanel'
-import { EnergyDrawer, type DrawerPath } from './components/EnergyDrawer'
+import { EnergyDrawer, type DrawerPath, type DrawerView } from './components/EnergyDrawer'
 import { download } from './util'
 import { FilterMenu } from './components/FilterMenu'
 import { FolderPicker } from './components/FolderPicker'
@@ -196,17 +197,86 @@ function App() {
   const [claudeOpen, setClaudeOpen] = useState(false) // D92
   // D79: the read-only copy exports the drawer's pathways, or one per branch (A30).
   const [drawerPaths, setDrawerPaths] = useState<DrawerPath[]>([])
+  // D105: the drawer's tab and pathways, kept here so they outlast the drawer (History,
+  // Analyses) and are remembered in the investigation; `drawerKey` starts it anew from them.
+  const [drawerView, setDrawerView] = useState<DrawerView | null>(null)
+  const [drawerKey, setDrawerKey] = useState(0)
+  // D105: counts the investigations shown; the view is restored once for each, and saved only
+  // after that, so the defaults shown while it loads never overwrite what was remembered.
+  const [shown, setShown] = useState(0)
+  const restored = useRef<number | null>(null)
+  // What was saved last; null until the restored view has been seen, which is not saved again.
+  // Opening an investigation must not change its database (D71: nothing new to sync).
+  const lastSaved = useRef<string | null>(null)
   const [sharing, setSharing] = useState<'ask' | 'saving' | null>(null)
   const [shareError, setShareError] = useState<string | null>(null)
   const resizing = useRef<{ x: number; width: number } | null>(null)
 
   useEffect(() => {
-    api.currentInvestigation().then(setInvestigation, (err: unknown) => {
-      setInvestigation(null)
-      setError(`Backend not reachable: ${errorText(err)}`)
-    })
+    api.currentInvestigation().then(
+      (inv) => {
+        setInvestigation(inv)
+        setShown((n) => n + 1)
+      },
+      (err: unknown) => {
+        setInvestigation(null)
+        setError(`Backend not reachable: ${errorText(err)}`)
+      },
+    )
     api.settings().then(setSettings, () => undefined)
   }, [])
+
+  // D105: open on what the investigation showed when it was last used. Records deleted since
+  // are left out by the backend; a level or type no longer offered falls back as usual.
+  const shownFolder = investigation?.folder ?? null
+  useEffect(() => {
+    restored.current = null
+    if (!shownFolder) return
+    let current = true
+    const done = (seen: string | null) => {
+      if (!current) return
+      restored.current = shown
+      lastSaved.current = seen
+    }
+    api.viewState().then((saved) => {
+      if (!current) return
+      setEnergyLevel(saved.level)
+      setEnergyType(saved.energy_type ?? 'G')
+      setReferenceId(saved.reference_id)
+      setEdgeEnergies(saved.edge_energies)
+      setFilters(saved.filters)
+      setExpanded(new Set(saved.expanded))
+      setDrawerOpen(saved.drawer.open)
+      setDrawerView({ tab: saved.drawer.tab, paths: saved.drawer.paths })
+      setDrawerKey((k) => k + 1)
+      done(null)
+    }, () => done(''))
+    return () => {
+      current = false
+    }
+  }, [shownFolder, shown])
+
+  // D105: every change to these is remembered at once, one save after the other.
+  const saving = useRef<Promise<unknown>>(Promise.resolve())
+  useEffect(() => {
+    if (restored.current !== shown || !drawerView) return
+    const state: ViewState = {
+      level: energyLevel,
+      energy_type: energyType,
+      reference_id: referenceId,
+      edge_energies: edgeEnergies,
+      filters,
+      expanded: [...expanded],
+      drawer: { open: drawerOpen, ...drawerView },
+    }
+    const text = JSON.stringify(state)
+    if (lastSaved.current === null || lastSaved.current === text) {
+      lastSaved.current = text
+      return
+    }
+    lastSaved.current = text
+    saving.current = saving.current.then(() => api.saveViewState(state)).catch(() => undefined)
+  }, [shown, energyLevel, energyType, referenceId, edgeEnergies, filters, expanded, drawerOpen, drawerView])
 
   // Answers to earlier fetches can arrive after later ones (slow runners, a large import); only
   // the latest is shown, or a stale canvas without a just-created node would drop its inspector.
@@ -318,7 +388,11 @@ function App() {
     choose(null)
     setFilters(NO_FILTERS)
     setExpanded(new Set())
+    setDrawerOpen(false)
+    setDrawerView(null)
+    setDrawerKey((k) => k + 1)
     setInvestigation(inv)
+    setShown((n) => n + 1)
     setError(null)
     setNotice(syncProblem)
     setView('canvas')
@@ -1268,6 +1342,9 @@ function App() {
                 refreshKey={refreshKey}
                 onReference={setReferenceId}
                 onPathsChange={setDrawerPaths}
+                key={drawerKey}
+                saved={drawerView ?? undefined}
+                onViewChange={setDrawerView}
                 onTurnover={newTurnover}
                 onSelectNode={(id) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id, true))}
               />

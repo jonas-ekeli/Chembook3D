@@ -1132,6 +1132,22 @@ export type SelectionReport = {
   reference_id: string | null
 }
 
+/** D105: what the notebook showed when last used, saved in the investigation (view only, not in
+ * the history). The backend drops records deleted since. */
+export type ViewState = {
+  level: string | null
+  energy_type: EnergyType | null
+  reference_id: string | null
+  edge_energies: boolean
+  filters: { branches: string[]; statuses: string[]; steps: string[] }
+  expanded: string[]
+  drawer: {
+    open: boolean
+    tab: 'profile' | 'table'
+    paths: { ids: string[]; branch_id: string | null; choices: { node_id: string; label: string; status: string }[] }[]
+  }
+}
+
 /** A `claude --cloud` launch of a calculation job that waits for the user's answer (D93). */
 export type LaunchQuestion = { job_id: string; name: string; screen: string }
 
@@ -1151,6 +1167,8 @@ export const api = {
     return request<Live>('GET', `/live?${query.toString()}`, undefined, signal)
   },
   reportSelection: (selection: SelectionReport) => request<void>('PUT', '/selection', selection),
+  viewState: () => request<ViewState>('GET', '/view-state'),
+  saveViewState: (state: ViewState) => request<void>('PUT', '/view-state', state),
   answerClaude: (id: string, confirm: boolean) =>
     request<ClaudeRequest>('POST', `/confirmations/${id}/answer`, { confirm }),
 

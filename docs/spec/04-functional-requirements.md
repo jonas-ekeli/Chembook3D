@@ -176,6 +176,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-CAN-05 | Filters by branch, status and step. Filtering never alters data. | D33 | 3 |
 | FR-CAN-06 | "Arrange branch" lays out one branch left to right in step order. Other positions are unchanged. | D33 | 3 |
 | FR-CAN-07 | Export a canvas image (viewport or full canvas). | D39 | 3 |
+| FR-CAN-08 | An investigation opens on what it showed when last used: energy level, energy type, reference, energies on edges, filters, expanded groups, and the energy drawer with its pathways. Saved in the investigation, not in the history. | D105 | 4 |
 
 ## FR-3D · 3D viewer
 
