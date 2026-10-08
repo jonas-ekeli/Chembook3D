@@ -1,11 +1,13 @@
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { forgetView } from './demoView.ts'
 
 // T-UI-07, FR-TOF-01…05, D86: a turnover from a closed pathway in the energy drawer, its TDTS
 // and TDI, the table, a second turnover from a branch, the comparison, the history, deleting.
 const E2E_DIR = process.env.E2E_DIR!
 
 async function openDemo(page: Page) {
+  await forgetView(page.request, join(E2E_DIR, 'demo'))
   await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
   await page.goto('/')
   await page.getByRole('button', { name: /^Open/ }).first().click()

@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { forgetView } from './demoView.ts'
 
 // D92: the Claude panel runs `claude` (here tests/fake_claude.py, see playwright.config.ts) in a
 // terminal beside the notebook: start, type, hide and show again without losing it, stop, and
@@ -7,6 +8,7 @@ import { expect, test, type Page } from '@playwright/test'
 const E2E_DIR = process.env.E2E_DIR!
 
 async function openDemo(page: Page) {
+  await forgetView(page.request, join(E2E_DIR, 'demo'))
   await page.goto('/')
   await page.getByRole('button', { name: /^Open/ }).first().click()
   const dialog = page.getByRole('dialog')

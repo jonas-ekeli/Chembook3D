@@ -1,11 +1,13 @@
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { forgetView } from './demoView.ts'
 
 // T-UI-06, FR-SEL-01…07, D83, D103: a selectivity from two TSs selected on the canvas, its result at
 // two temperatures and with only the lowest TS, an experiment, the history, and deleting it.
 const E2E_DIR = process.env.E2E_DIR!
 
 async function openDemo(page: Page) {
+  await forgetView(page.request, join(E2E_DIR, 'demo'))
   await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
   await page.goto('/')
   await page.getByRole('button', { name: /^Open/ }).first().click()

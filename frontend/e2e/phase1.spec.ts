@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { forgetView } from './demoView.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
 
@@ -19,6 +20,7 @@ async function browseTo(page: Page, folder: string) {
 }
 
 async function openInvestigation(page: Page, folder: string) {
+  await forgetView(page.request, folder)
   await page.goto('/')
   const open = page.getByRole('button', { name: /^Open/ }).first()
   await open.click()

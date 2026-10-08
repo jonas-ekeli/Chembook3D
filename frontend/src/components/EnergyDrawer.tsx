@@ -11,6 +11,7 @@ import {
   type Profiles,
   type ProfileRequest,
   type Settings,
+  type ViewState,
 } from '../api'
 import { closesCycle, download } from '../util'
 import { CompareStericsDialog } from './Sterics'
@@ -22,6 +23,9 @@ type Path = { ids: string[]; choices: { node_id: string; label: string; status: 
 
 /** A pathway as the read-only copy exports it (D79, A30). */
 export type DrawerPath = { ids: string[]; branch_id: string | null }
+
+/** D105: the drawer as the investigation remembers it. */
+export type DrawerView = Omit<ViewState['drawer'], 'open'>
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -306,6 +310,8 @@ export function EnergyDrawer({
   onSelectNode,
   onPathsChange,
   onTurnover,
+  saved,
+  onViewChange,
 }: {
   canvas: Canvas
   settings: Settings | null
@@ -321,9 +327,15 @@ export function EnergyDrawer({
   onPathsChange?: (paths: DrawerPath[]) => void
   /** D86: a saved turnover from a closed pathway, opened in the Analyses view. */
   onTurnover?: (ids: string[], name: string) => void
+  /** D105: the tab and pathways to start with, as the investigation remembered them. */
+  saved?: DrawerView
+  /** D105: the tab and pathways, whenever they change, to be remembered. */
+  onViewChange?: (view: DrawerView) => void
 }) {
-  const [tab, setTab] = useState<'profile' | 'table'>('profile')
-  const [paths, setPaths] = useState<Path[]>([])
+  const [tab, setTab] = useState<'profile' | 'table'>(saved?.tab ?? 'profile')
+  const [paths, setPaths] = useState<Path[]>(
+    () => saved?.paths.map((p) => ({ ids: p.ids, choices: p.choices, branchId: p.branch_id })) ?? [],
+  )
   const [profiles, setProfiles] = useState<Profiles | null>(null)
   const [table, setTable] = useState<EnergyTable | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -368,6 +380,16 @@ export function EnergyDrawer({
   useEffect(() => {
     onPathsChange?.(JSON.parse(pathsKey) as DrawerPath[])
   }, [pathsKey, onPathsChange])
+
+  // Every pathway, also one whose node is not on the canvas yet (still loading); the backend
+  // drops those through a deleted node when the view is read again.
+  const viewKey = JSON.stringify({
+    tab,
+    paths: paths.map((p) => ({ ids: p.ids, branch_id: p.branchId, choices: p.choices })),
+  })
+  useEffect(() => {
+    onViewChange?.(JSON.parse(viewKey) as DrawerView)
+  }, [viewKey, onViewChange])
 
   const request: ProfileRequest | null =
     level && livePaths.length
