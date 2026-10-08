@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { forgetView } from './demoView.ts'
 
 // T-UI-11, FR-EN-10, FR-EN-11, D106: the profile style with its presets and preview, the saved
 // images in that style, and the drawer made taller, its list hidden and the profile zoomed.
 const E2E_DIR = process.env.E2E_DIR!
 
 async function openDemo(page: Page) {
+  await forgetView(page.request, join(E2E_DIR, 'demo'))
   await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
   await page.goto('/')
   await page.getByRole('button', { name: /^Open/ }).first().click()
@@ -69,10 +71,8 @@ test('profile style, saved images and zoom', async ({ page }) => {
     expect(png.subarray(1, 4).toString()).toBe('PNG')
     expect(png.readUInt32BE(16)).toBe(4800) // width × 4
 
-    // The style is the app's, kept over a reload.
+    // The style is the app's, kept over a reload (which reopens the drawer on pathway B, D105).
     await page.reload()
-    await page.getByRole('button', { name: 'Profile and table' }).click()
-    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
     await expect(chart).toHaveAttribute('width', '1200')
 
     // FR-EN-11: a taller drawer, the list hidden, then zoom.
@@ -100,13 +100,13 @@ test('profile style, saved images and zoom', async ({ page }) => {
     // The drawer's height and the hidden list are remembered by the browser.
     const taller = (await drawer.boundingBox())!.height
     await page.reload()
-    await page.getByRole('button', { name: 'Profile and table' }).click()
+    await expect(chart).toBeVisible()
     expect((await drawer.boundingBox())!.height).toBeCloseTo(taller, 0)
     await expect(drawer.getByRole('button', { name: 'Pathways' })).toHaveAttribute('aria-pressed', 'false')
 
     // "Screen" brings back the look before styles.
     await drawer.getByRole('button', { name: 'Pathways' }).click()
-    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+    await expect(drawer.getByRole('group', { name: 'Pathway B' })).toBeVisible()
     await drawer.getByRole('button', { name: 'Style…' }).click()
     await dialog.getByRole('button', { name: 'Screen' }).click()
     await dialog.getByRole('button', { name: 'Save' }).click()
@@ -114,5 +114,6 @@ test('profile style, saved images and zoom', async ({ page }) => {
     await expect(chart).toHaveAttribute('width', '960')
   } finally {
     await page.request.put('/api/settings', { data: { profile_style: screen } })
+    await forgetView(page.request, join(E2E_DIR, 'demo'))
   }
 })
