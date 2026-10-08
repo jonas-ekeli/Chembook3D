@@ -59,6 +59,12 @@ _ANSI = re.compile(
 # a line break, moving it along the line (Claude Code places words this way) like a space.
 _CURSOR_LINE = re.compile(r"\x1b\[[0-9;?]*[ABEFHdf]")
 _CURSOR_ALONG = re.compile(r"\x1b\[[0-9;?]*[CG]")
+# What the Claude panel's xterm.js sends by itself, not the user: its attributes (ESC [ ? 1 ; 2 c)
+# and cursor position (ESC [ row ; col R) when asked, its colours (OSC 11), and, once Windows'
+# ConPTY turns focus reporting on, ESC [ I and ESC [ O as the panel takes and loses focus.
+_REPORT = re.compile(
+    r"\x1b\[(?:[?>]?[0-9;]*[cRn]|[IO])|\x1b\][0-9]+;rgb:[0-9a-fA-F/]*(?:\x07|\x1b\\)"
+)
 _SESSION = re.compile(r"\b((?:session|cse)_[A-Za-z0-9]{8,})\b")
 _URL = re.compile(r"https://claude\.ai/code/[^\s\"'<>)\]]+")
 # What Claude Code shows when it uploads the folder rather than having the session clone it
@@ -433,9 +439,12 @@ class Launch:
             self.terminal.resize(*LAUNCH_SIZE)
 
     def answer(self, text: str) -> None:
-        """Keys the user typed in the Claude panel."""
-        self.asked = False
-        self.last_output = time.monotonic()  # a still screen from now on is a new question
+        """Keys the user typed in the Claude panel. A report the panel's terminal sends by
+        itself is passed on but answers nothing: it let a start report "starting" while the
+        question was on screen."""
+        if _REPORT.sub("", text):
+            self.asked = False
+            self.last_output = time.monotonic()  # a still screen from now on is a new question
         if self.terminal is not None and self.running:
             self.terminal.write(text)
 

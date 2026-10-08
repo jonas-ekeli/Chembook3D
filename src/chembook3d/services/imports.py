@@ -74,10 +74,18 @@ class ImportBlocked(ValueError):
 # ---------- staging ----------
 
 
-def read_file(text: str, name: str = "") -> ParsedFile | crest.Ensemble:
-    """Recognise the program from the content, not the file name."""
+def read_file(text: str, name: str = "", folder: Path | None = None) -> ParsedFile | crest.Ensemble:
+    """Recognise the program from the content, not the file name. `folder` is where the file
+    was chosen, for an xTB scan's output beside it (D112)."""
     parsed: ParsedFile | crest.Ensemble
-    if gaussian.looks_like_gaussian(text):
+    if xtb.looks_like_structures(text):
+        try:
+            parsed = xtb.parse_structures(text, name, scan_outputs(folder) if folder else [])
+        except xtb.OptimizationLog as exc:
+            raise ImportFailed(str(exc)) from exc
+        except xtb.NotXtbOutput as exc:
+            raise ImportFailed(f"{name or 'The file'} is not a readable xTB scan: {exc}") from exc
+    elif gaussian.looks_like_gaussian(text):
         parsed = gaussian.parse(text)
     elif orca.looks_like_orca(text):
         parsed = orca.parse(text)
@@ -95,12 +103,40 @@ def read_file(text: str, name: str = "") -> ParsedFile | crest.Ensemble:
         return parsed
     else:
         raise ImportFailed(
-            f"{name or 'The file'} is not a Gaussian, ORCA or xTB output file or a CREST "
-            "conformer ensemble."
+            f"{name or 'The file'} is not a Gaussian, ORCA or xTB output file, an xTB scan or "
+            "a CREST conformer ensemble."
         )
     if not parsed.steps:
         raise ImportFailed(f"No job steps were found in {name}")
     return parsed
+
+
+# Files looked at for the xTB output beside an xtbscan.log (D112), and the largest read.
+SCAN_OUTPUT_FILES = 200
+SCAN_OUTPUT_SIZE = 50_000_000
+
+
+def scan_outputs(folder: Path) -> list[str]:
+    """The xTB outputs in `folder` (not its subfolders) that ran a relaxed scan."""
+    found = []
+    try:
+        children = sorted(folder.iterdir(), key=lambda p: p.name.lower())[:SCAN_OUTPUT_FILES]
+    except OSError:
+        return []
+    for child in children:
+        try:
+            if not child.is_file() or child.stat().st_size > SCAN_OUTPUT_SIZE:
+                continue
+            with open(child, "rb") as handle:
+                head = handle.read(20000)
+            if b"\x00" in head or not xtb.looks_like_xtb(head.decode("utf-8", "replace")):
+                continue
+            text = child.read_bytes().decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        if xtb.ran_relaxed_scan(text):
+            found.append(text)
+    return found
 
 
 @dataclass
@@ -129,7 +165,8 @@ class Staging:
 
     def add(self, data: bytes, original_name: str, origin_path: str = "") -> StagedFile:
         text = data.decode("utf-8", errors="replace")
-        parsed = read_file(text, original_name)
+        folder = Path(origin_path).parent if origin_path else None
+        parsed = read_file(text, original_name, folder)
         folder = Path(tempfile.mkdtemp(prefix="chembook3d-import-"))
         (folder / "upload").write_bytes(data)
         staged = StagedFile(

@@ -8,13 +8,17 @@ optimization followed by a frequency job, read as two steps like Gaussian's `opt
 xTB prints no coordinates for a single point or a frequency job (they are in the input file),
 so such steps have no geometry and can only be imported onto an existing node (A15). An
 optimization prints its final structure.
+
+A relaxed scan (`$scan`) writes the optimized structure of each point to `xtbscan.log`, not to
+its output; that file, and the `path.xyz` a scan path job writes in the same layout, are read
+by `parse_structures` as one relaxed scan (D112).
 """
 
 import re
 import shlex
 
 from chembook3d.parsers.common import ParsedFile, ParsedStep, Route
-from chembook3d.xyz import Atom, element_of
+from chembook3d.xyz import ELEMENTS, Atom, element_of
 
 PROGRAM = "xTB"
 BOHR_ANGSTROM = 0.529177210903  # CODATA 2018
@@ -31,6 +35,10 @@ _FLOAT = r"[-+]?\d+\.\d*(?:[EeDd][-+]?\d+)?"
 
 class NotXtbOutput(ValueError):
     pass
+
+
+class OptimizationLog(ValueError):
+    """xTB's optimization log (`xtbopt.log`): every optimizer step, not results."""
 
 
 def looks_like_xtb(text: str) -> bool:
@@ -248,15 +256,18 @@ def _charge_multiplicity(lines: list[str], args: list[str]) -> tuple[int | None,
     return value, 1 if electrons % 2 == 0 else 2
 
 
+def _version(lines: list[str]) -> str | None:
+    for line in lines[:100]:
+        if match := re.search(r"xtb version (\S+)", line):
+            return match.group(1)
+    return None
+
+
 def parse(text: str) -> ParsedFile:
     if not looks_like_xtb(text):
         raise NotXtbOutput("not an xTB output file")
     lines = text.splitlines()
-    version = None
-    for line in lines[:100]:
-        if match := re.search(r"xtb version (\S+)", line):
-            version = match.group(1)
-            break
+    version = _version(lines)
     args = _call(lines)
     route = route_from_call(args, _method(lines, args))
     charge, multiplicity = _charge_multiplicity(lines, args)
@@ -301,3 +312,201 @@ def _missing_fields(step: ParsedStep) -> list[str]:
         if "g" not in step.thermo:
             missing.append("free energy")
     return missing
+
+
+# ---------- relaxed scans and scan paths (D112) ----------
+
+SCAN_ROUTE = "relaxed scan"  # the route text of every calculation read from such a file
+DEFAULT_METHOD = "GFN2-xTB"  # xTB's default Hamiltonian
+_COMMENT_KEY = re.compile(r"(\w+):\s*(\S+)")
+
+
+def _comment(line: str) -> tuple[dict[str, str], list[str]]:
+    """`energy: -15.4 gnorm: 0.0004 xtb: 6.7.1 (edcfbbe) stage: 2 call: xtb a.xyz --opt`: the
+    keys before `call:` and the command line after it."""
+    head, _, call = line.partition("call:")
+    keys = {k.lower(): v for k, v in _COMMENT_KEY.findall(head)}
+    if not call.strip():
+        return keys, []
+    try:
+        return keys, shlex.split(call.strip(), posix=True)
+    except ValueError:
+        return keys, call.split()
+
+
+def looks_like_structures(text: str) -> bool:
+    """A multi-structure xyz whose comment lines start with `energy:`, as xTB writes them."""
+    lines = text.lstrip("\ufeff").splitlines()
+    return (
+        len(lines) >= 3
+        and lines[0].strip().isdigit()
+        and lines[1].strip().startswith("energy:")
+        and "energy" in _comment(lines[1])[0]
+    )
+
+
+def ran_relaxed_scan(text: str) -> bool:
+    """An xTB output of a run that wrote a relaxed scan to xtbscan.log."""
+    return looks_like_xtb(text) and "RELAXED SCAN" in text
+
+
+def _float(value: str | None) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except ValueError:
+        return None
+
+
+def _int(value: str | None) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except ValueError:
+        return None
+
+
+def _frames(text: str) -> tuple[list[tuple[dict[str, str], list[str], list[Atom]]], bool]:
+    """Every whole structure in the file, and whether the file ended inside one."""
+    lines = text.lstrip("\ufeff").splitlines()
+    frames = []
+    i = 0
+    while i < len(lines):
+        if not lines[i].strip():
+            i += 1
+            continue
+        header = lines[i].strip()
+        if not header.isdigit() or i + 1 >= len(lines):
+            return frames, True
+        count = int(header)
+        keys, call = _comment(lines[i + 1])
+        atoms = []
+        for number in range(i + 2, i + 2 + count):
+            parts = lines[number].split() if number < len(lines) else []
+            element = element_of(parts[0]) if len(parts) >= 4 else None
+            if element is None:
+                return frames, True
+            try:
+                atoms.append(Atom(element, *(float(v) for v in parts[1:4])))
+            except ValueError:
+                return frames, True
+        if frames and [a.element for a in atoms] != [a.element for a in frames[0][2]]:
+            raise NotXtbOutput(f"structure {len(frames) + 1} has different atoms")
+        frames.append((keys, call, atoms))
+        i += 2 + count
+    return frames, False
+
+
+def representative(energies: list[float | None]) -> int:
+    """D112: the point a path's node takes (0-based): the highest top, a point higher than
+    the points on either side of it, never the first or last; else the middle point."""
+    count = len(energies)
+    tops = [
+        n
+        for n in range(1, count - 1)
+        if None not in energies[n - 1 : n + 2]
+        and energies[n] > energies[n - 1]
+        and energies[n] > energies[n + 1]
+    ]
+    if tops:
+        return max(tops, key=lambda n: (energies[n], -n))
+    return (count - 1) // 2
+
+
+def _same_structure(a: list[Atom], b: list[Atom], tolerance: float = 1e-4) -> bool:
+    return len(a) == len(b) and all(
+        p.element == q.element
+        and abs(p.x - q.x) <= tolerance
+        and abs(p.y - q.y) <= tolerance
+        and abs(p.z - q.z) <= tolerance
+        for p, q in zip(a, b, strict=True)
+    )
+
+
+def _scan_output(outputs: list[str], first: list[Atom]) -> str | None:
+    """The xTB output that wrote this scan: the only one in the folder that ran a relaxed
+    scan, or the one whose final structure (the optimized start) is the scan's first point."""
+    scans = [text for text in outputs if ran_relaxed_scan(text)]
+    if len(scans) == 1:
+        return scans[0]
+    for text in scans:
+        lines = text.splitlines()
+        for n, line in enumerate(lines):
+            if line.strip() == "final structure:":
+                if _same_structure(_read_final_structure(lines, n), first):
+                    return text
+                break
+    return None
+
+
+def _electrons(atoms: list[Atom], charge: int) -> int:
+    return sum(ELEMENTS.index(a.element) + 1 for a in atoms) - charge
+
+
+def parse_structures(text: str, name: str = "", outputs: list[str] | None = None) -> ParsedFile:
+    """An `xtbscan.log` or `path.xyz` as one relaxed scan whose points are its structures
+    (D112). Its level of theory, charge and multiplicity come from a `call:` on its comment
+    lines, else from the xTB output in `outputs` that ran the scan, else xTB's defaults."""
+    frames, cut = _frames(text)
+    if not frames:
+        raise NotXtbOutput("no structures were found")
+    first_keys = frames[0][0]
+    if "gnorm" in first_keys and "stage" not in first_keys and "xtbopt" in name.lower():
+        raise OptimizationLog(
+            f"{name} is xTB's optimization log. Import the xTB output of that run instead; "
+            "its optimized structure and energy are there"
+        )
+    version = first_keys.get("xtb")
+    call = next((c for _, c, _ in frames if c), [])
+    missing: list[str] = []
+    charge: int | None = None
+    multiplicity: int | None = None
+    if call:
+        route = route_from_call(call, _method([], call) or DEFAULT_METHOD)
+        charge = _int(_flag_value(call, "--chrg", "-c"))
+        unpaired = _int(_flag_value(call, "--uhf", "-u"))
+        multiplicity = unpaired + 1 if unpaired is not None else None
+    else:
+        output = _scan_output(outputs or [], frames[0][2])
+        if output is not None:
+            lines = output.splitlines()
+            args = _call(lines)
+            route = route_from_call(args, _method(lines, args) or DEFAULT_METHOD)
+            charge, multiplicity = _charge_multiplicity(lines, args)
+            version = version or _version(lines)
+        else:
+            route = Route(text="", method=DEFAULT_METHOD)
+            missing += [
+                f"level of theory (taken as {DEFAULT_METHOD}, gas phase)",
+                "charge and multiplicity (taken as xTB's defaults)",
+            ]
+    if charge is None:
+        charge = 0
+    if multiplicity is None:
+        multiplicity = 1 if _electrons(frames[0][2], charge) % 2 == 0 else 2
+    route.job_type = "other"
+    route.compound_freq = False
+    route.text = f"{SCAN_ROUTE}: {route.text}" if route.text else SCAN_ROUTE
+
+    energies = [_float(keys.get("energy")) for keys, _, _ in frames]
+    stages = [_int(keys.get("stage")) for keys, _, _ in frames]
+    chosen = representative(energies)
+    step = ParsedStep(
+        index=1,
+        route=route,
+        title=name or None,
+        charge=charge,
+        multiplicity=multiplicity,
+        geometries=[atoms for _, _, atoms in frames],
+        geometry_energies=energies,
+        geometry_points=list(range(1, len(frames) + 1)),
+        geometry_stages=stages if any(s is not None for s in stages) else [],
+        converged_geometries=list(range(len(frames))),
+        scan="relaxed",
+        node_geometry=chosen,
+        scf_energy=energies[chosen],
+        optimization_converged=None,
+        termination="abnormal" if cut else "normal",
+    )
+    if step.scf_energy is None:
+        missing.append("total energy")
+    step.missing = missing
+    return ParsedFile(program=PROGRAM, version=version, steps=[step])

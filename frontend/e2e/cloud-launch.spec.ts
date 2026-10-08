@@ -11,6 +11,9 @@ const E2E_DIR = process.env.E2E_DIR!
 const WATER = '3\nwater\nO 0.0 0.0 0.1173\nH 0.0 0.7572 -0.4692\nH 0.0 -0.7572 -0.4692\n'
 
 test('a question before a cloud job starts is answered in the Claude panel', async ({ page }) => {
+  // The launch alone waits LAUNCH_QUIET (5 s) of a still screen, after a push; on a slow Windows
+  // runner the whole test can pass 30 s.
+  test.slow()
   const remote = join(E2E_DIR, 'cloud-remote.git')
   mkdirSync(remote)
   execFileSync('git', ['init', '-q', '--bare'], { cwd: remote })

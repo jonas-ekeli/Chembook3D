@@ -72,3 +72,46 @@ test('play a relaxed scan, its converged points only, with the measurement follo
   await expect(window.getByLabel('Structure shown')).toHaveCount(0)
   await expect(window.getByLabel('Atom numbers')).toBeVisible()
 })
+
+test('an xTB scan plays, and "Use this structure" changes a path node in place', async ({ page }) => {
+  // D112, T-UI-16
+  test.slow()
+  await newInvestigation(page, 'xTB scan path')
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Upload a file').setInputFiles(join(FIXTURES, 'xtb', 'dce_scan', 'xtbscan.log'))
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  const inspector = page.getByLabel('Node inspector')
+  await expect(inspector.getByRole('heading', { name: 'xtbscan' })).toBeVisible()
+  const coordinates = async () => (await inspector.getByLabel('xyz text').inputValue()).split('\n')[2]
+  const before = await coordinates()
+
+  const movie = inspector.getByLabel('Optimization steps')
+  await movie.getByLabel('Steps of').selectOption({ index: 1 })
+  const shown = movie.getByLabel('Structure shown')
+  const slider = movie.getByLabel('Structure', { exact: true })
+  // Every structure is a converged point: nothing to filter.
+  await expect(slider).toHaveAttribute('max', '12')
+  await expect(movie.getByLabel('Converged points only')).toHaveCount(0)
+  await movie.getByRole('button', { name: 'Pause' }).click()
+  await slider.fill('7')
+  await movie.getByRole('button', { name: 'Next structure' }).click()
+  await expect(shown).toContainText('Structure 9 of 13 · scan point 9 of 13 · converged')
+  await expect(movie.getByText('changes this node')).toBeVisible()
+  await movie.getByRole('button', { name: 'Use this structure' }).click()
+  await expect(page.getByRole('status')).toContainText("The node's geometry is now structure 9.")
+  await expect.poll(coordinates).not.toBe(before)
+  await expect(page.locator('.react-flow__node')).toHaveCount(1)
+
+  // On a node with a Gaussian scan, the structure goes to a derived node (ID-4).
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  await dialog.getByLabel('Upload a file').setInputFiles(join(FIXTURES, 'gaussian', 'dvb_scan_relaxed.log'))
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(inspector.getByRole('heading', { name: 'dvb_scan_relaxed' })).toBeVisible()
+  await movie.getByLabel('Steps of').selectOption({ index: 1 })
+  await movie.getByRole('button', { name: 'Pause' }).click()
+  await expect(movie.getByText('makes a derived node')).toBeVisible()
+  await movie.getByRole('button', { name: 'Use this structure' }).click()
+  await expect(page.getByRole('status')).toContainText('saved as a new node derived from “dvb_scan_relaxed”')
+  await expect(page.locator('.react-flow__node')).toHaveCount(3)
+})

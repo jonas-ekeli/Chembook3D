@@ -29,7 +29,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. This document covers recor
 |---|---|---|---|
 | Gaussian | 2 | output (.log/.out) | FR-IMP-01 to 03 |
 | ORCA | 5 | main output (.out) | FR-IMP-06, same kinds of results where printed |
-| xTB | 5 | main output | FR-IMP-07, same kinds of results where printed |
+| xTB | 5 | main output; a relaxed scan's `xtbscan.log` and a scan path's `path.xyz` (D112) | FR-IMP-07, same kinds of results where printed |
 | CREST | 5 | conformer ensemble (multi-structure xyz with energies in comment lines) | FR-IMP-10 |
 
 The exact input file variants beyond these (e.g. .fchk, .gjf, ORCA .hess, CREST rotamer files) are **not confirmed** (Q11). Parsers should be written so that more file kinds can be added.

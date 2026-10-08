@@ -431,7 +431,10 @@ export function ImportDialog({
       {error && <p role="alert">{error}</p>}
       {!plan && !file && (
         <>
-          <p>Choose a Gaussian, ORCA or xTB output file, or a CREST conformer ensemble (.xyz).</p>
+          <p>
+            Choose a Gaussian, ORCA or xTB output file, an xTB scan (xtbscan.log or path.xyz) or a CREST conformer
+            ensemble (.xyz).
+          </p>
           <label className="button">
             Upload a file…
             <input

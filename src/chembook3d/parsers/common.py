@@ -39,6 +39,10 @@ class ParsedStep:
     geometry_points: list[int | None] = field(default_factory=list)
     converged_geometries: list[int] = field(default_factory=list)
     scan: str | None = None  # "relaxed" (an optimization per point) or "rigid"
+    # D112: an xTB scan path's stage per structure (empty when the file names none), and the
+    # structure (0-based) its node takes when that is not the last one: the path's top.
+    geometry_stages: list[int | None] = field(default_factory=list)
+    node_geometry: int | None = None
     scf_energy: float | None = None
     optimization_converged: bool | None = None  # None when the step is not an optimization
     termination: str = "abnormal"  # normal | abnormal (05 §3.1: missing means abnormal)
@@ -60,7 +64,10 @@ class ParsedStep:
 
     @property
     def final_geometry(self) -> list[Atom] | None:
-        return self.geometries[-1] if self.geometries else None
+        """The structure the step leaves its node on: the last one, or a path's chosen point."""
+        if not self.geometries:
+            return None
+        return self.geometries[self.node_geometry if self.node_geometry is not None else -1]
 
     @property
     def imaginary_count(self) -> int:

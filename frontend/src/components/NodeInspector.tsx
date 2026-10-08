@@ -427,6 +427,14 @@ export function NodeInspector({
                   vibrating={vibration !== null}
                   onShow={setMovie}
                   onStart={() => setVibrationPicker((n) => n + 1)}
+                  onUsed={(used, derived, structure) =>
+                    onChanged(
+                      used,
+                      derived
+                        ? `Structure ${structure} saved as a new node derived from “${name(node)}”.`
+                        : `The node's geometry is now structure ${structure}.`,
+                    )
+                  }
                 />
               }
             />

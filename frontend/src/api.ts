@@ -290,9 +290,17 @@ export type GroupDeletePreview = {
 
 export type Modes = { xyz: string; frequencies: number[]; order: number[]; modes: number[][][] }
 
-/** D101: one structure of an optimization or scan, turned onto the calculation's final geometry. */
-export type StepFrame = { geometry: GeometryRows; energy: number | null; point: number | null; converged: boolean }
-export type Steps = { scan: 'relaxed' | 'rigid' | null; points: number; frames: StepFrame[] }
+/** D101: one structure of an optimization or scan, turned onto the calculation's final geometry;
+ * `stage` is the stage of an xTB scan path that names its stages (D112). */
+export type StepFrame = {
+  geometry: GeometryRows
+  energy: number | null
+  point: number | null
+  converged: boolean
+  stage: number | null
+}
+/** `in_place`: "Use this structure" changes the node itself (a scan path node), not a derived one (D112). */
+export type Steps = { scan: 'relaxed' | 'rigid' | null; points: number; frames: StepFrame[]; in_place: boolean }
 
 /** D80: all atoms (when they correspond), chosen atoms, or the stored coordinates. */
 export type OverlayAlign = 'all' | 'atoms' | 'none'
@@ -1433,6 +1441,8 @@ export const api = {
 
   modes: (calculationId: string) => request<Modes>('GET', `/calculations/${calculationId}/modes`),
   steps: (calculationId: string) => request<Steps>('GET', `/calculations/${calculationId}/steps`),
+  useStep: (calculationId: string, frame: number) =>
+    request<{ node: Node; derived: boolean }>('POST', `/calculations/${calculationId}/steps/${frame}/use`),
   overlay: (body: OverlayRequest) => request<Overlay>('POST', '/overlay', body),
   alignmentSets: () => request<AlignmentSet[]>('GET', '/alignment-sets'),
   createAlignmentSet: (name: string, atoms: Record<string, number[]>) =>

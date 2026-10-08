@@ -15,6 +15,7 @@ from chembook3d import xyz
 from chembook3d.api.notes import NoteOut, note_out
 from chembook3d.api.routes import (
     DbSession,
+    GeometryOut,
     HistoryOut,
     NodeOut,
     WarningOut,
@@ -214,6 +215,7 @@ class StepFrameOut(BaseModel):
     energy: float | None  # hartree
     point: int | None  # scan point, 1-based
     converged: bool
+    stage: int | None = None  # D112: a scan path's stage, when the file names it
 
 
 class StepsOut(BaseModel):
@@ -222,6 +224,9 @@ class StepsOut(BaseModel):
     scan: str | None  # "relaxed", "rigid" or None
     points: int
     frames: list[StepFrameOut]
+    # D112: "Use this structure" changes the node in place (a scan path node), rather than
+    # making a derived node.
+    in_place: bool = False
 
 
 class OverlayIn(BaseModel):
@@ -654,10 +659,26 @@ def calculation_steps(calculation_id: str, request: Request, session: DbSession)
                 energy=f.energy,
                 point=f.point,
                 converged=f.converged,
+                stage=f.stage,
             )
             for f in steps.frames
         ],
+        in_place=trajectory.changes_in_place(calculation.node),
     )
+
+
+@router.post("/calculations/{calculation_id}/steps/{frame}/use", response_model=GeometryOut)
+def use_step(calculation_id: str, frame: int, request: Request, session: DbSession):
+    """D112: the structure `frame` (0-based, as listed by the steps) as the node's geometry:
+    in place on a scan path node, else on a new derived node (ID-4, ID-5)."""
+    calculation = session.get(Calculation, calculation_id)
+    if calculation is None:
+        raise HTTPException(404, "Calculation not found")
+    try:
+        result = trajectory.use_frame(session, _investigation(request).folder, calculation, frame)
+    except trajectory.StepsUnavailable as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return GeometryOut(node=_node_out(session, result.node), derived=result.derived)
 
 
 @router.post("/overlay", response_model=OverlayOut)
