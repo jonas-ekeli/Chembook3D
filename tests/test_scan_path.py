@@ -180,12 +180,12 @@ def test_sending_writes_the_job(open_client):
     assert pathtools.distance(end_rows[0], end_rows[1]) == pytest.approx(
         np.linalg.norm(np.array(WATER_B[0][1:]) - np.array(WATER_B[1][1:])), abs=1e-6
     )
-    mapping = json.loads((folder / "inputs" / "mapping.json").read_text())
+    mapping = json.loads((folder / "inputs" / "mapping.json").read_text(encoding="utf-8"))
     assert mapping["mapping"] == [2, 1, 3] and mapping["fixed"] == [[2, 1]]
     assert mapping["end"]["label"] == "B"
-    settings = json.loads((folder / "inputs" / "path.json").read_text())
+    settings = json.loads((folder / "inputs" / "path.json").read_text(encoding="utf-8"))
     assert settings["held"][0]["atoms"] == [1, 2] and settings["held"][0]["kind"] == "distance"
-    text = (folder / "job.md").read_text()
+    text = (folder / "job.md").read_text(encoding="utf-8")
     assert "scan path job" in text and "--chrg 0 --uhf 0 --alpb ch2cl2" in text
     assert "At the end (“B”, a TS): distance 1–2 = " in text
     assert "A TS end that is only a guess" in text
@@ -262,7 +262,7 @@ def test_join_check_and_import(tmp_path):
     out = tmp_path / "path.xyz"
     assert pathtools.main(["join", str(out), str(tmp_path / "s1.log"), str(tmp_path / "s2.log"),
                            "--call", call, "--reverse", "2"]) == 0  # fmt: skip
-    step = xtb.parse_structures(out.read_text(), "path.xyz").steps[0]
+    step = xtb.parse_structures(out.read_text(encoding="utf-8"), "path.xyz").steps[0]
     assert step.geometry_stages == [1] * 4 + [2] * 4
     assert (step.route.solvation_model, step.route.solvent) == ("ALPB", "water")
     report = pathtools.check(str(out), start, end, allowed=[[1, 0]])
