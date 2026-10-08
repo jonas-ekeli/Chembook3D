@@ -151,6 +151,20 @@ test('"no TS" tags can be hidden and the title keeps clear of the legend', async
     await expect(chart).not.toContainText('no TS')
     expect((await (await page.request.get('/api/settings')).json()).profile_style.edge_tags).toBe(false)
 
+    // T-UI-14, D110: A-S1 (-3.20) and B-S1 (-2.10) lie close in one column. Their values stay
+    // above the levels and their names below, stacked in the order of the levels.
+    const at = async (text: RegExp) => {
+      const found = chart.locator('text', { hasText: text })
+      return {
+        x: Number(await found.getAttribute('x')),
+        y: Number(await found.getAttribute('y')),
+        anchor: await found.getAttribute('text-anchor'),
+      }
+    }
+    const stacked = [await at(/^-2\.10$/), await at(/^-3\.20$/), await at(/^B-S1$/), await at(/^A-S1$/)]
+    for (const label of stacked) expect([label.anchor, label.x]).toEqual(['middle', stacked[0].x])
+    for (let n = 1; n < stacked.length; n++) expect(stacked[n].y).toBeGreaterThan(stacked[n - 1].y)
+
     // T-UI-13, D109: node names along the bottom, above the step names, not by the levels.
     await expect(chart.locator('text', { hasText: /^B-S2 ‡$/ })).toHaveCount(1)
     const byLevel = Number(await chart.locator('text', { hasText: /^B-S2 ‡$/ }).getAttribute('y'))
@@ -164,8 +178,9 @@ test('"no TS" tags can be hidden and the title keeps clear of the legend', async
     const atBottom = Number(await name.getAttribute('y'))
     expect(atBottom).toBeGreaterThan(byLevel)
     expect(atBottom).toBeLessThan(step)
-    // A–S1 and B–S1 share a column: one line each.
+    // A–S1 and B–S1 share a column: one line each, starting just under the plot (D110).
     await expect(chart.locator('text', { hasText: /^[AB]-S1$/ })).toHaveCount(2)
+    expect(Number(await chart.getAttribute('height')) - (await at(/^B-S1$/)).y).toBeLessThan(50)
     await page.screenshot({ path: 'test-results/profile-names-bottom.png' })
   } finally {
     await page.request.put('/api/settings', { data: { profile_style: screen } })
