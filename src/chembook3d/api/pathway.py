@@ -34,9 +34,9 @@ from chembook3d.models import (
     Transition,
 )
 from chembook3d.services import alignment as alignment_service
+from chembook3d.services import atom_matching, layout, trajectory
 from chembook3d.services import branches as branch_service
 from chembook3d.services import groups as group_service
-from chembook3d.services import layout, trajectory
 from chembook3d.services import nodes as node_service
 from chembook3d.services import notes as note_service
 from chembook3d.services import overview as overview_service
@@ -251,6 +251,29 @@ class OverlayStructureOut(BaseModel):
 class OverlayOut(BaseModel):
     align: str
     structures: list[OverlayStructureOut]
+
+
+class AtomMatchIn(BaseModel):
+    start_id: str
+    end_id: str
+    pairs: list[list[int]] = Field(default_factory=list)  # (start atom, end atom), 1-based
+
+
+class AtomMatchOut(BaseModel):
+    start_id: str
+    end_id: str
+    mapping: list[int]  # for each start atom in order, the end's atom matched to it (1-based)
+    rmsd: float  # Å over all atoms, the end fitted on the start in this numbering
+    formed: list[list[int]]  # start's numbering: bonded at the end only
+    broken: list[list[int]]  # bonded at the start only
+    inverted: list[int]  # start atoms whose neighbours sit the other way round at the end
+    fixed: list[list[int]]  # the hand-fixed pairs kept
+    same_numbering: bool
+    confident: bool
+    doubts: list[str]
+    start_xyz: str
+    end_xyz: str  # as stored
+    renumbered_xyz: str  # the end in the start's order, placed on the start
 
 
 class AlignmentSetOut(BaseModel):
@@ -679,6 +702,24 @@ def use_step(calculation_id: str, frame: int, request: Request, session: DbSessi
     except trajectory.StepsUnavailable as exc:
         raise HTTPException(422, str(exc)) from exc
     return GeometryOut(node=_node_out(session, result.node), derived=result.derived)
+
+
+@router.post("/atom-match", response_model=AtomMatchOut)
+def atom_match(body: AtomMatchIn, session: DbSession):
+    """D113, A59: the end's atoms matched to the start's numbering; nothing is stored."""
+    start, end, result = atom_matching.match_nodes(session, body.start_id, body.end_id, body.pairs)
+    atoms = [
+        xyz.Atom(e, x, y, z)
+        for e, x, y, z in atom_matching.renumbered(start.geometry, end.geometry, result.mapping)
+    ]
+    return AtomMatchOut(
+        start_id=start.id,
+        end_id=end.id,
+        start_xyz=node_service.to_xyz(start),
+        end_xyz=node_service.to_xyz(end),
+        renumbered_xyz=xyz.format_xyz(atoms, comment=f"{end.label} in the order of {start.label}"),
+        **atom_matching.summary(result),
+    )
 
 
 @router.post("/overlay", response_model=OverlayOut)

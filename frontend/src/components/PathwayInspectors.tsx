@@ -20,6 +20,7 @@ import {
 } from '../api'
 import { Modal } from './Modal'
 import { Notes, TextField } from './Fields'
+import { AtomMatchDialog } from './AtomMatchDialog'
 import { MAX_OVERLAY, OverlayDialog } from './OverlayDialog'
 import { CompareStericsDialog } from './Sterics'
 
@@ -1060,6 +1061,7 @@ export function SelectionInspector({
   const [adding, setAdding] = useState(false)
   const [overlay, setOverlay] = useState(false)
   const [sterics, setSterics] = useState(false)
+  const [matching, setMatching] = useState(false)
   const assign = (fields: { step_id?: string | null; branch_id?: string | null }) =>
     Promise.all(nodes.map((n) => api.updateNode(n.id, fields))).then(
       () => {
@@ -1144,6 +1146,13 @@ export function SelectionInspector({
           Overlay in 3D
         </button>
         <button
+          disabled={nodes.length !== 2 || groups.length > 0 || nodes.some((n) => !n.xyz)}
+          onClick={() => setMatching(true)}
+          title="Match the second structure's atoms to the first one's numbering (D113)"
+        >
+          Match atoms…
+        </button>
+        <button
           disabled={nodes.filter((n) => n.xyz).length < 1}
           onClick={() => setSterics(true)}
           title="Buried volume and steric maps of the selected nodes (D81)"
@@ -1189,6 +1198,7 @@ export function SelectionInspector({
         />
       )}
       {overlay && nodes.length >= 2 && <OverlayDialog nodes={nodes} onClose={() => setOverlay(false)} />}
+      {matching && nodes.length === 2 && <AtomMatchDialog nodes={[nodes[0], nodes[1]]} onClose={() => setMatching(false)} />}
       {sterics && (
         <CompareStericsDialog nodes={nodes.filter((n) => n.xyz)} title={describeSelection(nodes, [])} onClose={() => setSterics(false)} />
       )}

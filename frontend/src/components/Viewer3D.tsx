@@ -12,6 +12,13 @@ export type AtomPicking = { atoms: number[]; onToggle: (index: number) => void }
 
 const PICK_COLOURS = ['#f59f00', '#1c7ed6', '#e03131', '#2f9e44']
 
+/** D113: numbers and highlights on atoms of the first model (0-based indices), and dashed
+ * lines between atoms (bonds that form or break). */
+export type AtomMarks = {
+  labels: { index: number; text: string; colour?: string; highlight?: boolean }[]
+  lines?: { from: number; to: number; colour: string }[]
+}
+
 function describe(result: ReturnType<typeof measure>): string | null {
   if (!result) return null
   if (result.kind === 'distance') return `Distance ${result.value.toFixed(3)} Å`
@@ -40,7 +47,9 @@ function hideHydrogens(model: import('3dmol').GLModel, xyz: string, mode: Hydrog
  *
  * With `trajectory` (D101), the first model is a movie of the structures in `frames` (xyz
  * texts with the same atoms), showing the one at `index`; measuring follows that structure.
- * `below` is drawn under the view, inside the pop-out with it (the movie's controls). */
+ * `below` is drawn under the view, inside the pop-out with it (the movie's controls).
+ *
+ * `marks` (D113) labels atoms and draws dashed lines between them, as the atom match does. */
 export function Viewer3D({
   models,
   vibration = null,
@@ -51,6 +60,7 @@ export function Viewer3D({
   corner,
   trajectory = null,
   below,
+  marks,
 }: {
   models: ViewerModel[]
   vibration?: { xyz: string; amplitude?: number } | null
@@ -61,6 +71,7 @@ export function Viewer3D({
   corner?: ReactNode
   trajectory?: { frames: string[]; index: number } | null
   below?: ReactNode
+  marks?: AtomMarks
 }) {
   const hydrogens = useContext(HydrogenDisplay)
   const host = useRef<HTMLDivElement>(null)
@@ -202,6 +213,28 @@ export function Viewer3D({
     if (!v || !ready) return
     v.removeAllShapes()
     v.removeAllLabels()
+    const at = (index: number) => {
+      const atom = atoms[index]
+      return atom ? { x: atom.x, y: atom.y, z: atom.z } : null
+    }
+    marks?.lines?.forEach(({ from, to, colour }) => {
+      const start = at(from)
+      const end = at(to)
+      if (start && end) v.addCylinder({ start, end, radius: 0.07, color: colour, dashed: true })
+    })
+    marks?.labels.forEach(({ index, text, colour, highlight }) => {
+      const center = at(index)
+      if (!center) return
+      if (highlight) v.addSphere({ center, radius: 0.5, color: colour ?? PICK_COLOURS[0], alpha: 0.6 })
+      v.addLabel(text, {
+        position: center,
+        fontSize: 10,
+        fontColor: 'black',
+        backgroundColor: colour ?? 'white',
+        backgroundOpacity: 0.75,
+        inFront: true,
+      })
+    })
     if (aligning) {
       aligning.forEach((index, i) => {
         const atom = atoms[index]
@@ -235,7 +268,7 @@ export function Viewer3D({
       }
     })
     v.render()
-  }, [picks, aligning, atoms, ready])
+  }, [picks, aligning, atoms, ready, marks])
 
   useEffect(() => {
     const element = host.current

@@ -335,6 +335,16 @@ TOOLS: list[ToolSpec] = [
             "allow_mirror": "Also try the mirror image.",
         },
     ),
+    T(
+        "match_atoms",
+        "read",
+        "POST",
+        "/api/atom-match",
+        "Match the end structure's atoms to the start's numbering (D113): for each start atom "
+        "the end's atom, the bonds that form or break, the fitted RMSD, why the match may be "
+        "doubtful, and the end renumbered in the start's order. Changes nothing.",
+        help={"pairs": "Pairs fixed by hand, [start atom, end atom], 1-based."},
+    ),
     # ---------- changing ----------
     T(
         "create_node",

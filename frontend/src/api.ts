@@ -329,6 +329,28 @@ export type OverlayStructure = {
 
 export type Overlay = { align: OverlayAlign; structures: OverlayStructure[] }
 
+/** D113: the end's atoms matched to the start's numbering. Atom numbers are 1-based, of the
+ * full structure; bonds and centres are in the start's numbering. */
+export type AtomMatch = {
+  start_id: string
+  end_id: string
+  /** For each start atom in order, the end's atom matched to it. */
+  mapping: number[]
+  rmsd: number
+  formed: [number, number][]
+  broken: [number, number][]
+  inverted: number[]
+  /** [start atom, end atom] pairs fixed by hand. */
+  fixed: [number, number][]
+  same_numbering: boolean
+  confident: boolean
+  doubts: string[]
+  start_xyz: string
+  end_xyz: string
+  /** The end in the start's order, placed on the start. */
+  renumbered_xyz: string
+}
+
 /** FR-3D-07: a named list of alignment atoms per node. */
 export type AlignmentSet = { id: string; name: string; atoms: Record<string, number[]> }
 
@@ -1444,6 +1466,8 @@ export const api = {
   useStep: (calculationId: string, frame: number) =>
     request<{ node: Node; derived: boolean }>('POST', `/calculations/${calculationId}/steps/${frame}/use`),
   overlay: (body: OverlayRequest) => request<Overlay>('POST', '/overlay', body),
+  atomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>
+    request<AtomMatch>('POST', '/atom-match', { start_id: startId, end_id: endId, pairs }),
   alignmentSets: () => request<AlignmentSet[]>('GET', '/alignment-sets'),
   createAlignmentSet: (name: string, atoms: Record<string, number[]>) =>
     request<AlignmentSet>('POST', '/alignment-sets', { name, atoms }),
