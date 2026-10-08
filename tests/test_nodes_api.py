@@ -311,6 +311,8 @@ def test_profile_style_setting(open_client):
     assert style["font_size"] == 14
     assert style["title"] is False
     assert style["edge_tags"] is False  # D108: "no TS" tags hidden
+    response = open_client.put("/api/settings", json={"profile_style": {"name_position": "bottom"}})
+    assert response.json()["profile_style"]["name_position"] == "bottom"  # D109
     assert settings["profile_style"]["edge_tags"] is True
     assert style["colours"] == "branch"
     assert "script" not in style

@@ -40,7 +40,7 @@ PROFILE_CHOICES: dict[str, tuple[str, ...]] = {
     "connector": ("straight", "curved"),
     "dash": ("solid", "dashed", "dotted", "by-pathway"),
     "value_position": ("above", "below", "hidden"),
-    "name_position": ("below", "above", "hidden"),
+    "name_position": ("below", "above", "bottom", "hidden"),  # bottom: along the x axis, D109
     "brackets": ("none", "round", "square"),
     "decimals": ("unit", "0", "1", "2", "3"),
     "legend": ("top-right", "top-left", "hidden"),

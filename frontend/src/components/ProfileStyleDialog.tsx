@@ -36,6 +36,7 @@ const CHOICES: { [K in keyof ProfileStyle]?: Choice<K> } = {
   name_position: [
     ['below', 'Below the level'],
     ['above', 'Above the level'],
+    ['bottom', 'Along the bottom'],
     ['hidden', 'Hidden'],
   ],
   brackets: [

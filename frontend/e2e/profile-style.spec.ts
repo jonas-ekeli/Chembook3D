@@ -150,6 +150,23 @@ test('"no TS" tags can be hidden and the title keeps clear of the legend', async
     await expect(chart.locator('[data-direct="true"]').first()).toBeAttached()
     await expect(chart).not.toContainText('no TS')
     expect((await (await page.request.get('/api/settings')).json()).profile_style.edge_tags).toBe(false)
+
+    // T-UI-13, D109: node names along the bottom, above the step names, not by the levels.
+    await expect(chart.locator('text', { hasText: /^B-S2 ‡$/ })).toHaveCount(1)
+    const byLevel = Number(await chart.locator('text', { hasText: /^B-S2 ‡$/ }).getAttribute('y'))
+    await drawer.getByRole('button', { name: 'Style…' }).click()
+    await dialog.getByLabel('Node name').selectOption({ label: 'Along the bottom' })
+    await dialog.getByRole('button', { name: 'Save' }).click()
+    await expect(dialog).toHaveCount(0)
+    const name = chart.locator('text', { hasText: /^B-S2 ‡$/ })
+    await expect(name).toHaveCount(1)
+    const step = Number(await chart.locator('text', { hasText: /^\[2\+2\] TS$/ }).getAttribute('y'))
+    const atBottom = Number(await name.getAttribute('y'))
+    expect(atBottom).toBeGreaterThan(byLevel)
+    expect(atBottom).toBeLessThan(step)
+    // A–S1 and B–S1 share a column: one line each.
+    await expect(chart.locator('text', { hasText: /^[AB]-S1$/ })).toHaveCount(2)
+    await page.screenshot({ path: 'test-results/profile-names-bottom.png' })
   } finally {
     await page.request.put('/api/settings', { data: { profile_style: screen } })
     await forgetView(page.request, join(E2E_DIR, 'demo'))
