@@ -151,6 +151,15 @@ def _update(folder: Path, job_id: str, **fields: Any) -> dict[str, Any]:
 # ---------- writing a job ----------
 
 
+def update_job(folder: Path, job_id: str, **fields: Any) -> dict[str, Any]:
+    """Record fields on a job (an imported scan path, D114)."""
+    return _update(Path(folder), job_id, **fields)
+
+
+def now() -> str:
+    return _now()
+
+
 def check_file_name(name: str) -> str:
     if not _FILE_NAME.match(name) or name in RESERVED or ".." in name:
         raise CloudJobError(
@@ -711,6 +720,18 @@ def _short(ref: str) -> str:
     return ref.removeprefix("refs/remotes/").removeprefix("refs/heads/")
 
 
+def fetch_origin(folder: Path) -> str | None:
+    """Fetch the investigation's GitHub repository, so results pushed there show; the error,
+    if any."""
+    if not sync.is_linked(folder):
+        return None
+    try:
+        sync._git(folder, "fetch", "-q", "--prune", "origin", network=True, timeout=120)
+    except sync.SyncError as exc:
+        return str(exc)
+    return None
+
+
 def job_status(
     folder: Path,
     job_id: str,
@@ -732,12 +753,8 @@ def job_status(
         _wait_for_launch(run, min(max(wait, 0.0), MAX_WAIT), until_answered=True)
         deadline = time.monotonic()
     while True:
-        if fetch and record["state"] != "draft" and sync.is_linked(folder):
-            try:
-                sync._git(folder, "fetch", "-q", "--prune", "origin", network=True, timeout=120)
-                fetch_error = None
-            except sync.SyncError as exc:
-                fetch_error = str(exc)
+        if fetch and record["state"] != "draft":
+            fetch_error = fetch_origin(folder)
         if record["state"] != "draft" and sync.git_available() and (folder / ".git").exists():
             refs = _result_refs(folder, job_id)
         if refs or time.monotonic() + POLL_EVERY > deadline:

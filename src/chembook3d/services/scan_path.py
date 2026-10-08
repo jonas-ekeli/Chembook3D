@@ -12,6 +12,7 @@ design the path itself with GFN2-xTB relaxed scans and the helper `pathtools.py`
 """
 
 import json
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,8 +22,8 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from chembook3d import cloud_jobs, pathtools
-from chembook3d.models import GroupNode, Node, Role, Transition
-from chembook3d.services import atom_matching
+from chembook3d.models import GroupNode, Node, Role, Status, Transition
+from chembook3d.services import atom_matching, imports
 from chembook3d.services.records import RecordError, get
 
 # xTB's ALPB solvents, and the names other programs give some of them (Gaussian, ORCA).
@@ -562,3 +563,127 @@ def create_job(
         return cloud_jobs.create_job(folder, name, text, inputs, investigation, extra)
     except cloud_jobs.CloudJobError as exc:
         raise RecordError(str(exc)) from exc
+
+
+# ---------- the result (PR 4) ----------
+
+PATH_FILE = "outputs/path.xyz"
+NODE_GAP = 0.5  # the new node sits halfway between the ends
+
+
+def _place(session: Session, node: Node) -> tuple[float, float]:
+    """Where a node is drawn: a group member inside its group's box is drawn at the group."""
+    if node.group_id:
+        group = session.get(GroupNode, node.group_id)
+        if group is not None:
+            return group.pos_x, group.pos_y
+    return node.pos_x, node.pos_y
+
+
+def _notes(job: dict[str, Any], result: dict[str, Any], start: str, end: str) -> str:
+    path = result.get("path") if isinstance(result.get("path"), dict) else {}
+    lines = [f"Scan path from “{start}” to “{end}”, cloud job {job['id']} (D114)."]
+    summary = str(result.get("summary") or "").strip()
+    if summary:
+        lines.append(summary)
+    if path.get("reached_end") is not None:
+        reached = "reached" if path["reached_end"] else "not reached"
+        rmsd = path.get("end_rmsd")
+        rmsd_text = f" (RMSD {float(rmsd):.2f} Å)" if isinstance(rmsd, int | float) else ""
+        lines.append(f"End {reached}{rmsd_text}.")
+    if isinstance(path.get("barrier_kcal"), int | float):
+        lines.append(
+            f"Highest point {float(path['barrier_kcal']):.1f} kcal/mol above the start (GFN2-xTB)."
+        )
+    design = str(path.get("design") or "").strip()
+    if design:
+        lines.append(f"Design: {design}")
+    if path.get("ts_check"):
+        lines.append(f"TS check: {path['ts_check']}")
+    return "\n\n".join(lines)
+
+
+def import_result(
+    session: Session, folder: Path, job_id: str, again: bool = False
+) -> dict[str, Any]:
+    """D115: the path a scan path job returned, imported as a new node halfway between its
+    ends, with no edges, in the start's step and branch, role unspecified, status planned, and
+    notes naming the ends and the session's summary. Its geometry is the path's top, else its
+    middle point (D112). The import can be undone like any other (D102); `again` imports a path
+    whose node is gone (undone or deleted) once more, which the app never does by itself."""
+    with _importing:
+        return _import_result(session, folder, job_id, again)
+
+
+_importing = threading.Lock()  # two tabs checking at once import a path once
+
+
+def _import_result(session: Session, folder: Path, job_id: str, again: bool) -> dict[str, Any]:
+    job = cloud_jobs.read_job(folder, job_id)
+    if job.get("kind") != "scan_path":
+        raise RecordError("this job is not a scan path")
+    imported = job.get("imported") or {}
+    if imported and (not again or session.get(Node, imported.get("node_id")) is not None):
+        raise RecordError("this path is imported already")
+    if not job.get("fetched"):
+        try:
+            cloud_jobs.fetch_results(folder, job_id)
+        except cloud_jobs.CloudJobError as exc:
+            raise RecordError(str(exc)) from exc
+    base = cloud_jobs.jobs_dir(folder) / job_id
+    path_file = base / PATH_FILE
+    result = {}
+    if (base / cloud_jobs.RESULT).is_file():
+        try:
+            result = json.loads((base / cloud_jobs.RESULT).read_text(encoding="utf-8"))
+        except ValueError:
+            result = {}
+    if not path_file.is_file():
+        why = str(result.get("summary") or "").strip()
+        message = f"The session returned no {PATH_FILE}" + (f": {why}" if why else "")
+        cloud_jobs.update_job(folder, job_id, import_error=message)
+        raise RecordError(message)
+    ends = job["scan_path"]
+    start = session.get(Node, ends["start_id"])
+    end = session.get(Node, ends["end_id"])
+    start_name = start.label if start is not None else ends["start_label"]
+    end_name = end.label if end is not None else ends["end_label"]
+    options = imports.ImportOptions(
+        duplicate_action="new",
+        label=f"Path {start_name} to {end_name}"[:200],
+        role=Role.UNSPECIFIED,
+        status=Status.PLANNED,
+        origin_path=str(path_file),
+        original_name="path.xyz",
+        notes=_notes(job, result if isinstance(result, dict) else {}, start_name, end_name),
+    )
+    if start is not None:
+        group = session.get(GroupNode, start.group_id) if start.group_id else None
+        options.step_id = start.step_id or (group.step_id if group else None)
+        options.branch_id = start.branch_id or (group.outgoing_branch_id if group else None)
+        a = _place(session, start)
+        b = _place(session, end) if end is not None else (a[0] + 400.0, a[1])
+        options.pos_x = a[0] + NODE_GAP * (b[0] - a[0])
+        options.pos_y = a[1] + NODE_GAP * (b[1] - a[1])
+    staging = imports.Staging()
+    try:
+        staged = staging.add(path_file.read_bytes(), "path.xyz", str(path_file))
+        try:
+            committed = imports.commit(session, folder, staged, options)
+        except imports.ImportBlocked as exc:
+            message = "; ".join(exc.blockers)
+            cloud_jobs.update_job(folder, job_id, import_error=message)
+            raise RecordError(message) from exc
+        except imports.ImportFailed as exc:
+            cloud_jobs.update_job(folder, job_id, import_error=str(exc))
+            raise RecordError(str(exc)) from exc
+    finally:
+        staging.clear()
+    node = session.get(Node, committed.node_id)
+    cloud_jobs.update_job(
+        folder,
+        job_id,
+        imported={"node_id": committed.node_id, "at": cloud_jobs.now()},
+        import_error=None,
+    )
+    return {"node_id": committed.node_id, "label": node.label if node else "", "job": job_id}
