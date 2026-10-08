@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from chembook3d.cli import running_in_wsl
+from chembook3d.launcher import write_stamp
 
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 
@@ -64,6 +65,8 @@ def main() -> None:
         result = subprocess.run([npm, *args], cwd=FRONTEND)
         if result.returncode != 0:
             sys.exit(result.returncode)
+    # D107: the launcher rebuilds only when frontend/ differs from what this build came from.
+    write_stamp(FRONTEND.parent)
     print(f"Built {FRONTEND / 'dist'}. Start the app with: uv run chembook3d")
 
 

@@ -41,6 +41,7 @@ import { Outline } from './components/Outline'
 import { Overview } from './components/Overview'
 import { AnalysesView } from './components/Analyses'
 import { ClaudeRequestDialog } from './components/ClaudeRequestDialog'
+import { LaunchNotices, ShutDownButton } from './components/ShutDown'
 import { useLive } from './live'
 import type { HydrogenMode } from './chem'
 import { recordNames } from './names'
@@ -921,7 +922,10 @@ function App() {
           </button>
           <button onClick={() => setPicker('open')}>Open investigation…</button>
           <button onClick={() => setCloning('address')}>Open from GitHub…</button>
+          <span className="spacer" />
+          <ShutDownButton />
         </div>
+        <LaunchNotices />
         {settings && settings.recent.length > 0 && (
           <section>
             <h2>Recently opened</h2>
@@ -1245,7 +1249,9 @@ function App() {
             Basis sets
           </button>
           <button onClick={() => setShowSettings(true)}>Settings</button>
+          <ShutDownButton />
         </header>
+        <LaunchNotices />
         {(error || notice) && (
           <div className={error ? 'banner error' : 'banner'} role={error ? 'alert' : 'status'}>
             {error ?? notice}

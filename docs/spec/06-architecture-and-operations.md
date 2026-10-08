@@ -55,7 +55,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Confirmed items are marked
 
 | Item | Status |
 |---|---|
-| Install and environment | **P23 as amended by D55:** uv manages the Python environment, dependencies (lock file) and install. The package includes the pre-built UI. `chembook3d` starts the backend and opens the default browser. A native-window wrapper (pywebview) is optional (Q33). |
+| Install and environment | **P23 as amended by D55:** uv manages the Python environment, dependencies (lock file) and install. The package includes the pre-built UI. `chembook3d` starts the backend and opens the default browser. A shortcut made by `chembook3d shortcut` does the same without a terminal, after updating the checkout and rebuilding the UI when needed, and the server then stops when the last tab closes (D107). A native-window wrapper (pywebview) is optional (Q33). |
 | Python version | 3.11+ (P24), pinned through uv. |
 | Node.js | Needed only to build the UI, not to run it. |
 | Hosting later | Not designed now (X4). Because the backend is already an HTTP API, a later hosted mode would add login, access control, multi-user storage and server-side file storage. These are future decisions. |

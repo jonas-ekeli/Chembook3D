@@ -1,5 +1,6 @@
 """FastAPI application: the local API plus the built web interface."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,6 +17,8 @@ from chembook3d.api.claude import router as claude_router
 from chembook3d.api.energies import router as energy_router
 from chembook3d.api.import_undo import router as undo_router
 from chembook3d.api.jobs import router as job_router
+from chembook3d.api.lifetime import SHUTDOWN_PUSH_TIMEOUT, Lifetime, watch
+from chembook3d.api.lifetime import router as lifetime_router
 from chembook3d.api.live import ChangeTracker, LiveState
 from chembook3d.api.live import router as live_router
 from chembook3d.api.notes import router as note_router
@@ -64,14 +67,16 @@ uv run chembook3d</pre>
 """
 
 
-SHUTDOWN_PUSH_TIMEOUT = 20  # seconds
-
-
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.investigation = None
     app.state.staging = Staging()
+    # D107: started by the launcher, the server stops when the last tab has closed.
+    lifetime = app.state.lifetime
+    watcher = asyncio.create_task(watch(lifetime)) if lifetime.launched else None
     yield
+    if watcher is not None:
+        watcher.cancel()
     app.state.claude_panel.close_all()  # stop Claude Code in any open panel (D92)
     app.state.cloud_jobs.close_all()  # and `claude --cloud` launchers; sessions go on (D93)
     app.state.staging.clear()  # previewed but not imported files (FR-IMP-05)
@@ -83,8 +88,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             print(f"Chembook3D sync: {status.message}", flush=True)
 
 
-def create_app() -> FastAPI:
+def create_app(launched: bool = False, notices: list[str] | None = None) -> FastAPI:
+    """launched: started by the launcher (D107), which passes what tabs should be told."""
     app = FastAPI(title="Chembook3D", version=__version__, lifespan=_lifespan)
+    app.state.lifetime = Lifetime(launched=launched, notices=list(notices or []))
     app.state.investigation = None
     app.state.staging = Staging()
     app.state.claude_panel = Panel()
@@ -118,6 +125,7 @@ def create_app() -> FastAPI:
     app.include_router(job_router)
     app.include_router(view_state_router)  # D105
     app.include_router(live_router)
+    app.include_router(lifetime_router)  # D107
 
     static = static_dir()
     if static is not None:

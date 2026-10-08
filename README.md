@@ -55,7 +55,26 @@ uv run python scripts/build_frontend.py
 uv run chembook3d
 ```
 
-This starts the local server on http://127.0.0.1:8765 and opens it in your browser. If no tab opens (usually the case in WSL), open that address yourself in a Windows or Linux browser. Stop the server with Ctrl+C.
+This starts the local server on http://127.0.0.1:8765 and opens it in your browser. If no tab opens (usually the case in WSL), open that address yourself in a Windows or Linux browser. Stop the server with Ctrl+C, or with **Shut down** in the app.
+
+### Start it without a terminal
+
+Create a Chembook3D shortcut once, from the folder of your checkout:
+
+```sh
+uv run chembook3d shortcut
+```
+
+On Windows it goes on the desktop and in the Start menu, on Linux in the app menu, and in WSL on the Windows desktop and Start menu (it starts the app inside WSL). A double-click then:
+
+1. opens a browser tab that shows what it is doing;
+2. updates the checkout with `git pull`, but only when it is on `main` with no local changes (otherwise it starts the version you have, and the app says why it was not updated);
+3. rebuilds the interface only when `frontend/` changed since the last build, and installs new Python packages if the update asks for them;
+4. starts the server in the background, with no terminal window, and the tab turns into the app.
+
+If Chembook3D is already running, the shortcut only opens a tab. Started this way, the server stops by itself about 10 seconds after you close the last Chembook3D tab (a reload is fine), or after 5 minutes without any tab; **Shut down** in the top bar stops it at once. What the launcher did is in `launcher.log` in the app's config folder (`%LOCALAPPDATA%\chembook3d` on Windows, `~/.config/chembook3d` on Linux and WSL). If your browser puts background tabs to sleep for a long time, the server may stop while a tab is asleep; start it again with the shortcut.
+
+Run `uv run chembook3d shortcut` again if the shortcut stops working, for example after moving the checkout or reinstalling uv, Python or Node.js.
 
 To try it with some data, create a demo investigation and open that folder from the start screen:
 

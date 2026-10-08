@@ -1178,6 +1178,20 @@ export type ViewState = {
   }
 }
 
+/** D107: what a tab's long poll on the backend's presence says. */
+export type Presence = {
+  /** Started by the launcher: the server stops when the last tab has closed. */
+  launched: boolean
+  stopping: boolean
+  /** From the launcher: why the checkout was not updated, or the old interface is shown. */
+  notices: string[]
+  /** After Shut down: how the push of a synced investigation went. */
+  sync: string | null
+}
+
+/** D107: what the Shut down question mentions. */
+export type ShutdownInfo = { launched: boolean; investigation: boolean; linked: boolean; claude_panel: boolean }
+
 /** A `claude --cloud` launch of a calculation job that waits for the user's answer (D93). */
 export type LaunchQuestion = { job_id: string; name: string; screen: string }
 
@@ -1196,6 +1210,14 @@ export const api = {
     if (confirmVersion !== null) query.set('confirmations', String(confirmVersion))
     return request<Live>('GET', `/live?${query.toString()}`, undefined, signal)
   },
+  /** D107: a long poll that keeps this tab counted; answers at once when the server stops. */
+  presence: (wait: number, signal?: AbortSignal) => {
+    const query = new URLSearchParams({ tab: CLIENT_ID, wait: String(wait) })
+    return request<Presence>('GET', `/presence?${query.toString()}`, undefined, signal)
+  },
+  health: () => request<{ status: string }>('GET', '/health'),
+  shutdownInfo: () => request<ShutdownInfo>('GET', '/shutdown'),
+  shutDown: () => request<{ sync: string | null }>('POST', '/shutdown'),
   reportSelection: (selection: SelectionReport) => request<void>('PUT', '/selection', selection),
   viewState: () => request<ViewState>('GET', '/view-state'),
   saveViewState: (state: ViewState) => request<void>('PUT', '/view-state', state),
