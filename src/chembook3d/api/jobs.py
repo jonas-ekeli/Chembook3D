@@ -16,6 +16,7 @@ from chembook3d import cloud_jobs
 from chembook3d.api.routes import DbSession, _investigation
 from chembook3d.models import Node
 from chembook3d.services import nodes as node_service
+from chembook3d.services import scan_path
 from chembook3d.services.records import get
 
 router = APIRouter(prefix="/api/jobs")
@@ -85,8 +86,25 @@ def _node_input(session, item: NodeInput) -> cloud_jobs.InputFile:
 
 
 @router.get("")
-def list_jobs(request: Request) -> list[dict[str, Any]]:
-    return cloud_jobs.list_jobs(_investigation(request).folder)
+def list_jobs(
+    request: Request, session: DbSession, detail: bool = False, refresh: bool = False
+) -> list[dict[str, Any]]:
+    """The jobs as recorded; with `detail`, each with where it stands, after one fetch from
+    GitHub with `refresh`, and for an imported scan path whether its node is still there
+    (D115)."""
+    folder = _investigation(request).folder
+    jobs = cloud_jobs.list_jobs(folder)
+    if not detail:
+        return jobs
+    error = None
+    if refresh and any(j.get("state") != "draft" for j in jobs):
+        error = cloud_jobs.fetch_origin(folder)
+    out = [cloud_jobs.job_status(folder, j["id"], launcher(request), fetch=False) for j in jobs]
+    for job in out:
+        job["fetch_error"] = error
+        if job.get("imported"):
+            job["imported"]["present"] = session.get(Node, job["imported"]["node_id"]) is not None
+    return out
 
 
 @router.post("")
@@ -151,5 +169,19 @@ def message_session(job_id: str, body: MessageIn, request: Request) -> dict[str,
     folder = _investigation(request).folder
     try:
         return cloud_jobs.send_message(folder, job_id, body.text)
+    except cloud_jobs.CloudJobError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/{job_id}/import-path")
+def import_path(
+    job_id: str, request: Request, session: DbSession, again: bool = False
+) -> dict[str, Any]:
+    """D115: a scan path job's result imported as a new node between its ends; `again` once
+    more after its node was removed."""
+    _local_page_only(request)
+    folder = _investigation(request).folder
+    try:
+        return scan_path.import_result(session, folder, job_id, again=again)
     except cloud_jobs.CloudJobError as exc:
         raise _refused(exc) from exc

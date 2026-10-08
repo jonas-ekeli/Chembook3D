@@ -413,8 +413,15 @@ export type CloudJob = {
   warning: string | null
   fetch_error: string | null
   result: { status?: string; summary?: string } | null
+  result_branch?: string | null
+  /** the launch's screen while it waits for an answer in the Claude panel */
+  question?: string | null
   kind?: string
   scan_path?: { start_id: string; end_id: string; start_label: string; end_label: string }
+  /** D115: the node a scan path's result was imported as */
+  imported?: { node_id: string; at: string; present?: boolean } | null
+  /** D115: why the path could not be imported; the app does not try again by itself */
+  import_error?: string | null
 }
 
 /** FR-3D-07: a named list of alignment atoms per node. */
@@ -1535,6 +1542,16 @@ export const api = {
   scanPathPlan: (body: ScanPathRequest) => request<ScanPathPlan>('POST', '/scan-paths/plan', body),
   sendScanPath: (body: ScanPathRequest & { held: { end: 'start' | 'end'; atoms: number[] }[]; solvent: string | null }) =>
     request<{ job: CloudJob; start_error: string | null }>('POST', '/scan-paths', body),
+  jobs: (refresh = false) => request<CloudJob[]>('GET', `/jobs?detail=true${refresh ? '&refresh=true' : ''}`),
+  job: (id: string) => request<CloudJob>('GET', `/jobs/${encodeURIComponent(id)}?refresh=true`),
+  startJob: (id: string) => request<CloudJob>('POST', `/jobs/${encodeURIComponent(id)}/start`),
+  fetchJob: (id: string) =>
+    request<{ branch: string; files: string[] }>('POST', `/jobs/${encodeURIComponent(id)}/fetch`),
+  importPath: (id: string, again = false) =>
+    request<{ node_id: string; label: string }>(
+      'POST',
+      `/jobs/${encodeURIComponent(id)}/import-path${again ? '?again=true' : ''}`,
+    ),
   atomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>
     request<AtomMatch>('POST', '/atom-match', { start_id: startId, end_id: endId, pairs }),
   alignmentSets: () => request<AlignmentSet[]>('GET', '/alignment-sets'),

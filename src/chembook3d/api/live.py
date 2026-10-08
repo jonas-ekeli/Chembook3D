@@ -60,11 +60,13 @@ LONGEST_WAIT = 30.0  # one long poll; the caller asks again
 QUIET = re.compile(
     r"^/api/("
     r"live|selection|view-state|confirmations(/.*)?"
-    r"|energies/(profile|table|table\.csv)|pathways/extend|overlay|snapshot"
+    r"|energies/(profile|table|table\.csv)|pathways/extend|overlay|snapshot|atom-match"
+    r"|scan-paths|scan-paths/plan"
     r"|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|imports|imports/[^/]+|imports/[^/]+/preview"
     r"|batch-imports|batch-imports/[^/]+|batch-imports/[^/]+/preview"
-    r"|note-images|source-files/[^/]+/open|claude(/.*)?|jobs(/.*)?|presence(/.*)?|shutdown"
+    r"|note-images|source-files/[^/]+/open|claude(/.*)?|presence(/.*)?|shutdown"
+    r"|jobs|jobs/(?![^/]+/import-path$).*"  # importing a scan path changes the notebook
     r")$"
 )
 

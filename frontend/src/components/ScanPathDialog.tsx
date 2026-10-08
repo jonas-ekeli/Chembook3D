@@ -165,7 +165,7 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
         {start_error ? (
           <>
             <p role="alert">The job “{job.name}” is saved but could not be started: {start_error}</p>
-            <p className="muted small">It can be started again from the cloud jobs list once that is fixed.</p>
+            <p className="muted small">It can be started again from Cloud jobs once that is fixed.</p>
           </>
         ) : (
           <div aria-label="Scan path sent">
@@ -180,7 +180,11 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
             {job.status === 'waiting_for_answer' || job.status === 'starting' ? (
               <p className="muted small">Claude Code is still starting it; if it asks a question, the Claude panel shows it.</p>
             ) : (
-              <p className="muted small">The session designs the path, runs it with xTB and pushes outputs/path.xyz to GitHub.</p>
+              <p className="muted small">
+                The session designs the path, runs it with xTB and pushes it to GitHub. While this investigation is
+                open, the app looks for it every few minutes and imports it as a new node between the two ends; Cloud
+                jobs shows where it stands.
+              </p>
             )}
             {job.warning && <div className="notice warn">{job.warning}</div>}
           </div>

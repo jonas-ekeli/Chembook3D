@@ -24,6 +24,8 @@ import {
 } from './api'
 import { NO_FILTERS, type Filters, type Selection, type ViewMode } from './canvasView'
 import { BasisSetsDialog } from './components/BasisSets'
+import { CloudJobsDialog } from './components/CloudJobsDialog'
+import { useScanPathImports } from './cloudJobs'
 import { CanvasPane, type CanvasEnergy } from './components/Canvas'
 import { ClaudePanel } from './components/ClaudePanel'
 import { EnergyDrawer, type DrawerPath, type DrawerView } from './components/EnergyDrawer'
@@ -153,6 +155,7 @@ function App() {
   const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showBases, setShowBases] = useState(false) // D94
+  const [showJobs, setShowJobs] = useState(false) // D115
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   // Git sync (D71)
@@ -305,6 +308,15 @@ function App() {
 
   // D91: changes Claude (or another tab) makes show at once; Claude's deletes wait for an answer.
   const claudeRequests = useLive(investigation?.folder ?? null, reload)
+
+  // D115: a scan path that came back from its cloud session becomes a node by itself.
+  const pathImported = (label: string) => {
+    reload()
+    setNotice(`Scan path imported as “${label}”, between its two ends (it can be undone in History).`)
+  }
+  useScanPathImports(investigation?.folder ?? null, investigation?.linked ?? false, pathImported, (job, message) =>
+    setNotice(`The scan path “${job.name}” could not be imported: ${message} (Cloud jobs)`),
+  )
 
   // The chosen level, or else the first with G (D32: free energy preferred), or else the first.
   const levelOption =
@@ -694,6 +706,17 @@ function App() {
             synced folder. Open it anyway only if you are sure it is closed (for example after a crash).
           </p>
         </Modal>
+      )}
+      {showJobs && investigation && (
+        <CloudJobsDialog
+          linked={investigation.linked}
+          onClose={() => setShowJobs(false)}
+          onImported={pathImported}
+          onSelectNode={(id) => {
+            setView('canvas')
+            selectNode(id, true)
+          }}
+        />
       )}
       {showBases && (
         <BasisSetsDialog
@@ -1227,6 +1250,9 @@ function App() {
             title="Claude Code in a panel beside the notebook (D92)"
           >
             Claude
+          </button>
+          <button onClick={() => setShowJobs(true)} title="Calculations handed to Claude Code cloud sessions (D93, D115)">
+            Cloud jobs
           </button>
           {investigation.linked ? (
             <SyncButton status={sync} busy={syncing} onSync={syncNow} />

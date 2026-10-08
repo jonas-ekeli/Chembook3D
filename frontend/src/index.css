@@ -813,6 +813,17 @@ table.steps th {
 table.steps tr.muted td {
   color: var(--muted);
 }
+/* D115: the cloud jobs list */
+.cloud-job-actions {
+  white-space: nowrap;
+}
+.cloud-job-actions button + button {
+  margin-left: 0.3rem;
+}
+.cloud-job-problem {
+  color: #b54708;
+  max-width: 22rem;
+}
 fieldset.choice {
   border: 1px solid #fedf89;
   border-radius: var(--radius);

@@ -223,6 +223,11 @@ class ImportOptions:
     # Where a new node goes on the canvas, e.g. where the file was dropped (WF-04).
     pos_x: float | None = None
     pos_y: float | None = None
+    # A new node's place in the mechanism and its notes (a scan path's node, D114), written
+    # with the node so undoing the import (D102) removes them with it.
+    step_id: str | None = None
+    branch_id: str | None = None
+    notes: str | None = None
     # CREST ensembles (FR-IMP-10): how many of the lowest conformers to keep, or exactly which
     # (file positions); the method that made the energies; charge and multiplicity (A16).
     conformer_count: int | None = None
@@ -1193,8 +1198,12 @@ def _new_node(
         node.step_id = derived_from.step_id
         node.branch_id = derived_from.branch_id
         node.view_rotation = derived_from.view_rotation
-    elif fields.get("pos_x") is not None and fields.get("pos_y") is not None:
-        node.pos_x, node.pos_y = fields["pos_x"], fields["pos_y"]
+    else:
+        if fields.get("pos_x") is not None and fields.get("pos_y") is not None:
+            node.pos_x, node.pos_y = fields["pos_x"], fields["pos_y"]
+        node.step_id = fields.get("step_id")
+        node.branch_id = fields.get("branch_id")
+        node.notes = fields.get("notes") or ""
     session.add(node)
     session.flush()
     history.record(
@@ -1238,6 +1247,8 @@ def _node_fields(plan_: Plan, options: ImportOptions) -> dict[str, Any]:
             raise ImportFailed(f"unknown kind '{options.kind}'")
         fields["kind"] = options.kind
     fields["pos_x"], fields["pos_y"] = options.pos_x, options.pos_y
+    fields["step_id"], fields["branch_id"] = options.step_id, options.branch_id
+    fields["notes"] = options.notes
     return fields
 
 

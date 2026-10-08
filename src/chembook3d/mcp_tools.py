@@ -672,6 +672,16 @@ TOOLS: list[ToolSpec] = [
         "the node the user names. Report anything listed in changed_outside_job to the user.",
     ),
     T(
+        "import_scan_path",
+        "write",
+        "POST",
+        "/api/jobs/{job_id}/import-path",
+        "Import a finished scan path job's outputs/path.xyz (D115) as a new node between its "
+        "two ends: no edges, the start's step and branch, its scan playing as a movie. The app "
+        "does this by itself while it is open; use it when that failed and the user asks, with "
+        "again=true only when the user wants a path whose node was removed imported once more.",
+    ),
+    T(
         "create_selectivity",
         "write",
         "POST",
