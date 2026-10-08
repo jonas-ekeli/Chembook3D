@@ -128,7 +128,12 @@ export function ProfileChart({
     left,
     right,
     top: Math.max(style.title ? 48 * s : 20 * s, legendRows ? legendTop + legendRows * row + 8 * s : 0),
-    bottom: (stepNames || bottomRows ? 56 * s : 28 * s) + (bottomRows ? bottomRows * row + (stepNames ? 4 * s : 0) : 0),
+    // D110: names along the bottom start just under the plot, with the step names under them.
+    bottom: bottomRows
+      ? 16 * s + f + (bottomRows - 1) * row + (stepNames ? row + 4 * s : 0)
+      : stepNames
+        ? 56 * s
+        : 28 * s,
   }
   const plotW = W - margin.left - margin.right
   const plotH = H - margin.top - margin.bottom
@@ -143,9 +148,10 @@ export function ProfileChart({
   const below = [style.value_position === 'below' && 'value', style.name_position === 'below' && 'name'].filter(
     Boolean,
   ) as ('value' | 'name')[]
-  // Room for a second line of labels on the same side, beyond the usual margin.
+  // Room for a second line of labels on the same side, beyond the usual margin; with names
+  // along the bottom, every line below the lowest level is kept inside the plot (D110).
   const extraTop = Math.max(0, above.length - 1) * row
-  const extraBottom = Math.max(0, below.length - 1) * row
+  const extraBottom = (bottomRows ? below.length : Math.max(0, below.length - 1)) * row
 
   const values = data.profiles.flatMap((p) => p.points.map((pt) => pt.relative).filter((v): v is number => v !== null))
   const shown = [0, ...values.map((v) => v * factor)]
@@ -169,16 +175,21 @@ export function ProfileChart({
     const text = formatDelta(hartree, valueSettings)
     return style.brackets === 'round' ? `(${text})` : style.brackets === 'square' ? `[${text}]` : text
   }
-  // Label placement. A node shared by overlaid pathways is labelled once. Where bars in one
-  // column lie close together, their labels go beside them, stacked so none overlap.
+  const gap = Math.max(6 * s, style.level_thickness / 2 + 3 * s)
+
+  // Label placement. A node shared by overlaid pathways is labelled once. Levels in one column
+  // closer than their labels need form a cluster: the labels above stack over its top level
+  // and those below under its bottom level, in the order of the levels, so none overlap and
+  // each stays on the side the style puts it (D110).
   type Label = {
     x: number
-    y: number
+    above: number // the level the lines above are placed from
+    below: number // the level the lines below are placed from
     value: string
     name: string
-    beside: boolean
   } | null
   const labels = new Map<string, Label>()
+  const close = Math.max(18 * s, gap + Math.max(above.length, below.length) * row + 2 * s)
   slots.forEach((_, slot) => {
     const here: {
       key: string
@@ -205,32 +216,27 @@ export function ProfileChart({
       }),
     )
     here.sort((a, b) => a.y - b.y)
-    const crowded = here.some((h, n) => n > 0 && h.y - here[n - 1].y < 18 * s)
-    let last = -Infinity
+    const clusters: (typeof here)[] = []
     for (const h of here) {
-      const cx = x(slot)
-      if (!crowded) {
+      const last = clusters[clusters.length - 1]
+      if (last && h.y - last[last.length - 1].y < close) last.push(h)
+      else clusters.push([h])
+    }
+    for (const cluster of clusters) {
+      const top = cluster[0].y
+      const bottom = cluster[cluster.length - 1].y
+      cluster.forEach((h, j) =>
         labels.set(h.key, {
-          x: cx,
-          y: h.y,
+          x: x(slot),
+          above: top - (cluster.length - 1 - j) * above.length * row,
+          below: bottom + j * below.length * row,
           value: h.value,
           name: h.name,
-          beside: false,
-        })
-      } else {
-        last = Math.max(h.y + 4 * s, last + 12 * s)
-        labels.set(h.key, {
-          x: cx + half + 4 * s,
-          y: last,
-          value: h.value,
-          name: h.name,
-          beside: true,
-        })
-      }
+        }),
+      )
     }
   })
 
-  const gap = Math.max(6 * s, style.level_thickness / 2 + 3 * s)
   const sizeOf = (line: 'value' | 'name') => (line === 'value' ? f : nameSize)
   const aboveAt = (k: number) => -gap - k * row
   const belowAt = (k: number, line: 'value' | 'name') => gap + 0.85 * sizeOf(line) + k * row
@@ -400,13 +406,17 @@ export function ProfileChart({
             // The mark goes after the name, or after the value when the name is hidden or along the
             // bottom.
             const markOn = above.includes('name') || below.includes('name') ? 'name' : 'value'
-            const lines = (side: ('value' | 'name')[], at: (k: number, line: 'value' | 'name') => number) =>
+            const lines = (
+              side: ('value' | 'name')[],
+              from: number,
+              at: (k: number, line: 'value' | 'name') => number,
+            ) =>
               label &&
               side.map((line, k) => (
                 <text
                   key={line}
                   x={label.x}
-                  y={label.y + at(k, line)}
+                  y={from + at(k, line)}
                   fontSize={sizeOf(line)}
                   textAnchor="middle"
                   fill={line === 'value' ? colours[pi] : soft}
@@ -434,21 +444,12 @@ export function ProfileChart({
                     </title>
                   )}
                 </line>
-                {label && label.beside && (
-                  <text x={label.x} y={label.y} fontSize={(f * 10.5) / 11} textAnchor="start">
-                    {style.value_position !== 'hidden' && <tspan fill={colours[pi]}>{label.value}</tspan>}
-                    {(style.name_position === 'above' || style.name_position === 'below') && (
-                      <tspan fill={soft}> {label.name}</tspan>
-                    )}
-                    {markSpan}
-                  </text>
-                )}
-                {label && !label.beside && (
+                {label && (
                   <>
-                    {lines(above, (k) => aboveAt(k))}
-                    {lines(below, belowAt)}
+                    {lines(above, label.above, (k) => aboveAt(k))}
+                    {lines(below, label.below, belowAt)}
                     {hidden && markSpan && (
-                      <text x={label.x} y={label.y - gap} fontSize={nameSize} textAnchor="middle">
+                      <text x={label.x} y={label.above - gap} fontSize={nameSize} textAnchor="middle">
                         {markSpan}
                       </text>
                     )}
