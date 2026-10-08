@@ -351,6 +351,72 @@ export type AtomMatch = {
   renumbered_xyz: string
 }
 
+/** D114: one end of a scan path; a group end stands for one of its members. */
+export type ScanPathEnd = {
+  node_id: string
+  label: string
+  role: Role
+  group_id: string | null
+  group_label: string | null
+  members: { id: string; label: string }[]
+}
+
+export type ScanPathCoordinate = {
+  kind: 'distance' | 'angle' | 'dihedral'
+  /** 1-based, in the start's numbering. */
+  atoms: number[]
+  ticked: boolean
+  why: string
+  start_value: number
+  end_value: number
+}
+
+export type ScanPathTsEnd = {
+  end: 'start' | 'end'
+  node_id: string
+  label: string
+  /** cm⁻¹, negative; null for a guess. */
+  imaginary: number | null
+  guess: boolean
+  frequency_job: boolean
+  suggested: ScanPathCoordinate[]
+}
+
+export type ScanPathPlan = {
+  start: ScanPathEnd
+  end: ScanPathEnd
+  edge_id: string
+  match: AtomMatch
+  charge: number
+  multiplicity: number
+  solvent: string | null
+  solvents: string[]
+  ts_ends: ScanPathTsEnd[]
+}
+
+export type ScanPathRequest = {
+  start_id: string
+  end_id: string
+  pairs?: [number, number][]
+  start_member_id?: string | null
+  end_member_id?: string | null
+}
+
+/** D93: a calculation job handed to a Claude Code cloud session, as the app records it. */
+export type CloudJob = {
+  id: string
+  name: string
+  created: string
+  status: 'draft' | 'starting' | 'waiting_for_answer' | 'launch_failed' | 'running' | 'finished' | 'fetched'
+  session_url: string | null
+  launch_error: string | null
+  warning: string | null
+  fetch_error: string | null
+  result: { status?: string; summary?: string } | null
+  kind?: string
+  scan_path?: { start_id: string; end_id: string; start_label: string; end_label: string }
+}
+
 /** FR-3D-07: a named list of alignment atoms per node. */
 export type AlignmentSet = { id: string; name: string; atoms: Record<string, number[]> }
 
@@ -1466,6 +1532,9 @@ export const api = {
   useStep: (calculationId: string, frame: number) =>
     request<{ node: Node; derived: boolean }>('POST', `/calculations/${calculationId}/steps/${frame}/use`),
   overlay: (body: OverlayRequest) => request<Overlay>('POST', '/overlay', body),
+  scanPathPlan: (body: ScanPathRequest) => request<ScanPathPlan>('POST', '/scan-paths/plan', body),
+  sendScanPath: (body: ScanPathRequest & { held: { end: 'start' | 'end'; atoms: number[] }[]; solvent: string | null }) =>
+    request<{ job: CloudJob; start_error: string | null }>('POST', '/scan-paths', body),
   atomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>
     request<AtomMatch>('POST', '/atom-match', { start_id: startId, end_id: endId, pairs }),
   alignmentSets: () => request<AlignmentSet[]>('GET', '/alignment-sets'),

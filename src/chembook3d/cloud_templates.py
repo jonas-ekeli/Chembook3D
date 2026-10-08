@@ -8,6 +8,7 @@ claude.ai. They are rewritten whenever this version of the app differs from what
 
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 from chembook3d.investigation import BACKUP_DIR, DB_NAME, FILES_DIR
@@ -15,6 +16,8 @@ from chembook3d.investigation import BACKUP_DIR, DB_NAME, FILES_DIR
 SETUP_SCRIPT = ".claude/chembook3d/setup-tools.sh"
 INSTRUCTIONS = ".claude/CLAUDE.md"
 SETTINGS = ".claude/settings.json"
+PATHTOOLS = ".claude/chembook3d/pathtools.py"  # the scan path helper (D114)
+PATHTOOLS_TEXT = (Path(__file__).parent / "pathtools.py").read_text(encoding="utf-8")
 HOOK_COMMAND = f'bash "$CLAUDE_PROJECT_DIR/{SETUP_SCRIPT}"'
 HOOK_TIMEOUT = 300  # seconds; the downloads are about 36 MB
 
@@ -89,6 +92,9 @@ returns its outputs. The app imports them into the notebook; you never change th
 - xTB {XTB_VERSION} (`xtb`) and CREST {CREST_VERSION} (`crest`) are installed when the session
   starts (`.claude/chembook3d/setup-tools.sh`). If they are missing, run that script with
   `CLAUDE_CODE_REMOTE=true`, then check `xtb --version` and `crest --version`.
+- A scan path job (D114) says so in its `job.md`, which describes it in full; the helper
+  `.claude/chembook3d/pathtools.py` (standard library Python) compares structures by the
+  app's own rules.
 - Run every calculation in a scratch folder outside the repository (for example
   `$HOME/scratch/<job>/<name>`), with `ulimit -s unlimited` first. Copy back only what
   the job asks for.

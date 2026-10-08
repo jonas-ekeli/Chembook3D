@@ -226,6 +226,7 @@ def test_round_trip_through_a_cloud_session(linked_client, remote, fake_claude, 
         cloud_templates.SETUP_SCRIPT,
         cloud_templates.INSTRUCTIONS,
         cloud_templates.SETTINGS,
+        cloud_templates.PATHTOOLS,
     }
     assert DB_NAME not in pushed
     assert all(p.startswith(("jobs/", ".claude/")) for p in pushed)

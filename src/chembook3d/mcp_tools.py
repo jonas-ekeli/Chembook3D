@@ -345,6 +345,15 @@ TOOLS: list[ToolSpec] = [
         "doubtful, and the end renumbered in the start's order. Changes nothing.",
         help={"pairs": "Pairs fixed by hand, [start atom, end atom], 1-based."},
     ),
+    T(
+        "plan_scan_path",
+        "read",
+        "POST",
+        "/api/scan-paths/plan",
+        "Check a scan path between two nodes or groups joined by an edge (D114): the atom "
+        "match, charge, multiplicity, solvent, and for a TS end the coordinates suggested to "
+        "hold. Changes nothing; the user sends the job from the app's Scan path dialog.",
+    ),
     # ---------- changing ----------
     T(
         "create_node",

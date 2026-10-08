@@ -21,6 +21,7 @@ import {
 import { Modal } from './Modal'
 import { Notes, TextField } from './Fields'
 import { AtomMatchDialog } from './AtomMatchDialog'
+import { ScanPathDialog } from './ScanPathDialog'
 import { MAX_OVERLAY, OverlayDialog } from './OverlayDialog'
 import { CompareStericsDialog } from './Sterics'
 
@@ -1062,6 +1063,8 @@ export function SelectionInspector({
   const [overlay, setOverlay] = useState(false)
   const [sterics, setSterics] = useState(false)
   const [matching, setMatching] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const scanEnds = scanPathEnds(nodes, groups, canvas)
   const assign = (fields: { step_id?: string | null; branch_id?: string | null }) =>
     Promise.all(nodes.map((n) => api.updateNode(n.id, fields))).then(
       () => {
@@ -1153,6 +1156,17 @@ export function SelectionInspector({
           Match atoms…
         </button>
         <button
+          disabled={!scanEnds}
+          onClick={() => setScanning(true)}
+          title={
+            scanEnds
+              ? 'A path of xTB structures from one to the other, designed and run by a Claude Code cloud session (D114)'
+              : 'Select two nodes or groups joined by an edge'
+          }
+        >
+          Scan path…
+        </button>
+        <button
           disabled={nodes.filter((n) => n.xyz).length < 1}
           onClick={() => setSterics(true)}
           title="Buried volume and steric maps of the selected nodes (D81)"
@@ -1198,12 +1212,25 @@ export function SelectionInspector({
         />
       )}
       {overlay && nodes.length >= 2 && <OverlayDialog nodes={nodes} onClose={() => setOverlay(false)} />}
+      {scanning && scanEnds && <ScanPathDialog startId={scanEnds[0]} endId={scanEnds[1]} onClose={() => setScanning(false)} />}
       {matching && nodes.length === 2 && <AtomMatchDialog nodes={[nodes[0], nodes[1]]} onClose={() => setMatching(false)} />}
       {sterics && (
         <CompareStericsDialog nodes={nodes.filter((n) => n.xyz)} title={describeSelection(nodes, [])} onClose={() => setSterics(false)} />
       )}
     </div>
   )
+}
+
+/** D114: the two selected items (nodes or groups) of a scan path, start first, when an edge
+ * joins them (also through a member's group, D108); the edge's direction gives the start. */
+function scanPathEnds(nodes: Node[], groups: Group[], canvas: Canvas): [string, string] | null {
+  const items = [...nodes.map((n) => ({ id: n.id, ids: [n.id, n.group_id].filter(Boolean) as string[] })), ...groups.map((g) => ({ id: g.id, ids: [g.id] }))]
+  if (items.length !== 2) return null
+  const [a, b] = items
+  const joins = (from: string[], to: string[]) => canvas.transitions.some((t) => from.includes(t.source_id) && to.includes(t.target_id))
+  if (joins(a.ids, b.ids)) return [a.id, b.id]
+  if (joins(b.ids, a.ids)) return [b.id, a.id]
+  return null
 }
 
 /** FR-BR-02: split a node's branch into new child branches. */
