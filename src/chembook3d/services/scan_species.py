@@ -21,6 +21,7 @@ from typing import Any
 import numpy as np
 from sqlalchemy.orm import Session
 
+from chembook3d import pathtools
 from chembook3d.models import Node, Transition
 from chembook3d.services import atom_matching
 from chembook3d.services.geometry import _coords, _fit, _rmsd
@@ -192,6 +193,11 @@ def matched(
     first = atom_matching.match(side, bound, fixed)
     heavy = {first.mapping[i] for i in range(n, len(side)) if side[i][0] != "H"}
     fragment = _fragment(bound, heavy)
+    # What the species binds to may turn its other neighbours round as it comes: a metal
+    # changes shape when it gains or loses a ligand, so it is never called a mirror image.
+    adjacency = atom_matching.bonds(_coords(bound), [r[0] for r in bound])
+    inside = set(fragment)
+    anchors = {int(k) for i in fragment for k in np.flatnonzero(adjacency[i]) if k not in inside}
     if Counter(bound[k][0] for k in fragment) != Counter(r[0] for r in species_rows):
         mapping = first.mapping  # the bonded hydrogens do not add up: keep the first match
     else:
@@ -199,16 +205,20 @@ def matched(
         where = {k: i for i, k in enumerate(rest)}, {k: i for i, k in enumerate(fragment)}
         complex_pairs = [(a, where[0][b]) for a, b in fixed if a < n and b in where[0]]
         species_pairs = [(a - n, where[1][b]) for a, b in fixed if a >= n and b in where[1]]
-        on_complex = atom_matching.match(small, [bound[k] for k in rest], complex_pairs)
+        on_complex = atom_matching.match(
+            small, [bound[k] for k in rest], complex_pairs, {where[0][k] for k in anchors}
+        )
         on_species = atom_matching.match(species_rows, [bound[k] for k in fragment], species_pairs)
         mapping = [rest[j] for j in on_complex.mapping] + [fragment[j] for j in on_species.mapping]
     if joins:
         start_side, end_side = side, bound
         pinned = list(enumerate(mapping))
+        loose = anchors
     else:
         start_side, end_side = bound, side
         pinned = [(j, i) for i, j in enumerate(mapping)]
-    match = atom_matching.match(start_side, end_side, pinned)
+        loose = {i for i, j in enumerate(mapping) if j in anchors}
+    match = atom_matching.match(start_side, end_side, pinned, loose)
     return replace(match, fixed=sorted(pairs)), start_side, end_side
 
 
@@ -251,3 +261,58 @@ def steady_doubts(
     if not bonds:
         doubts.append("the species makes no bond to the complex at the bound end")
     return replace(match, rmsd=complex_rmsd, doubts=doubts, inverted=inverted)
+
+
+APPROACH = 3.5  # Å: the first of two stages brings the species' centre this far in (A67)
+
+
+def approach(
+    bound: list[list[Any]], separated: list[list[Any]], atoms: list[int], anchor: list[int]
+) -> dict[str, Any] | None:
+    """A two-stage approach for the brief (D120, A67), 0-based atoms in, from 1 out: the
+    distance from the first anchor atom to the species' heavy atom nearest its centre, driven
+    from its separated length to APPROACH Å (or 0.5 Å past its bound length when that is
+    longer), with the species' turn held by one angle and one dihedral at their separated
+    values. None for a species of one atom or an anchor with no other neighbour."""
+    if len(atoms) < 2 or not anchor:
+        return None
+    xyz, apart = _coords(bound), _coords(separated)
+    inside = set(atoms)
+    a = anchor[0]
+    adjacency = atom_matching.bonds(xyz, [r[0] for r in bound])
+    around = [int(j) for j in np.flatnonzero(adjacency[a]) if j not in inside]
+    if not around:
+        return None
+    heavy = [i for i in atoms if bound[i][0] != "H"] or list(atoms)
+    centre = apart[atoms].mean(axis=0)
+    c = min(heavy, key=lambda i: float(np.linalg.norm(apart[i] - centre)))
+
+    def far(j: int) -> tuple[bool, bool, float]:
+        # A heavy neighbour of c first, then another heavy atom, then the nearest atom.
+        return (not adjacency[c, j], bound[j][0] == "H", float(np.linalg.norm(apart[j] - apart[c])))
+
+    d = min((j for j in atoms if j != c), key=far)
+
+    def sine(e: int) -> float:
+        u, v = apart[e] - apart[a], apart[c] - apart[a]
+        return float(np.linalg.norm(np.cross(u, v)) / np.linalg.norm(u) / np.linalg.norm(v))
+
+    e = max(around, key=sine)
+    rows = [[r[0], *map(float, p)] for r, p in zip(bound, apart, strict=True)]
+    bound_length = float(np.linalg.norm(xyz[a] - xyz[c]))
+    return {
+        "distance": {
+            "atoms": [a + 1, c + 1],
+            "from": round(float(np.linalg.norm(apart[a] - apart[c])), 3),
+            "to": round(max(APPROACH, bound_length + 0.5), 3),
+            "bound": round(bound_length, 3),
+        },
+        "angle": {
+            "atoms": [a + 1, c + 1, d + 1],
+            "value": round(pathtools.measure(rows, [a + 1, c + 1, d + 1]), 2),
+        },
+        "dihedral": {
+            "atoms": [e + 1, a + 1, c + 1, d + 1],
+            "value": round(pathtools.measure(rows, [e + 1, a + 1, c + 1, d + 1]), 2),
+        },
+    }

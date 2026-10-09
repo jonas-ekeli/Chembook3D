@@ -168,7 +168,7 @@ def _seed_frames(moving: np.ndarray, reference: np.ndarray) -> list[np.ndarray]:
 
 
 class _Matcher:
-    def __init__(self, start: Rows, end: Rows, fixed: dict[int, int]):
+    def __init__(self, start: Rows, end: Rows, fixed: dict[int, int], loose: Iterable[int] = ()):
         self.elements = [row[0] for row in start]
         self.end_elements = [row[0] for row in end]
         self.p = _coords(start)
@@ -181,6 +181,7 @@ class _Matcher:
         self.lab_p = _labels(self.elements, self.adj_p, table)
         self.lab_q = _labels(self.end_elements, self.adj_q, table)
         self.fixed = fixed
+        self.loose = set(loose)
         # How far apart two atoms' surroundings are: rounds 1 to ROUNDS in which labels differ.
         self.label_rounds = np.zeros((len(start), len(end)))
         for round_ in range(1, ROUNDS + 1):
@@ -198,9 +199,12 @@ class _Matcher:
     def inverted(self, mapping: list[int]) -> list[int]:
         """Start atoms whose neighbours sit the other way round at the end: a centre keeping
         three or more of its neighbours, whose first three kept span opposite handedness. A
-        match that swaps a CH2's hydrogens would make the path invert that carbon."""
+        match that swaps a CH2's hydrogens would make the path invert that carbon. Centres matched
+        to a `loose` end atom are never counted."""
         found = []
         for c, near in enumerate(self.near_p):
+            if mapping[c] in self.loose:
+                continue
             kept = [k for k in near if self.adj_q[mapping[c], mapping[k]]]
             if len(kept) < 3:
                 continue
@@ -341,9 +345,13 @@ def check_atoms(start: Rows, end: Rows) -> None:
         raise RecordError(f"the structures hold different atoms ({details})")
 
 
-def match(start: Rows, end: Rows, fixed: Iterable[tuple[int, int]] = ()) -> Match:
+def match(
+    start: Rows, end: Rows, fixed: Iterable[tuple[int, int]] = (), loose: Iterable[int] = ()
+) -> Match:
     """D113: the end's atoms matched to the start's, with the pairs in `fixed` (0-based
-    (start atom, end atom)) kept."""
+    (start atom, end atom)) kept. `loose` end atoms (0-based) may turn their neighbours the
+    other way round, as a metal that gains or loses a ligand may (D120): they are never
+    counted as mirror images."""
     check_atoms(start, end)
     pinned: dict[int, int] = {}
     for i, j in fixed:
@@ -356,7 +364,7 @@ def match(start: Rows, end: Rows, fixed: Iterable[tuple[int, int]] = ()) -> Matc
                 f"atom {i + 1} is {start[i][0]} but atom {j + 1} of the other end is {end[j][0]}"
             )
         pinned[i] = j
-    m = _Matcher(start, end, pinned)
+    m = _Matcher(start, end, pinned, loose)
     anchors = _anchors(m.lab_p, m.lab_q, pinned)
     if not anchors:  # nothing stands out: start from the atom of the rarest surroundings
         counts = Counter(m.lab_p[1])

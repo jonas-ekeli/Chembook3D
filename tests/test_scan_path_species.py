@@ -132,10 +132,6 @@ def test_a_species_that_leaves_runs_the_other_way(open_client):
     assert pathtools.rmsd([separated[i] for i in OLEFIN], [BOUND[i] for i in OLEFIN]) < 0.05
     assert species["closest"] == pytest.approx(4.0, abs=0.03)
     assert len(rows_of(out["match"]["end_xyz"])) == 12
-    # Sending waits for the brief (D120's second part).
-    body = {"start_id": ids["end"], "end_id": ids["start"], "start": False}
-    refused = open_client.post("/api/scan-paths", json=body)
-    assert refused.status_code == 422 and "not sent yet" in refused.text
 
 
 def test_the_species_on_the_edge_is_checked(open_client):

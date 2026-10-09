@@ -1,7 +1,8 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
-// T-UI-23, D120: a scan path along an edge where a free species joins. The complex is made up:
-// a ruthenium alkylidene with two chlorides, and ethylene bound side-on.
+// T-UI-23, T-UI-24, D120: a scan path along an edge where a free species joins, shown apart and
+// sent as a job. The complex is made up: a ruthenium alkylidene with two chlorides, and ethylene
+// bound side-on.
 const E2E_DIR = process.env.E2E_DIR!
 
 const ALKYLIDENE = [
@@ -87,6 +88,19 @@ test('a species that joins is shown apart and can be set farther out', async ({ 
   await contact.fill('6')
   await contact.press('Enter')
   await expect(summary).toContainText('until it is 6.0 Å from the rest')
-  // Sending waits for the brief (D120's second part).
-  await expect(dialog.getByRole('button', { name: 'Send' })).toBeDisabled()
+  // T-UI-24: sent with the separated start and the species in the job's settings.
+  await dialog.getByRole('button', { name: 'Send' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('is saved but could not be started')
+  const jobs = (await (await page.request.get('/api/jobs')).json()) as {
+    scan_path: { species: { label: string; separated: string; atoms: number[]; clearance: number; bonds: { atoms: number[] }[] } }
+  }[]
+  const sent = jobs[0].scan_path.species
+  expect(sent.label).toBe('ethylene')
+  expect(sent.separated).toBe('start')
+  expect(sent.atoms).toEqual([7, 8, 9, 10, 11, 12])
+  expect(sent.clearance).toBe(6)
+  expect(sent.bonds.map((b) => b.atoms)).toEqual([
+    [4, 8],
+    [4, 10],
+  ])
 })

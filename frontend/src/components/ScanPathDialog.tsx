@@ -330,15 +330,13 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
           <button onClick={onClose}>Cancel</button>
           <button
             className="primary"
-            disabled={!plan || busy || sending || missing.length > 0 || driveBad !== undefined || plan.species !== null}
+            disabled={!plan || busy || sending || missing.length > 0 || driveBad !== undefined}
             onClick={send}
             title={
               missing.length
                 ? `Tick the coordinates that make “${missing[0].label}” a TS`
                 : driveBad
                   ? `Give numbers for ${driveBad.kind} ${driveBad.atoms.join('–')}`
-                  : plan?.species
-                    ? 'A path where a species joins or leaves can be checked here; sending it comes with the next update'
                   : 'Write the job and start a Claude Code cloud session on it (D93)'
             }
           >

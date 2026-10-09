@@ -33,7 +33,7 @@ Written by Chembook3D into `.claude/chembook3d/pathtools.py` of the investigatio
         turns stage 2 round (scanned from the end back), --call may be given once per stage; a
         final optimisation's xtbopt.xyz joins as a one-structure stage as it is
     python3 pathtools.py check PATH.xyz START.xyz END.xyz [--mapping mapping.json]
-                                [--settings path.json] [--json]
+                                [--settings path.json] [--apart COMPLEX.xyz SPECIES.xyz] [--json]
         how close the path starts and ends to the two ends (with the settings, the end is judged
         on the reacting atoms `active` lists, and the RMSD over all atoms is given beside it),
         bonds that form or break along it
@@ -41,7 +41,10 @@ Written by Chembook3D into `.claude/chembook3d/pathtools.py` of the investigatio
         and the highest point, with spikes (one structure far above both neighbours with a jump
         into or out of it, as a conformer flipping in one step gives) reported apart; with
         settings that carry the user's own coordinates (`drive`), whether the path starts at
-        each one's `from` value and ends at its `to` value (`followed`)
+        each one's `from` value and ends at its `to` value (`followed`); with settings that carry
+        a species joining or leaving (`species`), its separated end judged on the complex and
+        on the species' closest contact (`separated`), and with --apart (each optimised alone,
+        their xtbopt.xyz) the separated end's energy above the two apart (`leftover_kcal`)
     python3 pathtools.py mode TS.xyz MODE [--atoms 2 3 [--atoms ...]] [--json]
         the imaginary mode of MODE (the app's `inputs/start_mode.json` or `end_mode.json`, or
         the g98.out of `xtb TS.xyz --hess`): its wavenumber, the five distances that change
@@ -92,6 +95,7 @@ ROTATION = 30.0  # degrees: a bond whose dihedral changes more is a rotation to 
 FIRST_POINT = {2: 0.05, 3: 5.0, 4: 5.0}  # a scan's first structure this far off has slipped
 PARTIAL_SCALE = 1.8  # × the sum of covalent radii: pairs a mode can make or break (D114)
 MODE_SHARE = 0.35  # a distance runs along a mode when it changes this much of the largest
+SEPARATED = 3.5  # Å: a species apart has no closer contact with the complex (D120)
 
 
 # ---------- reading and writing ----------
@@ -650,12 +654,42 @@ def followed(frames, drive):
     return out
 
 
-def check(path, start, end, allowed=None, active=None, drive=None):
+def contact(rows, species):
+    """The closest distance in Å between the species (atoms from 1) and every other atom."""
+    inside = {a - 1 for a in species}
+    rest = [r for k, r in enumerate(rows) if k not in inside]
+    return min(distance(rows[i], r) for i in inside for r in rest)
+
+
+def separated_end(rows, reference, species, active=None):
+    """How a path's separated end does (D120): the complex (the atoms outside `species`, from
+    1) fitted on `reference`'s, over its reacting atoms when `active` names 3 or more of them,
+    and the species' closest contact with the complex, wherever it lies past SEPARATED."""
+    inside = {a - 1 for a in species}
+    complex_atoms = [k for k in range(len(reference)) if k not in inside]
+    picked = [a - 1 for a in active or [] if 0 <= a - 1 < len(reference) and a - 1 not in inside]
+    judged = picked if len(picked) >= 3 else complex_atoms
+    complex_rmsd = rmsd([rows[k] for k in judged], [reference[k] for k in judged])
+    closest = contact(rows, species)
+    return {
+        "complex_rmsd": complex_rmsd,
+        "complex_rmsd_all_atoms": rmsd(
+            [rows[k] for k in complex_atoms], [reference[k] for k in complex_atoms]
+        ),
+        "closest_contact": closest,
+        "reached": complex_rmsd <= GOOD_END_RMSD and closest >= SEPARATED,
+    }
+
+
+def check(path, start, end, allowed=None, active=None, drive=None, species=None, apart=None):
     """How a path does: its ends, stray bond changes, jumps, spikes and its highest point.
     `allowed` lists more bonds (atom pairs from 1) that may form or break; with `active` (atoms
     from 1, `active_atoms`), the end is reached when those atoms fit the end (D118), and the
     RMSD over all atoms is given beside it; with `drive` (the user's coordinates, D119), whether
-    the path starts at each one's `from` and ends at its `to`."""
+    the path starts at each one's `from` and ends at its `to`. With `species` (path.json's, a
+    species joining or leaving, D120), its separated end is judged by `separated_end` instead,
+    and with `apart` (the energies in Eh of the complex and the species each optimised alone)
+    the separated end's energy above the two apart, `leftover_kcal`."""
     frames = read_frames(path)
     if not frames:
         raise ValueError(f"{path} holds no structure")
@@ -706,7 +740,28 @@ def check(path, start, end, allowed=None, active=None, drive=None):
     }
     if drive:
         report["drive"] = followed(frames, drive)
-    report["good"] = report["reached_end"] and not stray and largest <= GOOD_JUMP
+    if species:
+        which = species["separated"]
+        k = 0 if which == "start" else -1
+        separated = {"end": which}
+        separated.update(
+            separated_end(frames[k][1], start if k == 0 else end, species["atoms"], active)
+        )
+        if apart and energies[k] is not None:
+            separated["leftover_kcal"] = (energies[k] - sum(apart)) * HARTREE_KCAL
+        report["separated"] = separated
+        if which == "end":
+            report["active_end_rmsd"] = separated["complex_rmsd"]
+            report["judged_on"] = "the complex, with the species apart"
+            report["reached_end"] = separated["reached"]
+        else:
+            report["reached_start"] = separated["reached"]
+    report["good"] = (
+        report["reached_end"]
+        and report.get("reached_start", True)
+        and not stray
+        and largest <= GOOD_JUMP
+    )
     return report
 
 
@@ -893,6 +948,7 @@ def main(argv=None):
     p.add_argument("end")
     p.add_argument("--mapping")
     p.add_argument("--settings")
+    p.add_argument("--apart", nargs=2, metavar=("COMPLEX", "SPECIES"))
     p.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "diff":
@@ -943,14 +999,24 @@ def main(argv=None):
             with open(args.mapping, encoding="utf-8") as handle:
                 mapping = json.load(handle)
             allowed = mapping.get("formed", []) + mapping.get("broken", [])
-        active = drive = None
+        active = drive = species = apart = None
         if args.settings:
             with open(args.settings, encoding="utf-8") as handle:
                 settings = json.load(handle)
             active = settings.get("active")
             drive = (settings.get("drive") or {}).get("coordinates")
+            species = settings.get("species")
+        if args.apart:
+            if not species:
+                parser.error("--apart needs --settings with a species (path.json's `species`)")
+            apart = []
+            for name in args.apart:
+                energy = energy_of(read_frames(name)[-1][0])
+                if energy is None:
+                    parser.error(f"{name} has no `energy:` on its comment line (use xtbopt.xyz)")
+                apart.append(energy)
         start, end = read_xyz(args.start), read_xyz(args.end)
-        report = check(args.path, start, end, allowed, active, drive)
+        report = check(args.path, start, end, allowed, active, drive, species, apart)
         _print(report, args.json)
     return 0
 
