@@ -48,6 +48,8 @@ MAX_SUGGESTED = 6
 PARTIAL = (1.2, 1.8)  # × the sum of covalent radii: a bond forming or breaking at a TS
 KINDS = {2: "distance", 3: "angle", 4: "dihedral"}
 MAX_HELD = 12
+MAX_DRIVE = 8  # the user's own coordinates (D119)
+DRIVE_ORDERS = ("together", "staged")  # one concerted scan, or one stage per row in order
 
 
 @dataclass
@@ -390,6 +392,84 @@ def check_held(plan_: Plan, held: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _same(a: list[int], b: list[int]) -> bool:
+    return a == b or a == b[::-1]
+
+
+def check_drive(
+    plan_: Plan, drive: list[dict[str, Any]], order: str, held: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """The user's own coordinates to drive (D119), checked: 2 to 4 atoms of the structure,
+    each from its `from` value (the start's, unless given) to its `to` value (the end's, unless
+    given; a dihedral's may lie past ±180°, scanned as written). None when there are none."""
+    if not drive:
+        return None
+    if order not in DRIVE_ORDERS:
+        raise RecordError("drive the coordinates together or staged, in the order given")
+    if len(drive) > MAX_DRIVE:
+        raise RecordError(f"drive at most {MAX_DRIVE} coordinates")
+    count = len(plan_.start.node.geometry)
+    out: list[dict[str, Any]] = []
+    for row in drive:
+        atoms = row.get("atoms")
+        if (
+            not isinstance(atoms, list)
+            or len(atoms) not in KINDS
+            or not all(isinstance(x, int) and 1 <= x <= count for x in atoms)
+            or len(set(atoms)) != len(atoms)
+        ):
+            raise RecordError(
+                f"a coordinate to drive names 2 to 4 different atoms from 1 to {count}"
+            )
+        kind = KINDS[len(atoms)]
+        name = f"{kind} {'–'.join(map(str, atoms))}"
+        if any(_same(atoms, h["atoms"]) for h in held):
+            raise RecordError(
+                f"{name} is held at the TS, so it is driven to the other end's value already"
+            )
+        if any(_same(atoms, o["atoms"]) for o in out):
+            raise RecordError(f"{name} is listed twice")
+        start_value = value(plan_.start.node.geometry, atoms)
+        end_value = value(plan_.renumbered, atoms)
+        ends = []
+        for key, default in (("from", start_value), ("to", end_value)):
+            given = row.get(key)
+            number = default if given is None else float(given)
+            if not np.isfinite(number):
+                raise RecordError(f"{name}: give a number")
+            if kind == "distance" and not 0.5 <= number <= 15:
+                raise RecordError(f"{name}: a distance from 0.5 to 15 Å")
+            if kind == "angle" and not 0 < number < 180:
+                raise RecordError(f"{name}: an angle between 0° and 180°")
+            if kind == "dihedral" and not -540 <= number <= 540:
+                raise RecordError(f"{name}: a dihedral from −540° to 540°")
+            ends.append(number)
+        out.append(
+            {
+                "kind": kind,
+                "atoms": atoms,
+                "from": round(ends[0], 4),
+                "to": round(ends[1], 4),
+                "start_value": round(start_value, 4),
+                "end_value": round(end_value, 4),
+            }
+        )
+    return {"order": order, "coordinates": out}
+
+
+def _drive_text(drive: dict[str, Any]) -> str:
+    lines = []
+    for n, row in enumerate(drive["coordinates"], start=1):
+        unit = "Å" if row["kind"] == "distance" else "°"
+        atoms = ", ".join(str(a) for a in row["atoms"])
+        lead = f"{n}. " if drive["order"] == "staged" else "- "
+        lines.append(
+            f"{lead}{row['kind']} {atoms}: from {row['from']:.3f} to {row['to']:.3f} {unit} "
+            f"(start {row['start_value']:.3f}, end {row['end_value']:.3f} {unit})"
+        )
+    return "\n".join(lines)
+
+
 def _xyz(rows, comment: str) -> str:
     return pathtools.format_frame(rows, comment)
 
@@ -428,7 +508,7 @@ Atoms are numbered from 1 everywhere, as xTB numbers them.
   form and break between the ends by the app's rule; `mapping` gives each start atom's number
   in the end's own file.
 - `inputs/path.json`: the settings below, machine-readable, and `active`: the {active_count}
-  atoms the end is judged on (below).{mode_files}
+  atoms the end is judged on (below).{drive_file}{mode_files}
 
 Charge {charge}, multiplicity {multiplicity}: run every xtb call with
 `--gfn 2 --chrg {charge} --uhf {uhf}{solvent_flag}`{solvent_text}.
@@ -445,7 +525,7 @@ left free. Holding them means the path passes through the TS's values, not that 
 fixed: at the TS end of the path they are at the TS's values (within 0.05 Å or 2°), and from
 there they are driven to the other end's values, usually as the path's reaction coordinate.
 Never optimise the TS end without them in `$constrain`.
-
+{drive}
 ## Running xTB scans
 
 A stage is `xtb <structure>.xyz --opt --input scan.inp <the flags above> > scan.out 2>&1`;
@@ -497,11 +577,12 @@ A second stage after the one above:
 A **strategy** is one design: which coordinates are driven, together or in which stages and
 in which order. Running the same design scanned the other way, with another force constant or
 another number of points is a variant of it, not a new strategy.
-{ts_first}
+{user_first}{ts_first}
 - One concerted scan of the bonds that form and break (and the held coordinates).
 - Stages: the large dihedral changes first, then the bond changes, or the other way round.
   When several bonds turn, drive them together: `pathtools.py diff` lists the turning bonds
-  (`rotations`, one dihedral each, rings and methyl groups left out) and writes a concerted
+  (`rotations`, one dihedral each; rings and methyl groups are left out, but a ligand bound
+  side-on to a metal, η², turning about it is one of them) and writes a concerted
   `$scan` block for all of them (`scan_block`); one at a time, each relaxes the others back.
 - The same scanned from the end back to the start (`join --reverse` turns it round).
 - xTB's own path finder, which needs no coordinates. These settings worked on a 91-atom
@@ -582,21 +663,62 @@ the app imports it all the same, saying in its notes that it did not pass.
                  "force_constant": 1.0, "direction": "forward"}}],
     "tried": ["What else was tried and how it failed."],
     "conformer_note": null,
-    "ts_check": null
+    "ts_check": null,
+    "user_strategy": null
   }}
   ```
 
   `gate` is `"passed"` or `"missed"`; `missed` lists the reasons in a few words each (for
   example "end RMSD over the reacting atoms 0.81 Å"). `summary` says in two or three sentences
-  what the best path does and how close it came.
+  what the best path does and how close it came.{user_result}
 - `outputs/feedback.md` (optional): anything in these instructions or the helper that got in
   your way, and what would have helped, for the app's developer. The app keeps it with the job.
 """
 
 MODE_FILE = "{end}_mode.json"  # a TS end's imaginary mode, in inputs/ (D116)
 
+DRIVE = """
+## Coordinates the user asked to drive
+
+The user designed this path: {how}
+
+{rows}
+
+These are in `path.json` as `drive` (`from` and `to` for each, in the start's numbering).
+A dihedral's `to` may lie past ±180°: xTB drives it as written, the way round the user chose.
+"""
+
+DRIVE_HOW = {
+    "together": "drive these coordinates together, in one concerted scan, each from its first "
+    "value to its second.",
+    "staged": "drive these coordinates one stage per line, in this order, each from its first "
+    "value to its second.",
+}
+
+USER_FIRST = """
+- **The user's design first, run as given.** {stages} Add the held coordinates (driven from the
+  TS's values to the other end's, as always), choose the number of points and the force
+  constant yourself, and add restraints that keep the scan from slipping if it needs them, but
+  never drop one of the user's lines or change its values.{reverse} `pathtools.py check ...
+  --settings inputs/path.json` says under `drive` whether the path followed each line. If this
+  path passes, it is the answer: return it. If it misses, say why in `tried`, keep it as a
+  candidate (it may still come closest) and spend the rest of the budget on the strategies
+  below.
+"""
+
+USER_STAGES = {
+    "together": "One concerted `$scan` (`mode=concerted`) of every line above, the same number "
+    "of points for each.",
+    "staged": "One stage per line, in the order given; a later stage keeps what earlier stages "
+    "drove, at the values they reached.",
+}
+
+USER_RESULT = """
+  `user_strategy` reports the user's design either way: `{"gate": "passed" or "missed",
+  "why": "a few words", "chosen": true when outputs/path.xyz is that design}`."""
+
 TS_FIRST = """
-- **Downhill from the TS first.** Push the TS a little along its imaginary mode toward the
+- **{lead}** Push the TS a little along its imaginary mode toward the
   other end, `pathtools.py displace inputs/{ts}.xyz {mode} --toward inputs/{other}.xyz
   -o downhill/start.xyz` (try `--step 0.1` to `0.3`), then run one relaxed scan of the held
   coordinates from the TS's values to the {other}'s values, everything else free, starting
@@ -627,13 +749,17 @@ def create_job(
     plan_: Plan,
     held: list[dict[str, Any]],
     solvent: str | None,
+    drive: list[dict[str, Any]] | None = None,
+    drive_order: str = "together",
 ) -> dict[str, Any]:
-    """D114: the scan path job folder, ready to start (D93). The database is not changed."""
+    """D114: the scan path job folder, ready to start (D93). The database is not changed.
+    `drive` lists the user's own coordinates (D119), run first as given."""
     if solvent:
         solvent = SOLVENT_NAMES.get(solvent.strip().lower(), solvent.strip().lower())
         if solvent not in ALPB_SOLVENTS:
             raise RecordError(f"xTB's ALPB has no solvent “{solvent}”")
     held = check_held(plan_, held)
+    driven = check_drive(plan_, drive or [], drive_order, held)
     start, end, match = plan_.start, plan_.end, plan_.match
     summary = atom_matching.summary(match)
     mapping = {
@@ -653,6 +779,8 @@ def create_job(
         "held": held,
         "active": active,
     }
+    if driven is not None:
+        settings["drive"] = driven
     ts_of = {t["end"]: t for t in plan_.ts_ends}
 
     def ts_note(which: str) -> str:
@@ -677,6 +805,7 @@ def create_job(
         other = "end" if which == "start" else "start"
         ts_first.append(
             TS_FIRST.format(
+                lead="Then downhill from the TS." if driven else "Downhill from the TS first.",
                 ts=which,
                 other=other,
                 mode=f"inputs/{MODE_FILE.format(end=which)}" if which in plan_.modes else "g98.out",
@@ -710,6 +839,24 @@ def create_job(
             else ""
         ),
         ts_first="".join(ts_first),
+        drive_file=("\n  With the user's own coordinates, `drive` too (below)." if driven else ""),
+        drive=(
+            DRIVE.format(how=DRIVE_HOW[driven["order"]], rows=_drive_text(driven)) if driven else ""
+        ),
+        user_first=(
+            USER_FIRST.format(
+                stages=USER_STAGES[driven["order"]],
+                reverse=(
+                    " The TS is the end here: you may run it from the end back (each line from"
+                    " its second value to its first) and join it with `--reverse`."
+                    if "end" in ts_of and "start" not in ts_of
+                    else ""
+                ),
+            ).rstrip("\n")
+            if driven
+            else ""
+        ),
+        user_result=USER_RESULT if driven else "",
     )
     inputs = [
         cloud_jobs.InputFile(
@@ -732,7 +879,8 @@ def create_job(
         cloud_jobs.InputFile(
             name="path.json",
             text=json.dumps(settings, indent=2),
-            description="charge, multiplicity, solvent and the coordinates held at a TS end",
+            description="charge, multiplicity, solvent, the coordinates held at a TS end"
+            + (" and the user's own coordinates" if driven else ""),
         ),
     ]
     for which, (wavenumber, vectors) in plan_.modes.items():
@@ -849,6 +997,17 @@ def _notes(
         lines.append(
             f"Highest point {float(path['barrier_kcal']):.1f} kcal/mol above the start (GFN2-xTB)."
         )
+    user = path.get("user_strategy")
+    if isinstance(user, dict):
+        # D119: whether the path is the user's own design, and if not, why theirs missed.
+        why = str(user.get("why") or "").strip()
+        if user.get("chosen"):
+            lines.append("Driven by your coordinates (D119)." + (f" {why}" if why else ""))
+        else:
+            verdict = "passed too" if user.get("gate") == "passed" else "missed"
+            lines.append(
+                f"The agent's own design (yours {verdict}" + (f": {why})." if why else ").")
+            )
     design = str(path.get("design") or "").strip()
     if design:
         lines.append(f"Design: {design}")

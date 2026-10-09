@@ -1572,7 +1572,15 @@ export const api = {
     request<Trim>('POST', `/calculations/${calculationId}/steps/trim-preview`, body),
   overlay: (body: OverlayRequest) => request<Overlay>('POST', '/overlay', body),
   scanPathPlan: (body: ScanPathRequest) => request<ScanPathPlan>('POST', '/scan-paths/plan', body),
-  sendScanPath: (body: ScanPathRequest & { held: { end: 'start' | 'end'; atoms: number[] }[]; solvent: string | null }) =>
+  sendScanPath: (
+    body: ScanPathRequest & {
+      held: { end: 'start' | 'end'; atoms: number[] }[]
+      /** D119: the user's own coordinates, run first as given. */
+      drive?: { atoms: number[]; from: number; to: number }[]
+      drive_order?: 'together' | 'staged'
+      solvent: string | null
+    },
+  ) =>
     request<{ job: CloudJob; start_error: string | null }>('POST', '/scan-paths', body),
   jobs: (refresh = false) => request<CloudJob[]>('GET', `/jobs?detail=true${refresh ? '&refresh=true' : ''}`),
   job: (id: string) => request<CloudJob>('GET', `/jobs/${encodeURIComponent(id)}?refresh=true`),

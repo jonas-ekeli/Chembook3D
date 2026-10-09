@@ -8,7 +8,8 @@ Written by Chembook3D into `.claude/chembook3d/pathtools.py` of the investigatio
     python3 pathtools.py diff START.xyz END.xyz
         bonds that form and break, fitted RMSD, the distances that change most, and the bonds
         that turn by more than 30° (one dihedral each, both ways round, and a ready concerted
-        `$scan` block) between two structures of the same atoms in the same order
+        `$scan` block; a ligand bound side-on to a metal, η², turns about it as one of them)
+        between two structures of the same atoms in the same order
     python3 pathtools.py rmsd A.xyz B.xyz
     python3 pathtools.py measure FILE.xyz 3 7 [9 [12]]
         a distance (Å), angle or dihedral (degrees, xTB's and IUPAC's sign convention); on a
@@ -38,7 +39,9 @@ Written by Chembook3D into `.claude/chembook3d/pathtools.py` of the investigatio
         bonds that form or break along it
         other than those the ends differ by, the largest jump between neighbouring structures,
         and the highest point, with spikes (one structure far above both neighbours with a jump
-        into or out of it, as a conformer flipping in one step gives) reported apart
+        into or out of it, as a conformer flipping in one step gives) reported apart; with
+        settings that carry the user's own coordinates (`drive`), whether the path starts at
+        each one's `from` value and ends at its `to` value (`followed`)
     python3 pathtools.py mode TS.xyz MODE [--atoms 2 3 [--atoms ...]] [--json]
         the imaginary mode of MODE (the app's `inputs/start_mode.json` or `end_mode.json`, or
         the g98.out of `xtb TS.xyz --hess`): its wavenumber, the five distances that change
@@ -67,6 +70,13 @@ RADII = {
     "Pt": 1.36, "Au": 1.36, "Ti": 1.6, "Zr": 1.75, "Cr": 1.39, "Mn": 1.39, "Sn": 1.39,
 }  # fmt: skip
 DEFAULT_RADIUS = 1.5
+# Metals, for a ligand bound side-on (η²) whose turn about the metal is a rotation (D119).
+METALS = {
+    "Li", "Na", "K", "Rb", "Cs", "Be", "Mg", "Ca", "Sr", "Ba", "Al", "Ga", "In", "Tl", "Sn", "Pb",
+    "Bi", "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Y", "Zr", "Nb", "Mo", "Tc",
+    "Ru", "Rh", "Pd", "Ag", "Cd", "La", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
+    "Ce", "Nd", "Sm", "Eu", "Gd", "Yb", "Lu", "U",
+}  # fmt: skip
 BOND_SCALE = 1.2
 MIN_DISTANCE = 0.4
 HARTREE_KCAL = 627.5094740631
@@ -292,30 +302,77 @@ def diff(start, end, top=10):
     }
 
 
+def _side_on(start, near, j, k):
+    """For a bond between a metal and a ligand atom bound side-on (η², the metal in a
+    three-membered ring with the ligand's two atoms), (ligand atom, its partner, metal);
+    else None. The bond turns freely when nothing but the partner closes a ring (D119)."""
+    for metal, atom in ((j, k), (k, j)):
+        if start[metal][0] not in METALS or start[atom][0] in METALS:
+            continue
+        partners = [x for x in near[atom] & near[metal] if start[x][0] not in METALS]
+        if len(partners) != 1:
+            continue
+        partner = partners[0]
+        # η² only: no third ligand atom bound to the metal next to these two (η³, η⁵).
+        if any(x != atom and x in near[metal] for x in near[partner]):
+            continue
+        if any(x != partner and x in near[metal] for x in near[atom]):
+            continue
+        without = {a: b - {partner} for a, b in near.items() if a != partner}
+        if not _in_ring(without, j, k):
+            return atom, partner, metal
+    return None
+
+
 def _rotations(start, end, kept, near):
     """Bonds kept at both ends that turn by more than ROTATION degrees, one dihedral each
     (heavy atoms at its ends where there are), largest first. A bond in a ring, or with only
-    hydrogens beyond one end (a methyl group), is left out."""
+    hydrogens beyond one end (a methyl group), is left out, except a metal's bond to a ligand
+    bound side-on (η²): its turn is given once per ligand as partner–atom–metal–other, the way
+    the olefin turns about the metal (D119)."""
     found = {}
+    ligands = set()
     for j, k in kept:
         ends_j, ends_k = near[j] - {k}, near[k] - {j}
-        if not ends_j or not ends_k or _in_ring(near, j, k):
+        if not ends_j or not ends_k:
             continue
-        if all(start[x][0] == "H" for x in ends_j) or all(start[x][0] == "H" for x in ends_k):
+        side_on = None
+        if _in_ring(near, j, k):
+            side_on = _side_on(start, near, j, k)
+            if side_on is None:
+                continue
+        elif all(start[x][0] == "H" for x in ends_j) or all(start[x][0] == "H" for x in ends_k):
             continue
+        if side_on is not None:
+            atom, partner, metal = side_on
+            # The metal's other neighbours, never the ligand's own atoms.
+            quads = [(partner, atom, metal, m) for m in near[metal] - {atom, partner}]
+        else:
+            quads = [(i, j, k, m) for i in ends_j for m in ends_k - {i}]
         best = None
-        for i in ends_j:
-            for m in ends_k - {i}:
-                t0, t1 = _measure(start, [i, j, k, m]), _measure(end, [i, j, k, m])
-                turn = _wrapped(t1 - t0, 4)
-                hydrogens = (start[i][0] == "H") + (start[m][0] == "H")
-                item = (hydrogens, -abs(turn), [i + 1, j + 1, k + 1, m + 1], t0, t1, turn)
-                if best is None or item[:2] < best[:2]:
-                    best = item
-        if best is not None and abs(best[5]) > ROTATION:
-            found[(j, k)] = best
+        for i, jj, kk, m in quads:
+            t0, t1 = _measure(start, [i, jj, kk, m]), _measure(end, [i, jj, kk, m])
+            turn = _wrapped(t1 - t0, 4)
+            hydrogens = (start[i][0] == "H") + (start[m][0] == "H")
+            item = (hydrogens, -abs(turn), [i + 1, jj + 1, kk + 1, m + 1], t0, t1, turn)
+            if best is None or item[:2] < best[:2]:
+                best = item
+        if best is None or abs(best[5]) <= ROTATION:
+            continue
+        if side_on is not None:
+            ligand = (side_on[2], frozenset(side_on[:2]))
+            if ligand in ligands:
+                # The other atom of the same ligand: keep the larger turn of the two.
+                previous = next(key for key, item in found.items() if item[6] == ligand)
+                if found[previous][:2] <= best[:2]:
+                    continue
+                del found[previous]
+            ligands.add(ligand)
+            found[(j, k)] = (*best, ligand)
+        else:
+            found[(j, k)] = (*best, None)
     out = []
-    for _, _, atoms, t0, t1, turn in sorted(found.values(), key=lambda b: b[1]):
+    for _, _, atoms, t0, t1, turn, _ in sorted(found.values(), key=lambda b: b[1]):
         other = turn - 360 if turn > 0 else turn + 360
         out.append({
             "bond": f"{atoms[1]}-{atoms[2]}",
@@ -571,11 +628,34 @@ def _top(energies, skip=()):
     return max(inner, key=lambda k: energies[k]) if inner else None
 
 
-def check(path, start, end, allowed=None, active=None):
+def followed(frames, drive):
+    """Whether a path follows the user's coordinates (D119): each row's value at the path's
+    first and last structure against its `from` and `to` (a dihedral's `to` may lie past
+    ±180°, so it is compared the short way round)."""
+    out = []
+    for row in drive:
+        atoms = row["atoms"]
+        first, last = measure(frames[0][1], atoms), measure(frames[-1][1], atoms)
+        size = len(atoms)
+        started = abs(_wrapped(first - row["from"], size)) <= REACHED[size]
+        reached = abs(_wrapped(last - row["to"], size)) <= REACHED[size]
+        out.append({
+            "atoms": "-".join(map(str, atoms)),
+            "from": row["from"],
+            "to": row["to"],
+            "first": round(first, 3),
+            "last": round(last, 3),
+            "followed": started and reached,
+        })  # fmt: skip
+    return out
+
+
+def check(path, start, end, allowed=None, active=None, drive=None):
     """How a path does: its ends, stray bond changes, jumps, spikes and its highest point.
     `allowed` lists more bonds (atom pairs from 1) that may form or break; with `active` (atoms
     from 1, `active_atoms`), the end is reached when those atoms fit the end (D118), and the
-    RMSD over all atoms is given beside it."""
+    RMSD over all atoms is given beside it; with `drive` (the user's coordinates, D119), whether
+    the path starts at each one's `from` and ends at its `to`."""
     frames = read_frames(path)
     if not frames:
         raise ValueError(f"{path} holds no structure")
@@ -624,6 +704,8 @@ def check(path, start, end, allowed=None, active=None):
         "top_without_spikes": smooth_top + 1 if smooth_top is not None else None,
         "barrier_without_spikes_kcal": barrier(smooth_top),
     }
+    if drive:
+        report["drive"] = followed(frames, drive)
     report["good"] = report["reached_end"] and not stray and largest <= GOOD_JUMP
     return report
 
@@ -861,11 +943,14 @@ def main(argv=None):
             with open(args.mapping, encoding="utf-8") as handle:
                 mapping = json.load(handle)
             allowed = mapping.get("formed", []) + mapping.get("broken", [])
-        active = None
+        active = drive = None
         if args.settings:
             with open(args.settings, encoding="utf-8") as handle:
-                active = json.load(handle).get("active")
-        report = check(args.path, read_xyz(args.start), read_xyz(args.end), allowed, active)
+                settings = json.load(handle)
+            active = settings.get("active")
+            drive = (settings.get("drive") or {}).get("coordinates")
+        start, end = read_xyz(args.start), read_xyz(args.end)
+        report = check(args.path, start, end, allowed, active, drive)
         _print(report, args.json)
     return 0
 

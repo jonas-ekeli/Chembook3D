@@ -2314,6 +2314,12 @@ table.scan-path-held td.num {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+table.scan-path-held tr.held-driven td {
+  color: var(--muted);
+}
+table.scan-path-held input.drive-value {
+  width: 6.5em;
+}
 .scan-path-add {
   display: flex;
   flex-wrap: wrap;

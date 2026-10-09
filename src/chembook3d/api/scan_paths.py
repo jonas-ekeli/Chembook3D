@@ -1,7 +1,7 @@
 """Scan path between two connected nodes (D114, A60): the plan the dialog shows, and the cloud
 job it sends (D93). The rules are in `services/scan_path.py`."""
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
@@ -76,8 +76,27 @@ class HeldIn(BaseModel):
     atoms: list[int] = Field(description="2 to 4 atoms, 1-based, in the start's numbering.")
 
 
+class DriveIn(BaseModel):
+    atoms: list[int] = Field(description="2 to 4 atoms, 1-based, in the start's numbering.")
+    from_value: float | None = Field(
+        None, alias="from", description="Where the scan starts; the start's value if left out."
+    )
+    to_value: float | None = Field(
+        None,
+        alias="to",
+        description="Where it ends; the end's value if left out. A dihedral may lie past ±180°.",
+    )
+
+
 class JobIn(PlanIn):
     held: list[HeldIn] = Field(default_factory=list)
+    drive: list[DriveIn] = Field(
+        default_factory=list,
+        description="D119: the user's own coordinates, run first as given; empty: the agent's.",
+    )
+    drive_order: Literal["together", "staged"] = Field(
+        "together", description="One concerted scan, or one stage per coordinate in order."
+    )
     solvent: str | None = None
     start: bool = Field(True, description="Start the cloud session at once.")
 
@@ -130,6 +149,8 @@ def send(body: JobIn, request: Request, session: DbSession) -> dict[str, Any]:
         p,
         [h.model_dump() for h in body.held],
         body.solvent,
+        [{"atoms": d.atoms, "from": d.from_value, "to": d.to_value} for d in body.drive],
+        body.drive_order,
     )
     folder = investigation.folder
     start_error = None

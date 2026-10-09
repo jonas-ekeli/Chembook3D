@@ -11,6 +11,16 @@ function errorText(err: unknown): string {
 
 type Held = { end: 'start' | 'end'; atoms: number[]; ticked: boolean; why: string; start_value: number; end_value: number; kind: string }
 
+/** D119: one of the user's own coordinates to drive, from and to as typed. */
+type Drive = { atoms: number[]; kind: string; start_value: number; end_value: number; from: string; to: string }
+
+const wrap = (degrees: number) => ((((degrees + 180) % 360) + 360) % 360) - 180
+/** Where a coordinate ends: a dihedral the short way round from its start value. */
+const shortTo = (kind: string, from: number, end: number) => (kind === 'dihedral' ? from + wrap(end - from) : end)
+const fixed = (kind: string, value: number) => value.toFixed(kind === 'distance' ? 3 : 1)
+const sameAtoms = (a: number[], b: number[]) => a.join('-') === b.join('-') || a.join('-') === [...b].reverse().join('-')
+const number = (text: string) => (text.trim() === '' ? Number.NaN : Number(text))
+
 const PAIRS_KEY = 'chembook3d.scanPathPairs'
 
 /** D114: hand-fixed atom pairs are offered again the next time the same two nodes are
@@ -47,7 +57,8 @@ function tsHeading(ts: ScanPathTsEnd): string {
 
 /** D114, A60: a scan path between two nodes joined by an edge, run by a Claude Code cloud
  * session (D93). The dialog shows the atom match (D113, reviewed when doubtful), the
- * coordinates held at a TS end, and the solvent, and sends the job. */
+ * coordinates held at a TS end, the user's own coordinates to drive (D119) and the solvent,
+ * and sends the job. */
 export function ScanPathDialog({ startId, endId, onClose }: { startId: string; endId: string; onClose: () => void }) {
   const [ends, setEnds] = useState({ start: startId, end: endId })
   const [members, setMembers] = useState<{ start: string | null; end: string | null }>({ start: null, end: null })
@@ -58,8 +69,15 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
   const [solvent, setSolvent] = useState<string | null | undefined>(undefined)
   const [typed, setTyped] = useState<{ end: 'start' | 'end'; text: string }>({ end: 'end', text: '' })
   const [typedError, setTypedError] = useState<string | null>(null)
+  const [drive, setDrive] = useState<Drive[]>([])
+  const [driveOrder, setDriveOrder] = useState<'together' | 'staged'>('together')
+  const [driveText, setDriveText] = useState('')
+  const [driveError, setDriveError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
-  const [sent, setSent] = useState<{ job: CloudJob; start_error: string | null } | null>(null)
+  const [sent, setSent] = useState<{
+    job: CloudJob
+    start_error: string | null
+  } | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
 
   const key = JSON.stringify([ends, members, pairs])
@@ -87,6 +105,27 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
           }
           setAnswer({ key, plan: result, error: null })
           setHeld(result.ts_ends.flatMap((ts) => ts.suggested.map((s) => ({ ...s, end: ts.end }))))
+          // A fixed pair moves the end's atoms: the rows keep their atoms, and a value still at
+          // its old default follows the new match.
+          const a = parseXyz(result.match.start_xyz)
+          const b = parseXyz(result.match.renumbered_xyz)
+          setDrive((rows) =>
+            rows.flatMap((row) => {
+              const start = measure(row.atoms.map((n) => a[n - 1]))
+              const end = measure(row.atoms.map((n) => b[n - 1]))
+              if (!start || !end) return []
+              const oldTo = fixed(row.kind, shortTo(row.kind, row.start_value, row.end_value))
+              return [
+                {
+                  ...row,
+                  start_value: start.value,
+                  end_value: end.value,
+                  from: row.from === fixed(row.kind, row.start_value) ? fixed(row.kind, start.value) : row.from,
+                  to: row.to === oldTo ? fixed(row.kind, shortTo(row.kind, start.value, end.value)) : row.to,
+                },
+              ]
+            }),
+          )
         },
         (err: unknown) => !cancelled && setAnswer({ key, plan: null, error: errorText(err) }),
       )
@@ -116,14 +155,23 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
     setMembers({ start: members.end, end: members.start })
     setPairs(null)
     setReviewing(null)
+    setDrive([]) // numbered in the start's atoms, which are now the other end's
   }
 
-  const addTyped = () => {
-    const atoms = typed.text
+  const atomsOf = (text: string): number[] | null => {
+    const atoms = text
       .split(/[\s,–-]+/)
       .filter(Boolean)
       .map((t) => Number.parseInt(t, 10))
     if (atoms.length < 2 || atoms.length > 4 || atoms.some((a) => !(a >= 1 && a <= startAtoms.length)) || new Set(atoms).size !== atoms.length) {
+      return null
+    }
+    return atoms
+  }
+
+  const addTyped = () => {
+    const atoms = atomsOf(typed.text)
+    if (!atoms) {
       setTypedError(`Give 2 to 4 different atom numbers from 1 to ${startAtoms.length}.`)
       return
     }
@@ -141,6 +189,42 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
     setTypedError(null)
   }
 
+  const heldDriven = held.filter((h) => h.ticked)
+
+  const addDrive = () => {
+    const atoms = atomsOf(driveText)
+    if (!atoms) {
+      setDriveError(`Give 2 to 4 different atom numbers from 1 to ${startAtoms.length}.`)
+      return
+    }
+    const a = measure(atoms.map((n) => startAtoms[n - 1]))
+    const b = measure(atoms.map((n) => endAtoms[n - 1]))
+    if (!a || !b) return
+    const name = `${a.kind} ${atoms.join('–')}`
+    if (heldDriven.some((h) => sameAtoms(h.atoms, atoms))) {
+      setDriveError(`${name} is held at the TS, so it is driven to the other end's value already.`)
+      return
+    }
+    if (drive.some((d) => sameAtoms(d.atoms, atoms))) {
+      setDriveError(`${name} is listed already.`)
+      return
+    }
+    const row = {
+      atoms,
+      kind: a.kind,
+      start_value: a.value,
+      end_value: b.value,
+      from: fixed(a.kind, a.value),
+      to: fixed(a.kind, shortTo(a.kind, a.value, b.value)),
+    }
+    setDrive([...drive, row])
+    setDriveText('')
+    setDriveError(null)
+  }
+
+  const changeDrive = (index: number, change: Partial<Drive>) => setDrive(drive.map((d, i) => (i === index ? { ...d, ...change } : d)))
+  const driveBad = drive.find((d) => !Number.isFinite(number(d.from)) || !Number.isFinite(number(d.to)))
+
   const send = () => {
     if (!plan) return
     setSending(true)
@@ -153,6 +237,12 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
         start_member_id: members.start,
         end_member_id: members.end,
         held: held.filter((h) => h.ticked).map((h) => ({ end: h.end, atoms: h.atoms })),
+        drive: drive.map((d) => ({
+          atoms: d.atoms,
+          from: number(d.from),
+          to: number(d.to),
+        })),
+        drive_order: driveOrder,
         solvent: chosenSolvent,
       })
       .then(
@@ -236,9 +326,15 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
           <button onClick={onClose}>Cancel</button>
           <button
             className="primary"
-            disabled={!plan || busy || sending || missing.length > 0}
+            disabled={!plan || busy || sending || missing.length > 0 || driveBad !== undefined}
             onClick={send}
-            title={missing.length ? `Tick the coordinates that make “${missing[0].label}” a TS` : 'Write the job and start a Claude Code cloud session on it (D93)'}
+            title={
+              missing.length
+                ? `Tick the coordinates that make “${missing[0].label}” a TS`
+                : driveBad
+                  ? `Give numbers for ${driveBad.kind} ${driveBad.atoms.join('–')}`
+                  : 'Write the job and start a Claude Code cloud session on it (D93)'
+            }
           >
             {sending ? 'Sending…' : 'Send'}
           </button>
@@ -265,6 +361,7 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
                     onChange={(event) => {
                       setMembers({ ...members, [which]: event.target.value })
                       setPairs(null)
+                      if (which === 'start') setDrive([])
                     }}
                   >
                     {plan[which].members.map((m) => (
@@ -348,6 +445,122 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
             </div>
           )}
           {plan.ts_ends.length === 0 && <p className="muted small">Neither end is a TS, so no coordinate is held.</p>}
+          <section className="scan-path-section" aria-label="Drive these">
+            <p>
+              <strong>Drive these (optional)</strong>{' '}
+              <span className="muted small">
+                Empty, the agent designs the path itself. Given, it runs your design first, as given, and its own only if yours misses the quality
+                check.
+              </span>
+            </p>
+            {(drive.length > 0 || heldDriven.length > 0) && (
+              <table className="scan-path-held">
+                <thead>
+                  <tr>
+                    <th>Coordinate (start's numbering)</th>
+                    <th>From</th>
+                    <th>To</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {heldDriven.map((h) => (
+                    <tr key={`held:${h.end}:${h.atoms.join('-')}`} className="held-driven" aria-label={`Held ${h.kind} ${h.atoms.join('–')}`}>
+                      <td>
+                        {h.kind} {h.atoms.map((a) => `${startAtoms[a - 1]?.element ?? ''}${a}`).join('–')}
+                      </td>
+                      <td className="num">{format(h.kind, h.start_value)}</td>
+                      <td className="num">{format(h.kind, h.end_value)}</td>
+                      <td className="small">held at the TS, so driven with these</td>
+                    </tr>
+                  ))}
+                  {drive.map((d, i) => {
+                    const name = `${d.kind} ${d.atoms.join('–')}`
+                    const from = number(d.from)
+                    return (
+                      <tr key={d.atoms.join('-')} aria-label={`Drive ${name}`}>
+                        <td>
+                          {driveOrder === 'staged' && `${i + 1}. `}
+                          {d.kind} {d.atoms.map((a) => `${startAtoms[a - 1]?.element ?? ''}${a}`).join('–')}
+                        </td>
+                        <td className="num">
+                          <input
+                            className="drive-value"
+                            aria-label={`From ${name}`}
+                            value={d.from}
+                            onChange={(event) => changeDrive(i, { from: event.target.value })}
+                          />{' '}
+                          {unit(d.kind)}
+                        </td>
+                        <td className="num">
+                          <input
+                            className="drive-value"
+                            aria-label={`To ${name}`}
+                            value={d.to}
+                            onChange={(event) => changeDrive(i, { to: event.target.value })}
+                          />{' '}
+                          {unit(d.kind)}
+                        </td>
+                        <td>
+                          {d.kind === 'dihedral' && Number.isFinite(from) && Number.isFinite(number(d.to)) && (
+                            <button
+                              className="small"
+                              title="Turn the other way round: xTB scans a dihedral as written, past ±180° too"
+                              onClick={() => {
+                                const to = number(d.to)
+                                changeDrive(i, {
+                                  to: fixed(d.kind, to > from ? to - 360 : to + 360),
+                                })
+                              }}
+                            >
+                              Other way round
+                            </button>
+                          )}{' '}
+                          {driveOrder === 'staged' && i > 0 && (
+                            <button
+                              className="small"
+                              aria-label={`Move ${name} up`}
+                              onClick={() => setDrive([...drive.slice(0, i - 1), d, drive[i - 1], ...drive.slice(i + 1)])}
+                            >
+                              ↑
+                            </button>
+                          )}{' '}
+                          <button className="small" aria-label={`Remove ${name}`} onClick={() => setDrive(drive.filter((_, k) => k !== i))}>
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+            <div className="scan-path-add">
+              <input
+                aria-label="Atoms to drive"
+                placeholder="atoms, e.g. 2 1 6 3"
+                value={driveText}
+                onChange={(event) => setDriveText(event.target.value)}
+                onKeyDown={(event) => event.key === 'Enter' && addDrive()}
+              />
+              <button className="small" aria-label="Add a coordinate to drive" onClick={addDrive}>
+                Add
+              </button>
+              {driveError && <span role="alert">{driveError}</span>}
+            </div>
+            {drive.length + heldDriven.length > 1 && drive.length > 0 && (
+              <div className="scan-path-add" role="radiogroup" aria-label="Drive them">
+                <label>
+                  <input type="radio" name="drive-order" checked={driveOrder === 'together'} onChange={() => setDriveOrder('together')} /> together
+                  (one concerted scan)
+                </label>
+                <label>
+                  <input type="radio" name="drive-order" checked={driveOrder === 'staged'} onChange={() => setDriveOrder('staged')} /> in this order
+                  (one stage per row)
+                </label>
+              </div>
+            )}
+          </section>
           <label className="field">
             <span>Solvent (xTB ALPB)</span>
             <select aria-label="Solvent" value={chosenSolvent ?? ''} onChange={(event) => setSolvent(event.target.value || null)}>
