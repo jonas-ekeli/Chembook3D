@@ -13,6 +13,7 @@ design the path itself with GFN2-xTB relaxed scans and the helper `pathtools.py`
 
 import json
 import threading
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from chembook3d import cloud_jobs, pathtools
 from chembook3d.models import GroupNode, Node, Role, Status, Transition
-from chembook3d.services import atom_matching, imports
+from chembook3d.services import atom_matching, imports, scan_species, species
 from chembook3d.services.geometry import _coords, _fit
 from chembook3d.services.records import RecordError, get
 
@@ -248,7 +249,7 @@ class Plan:
     end: End
     edge: Transition
     match: atom_matching.Match
-    renumbered: list[list[Any]]
+    renumbered: list[list[Any]]  # the path's end in the start's numbering
     charge: int
     multiplicity: int
     solvent: str | None
@@ -257,6 +258,17 @@ class Plan:
     # the end as it is placed on the start, for `inputs/<end>_mode.json` (D116).
     modes: dict[str, tuple[float, list[list[float]]]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    # D120: the species joining or leaving, and the path's start in the start's numbering
+    # (the separated structure when the species joins; else the start node's geometry).
+    species: scan_species.Joining | None = None
+    start_rows: list[list[Any]] = field(default_factory=list)
+    # The two structures the match was made on, in their own numbering (the start beside the
+    # species, or the end beside it), for the review.
+    match_rows: tuple[list[list[Any]], list[list[Any]]] | None = None
+
+    def __post_init__(self):
+        if not self.start_rows:
+            self.start_rows = self.start.node.geometry
 
 
 NO_BOND_CHANGE = (
@@ -273,6 +285,112 @@ def _turned(vectors: list[list[float]], stored: list[list[Any]], placed: list[li
     return (np.array(vectors, dtype=float) @ rotation).tolist()
 
 
+def _formula(counts: Counter) -> str:
+    order = sorted(counts, key=lambda e: (e != "C", e != "H", e))
+    return "".join(f"{e}{counts[e] if counts[e] > 1 else ''}" for e in order)
+
+
+def _species_charge(small: End, bound: End, joining: Node) -> tuple[int, int]:
+    """The path's charge and multiplicity with a species (D120): the bound end's, which must
+    be the small end's charge plus the species'."""
+    parts = [small.node.charge, joining.charge]
+    if bound.node.charge is not None and all(c is not None for c in parts):
+        if sum(parts) != bound.node.charge:
+            raise RecordError(
+                f"“{small.name}” ({small.node.charge}) with “{species.label(joining)}” "
+                f"({joining.charge}) does not have the charge of “{bound.name}” "
+                f"({bound.node.charge})"
+            )
+    charge = bound.node.charge
+    if charge is None and all(c is not None for c in parts):
+        charge = sum(parts)
+    multiplicity = bound.node.multiplicity or small.node.multiplicity
+    if charge is None or multiplicity is None:
+        what = "charge" if charge is None else "multiplicity"
+        raise RecordError(f"“{bound.name}” has no {what}; set it on the node")
+    return charge, multiplicity
+
+
+def _joining(
+    session: Session,
+    start: End,
+    end: End,
+    edge: Transition,
+    pairs: list[list[int]] | None,
+    clearance: float,
+) -> tuple[atom_matching.Match, scan_species.Joining, list[list[Any]], list[list[Any]], tuple]:
+    """D120: the species on the edge matched across the two ends, and the separated end.
+    Returns the match, the species, the path's start and end in the start's numbering and the
+    two structures the match was made on."""
+    a, b = start.node.geometry, end.node.geometry
+    found = scan_species.on_edge(session, edge, start.ids())
+    if found is None:
+        big, small = (a, b) if len(a) > len(b) else (b, a)
+        missing = Counter(r[0] for r in big) - Counter(r[0] for r in small)
+        extra = Counter(r[0] for r in small) - Counter(r[0] for r in big)
+        what = f": {_formula(missing)} joins or leaves" if missing and not extra else ""
+        raise RecordError(
+            f"“{start.name}” has {len(a)} atoms and “{end.name}” {len(b)}{what}. Attach the "
+            "species that joins or leaves to the edge as a free species, and the scan path "
+            "follows it"
+        )
+    node, direction = found
+    if not node.geometry:
+        raise RecordError(f"the free species “{species.label(node)}” has no coordinates")
+    if not scan_species.CLEARANCE_RANGE[0] <= clearance <= scan_species.CLEARANCE_RANGE[1]:
+        low, high = scan_species.CLEARANCE_RANGE
+        raise RecordError(f"the separated species' closest contact is {low:g} to {high:g} Å")
+    joins = direction == species.JOINS
+    small, bound = (start, end) if joins else (end, start)
+    if small.node.role == Role.TRANSITION_STATE:
+        raise RecordError(
+            f"“{small.name}” is a TS without “{species.label(node)}”; with a species that joins "
+            "or leaves, a TS end is the one where the species is bound"
+        )
+    scan_species.check_atoms(
+        small.node.geometry,
+        node.geometry,
+        bound.node.geometry,
+        (small.name, species.label(node), bound.name),
+    )
+    match, start_side, end_side = scan_species.matched(
+        a, b, node.geometry, direction, atom_matching.pairs_from(pairs or [])
+    )
+    n_small = len(small.node.geometry)
+    atoms = scan_species.species_atoms(match, direction, n_small, len(start_side))
+    bonds = scan_species.crossing(match, atoms)
+    if joins:
+        bound_rows = [end_side[j] for j in match.mapping]  # the end's own coordinates
+        own = start_side
+    else:
+        bound_rows = [list(r) for r in a]
+        own = [end_side[j] for j in match.mapping]
+    separated, pull, closest, anchor, complex_rmsd = scan_species.separate(
+        bound_rows, own, atoms, bonds, clearance
+    )
+    match = scan_species.steady_doubts(match, complex_rmsd, bonds, anchor)
+    joining = scan_species.Joining(
+        node=node,
+        direction=direction,
+        bound="end" if joins else "start",
+        atoms=[i + 1 for i in atoms],
+        bonds=[[i + 1, j + 1] for i, j in bonds],
+        anchor=[i + 1 for i in anchor],
+        separated=separated,
+        clearance=clearance,
+        pull=pull,
+        closest=closest,
+        complex_rmsd=complex_rmsd,
+    )
+    if joins:
+        # The review shows the separated start (the start's numbering) beside the end.
+        return match, joining, separated, bound_rows, (separated, end_side)
+    in_end_order = [None] * len(end_side)
+    for i, j in enumerate(match.mapping):
+        in_end_order[j] = separated[i]
+    return match, joining, bound_rows, separated, (bound_rows, in_end_order)
+
+
 def plan(
     session: Session,
     start_id: str,
@@ -280,8 +398,11 @@ def plan(
     pairs: list[list[int]] | None = None,
     start_member_id: str | None = None,
     end_member_id: str | None = None,
+    clearance: float = scan_species.CLEARANCE,
 ) -> Plan:
-    """D114: the checks, the atom match and the suggested TS coordinates for a scan path."""
+    """D114: the checks, the atom match and the suggested TS coordinates for a scan path; with
+    a species joining or leaving on the edge (D120), the separated end, its species
+    `clearance` Å from the complex."""
     if start_id == end_id:
         raise RecordError("choose two different structures")
     start = resolve(session, start_id, start_member_id)
@@ -295,25 +416,29 @@ def plan(
     if edge is None:
         raise RecordError("a scan path runs along an edge; draw one between the two first")
     a, b = start.node.geometry, end.node.geometry
-    if len(a) != len(b):
-        raise RecordError(
-            f"“{start.name}” has {len(a)} atoms and “{end.name}” {len(b)}: a species joins or "
-            "leaves on this edge, which a scan path cannot follow yet"
+    joining = None
+    match_rows = None
+    if len(a) != len(b) or edge.species:
+        match, joining, start_rows, renumbered, match_rows = _joining(
+            session, start, end, edge, pairs, clearance
         )
-    charge, multiplicity = _charge_multiplicity(start, end)
-    match = atom_matching.match(a, b, atom_matching.pairs_from(pairs or []))
-    renumbered = atom_matching.renumbered(a, b, match.mapping)
+        small, bound = (start, end) if joining.direction == species.JOINS else (end, start)
+        charge, multiplicity = _species_charge(small, bound, joining.node)
+    else:
+        charge, multiplicity = _charge_multiplicity(start, end)
+        match = atom_matching.match(a, b, atom_matching.pairs_from(pairs or []))
+        renumbered = atom_matching.renumbered(a, b, match.mapping)
+        start_rows = a
     changed = [[i + 1, j + 1] for i, j in match.formed + match.broken]
     ts_ends = []
     modes = {}
     # The end in the start's order as it is stored (not fitted), so its mode vectors fit it.
-    reordered = [b[j] for j in match.mapping]
-    for which, item, rows, other in (
-        ("start", start, a, renumbered),
-        ("end", end, reordered, a),
-    ):
+    for which, item in (("start", start), ("end", end)):
         if item.node.role != Role.TRANSITION_STATE:
             continue
+        own = item.node.geometry
+        reordered = own if which == "start" else [own[j] for j in match.mapping]
+        rows, other = (start_rows, renumbered) if which == "start" else (reordered, start_rows)
         mode = imaginary_mode(item.node)
         renumbered_mode = None
         wavenumber = None
@@ -328,7 +453,7 @@ def plan(
             )
         suggested = suggest(rows, other, renumbered_mode, changed)
         for row in suggested:
-            row["start_value"] = value(a, row["atoms"])
+            row["start_value"] = value(start_rows, row["atoms"])
             row["end_value"] = value(renumbered, row["atoms"])
         ts_ends.append(
             {
@@ -344,7 +469,20 @@ def plan(
     solvent = solvent_of(start.node) or solvent_of(end.node)
     warnings = [] if match.formed or match.broken else [NO_BOND_CHANGE]
     return Plan(
-        start, end, edge, match, renumbered, charge, multiplicity, solvent, ts_ends, modes, warnings
+        start,
+        end,
+        edge,
+        match,
+        renumbered,
+        charge,
+        multiplicity,
+        solvent,
+        ts_ends,
+        modes,
+        warnings,
+        joining,
+        start_rows,
+        match_rows,
     )
 
 
@@ -354,7 +492,7 @@ def check_held(plan_: Plan, held: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ts = {t["end"]: t for t in plan_.ts_ends}
     if len(held) > MAX_HELD:
         raise RecordError(f"hold at most {MAX_HELD} coordinates")
-    count = len(plan_.start.node.geometry)
+    count = len(plan_.start_rows)
     out = []
     for row in held:
         which, atoms = row.get("end"), row.get("atoms")
@@ -367,7 +505,7 @@ def check_held(plan_: Plan, held: list[dict[str, Any]]) -> list[dict[str, Any]]:
             or len(set(atoms)) != len(atoms)
         ):
             raise RecordError(f"a held coordinate names 2 to 4 different atoms from 1 to {count}")
-        rows, other = plan_.start.node.geometry, plan_.renumbered
+        rows, other = plan_.start_rows, plan_.renumbered
         if which == "end":
             rows, other = other, rows
         out.append(
@@ -408,7 +546,7 @@ def check_drive(
         raise RecordError("drive the coordinates together or staged, in the order given")
     if len(drive) > MAX_DRIVE:
         raise RecordError(f"drive at most {MAX_DRIVE} coordinates")
-    count = len(plan_.start.node.geometry)
+    count = len(plan_.start_rows)
     out: list[dict[str, Any]] = []
     for row in drive:
         atoms = row.get("atoms")
@@ -429,7 +567,7 @@ def check_drive(
             )
         if any(_same(atoms, o["atoms"]) for o in out):
             raise RecordError(f"{name} is listed twice")
-        start_value = value(plan_.start.node.geometry, atoms)
+        start_value = value(plan_.start_rows, atoms)
         end_value = value(plan_.renumbered, atoms)
         ends = []
         for key, default in (("from", start_value), ("to", end_value)):
@@ -758,6 +896,10 @@ def create_job(
         solvent = SOLVENT_NAMES.get(solvent.strip().lower(), solvent.strip().lower())
         if solvent not in ALPB_SOLVENTS:
             raise RecordError(f"xTB's ALPB has no solvent “{solvent}”")
+    if plan_.species is not None:
+        raise RecordError(
+            "a path where a species joins or leaves can be planned and checked, but not sent yet"
+        )
     held = check_held(plan_, held)
     driven = check_drive(plan_, drive or [], drive_order, held)
     start, end, match = plan_.start, plan_.end, plan_.match
@@ -769,7 +911,7 @@ def create_job(
     }
     held_atoms = [row["atoms"] for row in held]
     active = pathtools.active_atoms(
-        start.node.geometry, plan_.renumbered, summary["formed"] + summary["broken"], held_atoms
+        plan_.start_rows, plan_.renumbered, summary["formed"] + summary["broken"], held_atoms
     )
     settings = {
         "charge": plan_.charge,
@@ -827,8 +969,8 @@ def create_job(
         uhf=plan_.multiplicity - 1,
         solvent_flag=f" --alpb {solvent}" if solvent else "",
         solvent_text=f" (ALPB {solvent})" if solvent else " (gas phase)",
-        active_count=len(active) or len(start.node.geometry),
-        atom_count=len(start.node.geometry),
+        active_count=len(active) or len(plan_.start_rows),
+        atom_count=len(plan_.start_rows),
         held=_held_text(held, plan_),
         guess_check=GUESS_CHECK.format(names=" and ".join(guesses)) if guesses else "",
         mode_files="".join(mode_lines),
