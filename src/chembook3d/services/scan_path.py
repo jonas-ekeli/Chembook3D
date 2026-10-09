@@ -411,7 +411,7 @@ def _held_text(held: list[dict[str, Any]], plan_: Plan) -> str:
 
 
 INSTRUCTIONS = """\
-This is a **scan path job** (Chembook3D D114, D116). Find the best path of relaxed GFN2-xTB
+This is a **scan path job** (Chembook3D D114, D116, D118). Find the best path of relaxed GFN2-xTB
 structures from `inputs/start.xyz` to `inputs/end.xyz` and return it as `outputs/path.xyz`.
 Chembook3D imports it as a new node whose scan plays as a movie (D112). Paths here are
 relative to this job's folder, where the commands below are run from; the helper is
@@ -427,7 +427,8 @@ Atoms are numbered from 1 everywhere, as xTB numbers them.
 - `inputs/mapping.json`: the match. `formed` and `broken` are the bonds (start numbering) that
   form and break between the ends by the app's rule; `mapping` gives each start atom's number
   in the end's own file.
-- `inputs/path.json`: the settings below, machine-readable.{mode_files}
+- `inputs/path.json`: the settings below, machine-readable, and `active`: the {active_count}
+  atoms the end is judged on (below).{mode_files}
 
 Charge {charge}, multiplicity {multiplicity}: run every xtb call with
 `--gfn 2 --chrg {charge} --uhf {uhf}{solvent_flag}`{solvent_text}.
@@ -465,11 +466,18 @@ Add `mode=concerted` under `$scan` to drive several lines together (`1: ...` and
 same number of points). Force constants of 0.5 to 2 Eh/bohr² work; xTB's restraints lag their
 targets a little.
 
-**After every stage**, run `pathtools.py trace stage-1/xtbscan.log --atoms 3 7 --to 1.54`:
-xTB ends normally even when a scan moved nothing (a wrong `$scan` number, for example), and
-the trace says whether each driven coordinate moved and reached its target (exit status 1 when
-one barely moved). `pathtools.py frames stage-1/xtbscan.log --last -o stage-2/start.xyz` takes
-out the structure the next stage starts from.
+xTB drives a scanned value from the first number to the second as written, past ±180° too:
+`60.0, 300.0` turns a dihedral through 180°, `60.0, -60.0` through 0°. `pathtools.py diff`
+gives each turning bond both ways round (`scan` and `other_way`).
+
+**After every stage**, run `pathtools.py trace stage-1/xtbscan.log --input stage-1/scan.inp`.
+xTB ends normally even when a scan moved nothing (a wrong `$scan` number, for example) or
+when its first structure relaxed away from the start value before the scan began; the trace
+reads the stage's input and warns about both (exit status 1), and says whether each scanned
+coordinate reached its target and each held one stayed. Fix a slipped first point (start from
+a structure at that value, or a stiffer force constant) before going on.
+`pathtools.py frames stage-1/xtbscan.log --last -o stage-2/start.xyz` takes out the structure
+the next stage starts from.
 
 **A later stage keeps what earlier stages did**: its `$constrain` holds every coordinate an
 earlier stage drove, at the value it actually reached (from the trace, not the value asked
@@ -485,28 +493,58 @@ A second stage after the one above:
     $end
 
 ## Strategies, in this order
+
+A **strategy** is one design: which coordinates are driven, together or in which stages and
+in which order. Running the same design scanned the other way, with another force constant or
+another number of points is a variant of it, not a new strategy.
 {ts_first}
 - One concerted scan of the bonds that form and break (and the held coordinates).
 - Stages: the large dihedral changes first, then the bond changes, or the other way round.
+  When several bonds turn, drive them together: `pathtools.py diff` lists the turning bonds
+  (`rotations`, one dihedral each, rings and methyl groups left out) and writes a concerted
+  `$scan` block for all of them (`scan_block`); one at a time, each relaxes the others back.
 - The same scanned from the end back to the start (`join --reverse` turns it round).
-- xTB's own path finder, `xtb inputs/start.xyz --path inputs/end.xyz --input path.inp`, which
-  needs no coordinates.
+- xTB's own path finder, which needs no coordinates. These settings worked on a 91-atom
+  organometallic step (about 30 s; the defaults gave a higher, worse path):
 
-**Budget**: stop after 6 strategies or about 60 minutes of xTB time, whichever comes first,
-then return the best path you have.
+      $path
+         nrun=1
+         npoint=25
+         anopt=10
+         kpush=0.003
+         kpull=-0.015
+         ppull=0.05
+         alp=1.2
+      $end
 
-When the two ends differ mostly in atoms far from anything that forms, breaks or is held (a
-different conformer of a side group), do not force that conformer change into the path: a
-path that ends in a nearby conformer is fine. Say so in `path.conformer_note`, with the end
-RMSD over the atoms that do take part when you can work it out.
+  Run `xtb inputs/start.xyz --path inputs/end.xyz --input path.inp <the flags above> >
+  path.out 2>&1`. Its `xtbpath.xyz` gives energies in kcal/mol from the first structure, not
+  in Eh: convert it with `pathtools.py pathfinder xtbpath.xyz path.out -o stage-1.xyz` before
+  joining (`join` refuses it as it is). Its points are only partly relaxed, so its barrier is
+  an estimate; a relaxed scan along the same change is better when there is time.
+
+**Budget**: about 60 minutes of xTB time and at most 6 strategies. Stop early only when a path
+passes; otherwise use the budget (try the reverse direction and the concerted rotations before
+giving up), then return the best path you have.
+
+**Where the path ends.** The end is judged on the atoms that take part in the reaction, listed
+in `path.json` as `active`: the atoms of the bonds that form or break and of the held
+coordinates, and every atom up to two bonds from them ({active_count} of {atom_count} here).
+Other atoms (side groups far from the reaction) may end in a different conformer from the end
+node's; do not force that change into the path. A path downhill from a TS that settles in
+another conformer is the answer the user wants, as an IRC would give it. Say in
+`path.conformer_note` which atoms differ from the end node and by how much (`end_rmsd` over all
+atoms against `active_end_rmsd`).
 
 ## Which path is best
 
 Check each candidate with
 
-    pathtools.py check path.xyz inputs/start.xyz inputs/end.xyz --mapping inputs/mapping.json
+    pathtools.py check path.xyz inputs/start.xyz inputs/end.xyz --mapping inputs/mapping.json \\
+        --settings inputs/path.json
 
-A path **passes** when it reaches the end (`end_rmsd` at most 0.5 Å after fitting), forms or
+A path **passes** when it reaches the end over the reacting atoms (`active_end_rmsd` at most
+0.5 Å after fitting on them; `end_rmsd` over all atoms is information only), forms or
 breaks no bond other than those in `mapping.json`, has no jump between neighbouring structures
 over 0.5 Å (`largest_jump`), and starts or ends at the held coordinates' TS values. Among those,
 keep the lowest highest point. A `spikes` entry is one structure far above both neighbours with
@@ -534,7 +572,8 @@ the app imports it all the same, saying in its notes that it did not pass.
     "gate": "passed",
     "missed": [],
     "reached_end": true,
-    "end_rmsd": 0.21,
+    "active_end_rmsd": 0.21,
+    "end_rmsd": 0.94,
     "top": 14,
     "barrier_kcal": 18.2,
     "spikes": [],
@@ -548,8 +587,10 @@ the app imports it all the same, saying in its notes that it did not pass.
   ```
 
   `gate` is `"passed"` or `"missed"`; `missed` lists the reasons in a few words each (for
-  example "end RMSD 1.27 Å"). `summary` says in two or three sentences what the best path does
-  and how close it came.
+  example "end RMSD over the reacting atoms 0.81 Å"). `summary` says in two or three sentences
+  what the best path does and how close it came.
+- `outputs/feedback.md` (optional): anything in these instructions or the helper that got in
+  your way, and what would have helped, for the app's developer. The app keeps it with the job.
 """
 
 MODE_FILE = "{end}_mode.json"  # a TS end's imaginary mode, in inputs/ (D116)
@@ -600,12 +641,17 @@ def create_job(
         "end": {"node_id": end.node.id, "label": end.name},
         **{k: summary[k] for k in ("mapping", "formed", "broken", "inverted", "fixed", "rmsd")},
     }
+    held_atoms = [row["atoms"] for row in held]
+    active = pathtools.active_atoms(
+        start.node.geometry, plan_.renumbered, summary["formed"] + summary["broken"], held_atoms
+    )
     settings = {
         "charge": plan_.charge,
         "multiplicity": plan_.multiplicity,
         "uhf": plan_.multiplicity - 1,
         "solvent": solvent,
         "held": held,
+        "active": active,
     }
     ts_of = {t["end"]: t for t in plan_.ts_ends}
 
@@ -652,6 +698,8 @@ def create_job(
         uhf=plan_.multiplicity - 1,
         solvent_flag=f" --alpb {solvent}" if solvent else "",
         solvent_text=f" (ALPB {solvent})" if solvent else " (gas phase)",
+        active_count=len(active) or len(start.node.geometry),
+        atom_count=len(start.node.geometry),
         held=_held_text(held, plan_),
         guess_check=GUESS_CHECK.format(names=" and ".join(guesses)) if guesses else "",
         mode_files="".join(mode_lines),
@@ -725,6 +773,7 @@ def create_job(
 # ---------- the result (PR 4) ----------
 
 PATH_FILE = "outputs/path.xyz"
+FEEDBACK_FILE = "outputs/feedback.md"  # the session's notes on the brief and helper (D118)
 NODE_GAP = 0.5  # the new node sits halfway between the ends
 
 
@@ -764,7 +813,9 @@ def _ts_check_text(check: Any) -> str:
     return "; ".join(parts) + "." if parts else json.dumps(check)
 
 
-def _notes(job: dict[str, Any], result: dict[str, Any], start: str, end: str) -> str:
+def _notes(
+    job: dict[str, Any], result: dict[str, Any], start: str, end: str, feedback: bool = False
+) -> str:
     path = result.get("path") if isinstance(result.get("path"), dict) else {}
     lines = [f"Scan path from “{start}” to “{end}”, cloud job {job['id']} (D114)."]
     summary = str(result.get("summary") or "").strip()
@@ -782,9 +833,18 @@ def _notes(job: dict[str, Any], result: dict[str, Any], start: str, end: str) ->
         )
     if path.get("reached_end") is not None:
         reached = "reached" if path["reached_end"] else "not reached"
-        rmsd = path.get("end_rmsd")
-        rmsd_text = f" (RMSD {float(rmsd):.2f} Å)" if isinstance(rmsd, int | float) else ""
-        lines.append(f"End {reached}{rmsd_text}.")
+        active, whole = path.get("active_end_rmsd"), path.get("end_rmsd")
+        if isinstance(active, int | float):
+            # D118: judged on the reacting atoms; the whole structure may differ in conformer.
+            whole_text = (
+                f", {float(whole):.2f} Å over all atoms" if isinstance(whole, int | float) else ""
+            )
+            lines.append(
+                f"End {reached} over the reacting atoms (RMSD {float(active):.2f} Å{whole_text})."
+            )
+        else:
+            rmsd_text = f" (RMSD {float(whole):.2f} Å)" if isinstance(whole, int | float) else ""
+            lines.append(f"End {reached}{rmsd_text}.")
     if isinstance(path.get("barrier_kcal"), int | float):
         lines.append(
             f"Highest point {float(path['barrier_kcal']):.1f} kcal/mol above the start (GFN2-xTB)."
@@ -797,6 +857,8 @@ def _notes(job: dict[str, Any], result: dict[str, Any], start: str, end: str) ->
         lines.append(f"Conformers: {conformer}")
     if path.get("ts_check"):
         lines.append(f"TS check: {_ts_check_text(path['ts_check'])}")
+    if feedback:
+        lines.append(f"The session left feedback in jobs/{job['id']}/{FEEDBACK_FILE}.")
     return "\n\n".join(lines)
 
 
@@ -852,7 +914,13 @@ def _import_result(session: Session, folder: Path, job_id: str, again: bool) -> 
         status=Status.PLANNED,
         origin_path=str(path_file),
         original_name="path.xyz",
-        notes=_notes(job, result if isinstance(result, dict) else {}, start_name, end_name),
+        notes=_notes(
+            job,
+            result if isinstance(result, dict) else {},
+            start_name,
+            end_name,
+            (base / FEEDBACK_FILE).is_file(),
+        ),
     )
     if start is not None:
         group = session.get(GroupNode, start.group_id) if start.group_id else None
