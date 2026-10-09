@@ -159,3 +159,69 @@ test('two conformers get a warning that no bond changes', async ({ page }) => {
   await expect(dialog.getByLabel('Scan path warning')).toContainText('No bond forms or breaks')
   await expect(dialog.getByRole('button', { name: 'Send' })).toBeEnabled()
 })
+
+test('your own coordinates to drive are sent with the job', async ({ page }) => {
+  // T-UI-22, D119: rows typed under "Drive these", a dihedral the other way round, a held TS
+  // coordinate shown greyed and refused as a row, "in this order", and the job's `drive`.
+  test.slow() // software WebGL is slow on the Windows runners
+  await newInvestigation(page, 'Scan path with own coordinates')
+  const stretched = reversed.map((atom, i) => (i === reversed.length - 7 ? (['H', atom[1] + 0.45, atom[2] + 0.45, atom[3]] as const) : atom))
+  const ids: string[] = []
+  for (const body of [
+    { label: 'start', xyz: xyz(GLYCEROL), pos_x: 100, pos_y: 100, charge: 0, multiplicity: 1 },
+    { label: 'guess', xyz: xyz(stretched), pos_x: 400, pos_y: 100, role: 'transition_state' },
+  ]) {
+    const response = await page.request.post('/api/nodes', { data: body })
+    expect(response.ok()).toBeTruthy()
+    ids.push(((await response.json()) as { id: string }).id)
+  }
+  const edge = await page.request.post('/api/transitions', { data: { source_id: ids[0], target_id: ids[1] } })
+  expect(edge.ok()).toBeTruthy()
+  await page.reload()
+  await canvasNode(page, 'start').click()
+  await canvasNode(page, 'guess').click({ modifiers: ['Control'] })
+  await page.getByLabel('Selection inspector').getByRole('button', { name: 'Scan path…' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'Scan path' })
+  await expect(dialog.getByLabel('Scan path plan')).toContainText('From “start” to “guess”')
+  const drive = dialog.getByLabel('Drive these')
+  await expect(drive.getByRole('table')).toHaveCount(0)
+  await dialog.getByLabel('Atoms to hold').fill('1 2')
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  // The held coordinate is driven anyway: shown greyed, and refused as a row of its own.
+  await expect(drive.getByLabel('Held distance 1–2')).toContainText('held at the TS')
+  const atoms = dialog.getByLabel('Atoms to drive')
+  await atoms.fill('2 1')
+  await atoms.press('Enter')
+  await expect(drive.getByRole('alert')).toContainText('is held at the TS')
+
+  await atoms.fill('4 1 2 6')
+  await atoms.press('Enter')
+  const from = drive.getByLabel('From dihedral 4–1–2–6')
+  const to = drive.getByLabel('To dihedral 4–1–2–6')
+  const start = Number(await from.inputValue())
+  const short = Number(await to.inputValue())
+  expect(Math.abs(short - start)).toBeLessThanOrEqual(180)
+  await drive.getByRole('button', { name: 'Other way round' }).click()
+  const long = Number(await to.inputValue())
+  expect(Math.abs(long - short)).toBeCloseTo(360, 1)
+  await atoms.fill('1 3')
+  await dialog.getByRole('button', { name: 'Add a coordinate to drive' }).click()
+  await drive.getByLabel('From distance 1–3').fill('2.6')
+  await drive.getByText('in this order').click()
+  await drive.getByRole('button', { name: 'Move distance 1–3 up' }).click()
+  await expect(drive.getByRole('row').nth(2)).toContainText('1. distance')
+  await dialog.getByRole('button', { name: 'Send' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('is saved but could not be started')
+  const jobs = (await (await page.request.get('/api/jobs')).json()) as {
+    scan_path: { drive: { order: string; coordinates: { atoms: number[]; from: number; to: number }[] } }
+  }[]
+  const sent = jobs[0].scan_path.drive
+  expect(sent.order).toBe('staged')
+  expect(sent.coordinates.map((c) => c.atoms)).toEqual([
+    [1, 3],
+    [4, 1, 2, 6],
+  ])
+  expect(sent.coordinates[0].from).toBeCloseTo(2.6, 3)
+  expect(sent.coordinates[1].to).toBeCloseTo(long, 1)
+})
