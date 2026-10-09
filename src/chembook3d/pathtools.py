@@ -10,8 +10,15 @@ Written by Chembook3D into `.claude/chembook3d/pathtools.py` of the investigatio
         most between two structures of the same atoms in the same order
     python3 pathtools.py rmsd A.xyz B.xyz
     python3 pathtools.py measure FILE.xyz 3 7 [9 [12]]
-        a distance (Å), angle or dihedral (degrees); atoms 1-based; on a multi-structure file,
-        one value per structure
+        a distance (Å), angle or dihedral (degrees, xTB's and IUPAC's sign convention); on a
+        multi-structure file, one value per structure
+    python3 pathtools.py frames xtbscan.log [--last | --index N] -o OUT.xyz
+        structures of a multi-structure file (an xtbscan.log, a path.xyz) as an xyz file:
+        all of them, the last, or number N
+    python3 pathtools.py trace xtbscan.log --atoms 2 3 [--to 3.2] [--atoms 1 2 3 4 ...]
+        each structure's energy (kcal/mol from the first) and the coordinates' values; with
+        --to (one per --atoms, in order), whether each coordinate moved and reached its target,
+        and exit status 1 when one barely moved: a scan that drove nothing ends normally too
     python3 pathtools.py join OUT.xyz STAGE1.log [STAGE2.log ...] --call "xtb ..." [--reverse N]
         every structure of the stages' xtbscan.log files in order, as one path.xyz whose
         comment lines read `energy: <Eh> stage: <n> call: <xtb command line>`; --reverse 2
@@ -19,7 +26,11 @@ Written by Chembook3D into `.claude/chembook3d/pathtools.py` of the investigatio
     python3 pathtools.py check PATH.xyz START.xyz END.xyz [--mapping mapping.json] [--json]
         how close the path starts and ends to the two ends, bonds that form or break along it
         other than those the ends differ by, the largest jump between neighbouring structures,
-        and the highest point
+        and the highest point, with spikes (one structure far above both neighbours with a jump
+        into or out of it, as a conformer flipping in one step gives) reported apart
+
+Atoms are numbered from 1 everywhere, on the command line and in the functions. Run this file
+as a script (`python3 pathtools.py ...`); importing it is not needed.
 """
 
 import argparse
@@ -43,6 +54,9 @@ HARTREE_KCAL = 627.5094740631
 # What a good path keeps to (D114).
 GOOD_END_RMSD = 0.5  # Å, the path's last structure against the end
 GOOD_JUMP = 0.5  # Å, fitted RMSD between neighbouring structures
+SPIKE_KCAL = 10.0  # kcal/mol above both neighbours, with a jump over GOOD_JUMP: a spike
+MOVED = 0.1  # a driven coordinate moved when it covered at least this part of the way
+REACHED = {2: 0.1, 3: 5.0, 4: 5.0}  # Å or degrees from its target: reached
 
 
 # ---------- reading and writing ----------
@@ -127,22 +141,35 @@ def angle(a, b, c):
 
 
 def dihedral(a, b, c, d):
-    b0 = _sub(a[1:4], b[1:4])
-    b1 = _sub(c[1:4], b[1:4])
-    b2 = _sub(d[1:4], c[1:4])
-    n1, n2 = _cross(b0, b1), _cross(b1, b2)
-    m1 = _cross(n1, [x / math.sqrt(_dot(b1, b1)) for x in b1])
-    return math.degrees(math.atan2(_dot(m1, n2), _dot(n1, n2)))
+    """The a-b-c-d dihedral in degrees, -180 to 180: 0 when a and d are on the same side (cis),
+    positive when a turns clockwise onto d looking from b to c (IUPAC; xTB and the app's 3D
+    view use the same)."""
+    b1 = _sub(b[1:4], a[1:4])
+    b2 = _sub(c[1:4], b[1:4])
+    b3 = _sub(d[1:4], c[1:4])
+    n1, n2 = _cross(b1, b2), _cross(b2, b3)
+    # atan2(|b2| b1·(b2×b3), (b1×b2)·(b2×b3)), as the 3D view's chem.ts measures it.
+    return math.degrees(math.atan2(math.sqrt(_dot(b2, b2)) * _dot(b1, n2), _dot(n1, n2)))
 
 
-def measure(rows, atoms):
-    """Distance, angle or dihedral of 0-based atoms."""
+def _measure(rows, atoms):
     picked = [rows[i] for i in atoms]
     return [None, None, distance, angle, dihedral][len(atoms)](*picked)
 
 
+def measure(rows, atoms):
+    """Distance (Å), angle or dihedral (degrees) of 2 to 4 atoms numbered from 1."""
+    if not 2 <= len(atoms) <= 4 or min(atoms) < 1 or max(atoms) > len(rows):
+        raise ValueError(f"give 2 to 4 atom numbers from 1 to {len(rows)}")
+    return _measure(rows, [a - 1 for a in atoms])
+
+
 def bonds(rows):
-    """Bonded pairs (i, j), i < j, 0-based, by the app's rule."""
+    """Bonded pairs (i, j), i < j, numbered from 1, by the app's rule."""
+    return {(i + 1, j + 1) for i, j in _bonds(rows)}
+
+
+def _bonds(rows):
     found = set()
     for i in range(len(rows)):
         ri = RADII.get(rows[i][0], DEFAULT_RADIUS)
@@ -205,7 +232,8 @@ def rmsd(a, b):
 
 
 def bond_changes(start, end):
-    a, b = bonds(start), bonds(end)
+    """0-based pairs formed and broken from start to end."""
+    a, b = _bonds(start), _bonds(end)
     return sorted(b - a), sorted(a - b)
 
 
@@ -213,7 +241,7 @@ def diff(start, end, top=10):
     if [r[0] for r in start] != [r[0] for r in end]:
         raise ValueError("the structures must hold the same atoms in the same order")
     formed, broken = bond_changes(start, end)
-    either = bonds(start) | bonds(end)
+    either = _bonds(start) | _bonds(end)
     distances = []
     for i in range(len(start)):
         for j in range(i + 1, len(start)):
@@ -232,7 +260,7 @@ def diff(start, end, top=10):
                 key = (i, j, k, m) if i < m else (m, k, j, i)
                 if key in torsions:
                     continue
-                t0, t1 = measure(start, list(key)), measure(end, list(key))
+                t0, t1 = _measure(start, list(key)), _measure(end, list(key))
                 change = abs((t1 - t0 + 180) % 360 - 180)
                 torsions[key] = (change, [x + 1 for x in key], t0, t1)
     dihedrals = sorted(torsions.values(), key=lambda item: -item[0])
@@ -267,27 +295,101 @@ def join(stages, calls, reversed_stages=()):
     return "".join(out)
 
 
-def check(path, start, end, allowed=None):
-    """How a path does: its ends, stray bond changes, jumps and its highest point."""
+def frames_of(path, index=None):
+    """The structures of a multi-structure file, or only number `index` (from 1; -1 the last)."""
+    frames = read_frames(path)
+    if index is not None:
+        if index == -1:
+            index = len(frames)
+        if not 1 <= index <= len(frames):
+            raise ValueError(f"{path} holds {len(frames)} structures")
+        frames = [frames[index - 1]]
+    return frames
+
+
+def _wrapped(change, size):
+    return (change + 180) % 360 - 180 if size == 4 else change
+
+
+def trace(path, coordinates, targets=None):
+    """Each structure's energy and the coordinates' values; with targets (one per coordinate),
+    whether each moved and reached its target."""
     frames = read_frames(path)
     if not frames:
         raise ValueError(f"{path} holds no structure")
-    allowed = {tuple(sorted(pair)) for pair in (allowed or [])}
+    energies = [energy_of(comment) for comment, _ in frames]
+    rows = []
+    for index, (_, structure) in enumerate(frames, start=1):
+        row = {"structure": index}
+        if energies[0] is not None and energies[index - 1] is not None:
+            row["kcal"] = round((energies[index - 1] - energies[0]) * HARTREE_KCAL, 2)
+        for atoms in coordinates:
+            row["-".join(map(str, atoms))] = round(measure(structure, atoms), 3)
+        rows.append(row)
+    report = {"structures": rows}
+    if targets:
+        if len(targets) != len(coordinates):
+            raise ValueError("give one target per coordinate")
+        verdicts = []
+        for atoms, target in zip(coordinates, targets, strict=True):
+            first = measure(frames[0][1], atoms)
+            last = measure(frames[-1][1], atoms)
+            asked = abs(_wrapped(target - first, len(atoms)))
+            went = abs(_wrapped(last - first, len(atoms)))
+            verdicts.append({
+                "atoms": "-".join(map(str, atoms)),
+                "first": round(first, 3),
+                "last": round(last, 3),
+                "target": target,
+                "moved": asked == 0 or went >= MOVED * asked,
+                "reached": abs(_wrapped(target - last, len(atoms))) <= REACHED[len(atoms)],
+            })  # fmt: skip
+        report["targets"] = verdicts
+    return report
+
+
+def _spikes(energies, jumps):
+    """Structures (0-based) far above both neighbours with a jump into or out of them."""
+    found = []
+    for k in range(1, len(energies) - 1):
+        above = (energies[k] - max(energies[k - 1], energies[k + 1])) * HARTREE_KCAL
+        if above > SPIKE_KCAL and max(jumps[k - 1], jumps[k]) > GOOD_JUMP:
+            found.append(k)
+    return found
+
+
+def _top(energies, skip=()):
+    inner = [k for k in range(1, len(energies) - 1) if k not in skip
+             and energies[k] > energies[k - 1] and energies[k] > energies[k + 1]]  # fmt: skip
+    return max(inner, key=lambda k: energies[k]) if inner else None
+
+
+def check(path, start, end, allowed=None):
+    """How a path does: its ends, stray bond changes, jumps, spikes and its highest point.
+    `allowed` lists more bonds (atom pairs from 1) that may form or break."""
+    frames = read_frames(path)
+    if not frames:
+        raise ValueError(f"{path} holds no structure")
+    allowed = {tuple(sorted((a - 1, b - 1))) for a, b in (allowed or [])}
     allowed |= {tuple(pair) for pair in bond_changes(start, end)[0] + bond_changes(start, end)[1]}
-    first_bonds = bonds(start)
+    first_bonds = _bonds(start)
     stray = []
     for index, (_, rows) in enumerate(frames, start=1):
-        for pair in sorted(bonds(rows) ^ first_bonds):
+        for pair in sorted(_bonds(rows) ^ first_bonds):
             if pair not in allowed:
                 stray.append({"structure": index, "atoms": [pair[0] + 1, pair[1] + 1]})
     jumps = [rmsd(frames[k][1], frames[k + 1][1]) for k in range(len(frames) - 1)]
     energies = [energy_of(comment) for comment, _ in frames]
-    top = None
+    top = smooth_top = None
+    spikes = []
     if all(e is not None for e in energies) and len(energies) > 2:
-        inner = [k for k in range(1, len(energies) - 1)
-                 if energies[k] > energies[k - 1] and energies[k] > energies[k + 1]]  # fmt: skip
-        if inner:
-            top = max(inner, key=lambda k: energies[k])
+        spikes = _spikes(energies, jumps)
+        top = _top(energies)
+        smooth_top = _top(energies, set(spikes))
+
+    def barrier(k):
+        return (energies[k] - energies[0]) * HARTREE_KCAL if k is not None else None
+
     end_rmsd = rmsd(frames[-1][1], end)
     largest = max(jumps) if jumps else 0.0
     report = {
@@ -299,7 +401,10 @@ def check(path, start, end, allowed=None):
         "largest_jump": largest,
         "largest_jump_after": jumps.index(largest) + 1 if jumps else None,
         "top": top + 1 if top is not None else None,
-        "barrier_kcal": ((energies[top] - energies[0]) * HARTREE_KCAL if top is not None else None),
+        "barrier_kcal": barrier(top),
+        "spikes": [k + 1 for k in spikes],
+        "top_without_spikes": smooth_top + 1 if smooth_top is not None else None,
+        "barrier_without_spikes_kcal": barrier(smooth_top),
     }
     report["good"] = report["reached_end"] and not stray and largest <= GOOD_JUMP
     return report
@@ -331,6 +436,17 @@ def main(argv=None):
     p = sub.add_parser("measure")
     p.add_argument("file")
     p.add_argument("atoms", nargs="+", type=int)
+    p = sub.add_parser("frames")
+    p.add_argument("file")
+    which = p.add_mutually_exclusive_group()
+    which.add_argument("--last", action="store_true")
+    which.add_argument("--index", type=int)
+    p.add_argument("-o", "--out", required=True)
+    p = sub.add_parser("trace")
+    p.add_argument("file")
+    p.add_argument("--atoms", action="append", nargs="+", type=int, required=True)
+    p.add_argument("--to", action="append", type=float)
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("join")
     p.add_argument("out")
     p.add_argument("stages", nargs="+")
@@ -351,7 +467,17 @@ def main(argv=None):
         if not 2 <= len(args.atoms) <= 4:
             parser.error("give 2 to 4 atom numbers")
         for _, rows in read_frames(args.file):
-            print(f"{measure(rows, [a - 1 for a in args.atoms]):.4f}")
+            print(f"{measure(rows, args.atoms):.4f}")
+    elif args.command == "frames":
+        picked = frames_of(args.file, -1 if args.last else args.index)
+        with open(args.out, "w", encoding="utf-8") as handle:
+            handle.write("".join(format_frame(rows, comment) for comment, rows in picked))
+        print(f"{args.out}: {len(picked)} structures")
+    elif args.command == "trace":
+        report = trace(args.file, args.atoms, args.to)
+        _print(report, args.json)
+        if any(not t["moved"] for t in report.get("targets", [])):
+            return 1
     elif args.command == "join":
         text = join(args.stages, args.call, set(args.reverse))
         with open(args.out, "w", encoding="utf-8") as handle:
@@ -362,8 +488,7 @@ def main(argv=None):
         if args.mapping:
             with open(args.mapping, encoding="utf-8") as handle:
                 mapping = json.load(handle)
-            pairs = mapping.get("formed", []) + mapping.get("broken", [])
-            allowed = [[a - 1, b - 1] for a, b in pairs]
+            allowed = mapping.get("formed", []) + mapping.get("broken", [])
         _print(check(args.path, read_xyz(args.start), read_xyz(args.end), allowed), args.json)
     return 0
 

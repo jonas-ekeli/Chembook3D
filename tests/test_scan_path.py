@@ -8,7 +8,7 @@ import pytest
 
 from chembook3d import cloud_jobs, cloud_templates, pathtools
 from chembook3d.parsers import xtb
-from chembook3d.services import atom_matching, geometry
+from chembook3d.services import atom_matching, geometry, scan_path
 from tests.test_atom_matching import FIXTURES, frames, scrambled
 from tests.test_import import TS, commit, fixture, named, upload
 from tests.test_overlay import xyz_text
@@ -229,7 +229,9 @@ def test_pathtools_agrees_with_the_app():
     complex_ = frames(FIXTURES / "sterics" / "8.xyz")[0]
     turned, _ = scrambled(complex_, seed=1)
     same = atom_matching.bonds(np.array([r[1:] for r in complex_]), [r[0] for r in complex_])
-    assert pathtools.bonds(complex_) == {(int(i), int(j)) for i, j in np.argwhere(np.triu(same))}
+    assert pathtools.bonds(complex_) == {
+        (int(i) + 1, int(j) + 1) for i, j in np.argwhere(np.triu(same))
+    }
     # Written into the repository with the other cloud files, word for word.
     assert cloud_templates.PATHTOOLS_TEXT == (
         __import__("pathlib").Path(pathtools.__file__).read_text(encoding="utf-8")
@@ -265,7 +267,7 @@ def test_join_check_and_import(tmp_path):
     step = xtb.parse_structures(out.read_text(encoding="utf-8"), "path.xyz").steps[0]
     assert step.geometry_stages == [1] * 4 + [2] * 4
     assert (step.route.solvation_model, step.route.solvent) == ("ALPB", "water")
-    report = pathtools.check(str(out), start, end, allowed=[[1, 0]])
+    report = pathtools.check(str(out), start, end, allowed=[[2, 1]])
     assert report["reached_end"] and report["end_rmsd"] < 1e-6 and report["start_rmsd"] < 1e-6
     assert report["stray_bond_changes"] == [] and report["top"] == 3
     assert report["largest_jump"] < pathtools.GOOD_JUMP and report["good"]
@@ -278,3 +280,78 @@ def test_join_check_and_import(tmp_path):
     diff = pathtools.diff(start, end)
     assert diff["broken"] == [[1, 2]] and diff["formed"] == []
     assert diff["distances"][0]["atoms"] in ([1, 2], [2, 3])
+
+
+def reference_dihedral(a, b, c, d):
+    """IUPAC, as xTB measures it (an independent formula: the vectors projected onto the plane
+    normal to the b–c bond)."""
+    a, b, c, d = (np.array(p[1:4], dtype=float) for p in (a, b, c, d))
+    axis = (c - b) / np.linalg.norm(c - b)
+    v = (a - b) - np.dot(a - b, axis) * axis
+    w = (d - c) - np.dot(d - c, axis) * axis
+    return float(np.degrees(np.arctan2(np.dot(np.cross(axis, v), w), np.dot(v, w))))
+
+
+def test_pathtools_dihedrals_follow_xtb(tmp_path):
+    # T-PATH-09: cis is 0°, trans 180°, the sign as xTB and IUPAC give it; atoms from 1 in the
+    # functions as on the command line; the app's held values use the same.
+    cis = [["C", 1, 0, 0], ["C", 0, 0, 0], ["C", 0, 1, 0], ["C", 1, 1, 0]]
+    trans = [["C", 1, 0, 0], ["C", 0, 0, 0], ["C", 0, 1, 0], ["C", -1, 1, 0]]
+    turned = [["C", 1, 0, 0], ["C", 0, 0, 0], ["C", 0, 1, 0], ["C", 0.5, 1, 0.8]]
+    assert pathtools.measure(cis, [1, 2, 3, 4]) == pytest.approx(0.0, abs=1e-9)
+    assert abs(pathtools.measure(trans, [1, 2, 3, 4])) == pytest.approx(180.0)
+    assert pathtools.measure(turned, [1, 2, 3, 4]) == pytest.approx(-57.99, abs=0.01)
+    assert scan_path.value(turned, [1, 2, 3, 4]) == pytest.approx(-57.99, abs=0.01)
+    rng = np.random.default_rng(3)
+    for _ in range(50):
+        rows = [["C", *rng.normal(size=3)] for _ in range(4)]
+        assert pathtools.measure(rows, [1, 2, 3, 4]) == pytest.approx(reference_dihedral(*rows))
+    with pytest.raises(ValueError):
+        pathtools.measure(cis, [0, 1, 2])
+    # The command line gives the same, one value per structure.
+    (tmp_path / "t.xyz").write_text(pathtools.format_frame(turned, "t"), encoding="utf-8")
+    assert pathtools.main(["measure", str(tmp_path / "t.xyz"), "1", "2", "3", "4"]) == 0
+
+
+def test_pathtools_frames_trace_and_spikes(tmp_path, capsys):
+    # T-PATH-10: one structure of a scan log out as xyz; a trace of the driven coordinate, which
+    # fails when the scan moved nothing; a conformer flipping in one step is reported as a
+    # spike, with the top found without it; the cloud files keep Python's cache out of git.
+    start = [list(r) for r in WATER_A]
+    stretched = [[e, x, y * f, z * f] for (e, x, y, z), f in zip(start, (1, 1.4, 1), strict=True)]
+    steps = [
+        [[e, x, y + t * (yy - y), z + t * (zz - z)]
+         for (e, x, y, z), (_, _, yy, zz) in zip(start, stretched, strict=True)]
+        for t in np.linspace(0, 1, 5)
+    ]  # fmt: skip
+    log = tmp_path / "xtbscan.log"
+    log.write_text(scan_log(steps, [-5.0, -4.995, -4.99, -4.993, -4.996]), encoding="utf-8")
+    last = tmp_path / "last.xyz"
+    assert pathtools.main(["frames", str(log), "--last", "-o", str(last)]) == 0
+    assert pathtools.rmsd(pathtools.read_xyz(last), steps[-1]) < 1e-6
+    third = tmp_path / "third.xyz"
+    assert pathtools.main(["frames", str(log), "--index", "3", "-o", str(third)]) == 0
+    assert pathtools.rmsd(pathtools.read_xyz(third), steps[2]) < 1e-6
+    target = pathtools.measure(stretched, [1, 2])
+    report = pathtools.trace(str(log), [[1, 2]], [target])
+    assert [r["kcal"] for r in report["structures"]][2] == pytest.approx(0.01 * 627.509, abs=0.01)
+    assert report["targets"][0]["moved"] and report["targets"][0]["reached"]
+    capsys.readouterr()
+    assert pathtools.main(["trace", str(log), "--atoms", "1", "2", "--to", f"{target}"]) == 0
+    # Driving a coordinate the scan never touched: it ends normally, the trace says so.
+    assert pathtools.main(["trace", str(log), "--atoms", "1", "3", "--to", "2.5"]) == 1
+    assert "moved False" in capsys.readouterr().out
+    # A flip in one structure: high above both neighbours, with a jump into it.
+    flipped = [r[:] for r in steps[2]]
+    flipped[2] = ["H", 0.0, -0.2, 2.5]
+    spiky = tmp_path / "spiky.xyz"
+    spiky.write_text(
+        scan_log([*steps[:2], flipped, *steps[3:]], [-5.0, -4.995, -4.9, -4.993, -4.996]),
+        encoding="utf-8",
+    )
+    report = pathtools.check(str(spiky), start, stretched)
+    assert report["spikes"] == [3] and report["top"] == 3
+    assert report["top_without_spikes"] is None and not report["good"]
+    smooth = pathtools.check(str(log), start, stretched)
+    assert smooth["spikes"] == [] and smooth["top"] == smooth["top_without_spikes"] == 3
+    assert cloud_templates.TOOLS_IGNORE_TEXT.strip() == "__pycache__/"
