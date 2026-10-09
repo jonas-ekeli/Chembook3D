@@ -102,6 +102,13 @@ test('an xTB scan plays, and "Use this structure" changes a path node in place',
   await expect(page.getByRole('status')).toContainText("The node's geometry is now structure 9.")
   await expect.poll(coordinates).not.toBe(before)
   await expect(page.locator('.react-flow__node')).toHaveCount(1)
+  // The history names the scan's changed coordinates and energy without listing them, so the
+  // inspector, and the 3D view in it, keep their width (a long line once made the view black).
+  const history = inspector.getByRole('list', { name: 'History' })
+  await expect(history).toContainText('Calculation coordinates changed (8 atoms → 8 atoms)')
+  await expect(history).toContainText(/Energy: -15\.\d{6} Eh → -15\.\d{6} Eh/)
+  const width = async (locator: typeof inspector) => (await locator.boundingBox())!.width
+  expect(await width(inspector.getByTestId('viewer3d'))).toBeLessThanOrEqual(await width(inspector))
 
   // On a node with a Gaussian scan, the structure goes to a derived node (ID-4).
   await page.getByRole('button', { name: 'Import file…' }).click()

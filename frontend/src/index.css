@@ -571,6 +571,11 @@ section {
 .history .record {
   font-weight: 500;
 }
+/* A long value must wrap, not widen the inspector (and the 3D view with it). */
+.history .what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 
 /* Dialogs */
 .modal-backdrop {

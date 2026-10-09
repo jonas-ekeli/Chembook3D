@@ -1,6 +1,7 @@
 import type { GeometryRows, HistoryEntry } from '../api'
 import { CALCULATION_TYPES, NOTE_CORNER_LABEL, ROLES, speciesChip, STATUSES, type NoteCorner } from '../api'
 import { noteTitle } from '../notes'
+import { hartree } from '../util'
 
 const FIELD_LABELS: Record<string, string> = {
   label: 'Label',
@@ -153,7 +154,11 @@ const CALCULATION_FIELDS: Record<string, string> = {
   level: 'Level of theory',
   geometry_level: 'Geometry level',
   notes: 'Calculation notes',
+  geometry: 'Calculation coordinates',
+  energy: 'Energy',
 }
+
+const energy = (value: unknown) => (typeof value === 'number' ? hartree(value) : show(null, value))
 
 function describeOther(entry: HistoryEntry): string | null {
   const value = entry.new_value as Record<string, unknown> | null
@@ -164,6 +169,9 @@ function describeOther(entry: HistoryEntry): string | null {
     }
     const field = CALCULATION_FIELDS[entry.field ?? ''] ?? entry.field
     if (entry.field === 'notes') return `${field} changed`
+    // D112: "Use this structure" on a scan path node changes the scan's own geometry and energy.
+    if (entry.field === 'geometry') return `${field} changed (${show('geometry', entry.old_value)} → ${show('geometry', entry.new_value)})`
+    if (entry.field === 'energy') return `${field}: ${energy(entry.old_value)} → ${energy(entry.new_value)}`
     return `${field}: ${show(null, entry.old_value)} → ${show(null, entry.new_value)}`
   }
   if (entry.record_type === 'source_file') {
