@@ -298,9 +298,33 @@ export type StepFrame = {
   point: number | null
   converged: boolean
   stage: number | null
+  /** D117: left out of the scan path by hand. */
+  removed: boolean
+}
+/** D117: where removed points leave a gap between two kept frames (0-based frame indices). */
+export type TrimCut = { before: number; after: number; removed: number; jump: number | null; large: boolean }
+/** D117: a scan path over its kept points. `top` is the frame the node takes, `shown` the frame
+ * the calculation stands for; `automatic` when they are the same, so a trim moves it along. */
+export type Trim = {
+  removed: number[]
+  kept: number
+  top: number
+  shown: number | null
+  automatic: boolean
+  barrier: number | null
+  cuts: TrimCut[]
+  spikes: number[]
+  first_removed: boolean
+  last_removed: boolean
 }
 /** `in_place`: "Use this structure" changes the node itself (a scan path node), not a derived one (D112). */
-export type Steps = { scan: 'relaxed' | 'rigid' | null; points: number; frames: StepFrame[]; in_place: boolean }
+export type Steps = {
+  scan: 'relaxed' | 'rigid' | null
+  points: number
+  frames: StepFrame[]
+  in_place: boolean
+  trim: Trim | null
+}
 
 /** D80: all atoms (when they correspond), chosen atoms, or the stored coordinates. */
 export type OverlayAlign = 'all' | 'atoms' | 'none'
@@ -688,6 +712,8 @@ export type Calculation = {
   result: CalculationResult | null
   quasi_harmonic: QuasiHarmonic | null
   notes: string
+  /** D117: scan points left out of a scan path. */
+  removed_points: number[]
   created_at: string
 }
 
@@ -1540,6 +1566,10 @@ export const api = {
   steps: (calculationId: string) => request<Steps>('GET', `/calculations/${calculationId}/steps`),
   useStep: (calculationId: string, frame: number) =>
     request<{ node: Node; derived: boolean }>('POST', `/calculations/${calculationId}/steps/${frame}/use`),
+  trimSteps: (calculationId: string, body: { remove?: number[]; restore?: number[] }) =>
+    request<{ steps: Steps; node: Node; moved: number | null }>('POST', `/calculations/${calculationId}/steps/trim`, body),
+  previewTrim: (calculationId: string, body: { remove?: number[]; restore?: number[] }) =>
+    request<Trim>('POST', `/calculations/${calculationId}/steps/trim-preview`, body),
   overlay: (body: OverlayRequest) => request<Overlay>('POST', '/overlay', body),
   scanPathPlan: (body: ScanPathRequest) => request<ScanPathPlan>('POST', '/scan-paths/plan', body),
   sendScanPath: (body: ScanPathRequest & { held: { end: 'start' | 'end'; atoms: number[] }[]; solvent: string | null }) =>

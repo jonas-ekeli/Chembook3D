@@ -2243,6 +2243,25 @@ pre.basis-text {
   display: flex;
   justify-content: space-between;
 }
+/* D117: a scan path's removed points and the section chosen on the chart */
+.trim-panel {
+  display: grid;
+  gap: 0.3rem;
+}
+.trim-panel p {
+  margin: 0;
+}
+.trim-selection {
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.5rem;
+}
+.step-chart svg {
+  touch-action: none;
+}
+.step-chart-hint {
+  margin: 0;
+}
 .step-controls select {
   width: auto;
 }

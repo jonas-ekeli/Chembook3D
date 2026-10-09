@@ -61,7 +61,7 @@ QUIET = re.compile(
     r"^/api/("
     r"live|selection|view-state|confirmations(/.*)?"
     r"|energies/(profile|table|table\.csv)|pathways/extend|overlay|snapshot|atom-match"
-    r"|scan-paths|scan-paths/plan"
+    r"|scan-paths|scan-paths/plan|calculations/[^/]+/steps/trim-preview"
     r"|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|imports|imports/[^/]+|imports/[^/]+/preview"
     r"|batch-imports|batch-imports/[^/]+|batch-imports/[^/]+/preview"

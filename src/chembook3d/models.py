@@ -236,6 +236,8 @@ class Calculation(Base):
         ForeignKey("source_files.id", ondelete="SET NULL"), default=None, index=True
     )
     notes: Mapped[str] = mapped_column(Text, default="")
+    # D117: the scan points (1-based) a scan path leaves out; its file is never changed.
+    removed_points: Mapped[list[Any]] = mapped_column(default=list)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     node: Mapped[Node] = relationship(back_populates="calculations")

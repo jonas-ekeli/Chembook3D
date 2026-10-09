@@ -1,7 +1,7 @@
 import type { GeometryRows, HistoryEntry } from '../api'
 import { CALCULATION_TYPES, NOTE_CORNER_LABEL, ROLES, speciesChip, STATUSES, type NoteCorner } from '../api'
 import { noteTitle } from '../notes'
-import { hartree } from '../util'
+import { hartree, ranges } from '../util'
 
 const FIELD_LABELS: Record<string, string> = {
   label: 'Label',
@@ -172,6 +172,8 @@ function describeOther(entry: HistoryEntry): string | null {
     // D112: "Use this structure" on a scan path node changes the scan's own geometry and energy.
     if (entry.field === 'geometry') return `${field} changed (${show('geometry', entry.old_value)} → ${show('geometry', entry.new_value)})`
     if (entry.field === 'energy') return `${field}: ${energy(entry.old_value)} → ${energy(entry.new_value)}`
+    // D117: points taken out of a scan path or put back, as runs, never the raw list.
+    if (entry.field === 'removed_points') return describeTrim(entry.old_value, entry.new_value)
     return `${field}: ${show(null, entry.old_value)} → ${show(null, entry.new_value)}`
   }
   if (entry.record_type === 'source_file') {
@@ -193,6 +195,19 @@ function describeOther(entry: HistoryEntry): string | null {
     return `Added elements to a ${what}: ${show(null, entry.new_value)}`
   }
   return null
+}
+
+function describeTrim(before: unknown, after: unknown): string {
+  const old = new Set(Array.isArray(before) ? (before as number[]) : [])
+  const now = Array.isArray(after) ? (after as number[]) : []
+  const removed = now.filter((p) => !old.has(p))
+  const restored = [...old].filter((p) => !now.includes(p))
+  const points = (list: number[]) => `point${list.length === 1 ? '' : 's'} ${ranges(list)}`
+  const parts = []
+  if (removed.length) parts.push(`Removed ${points(removed)} from the scan path`)
+  if (restored.length) parts.push(`${removed.length ? 'put' : 'Put'} ${points(restored)} back in the scan path`)
+  const total = now.length ? `${now.length} removed in all` : 'none removed now'
+  return `${parts.join(', ') || 'Scan path points unchanged'} (${total})`
 }
 
 /** D85, A35: a pinned note's changes, recorded on its node. */

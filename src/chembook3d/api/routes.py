@@ -265,6 +265,7 @@ class CalculationOut(BaseModel):
     result: ResultOut | None
     quasi_harmonic: QuasiHarmonicOut | None
     notes: str
+    removed_points: list[int] = []  # D117: scan points left out of a scan path
     created_at: UtcDatetime
 
 
@@ -1044,6 +1045,7 @@ def _calculation_out(request: Request, calculation: Calculation) -> CalculationO
         result=ResultOut.model_validate(result, from_attributes=True) if result else None,
         quasi_harmonic=_quasi_harmonic_out(calculation),
         notes=calculation.notes,
+        removed_points=calculation.removed_points or [],
         created_at=calculation.created_at,
     )
 

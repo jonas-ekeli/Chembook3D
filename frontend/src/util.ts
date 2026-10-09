@@ -37,3 +37,16 @@ export function withDisplacements(xyz: string, mode: number[][]): string {
 export function hartree(value: number | null | undefined, digits = 6): string {
   return value === null || value === undefined ? '—' : `${value.toFixed(digits)} Eh`
 }
+
+/** "3–7, 10": numbers as runs. */
+export function ranges(numbers: number[]): string {
+  const sorted = [...numbers].sort((a, b) => a - b)
+  const runs: string[] = []
+  for (let i = 0; i < sorted.length; ) {
+    let j = i
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++
+    runs.push(j > i ? `${sorted[i]}–${sorted[j]}` : String(sorted[i]))
+    i = j + 1
+  }
+  return runs.join(', ')
+}
