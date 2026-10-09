@@ -12,6 +12,8 @@ design the path itself with GFN2-xTB relaxed scans and the helper `pathtools.py`
 """
 
 import json
+import re
+import textwrap
 import threading
 from collections import Counter
 from dataclasses import dataclass, field
@@ -639,14 +641,14 @@ Atoms are numbered from 1 everywhere, as xTB numbers them.
 
 ## The two ends
 
-- `inputs/start.xyz`: “{start}”{start_ts}.
-- `inputs/end.xyz`: “{end}”{end_ts}, renumbered by the app in the start's atom order and fitted
-  on the start. The atoms correspond one to one; never renumber them.
+- `inputs/start.xyz`: “{start}”{start_ts}{start_apart}.
+- `inputs/end.xyz`: “{end}”{end_ts}{end_apart}, renumbered by the app in the start's atom order
+  and fitted on the start. The atoms correspond one to one; never renumber them.
 - `inputs/mapping.json`: the match. `formed` and `broken` are the bonds (start numbering) that
   form and break between the ends by the app's rule; `mapping` gives each start atom's number
   in the end's own file.
 - `inputs/path.json`: the settings below, machine-readable, and `active`: the {active_count}
-  atoms the end is judged on (below).{drive_file}{mode_files}
+  atoms the end is judged on (below).{species_file}{drive_file}{mode_files}
 
 Charge {charge}, multiplicity {multiplicity}: run every xtb call with
 `--gfn 2 --chrg {charge} --uhf {uhf}{solvent_flag}`{solvent_text}.
@@ -663,7 +665,7 @@ left free. Holding them means the path passes through the TS's values, not that 
 fixed: at the TS end of the path they are at the TS's values (within 0.05 Å or 2°), and from
 there they are driven to the other end's values, usually as the path's reaction coordinate.
 Never optimise the TS end without them in `$constrain`.
-{drive}
+{species}{drive}
 ## Running xTB scans
 
 A stage is `xtb <structure>.xyz --opt --input scan.inp <the flags above> > scan.out 2>&1`;
@@ -715,7 +717,7 @@ A second stage after the one above:
 A **strategy** is one design: which coordinates are driven, together or in which stages and
 in which order. Running the same design scanned the other way, with another force constant or
 another number of points is a variant of it, not a new strategy.
-{user_first}{ts_first}
+{user_first}{ts_first}{species_first}
 - One concerted scan of the bonds that form and break (and the held coordinates).
 - Stages: the large dihedral changes first, then the bond changes, or the other way round.
   When several bonds turn, drive them together: `pathtools.py diff` lists the turning bonds
@@ -808,7 +810,7 @@ the app imports it all the same, saying in its notes that it did not pass.
 
   `gate` is `"passed"` or `"missed"`; `missed` lists the reasons in a few words each (for
   example "end RMSD over the reacting atoms 0.81 Å"). `summary` says in two or three sentences
-  what the best path does and how close it came.{user_result}
+  what the best path does and how close it came.{user_result}{species_result}
 - `outputs/feedback.md` (optional): anything in these instructions or the helper that got in
   your way, and what would have helped, for the app's developer. The app keeps it with the job.
 """
@@ -855,6 +857,58 @@ USER_RESULT = """
   `user_strategy` reports the user's design either way: `{"gate": "passed" or "missed",
   "why": "a few words", "chosen": true when outputs/path.xyz is that design}`."""
 
+SPECIES = """
+## A species {verb}: “{species}”
+
+“{species}” {verb} along this path: it is {bound_text}.
+The app matched it across the ends and built the separated end, `inputs/{apart}.xyz`, itself:
+the bound structure with
+“{small}”'s own geometry fitted on the complex and “{species}”'s own geometry fitted on where
+it sits bound, then pulled straight out along the line from atom {anchor} through its centre
+until its closest contact with the complex was {closest:.1f} Å. So it faces the complex the
+way it binds, turned the way it binds.
+
+- `path.json` `species`: its atoms ({atoms}), the bonds it {makes} with their bound and
+  separated lengths, which end is the separated one (`separated`: "{apart}"), the charge and
+  `--uhf` of the complex alone (`complex`) and of the species alone (`alone`), and a two-stage
+  approach (`approach`, below).
+- `inputs/complex.xyz` and `inputs/species.xyz`: “{small}” and “{species}” alone, as their
+  nodes have them, each in its own atom order.{leaves_mapping}
+
+**The separated end** is judged by itself: `pathtools.py check ... --settings inputs/path.json`
+reports it under `separated`. It passes when the complex fits `inputs/{apart}.xyz`'s within
+0.5 Å after fitting on the complex alone (over its reacting atoms, as `active` lists them;
+`complex_rmsd`) and the species' closest contact with the complex is at least 3.5 Å
+(`closest_contact`), wherever it lies and however it is turned past that.{replaces} The bound
+end, `inputs/{bound_end}.xyz`, is judged as any end, and no bond other than the ones the
+species {makes} may change along the path.
+
+**The leftover interaction.** At the separated end the species is still a few Å from the
+complex, so the path's energies there are not those of the two apart. Optimise each alone, in
+its own folder: `xtb inputs/complex.xyz --opt --gfn 2 --chrg {complex_charge} --uhf
+{complex_uhf}{solvent_flag}` and `xtb inputs/species.xyz --opt --gfn 2 --chrg {alone_charge}
+--uhf {alone_uhf}{solvent_flag}`, then add `--apart complex/xtbopt.xyz species/xtbopt.xyz` to
+`check`: `separated.leftover_kcal` is the separated end's energy minus the two apart.
+"""
+
+SPECIES_FIRST = """
+- **Pull it out from the bound end{backwards}.** Drive the bonds it {makes} together
+  (`mode=concerted`), from their bound lengths to their separated ones, starting from
+  `inputs/{bound_end}.xyz` with the complex otherwise free.{join_note} Starting from the bound
+  structure is far more robust than steering a loose molecule in from a few Å away, where it
+  wanders: it leaves the way it sits.
+- **Bring it in.** One concerted scan of the same bonds from their separated lengths to their
+  bound ones, starting from `inputs/{apart}.xyz`.{bring_note}
+- **In two stages.** {two_stages}
+- The straight line out is the app's guess. If it clashes in xTB, or the bound pose is only
+  reached by a turn on the way in, change the line (another angle, a turn first) and say what
+  you did in `design`.
+"""
+
+SPECIES_RESULT = """
+  `species` reports the separated end from `check`: `{"complex_rmsd": 0.12, "closest_contact":
+  4.1, "leftover_kcal": -1.4}`."""
+
 TS_FIRST = """
 - **{lead}** Push the TS a little along its imaginary mode toward the
   other end, `pathtools.py displace inputs/{ts}.xyz {mode} --toward inputs/{other}.xyz
@@ -881,6 +935,168 @@ only: never change the held coordinates. The same `g98.out` serves `pathtools.py
 """
 
 
+def _apart(joining: dict[str, Any] | None, which: str) -> str:
+    """“ with <species> apart” for the separated end (D120)."""
+    if joining is None or joining["separated"] != which:
+        return ""
+    return f" with “{joining['label']}” apart"
+
+
+def _species_settings(plan_: Plan) -> dict[str, Any]:
+    """path.json's `species` (D120): the species in the start's numbering, the bonds it makes
+    with their bound and separated lengths, which end is separated, the complex's and the
+    species' own charge and --uhf, and a two-stage approach."""
+    joining = plan_.species
+    joins = joining.direction == species.JOINS
+    small = plan_.start if joins else plan_.end
+    bound_rows = plan_.renumbered if joins else plan_.start_rows
+    alone = joining.node.charge
+    if alone is None:
+        alone = plan_.charge - (small.node.charge or 0)
+    return {
+        "label": joining.name,
+        "node_id": joining.node.id,
+        "direction": joining.direction,
+        "separated": "start" if joins else "end",
+        "atoms": joining.atoms,
+        "bonds": [
+            {
+                "atoms": pair,
+                "bound": round(value(bound_rows, pair), 3),
+                "separated": round(value(joining.separated, pair), 3),
+            }
+            for pair in joining.bonds
+        ],
+        "anchor": joining.anchor,
+        "clearance": joining.clearance,
+        "closest": round(joining.closest, 3),
+        "complex": {
+            "label": small.name,
+            "charge": plan_.charge - alone,
+            "uhf": (small.node.multiplicity or plan_.multiplicity) - 1,
+        },
+        "alone": {"charge": alone, "uhf": (joining.node.multiplicity or 1) - 1},
+        "approach": scan_species.approach(
+            bound_rows,
+            joining.separated,
+            [a - 1 for a in joining.atoms],
+            [a - 1 for a in joining.anchor],
+        ),
+    }
+
+
+def _wrapped(text: str, width: int = 95) -> str:
+    """Paragraphs and list items of a brief part filled to `width` again once the names are
+    in."""
+    out = []
+    for block in text.split("\n\n"):
+        items = re.split(r"\n(?=- )", block.strip("\n"))
+        lines = []
+        for item in items:
+            words = " ".join(item.split())
+            lead = "  " if words.startswith("- ") else ""
+            lines.append(
+                textwrap.fill(
+                    words,
+                    width,
+                    subsequent_indent=lead,
+                    break_long_words=False,
+                    break_on_hyphens=False,
+                )
+            )
+        out.append("\n".join(lines))
+    return "\n" + "\n\n".join(out) + "\n"
+
+
+def _species_text(
+    plan_: Plan, joining: dict[str, Any] | None, solvent: str | None
+) -> dict[str, str]:
+    """The brief's species parts (D120), empty without a species."""
+    keys = ("start_apart", "end_apart", "species_file", "species", "species_first")
+    if joining is None:
+        return dict.fromkeys((*keys, "species_result"), "")
+    joins = joining["direction"] == species.JOINS
+    apart, bound_end = ("start", "end") if joins else ("end", "start")
+    makes = "forms" if joins else "breaks"
+    name = joining["label"]
+    pairs = ", ".join("–".join(map(str, b["atoms"])) for b in joining["bonds"]) or "none"
+    approach = joining["approach"]
+    if approach is None:
+        two_stages = (
+            "First its centre in to about 3.5 Å from the complex, its turn held by one angle "
+            f"and one dihedral to the complex, then the bonds it {makes}."
+        )
+    else:
+        d, a, t = approach["distance"], approach["angle"], approach["dihedral"]
+        two_stages = (
+            f"First its centre in: distance {'–'.join(map(str, d['atoms']))} from "
+            f"{d['from']:.2f} to {d['to']:.2f} Å, its turn held by angle "
+            f"{'–'.join(map(str, a['atoms']))} at {a['value']:.1f}° and dihedral "
+            f"{'–'.join(map(str, t['atoms']))} at {t['value']:.1f}° (`species.approach`); then "
+            f"the bonds it {makes} to their bound lengths, the angle and dihedral let go."
+        )
+    if not joins:
+        two_stages += " Run both from the separated end and join them with `--reverse`."
+    complex_ = joining["complex"]
+    alone = joining["alone"]
+    return {
+        "start_apart": f", with “{name}” apart (the separated end, below)" if joins else "",
+        "end_apart": "" if joins else f", with “{name}” apart (the separated end, below)",
+        "species_file": f"\n  With “{name}” joining or leaving, `species` too (below).",
+        "species": _wrapped(
+            SPECIES.format(
+                species=name,
+                verb=joining["direction"],
+                bound_text=(
+                    f"apart at the start and bound at the end, by {pairs}"
+                    if joins
+                    else f"bound at the start, by {pairs}, and apart at the end"
+                ),
+                apart=apart,
+                bound_end=bound_end,
+                small=complex_["label"],
+                anchor=", ".join(map(str, joining["anchor"])),
+                closest=joining["closest"],
+                atoms=", ".join(map(str, joining["atoms"])),
+                makes=makes,
+                leaves_mapping=(
+                    ""
+                    if joins
+                    else "\n- `mapping.json`'s `mapping` numbers the end's atoms followed by the "
+                    f"species node's: past {len(plan_.start_rows) - len(joining['atoms'])} it is "
+                    f"“{name}”'s own order."
+                ),
+                replaces=(
+                    " For this end it stands in for `active_end_rmsd`."
+                    if not joins
+                    else " The path must start there."
+                ),
+                complex_charge=complex_["charge"],
+                complex_uhf=complex_["uhf"],
+                alone_charge=alone["charge"],
+                alone_uhf=alone["uhf"],
+                solvent_flag=f" --alpb {solvent}" if solvent else "",
+            )
+        ),
+        "species_first": _wrapped(
+            SPECIES_FIRST.format(
+                backwards=" and turn it round" if joins else "",
+                makes=makes,
+                bound_end=bound_end,
+                apart=apart,
+                join_note=(
+                    " It runs from the end back, so join it with `--reverse`." if joins else ""
+                ),
+                bring_note=(
+                    "" if joins else " It runs from the end back: join it with `--reverse`."
+                ),
+                two_stages=two_stages,
+            )
+        ).rstrip("\n"),
+        "species_result": SPECIES_RESULT,
+    }
+
+
 def create_job(
     folder: Path,
     investigation: str,
@@ -896,10 +1112,6 @@ def create_job(
         solvent = SOLVENT_NAMES.get(solvent.strip().lower(), solvent.strip().lower())
         if solvent not in ALPB_SOLVENTS:
             raise RecordError(f"xTB's ALPB has no solvent “{solvent}”")
-    if plan_.species is not None:
-        raise RecordError(
-            "a path where a species joins or leaves can be planned and checked, but not sent yet"
-        )
     held = check_held(plan_, held)
     driven = check_drive(plan_, drive or [], drive_order, held)
     start, end, match = plan_.start, plan_.end, plan_.match
@@ -923,6 +1135,9 @@ def create_job(
     }
     if driven is not None:
         settings["drive"] = driven
+    joining = _species_settings(plan_) if plan_.species is not None else None
+    if joining is not None:
+        settings["species"] = joining
     ts_of = {t["end"]: t for t in plan_.ts_ends}
 
     def ts_note(which: str) -> str:
@@ -999,18 +1214,24 @@ def create_job(
             else ""
         ),
         user_result=USER_RESULT if driven else "",
+        **_species_text(plan_, joining, solvent),
     )
     inputs = [
         cloud_jobs.InputFile(
             name="start.xyz",
-            text=_xyz(start.node.geometry, start.name),
-            description=f"the start, node “{start.name}”, {len(start.node.geometry)} atoms",
+            text=_xyz(plan_.start_rows, start.name + _apart(joining, "start")),
+            description=f"the start, node “{start.name}”{_apart(joining, 'start')}, "
+            f"{len(plan_.start_rows)} atoms",
             node_id=start.node.id,
         ),
         cloud_jobs.InputFile(
             name="end.xyz",
-            text=_xyz(plan_.renumbered, f"{end.name} in the atom order of {start.name}"),
-            description=f"the end, node “{end.name}”, renumbered in the start's order",
+            text=_xyz(
+                plan_.renumbered,
+                f"{end.name}{_apart(joining, 'end')} in the atom order of {start.name}",
+            ),
+            description=f"the end, node “{end.name}”{_apart(joining, 'end')}, renumbered in "
+            "the start's order",
             node_id=end.node.id,
         ),
         cloud_jobs.InputFile(
@@ -1022,9 +1243,26 @@ def create_job(
             name="path.json",
             text=json.dumps(settings, indent=2),
             description="charge, multiplicity, solvent, the coordinates held at a TS end"
-            + (" and the user's own coordinates" if driven else ""),
+            + (" and the user's own coordinates" if driven else "")
+            + (" and the species that joins or leaves" if joining else ""),
         ),
     ]
+    if joining is not None:
+        small = start if joining["separated"] == "start" else end
+        inputs += [
+            cloud_jobs.InputFile(
+                name="complex.xyz",
+                text=_xyz(small.node.geometry, small.name),
+                description=f"the complex alone, node “{small.name}”",
+                node_id=small.node.id,
+            ),
+            cloud_jobs.InputFile(
+                name="species.xyz",
+                text=_xyz(plan_.species.node.geometry, joining["label"]),
+                description=f"the species alone, node “{joining['label']}”",
+                node_id=plan_.species.node.id,
+            ),
+        ]
     for which, (wavenumber, vectors) in plan_.modes.items():
         node = start.node if which == "start" else end.node
         inputs.append(
@@ -1103,6 +1341,28 @@ def _ts_check_text(check: Any) -> str:
     return "; ".join(parts) + "." if parts else json.dumps(check)
 
 
+def _species_note(joining: dict[str, Any], report: Any) -> str:
+    """D120: the species that joins or leaves, and what the energies at its far end mean."""
+    name = joining.get("label") or "the species"
+    far = joining.get("separated") or "far"
+    text = (
+        f"“{name}” {joining.get('direction', 'joins')} along this path (D120). The energies are "
+        f"GFN2-xTB with “{name}” a few Å from the complex at the {far} end, not apart"
+    )
+    report = report if isinstance(report, dict) else {}
+    closest, leftover = report.get("closest_contact"), report.get("leftover_kcal")
+    if isinstance(closest, int | float):
+        text += f" (closest contact {float(closest):.1f} Å)"
+    text += "."
+    if isinstance(leftover, int | float):
+        side = "below" if leftover < 0 else "above"
+        text += (
+            f" There the path lies {abs(float(leftover)):.1f} kcal/mol {side} the complex and "
+            f"“{name}” each optimised alone."
+        )
+    return text
+
+
 def _notes(
     job: dict[str, Any], result: dict[str, Any], start: str, end: str, feedback: bool = False
 ) -> str:
@@ -1135,6 +1395,9 @@ def _notes(
         else:
             rmsd_text = f" (RMSD {float(whole):.2f} Å)" if isinstance(whole, int | float) else ""
             lines.append(f"End {reached}{rmsd_text}.")
+    joining = (job.get("scan_path") or {}).get("species")
+    if isinstance(joining, dict):
+        lines.append(_species_note(joining, path.get("species")))
     if isinstance(path.get("barrier_kcal"), int | float):
         lines.append(
             f"Highest point {float(path['barrier_kcal']):.1f} kcal/mol above the start (GFN2-xTB)."
