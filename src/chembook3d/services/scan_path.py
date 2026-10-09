@@ -139,7 +139,7 @@ def has_frequency_job(node: Node) -> bool:
 
 def value(rows: list[list[Any]], atoms: list[int]) -> float:
     """A distance (Å), angle or dihedral (degrees) of 1-based atoms."""
-    return pathtools.measure(rows, [a - 1 for a in atoms])
+    return pathtools.measure(rows, atoms)
 
 
 def _radii(rows) -> np.ndarray:
@@ -414,7 +414,11 @@ scan.out 2>&1`; xTB writes the optimised structure of each point to `xtbscan.log
 
 `python3 ../../.claude/chembook3d/pathtools.py diff inputs/start.xyz inputs/end.xyz` lists the
 bonds that form and break and the distances and dihedrals that change most; start there.
-`pathtools.py measure`, `rmsd` and `join` help along the way.
+`pathtools.py measure`, `rmsd` and `join` help along the way; after each stage, `pathtools.py
+trace stage-1/xtbscan.log --atoms 2 3 --to 2.1` shows whether the driven coordinate moved and
+reached its target (xTB ends normally when a scan moved nothing), and `pathtools.py frames
+stage-1/xtbscan.log --last -o next.xyz` takes out the structure the next stage starts from. Run
+it as a script (atoms are numbered from 1 everywhere, dihedrals measured as xTB measures them).
 
 Try several strategies (at least two different designs, more when the first ones fail), for
 example one concerted scan of the forming and breaking bonds; stages with the large dihedral

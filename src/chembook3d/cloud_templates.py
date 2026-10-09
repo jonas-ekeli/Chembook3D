@@ -18,6 +18,9 @@ INSTRUCTIONS = ".claude/CLAUDE.md"
 SETTINGS = ".claude/settings.json"
 PATHTOOLS = ".claude/chembook3d/pathtools.py"  # the scan path helper (D114)
 PATHTOOLS_TEXT = (Path(__file__).parent / "pathtools.py").read_text(encoding="utf-8")
+# Python caches a module it imports beside it; kept out of the repository's untracked files.
+TOOLS_IGNORE = ".claude/chembook3d/.gitignore"
+TOOLS_IGNORE_TEXT = "__pycache__/\n"
 HOOK_COMMAND = f'bash "$CLAUDE_PROJECT_DIR/{SETUP_SCRIPT}"'
 HOOK_TIMEOUT = 300  # seconds; the downloads are about 36 MB
 

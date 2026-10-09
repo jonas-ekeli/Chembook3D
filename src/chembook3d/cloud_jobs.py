@@ -281,6 +281,7 @@ def write_cloud_files(folder: Path) -> list[str]:
     wanted = {
         cloud_templates.SETUP_SCRIPT: cloud_templates.SETUP_TEXT,
         cloud_templates.PATHTOOLS: cloud_templates.PATHTOOLS_TEXT,
+        cloud_templates.TOOLS_IGNORE: cloud_templates.TOOLS_IGNORE_TEXT,
         cloud_templates.INSTRUCTIONS: cloud_templates.instructions_text(
             cloud_templates.github_https(sync.remote_url(folder))
         ),
