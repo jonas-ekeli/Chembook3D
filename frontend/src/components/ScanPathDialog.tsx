@@ -283,6 +283,11 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
                 {review ? 'Hide the match' : 'Review'}
               </button>
             </p>
+            {plan.warnings.map((w) => (
+              <div key={w} className="notice warn" role="status" aria-label="Scan path warning">
+                {w}
+              </div>
+            ))}
             {plan.match.doubts.length > 0 && (
               <div className="notice warn" role="status" aria-label="Doubts">
                 Check this match: {plan.match.doubts.join('; ')}.

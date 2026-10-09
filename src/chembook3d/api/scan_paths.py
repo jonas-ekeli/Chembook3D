@@ -68,6 +68,7 @@ class PlanOut(BaseModel):
     solvent: str | None  # xTB's ALPB name, from the nodes' levels
     solvents: list[str]  # every ALPB solvent
     ts_ends: list[TsEndOut]
+    warnings: list[str]  # D116: e.g. no bond forms or breaks between the ends
 
 
 class HeldIn(BaseModel):
@@ -112,6 +113,7 @@ def plan(body: PlanIn, session: DbSession):
         solvent=p.solvent,
         solvents=sorted(scan_path.ALPB_SOLVENTS),
         ts_ends=[TsEndOut(**t) for t in p.ts_ends],
+        warnings=p.warnings,
     )
 
 

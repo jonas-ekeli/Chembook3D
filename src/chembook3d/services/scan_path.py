@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from chembook3d import cloud_jobs, pathtools
 from chembook3d.models import GroupNode, Node, Role, Status, Transition
 from chembook3d.services import atom_matching, imports
+from chembook3d.services.geometry import _coords, _fit
 from chembook3d.services.records import RecordError, get
 
 # xTB's ALPB solvents, and the names other programs give some of them (Gaussian, ORCA).
@@ -250,6 +251,24 @@ class Plan:
     multiplicity: int
     solvent: str | None
     ts_ends: list[dict[str, Any]]
+    # A TS end's imaginary mode (wavenumber, vectors) in the start's numbering, turned with
+    # the end as it is placed on the start, for `inputs/<end>_mode.json` (D116).
+    modes: dict[str, tuple[float, list[list[float]]]] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+
+
+NO_BOND_CHANGE = (
+    "No bond forms or breaks between these two structures by the app's rule, so the path will "
+    "mostly change their conformation. Check that these are the two structures you meant; a "
+    "path that ends in a nearby conformer is returned with a note."
+)
+
+
+def _turned(vectors: list[list[float]], stored: list[list[Any]], placed: list[list[Any]]):
+    """Mode vectors of `stored` turned the way `stored` was turned onto `placed`."""
+    a, b = _coords(stored), _coords(placed)
+    rotation, _ = _fit(a - a.mean(axis=0), b - b.mean(axis=0), allow_mirror=False)
+    return (np.array(vectors, dtype=float) @ rotation).tolist()
 
 
 def plan(
@@ -284,6 +303,7 @@ def plan(
     renumbered = atom_matching.renumbered(a, b, match.mapping)
     changed = [[i + 1, j + 1] for i, j in match.formed + match.broken]
     ts_ends = []
+    modes = {}
     # The end in the start's order as it is stored (not fitted), so its mode vectors fit it.
     reordered = [b[j] for j in match.mapping]
     for which, item, rows, other in (
@@ -298,6 +318,12 @@ def plan(
         if mode is not None:
             wavenumber, vectors = mode
             renumbered_mode = vectors if which == "start" else [vectors[j] for j in match.mapping]
+            modes[which] = (
+                wavenumber,
+                renumbered_mode
+                if which == "start"
+                else _turned(renumbered_mode, reordered, renumbered),
+            )
         suggested = suggest(rows, other, renumbered_mode, changed)
         for row in suggested:
             row["start_value"] = value(a, row["atoms"])
@@ -314,7 +340,10 @@ def plan(
             }
         )
     solvent = solvent_of(start.node) or solvent_of(end.node)
-    return Plan(start, end, edge, match, renumbered, charge, multiplicity, solvent, ts_ends)
+    warnings = [] if match.formed or match.broken else [NO_BOND_CHANGE]
+    return Plan(
+        start, end, edge, match, renumbered, charge, multiplicity, solvent, ts_ends, modes, warnings
+    )
 
 
 def check_held(plan_: Plan, held: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -336,9 +365,17 @@ def check_held(plan_: Plan, held: list[dict[str, Any]]) -> list[dict[str, Any]]:
             or len(set(atoms)) != len(atoms)
         ):
             raise RecordError(f"a held coordinate names 2 to 4 different atoms from 1 to {count}")
-        rows = plan_.start.node.geometry if which == "start" else plan_.renumbered
+        rows, other = plan_.start.node.geometry, plan_.renumbered
+        if which == "end":
+            rows, other = other, rows
         out.append(
-            {"end": which, "kind": KINDS[len(atoms)], "atoms": atoms, "value": value(rows, atoms)}
+            {
+                "end": which,
+                "kind": KINDS[len(atoms)],
+                "atoms": atoms,
+                "value": value(rows, atoms),
+                "other_value": value(other, atoms),
+            }
         )
     missing = [
         t["label"]
@@ -363,76 +400,121 @@ def _held_text(held: list[dict[str, Any]], plan_: Plan) -> str:
     lines = []
     for row in held:
         name = plan_.start.name if row["end"] == "start" else plan_.end.name
+        other = "end" if row["end"] == "start" else "start"
         unit = "Å" if row["kind"] == "distance" else "°"
         atoms = "–".join(str(a) for a in row["atoms"])
         lines.append(
             f"- At the {row['end']} (“{name}”, a TS): {row['kind']} {atoms} = "
-            f"{row['value']:.3f} {unit}"
+            f"{row['value']:.3f} {unit}; {row['other_value']:.3f} {unit} at the {other}"
         )
     return "\n".join(lines)
 
 
 INSTRUCTIONS = """\
-This is a **scan path job** (Chembook3D D114). Find the best path of relaxed GFN2-xTB
+This is a **scan path job** (Chembook3D D114, D116). Find the best path of relaxed GFN2-xTB
 structures from `inputs/start.xyz` to `inputs/end.xyz` and return it as `outputs/path.xyz`.
 Chembook3D imports it as a new node whose scan plays as a movie (D112). Paths here are
 relative to this job's folder, where the commands below are run from; the helper is
-`../../.claude/chembook3d/pathtools.py` from there (Python, standard library only).
+`../../.claude/chembook3d/pathtools.py` from there (Python, standard library only; run it as a
+script, `python3 ../../.claude/chembook3d/pathtools.py <command>`, here written `pathtools.py`).
+Atoms are numbered from 1 everywhere, as xTB numbers them.
 
 ## The two ends
 
 - `inputs/start.xyz`: “{start}”{start_ts}.
 - `inputs/end.xyz`: “{end}”{end_ts}, renumbered by the app in the start's atom order and fitted
   on the start. The atoms correspond one to one; never renumber them.
-- `inputs/mapping.json`: the match. `formed` and `broken` are the bonds (1-based, start
-  numbering) that form and break between the ends by the app's rule; `mapping` gives each
-  start atom's number in the end's own file.
-- `inputs/path.json`: the settings below, machine-readable.
+- `inputs/mapping.json`: the match. `formed` and `broken` are the bonds (start numbering) that
+  form and break between the ends by the app's rule; `mapping` gives each start atom's number
+  in the end's own file.
+- `inputs/path.json`: the settings below, machine-readable.{mode_files}
 
 Charge {charge}, multiplicity {multiplicity}: run every xtb call with
 `--gfn 2 --chrg {charge} --uhf {uhf}{solvent_flag}`{solvent_text}.
+
+`pathtools.py diff inputs/start.xyz inputs/end.xyz` lists the bonds that form and break and the
+distances and dihedrals that change most; start there.{no_bond_change}
 
 ## Coordinates the user holds at a TS end
 
 {held}
 
-At a TS end, a structure is a TS only along these coordinates, so they must stay at those
-values (within 0.05 Å or 2°) while the path leaves or reaches that end: put them in `$constrain`
-during every stage that touches that end, and change them only after leaving it. Everything
-else is yours to choose.
+A TS end is a TS only along these coordinates, and xTB relaxes it away from them if they are
+left free. Holding them means the path passes through the TS's values, not that they stay
+fixed: at the TS end of the path they are at the TS's values (within 0.05 Å or 2°), and from
+there they are driven to the other end's values, usually as the path's reaction coordinate.
+Never optimise the TS end without them in `$constrain`.
 
-## What you design
+## Running xTB scans
 
-You decide how to get from start to end: which distances, angles and dihedrals to drive,
-whether in one concerted scan (`$scan` with `mode=concerted`) or in stages run one after
-another (each stage starting from the last structure of the one before, for example a rotation
-first and then the bond changes), in which direction (a stage scanned from the end back to
-the start is turned round when joined), the number of points (about 10 to 30 per stage) and the
-force constants (`$constrain` `force constant=`, 0.5 to 2 Eh/bohr²; xTB's restraints lag their
-targets a little). Run each stage with `xtb <structure>.xyz --opt --input scan.inp ... >
-scan.out 2>&1`; xTB writes the optimised structure of each point to `xtbscan.log`.
+A stage is `xtb <structure>.xyz --opt --input scan.inp <the flags above> > scan.out 2>&1`;
+xTB writes the optimised structure of each point to `xtbscan.log`. Everything you hold or
+drive goes in `$constrain` (atoms from 1); `$scan` drives constraints by their **position in
+the `$constrain` block** (1 = the first line after `force constant`), so list the scanned
+ones first. One scanned distance and one held distance:
 
-`python3 ../../.claude/chembook3d/pathtools.py diff inputs/start.xyz inputs/end.xyz` lists the
-bonds that form and break and the distances and dihedrals that change most; start there.
-`pathtools.py measure`, `rmsd` and `join` help along the way; after each stage, `pathtools.py
-trace stage-1/xtbscan.log --atoms 2 3 --to 2.1` shows whether the driven coordinate moved and
-reached its target (xTB ends normally when a scan moved nothing), and `pathtools.py frames
-stage-1/xtbscan.log --last -o next.xyz` takes out the structure the next stage starts from. Run
-it as a script (atoms are numbered from 1 everywhere, dihedrals measured as xTB measures them).
+    $constrain
+      force constant=1.0
+      distance: 3, 7, 2.10
+      distance: 2, 5, 1.95
+    $scan
+      1: 2.10, 1.54, 20
+    $end
 
-Try several strategies (at least two different designs, more when the first ones fail), for
-example one concerted scan of the forming and breaking bonds; stages with the large dihedral
-changes first; the same scanned from the end back; and xTB's own path finder
-(`xtb start.xyz --path end.xyz --input path.inp`, which needs no coordinates) as a candidate.
+Add `mode=concerted` under `$scan` to drive several lines together (`1: ...` and `2: ...`, the
+same number of points). Force constants of 0.5 to 2 Eh/bohr² work; xTB's restraints lag their
+targets a little.
+
+**After every stage**, run `pathtools.py trace stage-1/xtbscan.log --atoms 3 7 --to 1.54`:
+xTB ends normally even when a scan moved nothing (a wrong `$scan` number, for example), and
+the trace says whether each driven coordinate moved and reached its target (exit status 1 when
+one barely moved). `pathtools.py frames stage-1/xtbscan.log --last -o stage-2/start.xyz` takes
+out the structure the next stage starts from.
+
+**A later stage keeps what earlier stages did**: its `$constrain` holds every coordinate an
+earlier stage drove, at the value it actually reached (from the trace, not the value asked
+for), until it is meant to move; otherwise the first optimisation of the stage relaxes back.
+A second stage after the one above:
+
+    $constrain
+      force constant=1.0
+      dihedral: 4, 3, 7, 12, 60.0
+      distance: 3, 7, 1.56
+    $scan
+      1: 60.0, 175.0, 24
+    $end
+
+## Strategies, in this order
+{ts_first}
+- One concerted scan of the bonds that form and break (and the held coordinates).
+- Stages: the large dihedral changes first, then the bond changes, or the other way round.
+- The same scanned from the end back to the start (`join --reverse` turns it round).
+- xTB's own path finder, `xtb inputs/start.xyz --path inputs/end.xyz --input path.inp`, which
+  needs no coordinates.
+
+**Budget**: stop after 6 strategies or about 60 minutes of xTB time, whichever comes first,
+then return the best path you have.
+
+When the two ends differ mostly in atoms far from anything that forms, breaks or is held (a
+different conformer of a side group), do not force that conformer change into the path: a
+path that ends in a nearby conformer is fine. Say so in `path.conformer_note`, with the end
+RMSD over the atoms that do take part when you can work it out.
+
+## Which path is best
+
 Check each candidate with
 
-    python3 ../../.claude/chembook3d/pathtools.py check path.xyz inputs/start.xyz \\
-        inputs/end.xyz --mapping inputs/mapping.json
+    pathtools.py check path.xyz inputs/start.xyz inputs/end.xyz --mapping inputs/mapping.json
 
-and keep the best: one that reaches the end (`end_rmsd` at most 0.5 Å after fitting), forms or
+A path **passes** when it reaches the end (`end_rmsd` at most 0.5 Å after fitting), forms or
 breaks no bond other than those in `mapping.json`, has no jump between neighbouring structures
-(`largest_jump` at most 0.5 Å), keeps the held coordinates, and among those the lowest highest
-point. If none reaches the end, return the closest and say so.
+over 0.5 Å (`largest_jump`), and starts or ends at the held coordinates' TS values. Among those,
+keep the lowest highest point. A `spikes` entry is one structure far above both neighbours with
+a jump into it, as a conformer flipping in one step gives: try to avoid it (more points or a
+restraint on that dihedral), and give `top_without_spikes` as well.
+
+If no path passes, return the one that came closest, with `"gate": "missed"` and the reasons:
+the app imports it all the same, saying in its notes that it did not pass.
 {guess_check}
 ## What to return
 
@@ -449,28 +531,52 @@ point. If none reaches the end, return the closest and say so.
 
   ```json
   "path": {{
+    "gate": "passed",
+    "missed": [],
     "reached_end": true,
     "end_rmsd": 0.21,
     "top": 14,
     "barrier_kcal": 18.2,
+    "spikes": [],
     "design": "What the best path drives, stage by stage, and why.",
     "stages": [{{"coordinates": ["distance 3-7 2.10 -> 1.54"], "points": 20,
                  "force_constant": 1.0, "direction": "forward"}}],
     "tried": ["What else was tried and how it failed."],
+    "conformer_note": null,
     "ts_check": null
   }}
   ```
 
-  `summary` says in two or three sentences what the best path does and how close it came.
+  `gate` is `"passed"` or `"missed"`; `missed` lists the reasons in a few words each (for
+  example "end RMSD 1.27 Å"). `summary` says in two or three sentences what the best path does
+  and how close it came.
+"""
+
+MODE_FILE = "{end}_mode.json"  # a TS end's imaginary mode, in inputs/ (D116)
+
+TS_FIRST = """
+- **Downhill from the TS first.** Push the TS a little along its imaginary mode toward the
+  other end, `pathtools.py displace inputs/{ts}.xyz {mode} --toward inputs/{other}.xyz
+  -o downhill/start.xyz` (try `--step 0.1` to `0.3`), then run one relaxed scan of the held
+  coordinates from the TS's values to the {other}'s values, everything else free, starting
+  from the pushed structure, so its first point is the TS held at its values.{reverse} If the
+  scan stops short of the {other}, a last optimisation without restraints often finishes it.
 """
 
 GUESS_CHECK = """
 ## A TS end that is only a guess
 
 {names} has no frequency job, so the user ticked the coordinates that make it a TS. Run an xTB
-frequency job on it (`xtb <ts>.xyz --hess`) and say in `path.ts_check` whether its imaginary
-mode (if it has one) runs along the held coordinates. This is a warning only: never change the
-held coordinates.
+frequency job on it (`xtb inputs/<ts>.xyz --hess <the flags above>`, which writes `g98.out`),
+then
+
+    pathtools.py mode inputs/<ts>.xyz g98.out --atoms <a> <b> [--atoms ...] --json
+
+with every held coordinate. It reports the imaginary mode, the five distances that change most
+along it and each held coordinate's change; the mode runs along the held coordinates when each
+held distance changes by at least 35 % of the largest change (`runs_along`), the rule the app
+uses to suggest coordinates from a mode. Put that report in `path.ts_check`. This is a warning
+only: never change the held coordinates. The same `g98.out` serves `pathtools.py displace`.
 """
 
 
@@ -512,6 +618,30 @@ def create_job(
         return f", a transition state (imaginary mode {abs(t['imaginary']):.0f}i cm⁻¹)"
 
     guesses = [f"“{t['label']}”" for t in plan_.ts_ends if t["guess"]]
+    mode_lines = []
+    for which in plan_.modes:
+        mode_lines.append(
+            f"\n- `inputs/{MODE_FILE.format(end=which)}`: the {which}'s imaginary mode from its "
+            "frequency job, `wavenumber` in cm⁻¹ and one displacement `vectors` row per atom, in "
+            "the start's numbering and as `inputs/" + which + ".xyz` is turned."
+        )
+    ts_first = []
+    for t in plan_.ts_ends:
+        which = t["end"]
+        other = "end" if which == "start" else "start"
+        ts_first.append(
+            TS_FIRST.format(
+                ts=which,
+                other=other,
+                mode=f"inputs/{MODE_FILE.format(end=which)}" if which in plan_.modes else "g98.out",
+                reverse=(
+                    " The TS is the end here, so this stage runs from the end back to the start:"
+                    " join it with `--reverse`."
+                    if which == "end"
+                    else ""
+                ),
+            ).rstrip("\n")
+        )
     text = INSTRUCTIONS.format(
         start=start.name,
         end=end.name,
@@ -524,6 +654,14 @@ def create_job(
         solvent_text=f" (ALPB {solvent})" if solvent else " (gas phase)",
         held=_held_text(held, plan_),
         guess_check=GUESS_CHECK.format(names=" and ".join(guesses)) if guesses else "",
+        mode_files="".join(mode_lines),
+        no_bond_change=(
+            "\n\nNo bond forms or breaks between the ends by the app's rule, so this path is "
+            "mostly a change of conformation; see the note on conformers below."
+            if plan_.warnings
+            else ""
+        ),
+        ts_first="".join(ts_first),
     )
     inputs = [
         cloud_jobs.InputFile(
@@ -549,6 +687,21 @@ def create_job(
             description="charge, multiplicity, solvent and the coordinates held at a TS end",
         ),
     ]
+    for which, (wavenumber, vectors) in plan_.modes.items():
+        node = start.node if which == "start" else end.node
+        inputs.append(
+            cloud_jobs.InputFile(
+                name=MODE_FILE.format(end=which),
+                text=json.dumps(
+                    {
+                        "wavenumber": wavenumber,
+                        "vectors": [[round(float(x), 6) for x in v] for v in vectors],
+                    }
+                ),
+                description=f"the imaginary mode of “{node.label or 'Untitled node'}”",
+                node_id=node.id,
+            )
+        )
     extra = {
         "kind": "scan_path",
         "scan_path": {
@@ -584,12 +737,49 @@ def _place(session: Session, node: Node) -> tuple[float, float]:
     return node.pos_x, node.pos_y
 
 
+def _ts_check_text(check: Any) -> str:
+    """The session's TS check (`pathtools.py mode --json`, D116), or its own words."""
+    if not isinstance(check, dict):
+        return str(check)
+    parts = []
+    wavenumber = check.get("wavenumber")
+    if isinstance(wavenumber, int | float):
+        parts.append(
+            f"imaginary mode {abs(wavenumber):.0f}i cm⁻¹"
+            if wavenumber < 0
+            else f"no imaginary mode (lowest {wavenumber:.0f} cm⁻¹)"
+        )
+    runs = check.get("runs_along")
+    if runs is not None:
+        parts.append("runs along the held coordinates" if runs else "does not run along them")
+    held = check.get("coordinates")
+    if isinstance(held, list):
+        shares = [
+            f"{c.get('atoms')} {c['share']:.0%}"
+            for c in held
+            if isinstance(c, dict) and isinstance(c.get("share"), int | float)
+        ]
+        if shares:
+            parts.append("held distances " + ", ".join(shares) + " of the largest change")
+    return "; ".join(parts) + "." if parts else json.dumps(check)
+
+
 def _notes(job: dict[str, Any], result: dict[str, Any], start: str, end: str) -> str:
     path = result.get("path") if isinstance(result.get("path"), dict) else {}
     lines = [f"Scan path from “{start}” to “{end}”, cloud job {job['id']} (D114)."]
     summary = str(result.get("summary") or "").strip()
     if summary:
         lines.append(summary)
+    if path.get("gate") == "missed":
+        missed = path.get("missed")
+        reasons = (
+            "; ".join(str(x) for x in missed if str(x).strip())
+            if isinstance(missed, list)
+            else str(missed or "").strip()
+        )
+        lines.append(
+            "Did not pass the quality check (D116)" + (f": {reasons}." if reasons else ".")
+        )
     if path.get("reached_end") is not None:
         reached = "reached" if path["reached_end"] else "not reached"
         rmsd = path.get("end_rmsd")
@@ -602,8 +792,11 @@ def _notes(job: dict[str, Any], result: dict[str, Any], start: str, end: str) ->
     design = str(path.get("design") or "").strip()
     if design:
         lines.append(f"Design: {design}")
+    conformer = str(path.get("conformer_note") or "").strip()
+    if conformer:
+        lines.append(f"Conformers: {conformer}")
     if path.get("ts_check"):
-        lines.append(f"TS check: {path['ts_check']}")
+        lines.append(f"TS check: {_ts_check_text(path['ts_check'])}")
     return "\n\n".join(lines)
 
 
