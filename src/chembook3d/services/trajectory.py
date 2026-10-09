@@ -9,6 +9,10 @@ jump about and ends on the structure the node shows.
 The structure shown can be taken over as a node's geometry (D112, `use_frame`): in place on a
 scan path node, whose calculations are all xTB relaxed scans read from `xtbscan.log` or
 `path.xyz`; otherwise on a derived node (ID-4, ID-5).
+
+A scan path's points can be removed from the path by hand (D117, `trim`): the file is never
+touched, the calculation lists the points it leaves out (`removed_points`), and the path's top
+is chosen again over the points kept, with each cut's jump measured as `pathtools.py` does.
 """
 
 from dataclasses import dataclass
@@ -18,6 +22,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from chembook3d import pathtools
 from chembook3d.models import Calculation, CalculationType, Node
 from chembook3d.parsers import xtb
 from chembook3d.parsers.common import ParsedFile
@@ -29,6 +34,11 @@ from chembook3d.services import nodes as node_service
 # structure printed again: Gaussian repeats the final one after an optimization, ORCA
 # evaluates it once more at the stationary point.
 SAME_STRUCTURE = 1e-5
+# D117: the structure a scan path calculation shows is the frame within this fitted RMSD (Å).
+SHOWN_RMSD = 1e-3
+# D117 (D116's limits): a cut whose structures differ by more than this (Å) is a jump, and a
+# point this far (kcal/mol) above both kept neighbours with such a jump is a spike.
+LARGE_JUMP = pathtools.GOOD_JUMP
 
 
 class StepsUnavailable(ValueError):
@@ -42,6 +52,34 @@ class Frame:
     point: int | None  # the scan point it belongs to (1-based), None outside a scan
     converged: bool  # an optimization (or a scan point's) converged on this structure
     stage: int | None = None  # D112: the stage of a scan path that names its stages
+    removed: bool = False  # D117: left out of the path by hand
+
+
+@dataclass
+class Cut:
+    """D117: where removed points leave a gap between two kept frames (0-based)."""
+
+    before: int  # the last kept frame before the gap
+    after: int  # the first kept frame after it
+    removed: int  # how many frames the gap holds
+    jump: float | None  # Å, the fitted RMSD between `before` and `after`
+    large: bool  # the jump is over LARGE_JUMP: the trimmed path is not continuous there
+
+
+@dataclass
+class Trim:
+    """D117: a scan path with its removed points left out."""
+
+    removed: list[int]  # the points removed (1-based scan points), in order
+    kept: int  # how many frames are kept
+    top: int  # the frame (0-based) the node takes over the kept frames (`xtb.representative`)
+    shown: int | None  # the frame the calculation stands for, when one matches its geometry
+    automatic: bool  # the calculation shows `top`, so a trim moves it with the top
+    barrier: float | None  # hartree, the top above the first kept frame
+    cuts: list[Cut]
+    spikes: list[int]  # kept frames (0-based) far above both kept neighbours with a jump
+    first_removed: bool  # the path no longer starts where it was run from
+    last_removed: bool  # nor ends there
 
 
 @dataclass
@@ -49,6 +87,7 @@ class Steps:
     scan: str | None  # "relaxed", "rigid" or None
     points: int  # how many scan points the file reached; 0 outside a scan
     frames: list[Frame]
+    trim: Trim | None = None  # D117: a scan path's kept points; None for any other calculation
 
 
 @lru_cache(maxsize=4)
@@ -108,7 +147,61 @@ def read_steps(folder: Path, calculation: Calculation) -> Steps:
         if geometry.elements(frame.rows) == geometry.elements(reference):
             frame.rows = geometry.place(reference, frame.rows).rows
     points = {f.point for f in frames if f.point is not None}
-    return Steps(scan=step.scan, points=len(points), frames=frames)
+    steps = Steps(scan=step.scan, points=len(points), frames=frames)
+    if is_scan_path(calculation):
+        steps.trim = trim_of(frames, calculation.removed_points or [], calculation.geometry)
+    return steps
+
+
+def _jump(a: list[list[Any]], b: list[list[Any]]) -> float | None:
+    try:
+        return pathtools.rmsd(a, b)
+    except ValueError:
+        return None
+
+
+def trim_of(frames: list[Frame], removed: list[int], shown_rows: list[Any] | None) -> Trim:
+    """D117: marks the removed frames and describes the path over the kept ones: its top
+    (neighbours across a cut are the nearest kept frames), each cut and its jump, and the
+    spikes `pathtools.py check` would report on the kept frames."""
+    gone = set(removed)
+    for frame in frames:
+        frame.removed = frame.point in gone
+    kept = [n for n, f in enumerate(frames) if not f.removed]
+    energies = [frames[n].energy for n in kept]
+    top = kept[xtb.representative(energies)] if kept else 0
+    jumps = [_jump(frames[a].rows, frames[b].rows) for a, b in zip(kept, kept[1:], strict=False)]
+    cuts = [
+        Cut(a, b, b - a - 1, jump, jump is not None and jump > LARGE_JUMP)
+        for (a, b), jump in zip(zip(kept, kept[1:], strict=False), jumps, strict=True)
+        if b - a > 1
+    ]
+    spikes: list[int] = []
+    if len(kept) > 2 and None not in energies and None not in jumps:
+        spikes = [kept[k] for k in pathtools._spikes(energies, jumps)]
+    shown = None
+    if shown_rows:
+        fits = [
+            (rmsd, n)
+            for n, f in enumerate(frames)
+            if (rmsd := geometry.aligned_rmsd(shown_rows, f.rows)) is not None
+            and rmsd <= SHOWN_RMSD
+        ]
+        shown = min(fits)[1] if fits else None
+    low = frames[kept[0]].energy if kept else None
+    high = frames[top].energy
+    return Trim(
+        removed=sorted(gone),
+        kept=len(kept),
+        top=top,
+        shown=shown,
+        automatic=shown == top,
+        barrier=high - low if high is not None and low is not None else None,
+        cuts=cuts,
+        spikes=spikes,
+        first_removed=bool(frames) and frames[0].removed,
+        last_removed=bool(frames) and frames[-1].removed,
+    )
 
 
 def is_scan_path(calculation: Calculation) -> bool:
@@ -156,3 +249,68 @@ def use_frame(
         result.energy = chosen.energy
     session.flush()
     return node_service.GeometryResult(node, derived=False)
+
+
+@dataclass
+class TrimResult:
+    steps: Steps
+    moved: int | None  # the frame (0-based) the node moved to with the top, if it did
+
+
+def removed_after(
+    steps: Steps, remove: list[int] | None = None, restore: list[int] | None = None
+) -> list[int]:
+    """D117: the points removed once `remove` are taken out of the path and `restore` put
+    back, checked against the path: points it has, and at least two points kept."""
+    if steps.trim is None:
+        raise StepsUnavailable("Only a scan path's points can be removed")
+    points = {f.point for f in steps.frames if f.point is not None}
+    asked = set(remove or []) | set(restore or [])
+    if unknown := sorted(asked - points):
+        raise StepsUnavailable(f"The path has no point {', '.join(map(str, unknown))}")
+    removed = (set(steps.trim.removed) | set(remove or [])) - set(restore or [])
+    if len(points - removed) < 2:
+        raise StepsUnavailable("At least two points of the path must stay")
+    return sorted(removed)
+
+
+def trim(
+    session: Session,
+    folder: Path,
+    calculation: Calculation,
+    remove: list[int] | None = None,
+    restore: list[int] | None = None,
+) -> TrimResult:
+    """D117: takes points out of a scan path or puts them back, in the history. When the
+    calculation showed the automatic top on a scan path node, the node and the scan move to the
+    new top (`use_frame`); a structure picked with "Use this structure" stays."""
+    before = read_steps(folder, calculation)
+    removed = removed_after(before, remove, restore)
+    old = list(calculation.removed_points or [])
+    if removed == old:
+        return TrimResult(before, None)
+    history.record(session, "calculation", calculation.id, "update", "removed_points", old, removed)
+    calculation.removed_points = removed
+    assert before.trim is not None
+    after = trim_of(before.frames, removed, calculation.geometry)
+    moved = None
+    # Only in place: on a node with other results the top never makes a derived node by itself.
+    follows = before.trim.automatic and changes_in_place(calculation.node)
+    if follows and after.top != before.trim.top:
+        use_frame(session, folder, calculation, after.top)
+        moved = after.top
+    session.flush()
+    return TrimResult(read_steps(folder, calculation), moved)
+
+
+def preview_trim(
+    folder: Path,
+    calculation: Calculation,
+    remove: list[int] | None = None,
+    restore: list[int] | None = None,
+) -> Trim:
+    """D117: the path as it would be after `trim`, changing nothing (the cut a selection
+    would leave and the new top, before the user confirms)."""
+    steps = read_steps(folder, calculation)
+    removed = removed_after(steps, remove, restore)
+    return trim_of(steps.frames, removed, calculation.geometry)

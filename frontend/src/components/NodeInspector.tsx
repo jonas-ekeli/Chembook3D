@@ -435,6 +435,7 @@ export function NodeInspector({
                         : `The node's geometry is now structure ${structure}.`,
                     )
                   }
+                  onTrimmed={(trimmed, notice) => onChanged(trimmed, notice)}
                 />
               }
             />

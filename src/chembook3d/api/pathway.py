@@ -216,6 +216,30 @@ class StepFrameOut(BaseModel):
     point: int | None  # scan point, 1-based
     converged: bool
     stage: int | None = None  # D112: a scan path's stage, when the file names it
+    removed: bool = False  # D117: left out of the scan path by hand
+
+
+class CutOut(BaseModel):
+    before: int  # frame indices (0-based) of the kept frames on either side
+    after: int
+    removed: int
+    jump: float | None  # Å, fitted RMSD across the cut
+    large: bool  # over 0.5 Å (D116's limit): the trimmed path is not continuous there
+
+
+class TrimOut(BaseModel):
+    """D117: a scan path over its kept points."""
+
+    removed: list[int]  # scan points (1-based) left out
+    kept: int
+    top: int  # frame (0-based) the node takes over the kept points
+    shown: int | None  # frame the calculation stands for
+    automatic: bool  # it shows the automatic top, so trimming moves it with the top
+    barrier: float | None  # hartree, the top above the first kept point
+    cuts: list[CutOut]
+    spikes: list[int]  # frames (0-based) suggested for removal
+    first_removed: bool
+    last_removed: bool
 
 
 class StepsOut(BaseModel):
@@ -227,6 +251,20 @@ class StepsOut(BaseModel):
     # D112: "Use this structure" changes the node in place (a scan path node), rather than
     # making a derived node.
     in_place: bool = False
+    trim: TrimOut | None = None  # D117: a scan path's kept points; None for other calculations
+
+
+class TrimIn(BaseModel):
+    """D117: scan points (1-based) to take out of the path and to put back."""
+
+    remove: list[int] = Field(default_factory=list)
+    restore: list[int] = Field(default_factory=list)
+
+
+class TrimResultOut(BaseModel):
+    steps: StepsOut
+    node: NodeOut
+    moved: int | None  # the frame (0-based) the node moved to with the top, if it did
 
 
 class OverlayIn(BaseModel):
@@ -673,6 +711,14 @@ def calculation_steps(calculation_id: str, request: Request, session: DbSession)
         steps = trajectory.read_steps(_investigation(request).folder, calculation)
     except trajectory.StepsUnavailable as exc:
         raise HTTPException(422, str(exc)) from exc
+    return _steps_out(calculation, steps)
+
+
+def _trim_out(trim: trajectory.Trim) -> TrimOut:
+    return TrimOut(**asdict(trim))
+
+
+def _steps_out(calculation: Calculation, steps: trajectory.Steps) -> StepsOut:
     return StepsOut(
         scan=steps.scan,
         points=steps.points,
@@ -683,11 +729,45 @@ def calculation_steps(calculation_id: str, request: Request, session: DbSession)
                 point=f.point,
                 converged=f.converged,
                 stage=f.stage,
+                removed=f.removed,
             )
             for f in steps.frames
         ],
         in_place=trajectory.changes_in_place(calculation.node),
+        trim=_trim_out(steps.trim) if steps.trim else None,
     )
+
+
+@router.post("/calculations/{calculation_id}/steps/trim", response_model=TrimResultOut)
+def trim_steps(calculation_id: str, body: TrimIn, request: Request, session: DbSession):
+    """D117: takes points out of a scan path or puts them back; the node follows the top
+    when it showed the automatic one."""
+    calculation = session.get(Calculation, calculation_id)
+    if calculation is None:
+        raise HTTPException(404, "Calculation not found")
+    folder = _investigation(request).folder
+    try:
+        result = trajectory.trim(session, folder, calculation, body.remove, body.restore)
+    except trajectory.StepsUnavailable as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return TrimResultOut(
+        steps=_steps_out(calculation, result.steps),
+        node=_node_out(session, calculation.node),
+        moved=result.moved,
+    )
+
+
+@router.post("/calculations/{calculation_id}/steps/trim-preview", response_model=TrimOut)
+def preview_trim_steps(calculation_id: str, body: TrimIn, request: Request, session: DbSession):
+    """D117: the path as a trim would leave it (cuts, jumps, top), changing nothing."""
+    calculation = session.get(Calculation, calculation_id)
+    if calculation is None:
+        raise HTTPException(404, "Calculation not found")
+    folder = _investigation(request).folder
+    try:
+        return _trim_out(trajectory.preview_trim(folder, calculation, body.remove, body.restore))
+    except trajectory.StepsUnavailable as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post("/calculations/{calculation_id}/steps/{frame}/use", response_model=GeometryOut)
