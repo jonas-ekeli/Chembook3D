@@ -392,6 +392,8 @@ export type ScanPathPlan = {
   solvent: string | null
   solvents: string[]
   ts_ends: ScanPathTsEnd[]
+  /** D116: e.g. no bond forms or breaks between the ends. */
+  warnings: string[]
 }
 
 export type ScanPathRequest = {

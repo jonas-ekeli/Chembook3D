@@ -28,6 +28,15 @@ Written by Chembook3D into `.claude/chembook3d/pathtools.py` of the investigatio
         other than those the ends differ by, the largest jump between neighbouring structures,
         and the highest point, with spikes (one structure far above both neighbours with a jump
         into or out of it, as a conformer flipping in one step gives) reported apart
+    python3 pathtools.py mode TS.xyz MODE [--atoms 2 3 [--atoms ...]] [--json]
+        the imaginary mode of MODE (the app's `inputs/start_mode.json` or `end_mode.json`, or
+        the g98.out of `xtb TS.xyz --hess`): its wavenumber, the five distances that change
+        most along it, each coordinate's change, and whether the mode runs along the given
+        distances (each changes by at least 35 % of the largest change, as the app suggests
+        coordinates to hold)
+    python3 pathtools.py displace TS.xyz MODE --toward END.xyz [--step 0.1] -o OUT.xyz
+        the TS pushed along its imaginary mode (the atom moving most by STEP Å), in the
+        direction that brings it closer to END.xyz: where a path downhill from the TS starts
 
 Atoms are numbered from 1 everywhere, on the command line and in the functions. Run this file
 as a script (`python3 pathtools.py ...`); importing it is not needed.
@@ -57,6 +66,8 @@ GOOD_JUMP = 0.5  # Å, fitted RMSD between neighbouring structures
 SPIKE_KCAL = 10.0  # kcal/mol above both neighbours, with a jump over GOOD_JUMP: a spike
 MOVED = 0.1  # a driven coordinate moved when it covered at least this part of the way
 REACHED = {2: 0.1, 3: 5.0, 4: 5.0}  # Å or degrees from its target: reached
+PARTIAL_SCALE = 1.8  # × the sum of covalent radii: pairs a mode can make or break (D114)
+MODE_SHARE = 0.35  # a distance runs along a mode when it changes this much of the largest
 
 
 # ---------- reading and writing ----------
@@ -410,6 +421,125 @@ def check(path, start, end, allowed=None):
     return report
 
 
+# ---------- a TS's imaginary mode ----------
+
+
+def _g98_mode(lines):
+    """The most negative mode of a Gaussian-style frequency output (xTB's g98.out)."""
+    best = None
+    k = 0
+    while k < len(lines):
+        line = lines[k]
+        if line.strip().startswith("Frequencies --"):
+            wavenumbers = [float(x) for x in line.split("--", 1)[1].split()]
+            while k < len(lines) and not lines[k].split()[:2] == ["Atom", "AN"]:
+                k += 1
+            columns = [[] for _ in wavenumbers]
+            k += 1
+            while k < len(lines):
+                parts = lines[k].split()
+                if len(parts) != 2 + 3 * len(wavenumbers) or not parts[0].isdigit():
+                    break
+                for m in range(len(wavenumbers)):
+                    columns[m].append([float(x) for x in parts[2 + 3 * m : 5 + 3 * m]])
+                k += 1
+            for wavenumber, vectors in zip(wavenumbers, columns, strict=True):
+                if best is None or wavenumber < best[0]:
+                    best = (wavenumber, vectors)
+            continue
+        k += 1
+    return best
+
+
+def read_mode(path):
+    """(wavenumber in cm⁻¹, negative for imaginary; one [x, y, z] per atom) from the app's mode
+    file (JSON with `wavenumber` and `vectors`) or a g98.out."""
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    if text.lstrip().startswith("{"):
+        data = json.loads(text)
+        return float(data["wavenumber"]), [[float(x) for x in v] for v in data["vectors"]]
+    found = _g98_mode(text.splitlines())
+    if found is None:
+        raise ValueError(f"{path}: no frequencies found")
+    return found
+
+
+def _rate(rows, vectors, atoms):
+    """How fast a coordinate changes along the mode (per Å of the atom moving most)."""
+    largest = max(math.sqrt(_dot(v, v)) for v in vectors) or 1.0
+    h = 1e-4 / largest
+
+    def moved(sign):
+        return [[r[0], *(x + sign * h * dx for x, dx in zip(r[1:4], v, strict=True))]
+                for r, v in zip(rows, vectors, strict=True)]  # fmt: skip
+
+    change = measure(moved(1), atoms) - measure(moved(-1), atoms)
+    return _wrapped(change, len(atoms)) / (2 * h * largest)
+
+
+def mode_report(rows, mode, coordinates=()):
+    """The mode's wavenumber, the five distances that change most along it, each coordinate's
+    change, and whether it runs along the given distances (D114's 35 % rule)."""
+    wavenumber, vectors = mode
+    if len(vectors) != len(rows):
+        raise ValueError(f"the mode has {len(vectors)} atoms and the structure {len(rows)}")
+    n = len(rows)
+    pairs = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            reach = PARTIAL_SCALE * (
+                RADII.get(rows[i][0], DEFAULT_RADIUS) + RADII.get(rows[j][0], DEFAULT_RADIUS)
+            )
+            if distance(rows[i], rows[j]) < reach:
+                pairs.append((abs(_rate(rows, vectors, [i + 1, j + 1])), i, j))
+    pairs.sort(reverse=True)
+    largest = pairs[0][0] if pairs and pairs[0][0] > 0 else None
+    report = {
+        "wavenumber": wavenumber,
+        "imaginary": wavenumber < 0,
+        "top_distances": [
+            {
+                "atoms": f"{i + 1}-{j + 1}",
+                "value": round(distance(rows[i], rows[j]), 3),
+                "share": round(rate / largest, 2) if largest else 0.0,
+            }
+            for rate, i, j in pairs[:5]
+        ],  # fmt: skip
+    }
+    held = []
+    for atoms in coordinates:
+        rate = _rate(rows, vectors, atoms)
+        row = {"atoms": "-".join(map(str, atoms)), "value": round(measure(rows, atoms), 3)}
+        row["change"] = round(rate, 3)
+        if len(atoms) == 2:
+            row["share"] = round(abs(rate) / largest, 2) if largest else 0.0
+        held.append(row)
+    report["coordinates"] = held
+    shares = [row["share"] for row in held if "share" in row]
+    report["runs_along"] = (
+        wavenumber < 0 and all(x >= MODE_SHARE for x in shares) if shares else None
+    )
+    return report
+
+
+def displace(rows, mode, toward, step=0.1):
+    """The structure pushed along the mode so the atom moving most moves `step` Å, in the
+    direction whose result fits `toward` better."""
+    _, vectors = mode
+    largest = max(math.sqrt(_dot(v, v)) for v in vectors)
+    if largest == 0:
+        raise ValueError("the mode moves no atom")
+    pushed = []
+    for sign in (1, -1):
+        scale = sign * step / largest
+        moved = [[r[0], *(x + scale * dx for x, dx in zip(r[1:4], v, strict=True))]
+                 for r, v in zip(rows, vectors, strict=True)]  # fmt: skip
+        pushed.append((rmsd(moved, toward), sign, moved))
+    pushed.sort(key=lambda item: item[0])
+    return pushed[0][2]
+
+
 def _print(data, as_json):
     if as_json:
         print(json.dumps(data, indent=2))
@@ -447,6 +577,17 @@ def main(argv=None):
     p.add_argument("--atoms", action="append", nargs="+", type=int, required=True)
     p.add_argument("--to", action="append", type=float)
     p.add_argument("--json", action="store_true")
+    p = sub.add_parser("mode")
+    p.add_argument("ts")
+    p.add_argument("mode")
+    p.add_argument("--atoms", action="append", nargs="+", type=int, default=[])
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("displace")
+    p.add_argument("ts")
+    p.add_argument("mode")
+    p.add_argument("--toward", required=True)
+    p.add_argument("--step", type=float, default=0.1)
+    p.add_argument("-o", "--out", required=True)
     p = sub.add_parser("join")
     p.add_argument("out")
     p.add_argument("stages", nargs="+")
@@ -478,6 +619,14 @@ def main(argv=None):
         _print(report, args.json)
         if any(not t["moved"] for t in report.get("targets", [])):
             return 1
+    elif args.command == "mode":
+        _print(mode_report(read_xyz(args.ts), read_mode(args.mode), args.atoms), args.json)
+    elif args.command == "displace":
+        rows = displace(read_xyz(args.ts), read_mode(args.mode), read_xyz(args.toward), args.step)
+        comment = f" pushed {args.step} A along the imaginary mode toward {args.toward}"
+        with open(args.out, "w", encoding="utf-8") as handle:
+            handle.write(format_frame(rows, comment))
+        print(f"{args.out}: rmsd to {args.toward} {rmsd(rows, read_xyz(args.toward)):.4f}")
     elif args.command == "join":
         text = join(args.stages, args.call, set(args.reverse))
         with open(args.out, "w", encoding="utf-8") as handle:

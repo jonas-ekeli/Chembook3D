@@ -133,3 +133,29 @@ test('a coordinate typed by hand is held at a TS that is the start of the path',
   await expect(typed).toBeChecked()
   await expect(dialog.getByRole('button', { name: 'Send' })).toBeEnabled()
 })
+
+test('two conformers get a warning that no bond changes', async ({ page }) => {
+  // T-UI-20, D116: the same structure numbered backwards and turned: nothing forms or breaks.
+  test.slow() // software WebGL is slow on the Windows runners
+  await newInvestigation(page, 'Scan path between conformers')
+  const ids: string[] = []
+  for (const body of [
+    { label: 'one', xyz: xyz(GLYCEROL), pos_x: 100, pos_y: 100, charge: 0, multiplicity: 1 },
+    { label: 'two', xyz: xyz(reversed), pos_x: 400, pos_y: 100, charge: 0, multiplicity: 1 },
+  ]) {
+    const response = await page.request.post('/api/nodes', { data: body })
+    expect(response.ok()).toBeTruthy()
+    ids.push(((await response.json()) as { id: string }).id)
+  }
+  const edge = await page.request.post('/api/transitions', { data: { source_id: ids[0], target_id: ids[1] } })
+  expect(edge.ok()).toBeTruthy()
+  await page.reload()
+  await canvasNode(page, 'one').click()
+  await canvasNode(page, 'two').click({ modifiers: ['Control'] })
+  await page.getByLabel('Selection inspector').getByRole('button', { name: 'Scan path…' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'Scan path' })
+  await expect(dialog.getByLabel('Scan path plan')).toContainText('From “one” to “two”')
+  await expect(dialog.getByLabel('Scan path warning')).toContainText('No bond forms or breaks')
+  await expect(dialog.getByRole('button', { name: 'Send' })).toBeEnabled()
+})

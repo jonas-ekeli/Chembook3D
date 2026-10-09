@@ -355,3 +355,132 @@ def test_pathtools_frames_trace_and_spikes(tmp_path, capsys):
     smooth = pathtools.check(str(log), start, stretched)
     assert smooth["spikes"] == [] and smooth["top"] == smooth["top_without_spikes"] == 3
     assert cloud_templates.TOOLS_IGNORE_TEXT.strip() == "__pycache__/"
+
+
+def g98_text(wavenumbers, modes, numbers) -> str:
+    """A Gaussian-style frequency block as `xtb --hess` writes it to g98.out."""
+    lines = [" Harmonic frequencies (cm**-1), IR intensities (KM/Mole)", ""]
+    for k in range(0, len(wavenumbers), 3):
+        chunk = range(k, min(k + 3, len(wavenumbers)))
+        lines.append(" Frequencies --" + "".join(f"{wavenumbers[m]:14.4f}" for m in chunk))
+        lines.append(" Red. masses --" + "".join(f"{1.0:14.4f}" for _ in chunk))
+        lines.append("  Atom AN" + "      X      Y      Z  " * len(chunk))
+        for i, z in enumerate(numbers):
+            cells = "".join(f"{x:7.2f}" for m in chunk for x in modes[m][i])
+            lines.append(f"{i + 1:6d}{z:4d}  {cells}")
+    return "\n".join(lines) + "\n"
+
+
+def test_a_ts_end_sends_its_mode_and_the_session_can_read_it(open_client, tmp_path):
+    # T-PATH-11 (D116): a TS end with a frequency job sends its imaginary mode in the start's
+    # numbering, turned with the end as it is placed on the start, so pathtools finds the
+    # held distance along it; the brief puts the downhill run first (reversed when the TS is
+    # the end) and explains xTB's scan input; a held coordinate carries both ends' values; a
+    # g98.out gives the same mode, and the push goes toward the other end.
+    ts, ts_rows, mode = ts_and_mode(open_client)
+    pushed = [[e, *(np.array(r) + 0.6 * m)] for (e, *r), m in zip(ts_rows, mode, strict=True)]
+    start_rows, _ = scrambled(pushed, seed=4)
+    start = node(open_client, label="before", xyz=xyz_text(start_rows), role="minimum",
+                 charge=ts["charge"], multiplicity=ts["multiplicity"])  # fmt: skip
+    edge(open_client, start["id"], ts["id"])
+    out = plan(open_client, {"start_id": start["id"], "end_id": ts["id"]})
+    held = [s for s in out["ts_ends"][0]["suggested"] if s["ticked"]]
+    body = {
+        "start_id": start["id"],
+        "end_id": ts["id"],
+        "held": [{"end": "end", "atoms": s["atoms"]} for s in held],
+        "start": False,
+    }
+    response = open_client.post("/api/scan-paths", json=body)
+    assert response.status_code == 200, response.text
+    job = response.json()["job"]
+    folder = cloud_jobs.jobs_dir(open_client.app.state.investigation.folder) / job["id"]
+    end_rows = pathtools.read_xyz(folder / "inputs" / "end.xyz")
+    wavenumber, vectors = pathtools.read_mode(folder / "inputs" / "end_mode.json")
+    assert wavenumber == out["ts_ends"][0]["imaginary"] and len(vectors) == len(end_rows)
+    assert not (folder / "inputs" / "start_mode.json").exists()
+    report = pathtools.mode_report(end_rows, (wavenumber, vectors), [s["atoms"] for s in held])
+    assert report["imaginary"] and report["runs_along"] is True
+    top = report["top_distances"][0]["atoms"]
+    assert top == "-".join(map(str, sorted(held[0]["atoms"])))
+    assert report["coordinates"][0]["share"] == pytest.approx(1.0)
+    # Pushed along the mode, the TS comes closer to the start than it was.
+    start_xyz = pathtools.read_xyz(folder / "inputs" / "start.xyz")
+    downhill = pathtools.displace(end_rows, (wavenumber, vectors), start_xyz, 0.2)
+    assert pathtools.rmsd(downhill, start_xyz) < pathtools.rmsd(end_rows, start_xyz)
+    settings = json.loads((folder / "inputs" / "path.json").read_text(encoding="utf-8"))
+    first = settings["held"][0]
+    assert first["value"] == pytest.approx(held[0]["end_value"])
+    assert first["other_value"] == pytest.approx(held[0]["start_value"])
+    text = (folder / "job.md").read_text(encoding="utf-8")
+    for words in (
+        "Downhill from the TS first",
+        "displace inputs/end.xyz inputs/end_mode.json --toward inputs/start.xyz",
+        "join it with `--reverse`",
+        "by their **position in\nthe `$constrain` block**",
+        "A later stage keeps what earlier stages did",
+        "stop after 6 strategies or about 60 minutes",
+        '"gate": "missed"',
+        "inputs/end_mode.json`: the end's imaginary mode",
+    ):
+        assert words in text, words
+    assert "A TS end that is only a guess" not in text
+
+    # The session's own frequency job reads the same: g98.out holds the mode among others.
+    numbers = [{"C": 6, "H": 1, "O": 8, "N": 7}.get(r[0], 6) for r in end_rows]
+    others = [[[0.1, 0.0, 0.0]] * len(end_rows), [[0.0, 0.1, 0.0]] * len(end_rows)]
+    g98 = tmp_path / "g98.out"
+    g98.write_text(g98_text([35.0, wavenumber, 80.0], [others[0], vectors, others[1]], numbers))
+    read = pathtools.read_mode(g98)
+    assert read[0] == pytest.approx(wavenumber, abs=1e-3)
+    assert np.allclose(read[1], vectors, atol=0.006)
+    assert pathtools.main(["mode", str(folder / "inputs" / "end.xyz"), str(g98), "--atoms",
+                           *map(str, held[0]["atoms"])]) == 0  # fmt: skip
+
+
+def test_ends_without_a_bond_change_are_flagged_and_a_missed_gate_is_noted(open_client):
+    # T-PATH-12 (D116): two conformers (no bond forms or breaks) get a warning in the plan and
+    # a line in the brief; a path that missed the quality check, with a conformer note and a
+    # TS check from `pathtools.py mode`, says so in the new node's notes.
+    a = node(open_client, label="A", xyz=xyz_text(WATER_A), charge=0, multiplicity=1)
+    turned = [list(WATER_A[0]), ["H", 0.0, 0.70, -0.52], list(WATER_A[2])]
+    b = node(open_client, label="B", xyz=xyz_text(turned), charge=0, multiplicity=1)
+    edge(open_client, a["id"], b["id"])
+    out = plan(open_client, {"start_id": a["id"], "end_id": b["id"]})
+    assert out["warnings"] and "No bond forms or breaks" in out["warnings"][0]
+    response = open_client.post(
+        "/api/scan-paths", json={"start_id": a["id"], "end_id": b["id"], "start": False}
+    )
+    folder = cloud_jobs.jobs_dir(open_client.app.state.investigation.folder)
+    text = (folder / response.json()["job"]["id"] / "job.md").read_text(encoding="utf-8")
+    assert "mostly a change of conformation" in text and "Downhill" not in text
+    assert "Neither end is a transition state" in text
+
+    result = {
+        "summary": "The closest path stops in a nearby rotamer.",
+        "path": {
+            "gate": "missed",
+            "missed": ["end RMSD 1.27 Å", "a spike at structure 9"],
+            "reached_end": False,
+            "end_rmsd": 1.27,
+            "conformer_note": "The ends differ in the mesityl rotation only.",
+            "ts_check": {
+                "wavenumber": -412.3,
+                "runs_along": False,
+                "coordinates": [{"atoms": "2-3", "share": 0.21}],
+            },  # fmt: skip
+        },
+    }
+    notes = scan_path._notes({"id": "job-1"}, result, "A", "B")
+    assert (
+        "Did not pass the quality check (D116): end RMSD 1.27 Å; a spike at structure 9." in notes
+    )
+    assert "End not reached (RMSD 1.27 Å)." in notes
+    assert "Conformers: The ends differ in the mesityl rotation only." in notes
+    assert (
+        "TS check: imaginary mode 412i cm⁻¹; does not run along them; held distances 2-3 21% "
+        "of the largest change." in notes
+    )
+    assert "TS check: looks fine" in scan_path._notes(
+        {"id": "j"}, {"path": {"ts_check": "looks fine"}}, "A", "B"
+    )
