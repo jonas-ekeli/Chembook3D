@@ -3,6 +3,7 @@ import { api, type CloudJob, type ScanPathPlan, type ScanPathTsEnd } from '../ap
 import { describeMatch } from '../atomMatch'
 import { measure, parseXyz } from '../chem'
 import { AtomMatchReview } from './AtomMatchDialog'
+import { SpeciesSection } from './ScanPathSpecies'
 import { Modal } from './Modal'
 
 function errorText(err: unknown): string {
@@ -80,7 +81,8 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
   } | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
 
-  const key = JSON.stringify([ends, members, pairs])
+  const [clearance, setClearance] = useState(4)
+  const key = JSON.stringify([ends, members, pairs, clearance])
   const plan = answer?.plan ?? null
   const busy = answer?.key !== key
 
@@ -93,6 +95,7 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
         pairs: pairs ?? undefined,
         start_member_id: members.start,
         end_member_id: members.end,
+        clearance,
       })
       .then(
         (result) => {
@@ -236,6 +239,7 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
         pairs: pairs ?? [],
         start_member_id: members.start,
         end_member_id: members.end,
+        clearance,
         held: held.filter((h) => h.ticked).map((h) => ({ end: h.end, atoms: h.atoms })),
         drive: drive.map((d) => ({
           atoms: d.atoms,
@@ -326,13 +330,15 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
           <button onClick={onClose}>Cancel</button>
           <button
             className="primary"
-            disabled={!plan || busy || sending || missing.length > 0 || driveBad !== undefined}
+            disabled={!plan || busy || sending || missing.length > 0 || driveBad !== undefined || plan.species !== null}
             onClick={send}
             title={
               missing.length
                 ? `Tick the coordinates that make “${missing[0].label}” a TS`
                 : driveBad
                   ? `Give numbers for ${driveBad.kind} ${driveBad.atoms.join('–')}`
+                  : plan?.species
+                    ? 'A path where a species joins or leaves can be checked here; sending it comes with the next update'
                   : 'Write the job and start a Claude Code cloud session on it (D93)'
             }
           >
@@ -400,6 +406,7 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
               />
             )}
           </section>
+          {plan.species && <SpeciesSection species={plan.species} plan={plan} clearance={clearance} onClearance={setClearance} />}
           {plan.ts_ends.map((ts) => (
             <section className="scan-path-section" key={ts.end} aria-label={`Held at ${ts.end === 'start' ? 'the start' : 'the end'}`}>
               <p className={ts.guess ? 'notice warn' : undefined}>{tsHeading(ts)}</p>

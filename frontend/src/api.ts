@@ -406,6 +406,23 @@ export type ScanPathTsEnd = {
   suggested: ScanPathCoordinate[]
 }
 
+/** D120: a free species joining or leaving along a scan path, in the start's numbering. */
+export type ScanPathSpecies = {
+  node_id: string
+  label: string
+  direction: 'joins' | 'leaves'
+  /** The end where it is bound. */
+  bound: 'start' | 'end'
+  atoms: number[]
+  bonds: [number, number][]
+  anchor: number[]
+  clearance: number
+  pull: number
+  closest: number
+  separated_xyz: string
+  bound_xyz: string
+}
+
 export type ScanPathPlan = {
   start: ScanPathEnd
   end: ScanPathEnd
@@ -418,6 +435,7 @@ export type ScanPathPlan = {
   ts_ends: ScanPathTsEnd[]
   /** D116: e.g. no bond forms or breaks between the ends. */
   warnings: string[]
+  species: ScanPathSpecies | null
 }
 
 export type ScanPathRequest = {
@@ -426,6 +444,8 @@ export type ScanPathRequest = {
   pairs?: [number, number][]
   start_member_id?: string | null
   end_member_id?: string | null
+  /** D120: the separated species' closest contact with the complex, Å. */
+  clearance?: number
 }
 
 /** D93: a calculation job handed to a Claude Code cloud session, as the app records it. */
