@@ -2,6 +2,7 @@
 helper the cloud session uses (`pathtools.py`)."""
 
 import json
+import math
 
 import numpy as np
 import pytest
@@ -419,7 +420,7 @@ def test_a_ts_end_sends_its_mode_and_the_session_can_read_it(open_client, tmp_pa
         "join it with `--reverse`",
         "by their **position in\nthe `$constrain` block**",
         "A later stage keeps what earlier stages did",
-        "stop after 6 strategies or about 60 minutes",
+        "about 60 minutes of xTB time and at most 6 strategies",
         '"gate": "missed"',
         "inputs/end_mode.json`: the end's imaginary mode",
     ):
@@ -484,3 +485,184 @@ def test_ends_without_a_bond_change_are_flagged_and_a_missed_gate_is_noted(open_
     assert "TS check: looks fine" in scan_path._notes(
         {"id": "j"}, {"path": {"ts_check": "looks fine"}}, "A", "B"
     )
+
+
+DCE = FIXTURES / "xtb" / "dce_scan"
+
+
+def test_pathtools_round_two(tmp_path, capsys):
+    # T-PATH-14 (D118): the turning bonds of a real xTB scan, one dihedral each and both ways
+    # round, with a concerted block; methyl groups and rings left out; trace reads the stage's
+    # scan.inp and warns about a scan that drove nothing and a first point that slipped; the
+    # path finder's kcal/mol energies are turned into Eh and refused by join as they are; a
+    # final optimisation joins as one structure; the end is judged on the reacting atoms.
+    log = pathtools.read_frames(DCE / "xtbscan.log")
+    first, last = log[0][1], log[-1][1]
+    report = pathtools.diff(first, last)
+    (rotation,) = report["rotations"]
+    assert rotation["bond"] == "1-2" and sorted(rotation["atoms"][::3]) == [3, 6]
+    assert abs(rotation["scan"][1] - rotation["scan"][0]) == pytest.approx(180, abs=0.5)
+    assert abs(rotation["other_way"][1] - rotation["other_way"][0]) == pytest.approx(180, abs=0.5)
+    assert "mode=concerted" in report["scan_block"] and "dihedral: " in report["scan_block"]
+    assert "dihedrals" not in report
+    # Ethane turned: only hydrogens beyond each carbon, so nothing to drive.
+    ethane = [["C", 0, 0, 0.76], ["C", 0, 0, -0.76]] + [
+        ["H", math.cos(a), math.sin(a), s * 1.15] for s in (1, -1) for a in (0.0, 2.09, 4.19)
+    ]
+    turned = [r[:] for r in ethane]
+    for r in turned[5:]:
+        x, y = r[1], r[2]
+        r[1], r[2] = x * math.cos(1.0) - y * math.sin(1.0), x * math.sin(1.0) + y * math.cos(1.0)
+    assert pathtools.diff(ethane, turned)["rotations"] == []
+    ring = {0: {1, 3}, 1: {0, 2}, 2: {1, 3}, 3: {2, 0, 4}, 4: {3}}
+    assert pathtools._in_ring(ring, 0, 1) and not pathtools._in_ring(ring, 3, 4)
+
+    # trace with the fixture's own input: the dihedral went from 180° to 0° as asked.
+    report = pathtools.trace_input(DCE / "xtbscan.log", DCE / "scan.inp")
+    (target,) = report["targets"]
+    assert target["moved"] and target["reached"] and not target["first_slipped"]
+    assert report["warnings"] == []
+    # A scan line naming the wrong constraint: the held distance was "scanned", the dihedral
+    # moved though it was meant to be held.
+    wrong = tmp_path / "wrong.inp"
+    wrong.write_text(
+        "$constrain\n  force constant=1.0\n  dihedral: 3,1,2,6,180.0\n  distance: 1,2,1.52\n"
+        "$scan\n  2: 1.52,2.50,13\n$end\n",
+        encoding="utf-8",
+    )
+    report = pathtools.trace_input(DCE / "xtbscan.log", wrong)
+    held, scanned = report["targets"]
+    assert not held["reached"] and not scanned["moved"]
+    assert any("did not drive it" in w for w in report["warnings"])
+    assert any("held at 180.0 but ended at 0.005" in w for w in report["warnings"])
+    # A first point that slipped: the scan was asked to start at 120°.
+    slipped = tmp_path / "slipped.inp"
+    slipped.write_text(
+        "$constrain\n  dihedral: 3,1,2,6,120.0\n$scan\n  1: 120.0,0.0,13\n$end\n", encoding="utf-8"
+    )
+    report = pathtools.trace_input(DCE / "xtbscan.log", slipped)
+    assert report["targets"][0]["first_slipped"]
+    assert "relaxed away before the scan began" in report["warnings"][0]
+    assert pathtools.main(["trace", str(DCE / "xtbscan.log"), "--input", str(slipped)]) == 1
+    missing = tmp_path / "missing.inp"
+    missing.write_text("$constrain\n  dihedral: 3,1,2,6,180.0\n$scan\n  2: 1,2,3\n$end\n")
+    with pytest.raises(ValueError, match="names no \\$constrain line"):
+        pathtools.trace_input(DCE / "xtbscan.log", missing)
+
+    # The path finder's file: kcal/mol from its first structure; its output the total energy.
+    finder = tmp_path / "xtbpath.xyz"
+    finder.write_text(
+        "".join(
+            pathtools.format_frame(rows, f" energy: {k:.12f} xtb: 6.7.1 (edcfbbe)")
+            for (_, rows), k in zip(log[:3], [0.0, 1.5, -0.4], strict=True)
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "path.out"
+    output.write_text(
+        "          | TOTAL ENERGY             -15.416221781784 Eh   |\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="pathtools.py pathfinder"):
+        pathtools.join([finder], ["xtb a.xyz --path b.xyz"])
+    stage = tmp_path / "stage-1.xyz"
+    assert pathtools.main(["pathfinder", str(finder), str(output), "-o", str(stage)]) == 0
+    energies = [pathtools.energy_of(c) for c, _ in pathtools.read_frames(stage)]
+    assert energies[0] == pytest.approx(-15.416221781784)
+    assert (energies[1] - energies[0]) * pathtools.HARTREE_KCAL == pytest.approx(1.5)
+    # A final optimisation's xtbopt.xyz joins as it is, as one more structure.
+    final = tmp_path / "xtbopt.xyz"
+    final.write_text(
+        pathtools.format_frame(last, " energy: -15.4162 gnorm: 0.0001 xtb: 6.7.1 (edcfbbe)"),
+        encoding="utf-8",
+    )
+    text = pathtools.join([stage, final], ["xtb a.xyz --path b.xyz", "xtb x.xyz --opt"])
+    assert text.count(" energy: ") == 4 and "stage: 2 call: xtb x.xyz --opt" in text
+
+    # The end judged on the reacting atoms: a water whose far hydrogen differs.
+    start = [list(r) for r in WATER_A]
+    end = [["O", 0.0, 0.0, 0.1173], ["H", 0.0, 1.30, -0.80], ["H", 0.0, -0.7572, -0.4692]]
+    assert pathtools.active_atoms(start, end) == [1, 2, 3]
+    assert pathtools.active_atoms(start, start) == []
+    assert pathtools.active_atoms(start, start, held=[[1, 2]]) == [1, 2, 3]
+    capsys.readouterr()
+
+
+def test_the_end_is_judged_on_the_reacting_atoms(tmp_path):
+    # T-PATH-15 (D118): a chain whose far end ends in another conformer reaches the end over
+    # the reacting atoms only; without `active` it does not.
+    chain = [["C", 1.5 * k, 0.0, 0.0] for k in range(8)]
+    start = [r[:] for r in chain]
+    end = [r[:] for r in chain]
+    end[0] = ["C", -0.5, 1.2, 0.0]  # the reacting end moves (a bond 0-1 breaks)
+    for k in range(5, 8):  # the far end bends away
+        end[k] = ["C", 1.5 * 4 + 1.5 * (k - 4) * 0.5, 1.5 * (k - 4) * 0.85, 0.0]
+    # The path moves only the reacting carbon; the far end keeps the start's conformer.
+    path = tmp_path / "path.xyz"
+    steps = []
+    for t in np.linspace(0, 1, 8):
+        rows = [r[:] for r in start]
+        rows[0] = ["C", *(a + t * (b - a) for a, b in zip(start[0][1:], end[0][1:], strict=True))]
+        steps.append(rows)
+    path.write_text(scan_log(steps, [-5.0 + 0.001 * k for k in range(8)]), encoding="utf-8")
+    active = pathtools.active_atoms(start, end)
+    assert active == [1, 2, 3, 4]
+    whole = pathtools.check(str(path), start, end)
+    judged = pathtools.check(str(path), start, end, active=active)
+    assert whole["judged_on"] == "all atoms" and not whole["reached_end"]
+    assert judged["judged_on"] == "the reacting atoms" and judged["active_atoms"] == 4
+    assert judged["reached_end"] and judged["active_end_rmsd"] < 0.01
+    assert judged["end_rmsd"] == pytest.approx(whole["end_rmsd"])
+    settings = tmp_path / "path.json"
+    settings.write_text(json.dumps({"active": active}), encoding="utf-8")
+    assert pathtools.main(["check", str(path), *_saved(tmp_path, start, end),
+                           "--settings", str(settings), "--json"]) == 0  # fmt: skip
+
+
+def _saved(folder, start, end) -> list[str]:
+    for name, rows in (("s.xyz", start), ("e.xyz", end)):
+        (folder / name).write_text(pathtools.format_frame(rows, name), encoding="utf-8")
+    return [str(folder / "s.xyz"), str(folder / "e.xyz")]
+
+
+def test_the_job_names_the_reacting_atoms(open_client):
+    # T-PATH-16 (D118): path.json lists the atoms the end is judged on, the brief gates on
+    # them and gives the tested path finder settings, the stage checks and the feedback file;
+    # the notes give both RMSDs and point at the session's feedback.
+    a, b = water_pair(open_client, role="transition_state")
+    edge(open_client, a["id"], b["id"])
+    body = {
+        "start_id": a["id"],
+        "end_id": b["id"],
+        "pairs": [[2, 1]],
+        "held": [{"end": "end", "atoms": [1, 2]}],
+        "start": False,
+    }
+    response = open_client.post("/api/scan-paths", json=body)
+    assert response.status_code == 200, response.text
+    job = response.json()["job"]
+    folder = cloud_jobs.jobs_dir(open_client.app.state.investigation.folder) / job["id"]
+    settings = json.loads((folder / "inputs" / "path.json").read_text(encoding="utf-8"))
+    assert settings["active"] == [1, 2, 3] and job["scan_path"]["active"] == [1, 2, 3]
+    text = (folder / "job.md").read_text(encoding="utf-8")
+    for words in (
+        "`active`: the 3\n  atoms the end is judged on",
+        "(3 of 3 here)",
+        "--settings inputs/path.json",
+        "`active_end_rmsd` at most\n0.5 Å",
+        "A **strategy** is one design",
+        "kpush=0.003",
+        "pathtools.py pathfinder xtbpath.xyz path.out -o stage-1.xyz",
+        "trace stage-1/xtbscan.log --input stage-1/scan.inp",
+        "`60.0, 300.0` turns a dihedral through 180°",
+        "outputs/feedback.md",
+        "Stop early only when a path\npasses",
+    ):
+        assert words in text, words
+    assert "stop after 6 strategies" not in text
+
+    result = {"path": {"reached_end": True, "active_end_rmsd": 0.18, "end_rmsd": 1.25}}
+    notes = scan_path._notes({"id": "job-2"}, result, "A", "B", feedback=True)
+    assert "End reached over the reacting atoms (RMSD 0.18 Å, 1.25 Å over all atoms)." in notes
+    assert "The session left feedback in jobs/job-2/outputs/feedback.md." in notes
+    old = scan_path._notes({"id": "j"}, {"path": {"reached_end": False, "end_rmsd": 1.3}}, "A", "B")
+    assert "End not reached (RMSD 1.30 Å)." in old and "feedback" not in old

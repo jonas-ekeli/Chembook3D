@@ -6,8 +6,9 @@ Written by Chembook3D into `.claude/chembook3d/pathtools.py` of the investigatio
 `services/geometry.py`), so the cloud session and the app agree on what a path does.
 
     python3 pathtools.py diff START.xyz END.xyz
-        bonds that form and break, fitted RMSD, and the distances and dihedrals that change
-        most between two structures of the same atoms in the same order
+        bonds that form and break, fitted RMSD, the distances that change most, and the bonds
+        that turn by more than 30° (one dihedral each, both ways round, and a ready concerted
+        `$scan` block) between two structures of the same atoms in the same order
     python3 pathtools.py rmsd A.xyz B.xyz
     python3 pathtools.py measure FILE.xyz 3 7 [9 [12]]
         a distance (Å), angle or dihedral (degrees, xTB's and IUPAC's sign convention); on a
@@ -15,16 +16,26 @@ Written by Chembook3D into `.claude/chembook3d/pathtools.py` of the investigatio
     python3 pathtools.py frames xtbscan.log [--last | --index N] -o OUT.xyz
         structures of a multi-structure file (an xtbscan.log, a path.xyz) as an xyz file:
         all of them, the last, or number N
+    python3 pathtools.py trace xtbscan.log --input scan.inp
     python3 pathtools.py trace xtbscan.log --atoms 2 3 [--to 3.2] [--atoms 1 2 3 4 ...]
-        each structure's energy (kcal/mol from the first) and the coordinates' values; with
-        --to (one per --atoms, in order), whether each coordinate moved and reached its target,
-        and exit status 1 when one barely moved: a scan that drove nothing ends normally too
+        each structure's energy (kcal/mol from the first) and the coordinates' values; with the
+        stage's scan.inp (or --to, one per --atoms), whether each scanned coordinate started at
+        its start value, moved and reached its target and each held one stayed, with exit
+        status 1 when a scan barely moved or its first structure slipped away from the start
+        value: xTB ends normally in both cases
+    python3 pathtools.py pathfinder xtbpath.xyz path.out -o STAGE.xyz
+        xTB's path finder (`xtb A.xyz --path B.xyz`) writes energies in kcal/mol from its first
+        structure; this writes them in Eh (from the run's output), so the path joins as a stage
     python3 pathtools.py join OUT.xyz STAGE1.log [STAGE2.log ...] --call "xtb ..." [--reverse N]
         every structure of the stages' xtbscan.log files in order, as one path.xyz whose
         comment lines read `energy: <Eh> stage: <n> call: <xtb command line>`; --reverse 2
-        turns stage 2 round (scanned from the end back), --call may be given once per stage
-    python3 pathtools.py check PATH.xyz START.xyz END.xyz [--mapping mapping.json] [--json]
-        how close the path starts and ends to the two ends, bonds that form or break along it
+        turns stage 2 round (scanned from the end back), --call may be given once per stage; a
+        final optimisation's xtbopt.xyz joins as a one-structure stage as it is
+    python3 pathtools.py check PATH.xyz START.xyz END.xyz [--mapping mapping.json]
+                                [--settings path.json] [--json]
+        how close the path starts and ends to the two ends (with the settings, the end is judged
+        on the reacting atoms `active` lists, and the RMSD over all atoms is given beside it),
+        bonds that form or break along it
         other than those the ends differ by, the largest jump between neighbouring structures,
         and the highest point, with spikes (one structure far above both neighbours with a jump
         into or out of it, as a conformer flipping in one step gives) reported apart
@@ -66,6 +77,9 @@ GOOD_JUMP = 0.5  # Å, fitted RMSD between neighbouring structures
 SPIKE_KCAL = 10.0  # kcal/mol above both neighbours, with a jump over GOOD_JUMP: a spike
 MOVED = 0.1  # a driven coordinate moved when it covered at least this part of the way
 REACHED = {2: 0.1, 3: 5.0, 4: 5.0}  # Å or degrees from its target: reached
+ACTIVE_REACH = 2  # bonds out from a reacting or held atom: the atoms an end is judged on (D118)
+ROTATION = 30.0  # degrees: a bond whose dihedral changes more is a rotation to drive (D118)
+FIRST_POINT = {2: 0.05, 3: 5.0, 4: 5.0}  # a scan's first structure this far off has slipped
 PARTIAL_SCALE = 1.8  # × the sum of covalent radii: pairs a mode can make or break (D114)
 MODE_SHARE = 0.35  # a distance runs along a mode when it changes this much of the largest
 
@@ -264,17 +278,7 @@ def diff(start, end, top=10):
     for i, j in either:
         near[i].add(j)
         near[j].add(i)
-    torsions = {}
-    for j, k in either:
-        for i in near[j] - {k}:
-            for m in near[k] - {j, i}:
-                key = (i, j, k, m) if i < m else (m, k, j, i)
-                if key in torsions:
-                    continue
-                t0, t1 = _measure(start, list(key)), _measure(end, list(key))
-                change = abs((t1 - t0 + 180) % 360 - 180)
-                torsions[key] = (change, [x + 1 for x in key], t0, t1)
-    dihedrals = sorted(torsions.values(), key=lambda item: -item[0])
+    rotations = _rotations(start, end, _bonds(start) & _bonds(end), near)
     return {
         "rmsd": rmsd(start, end),
         "formed": [[i + 1, j + 1] for i, j in formed],
@@ -283,17 +287,87 @@ def diff(start, end, top=10):
             {"atoms": atoms, "start": round(d0, 3), "end": round(d1, 3)}
             for _, atoms, d0, d1 in distances[:top]
         ],
-        "dihedrals": [
-            {"atoms": atoms, "start": round(t0, 1), "end": round(t1, 1)}
-            for _, atoms, t0, t1 in dihedrals[:top]
-        ],
+        "rotations": rotations,
+        "scan_block": _scan_block(rotations),
     }
+
+
+def _rotations(start, end, kept, near):
+    """Bonds kept at both ends that turn by more than ROTATION degrees, one dihedral each
+    (heavy atoms at its ends where there are), largest first. A bond in a ring, or with only
+    hydrogens beyond one end (a methyl group), is left out."""
+    found = {}
+    for j, k in kept:
+        ends_j, ends_k = near[j] - {k}, near[k] - {j}
+        if not ends_j or not ends_k or _in_ring(near, j, k):
+            continue
+        if all(start[x][0] == "H" for x in ends_j) or all(start[x][0] == "H" for x in ends_k):
+            continue
+        best = None
+        for i in ends_j:
+            for m in ends_k - {i}:
+                t0, t1 = _measure(start, [i, j, k, m]), _measure(end, [i, j, k, m])
+                turn = _wrapped(t1 - t0, 4)
+                hydrogens = (start[i][0] == "H") + (start[m][0] == "H")
+                item = (hydrogens, -abs(turn), [i + 1, j + 1, k + 1, m + 1], t0, t1, turn)
+                if best is None or item[:2] < best[:2]:
+                    best = item
+        if best is not None and abs(best[5]) > ROTATION:
+            found[(j, k)] = best
+    out = []
+    for _, _, atoms, t0, t1, turn in sorted(found.values(), key=lambda b: b[1]):
+        other = turn - 360 if turn > 0 else turn + 360
+        out.append({
+            "bond": f"{atoms[1]}-{atoms[2]}",
+            "atoms": atoms,
+            "start": round(t0, 1),
+            "end": round(t1, 1),
+            "scan": [round(t0, 1), round(t0 + turn, 1)],
+            "other_way": [round(t0, 1), round(t0 + other, 1)],
+        })  # fmt: skip
+    return out
+
+
+def _in_ring(near, j, k):
+    """True when atoms j and k stay connected without their own bond: it cannot turn freely."""
+    seen, todo = {j}, [j]
+    while todo:
+        a = todo.pop()
+        for b in near[a]:
+            if (a, b) in ((j, k), (k, j)) or b in seen:
+                continue
+            if b == k:
+                return True
+            seen.add(b)
+            todo.append(b)
+    return False
+
+
+def _scan_block(rotations, points=20):
+    """An xTB input driving every rotation together, the short way round (xTB goes from the
+    first value to the second as written, past ±180° too)."""
+    if not rotations:
+        return ""
+    lines = ["$constrain", "  force constant=1.0"]
+    lines += [
+        "  dihedral: " + ", ".join(map(str, r["atoms"])) + f", {r['scan'][0]}" for r in rotations
+    ]
+    lines += ["$scan", "  mode=concerted"]
+    lines += [
+        f"  {n}: {r['scan'][0]}, {r['scan'][1]}, {points}" for n, r in enumerate(rotations, start=1)
+    ]
+    return "\n".join([*lines, "$end"])
 
 
 def join(stages, calls, reversed_stages=()):
     """path.xyz text from the stages' xtbscan.log files."""
     out = []
     for n, path in enumerate(stages, start=1):
+        if str(path).replace("\\", "/").rsplit("/", 1)[-1].startswith("xtbpath"):
+            raise ValueError(
+                f"{path}: xTB's path finder writes energies in kcal/mol from its first "
+                "structure; convert it with `pathtools.py pathfinder` and join that"
+            )
         frames = read_frames(path)
         if n in reversed_stages:
             frames = frames[::-1]
@@ -304,6 +378,45 @@ def join(stages, calls, reversed_stages=()):
                 raise ValueError(f"{path}: a structure has no `energy:` on its comment line")
             out.append(format_frame(rows, f" energy: {energy:.12f} stage: {n} call: {call}"))
     return "".join(out)
+
+
+def path_finder(path, output):
+    """xyz text of xTB's path finder result with its energies in Eh: the file gives kcal/mol
+    from its first structure, the run's output the first structure's total energy."""
+    first = None
+    with open(output, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if "TOTAL ENERGY" in line:
+                first = float(line.split("TOTAL ENERGY")[1].split()[0])
+                break
+    if first is None:
+        raise ValueError(f"{output}: no TOTAL ENERGY (give the output of the --path run)")
+    out = []
+    for comment, rows in read_frames(path):
+        kcal = energy_of(comment)
+        if kcal is None:
+            raise ValueError(f"{path}: a structure has no `energy:` on its comment line")
+        out.append(format_frame(rows, f" energy: {first + kcal / HARTREE_KCAL:.12f}"))
+    return "".join(out)
+
+
+def active_atoms(start, end, pairs=(), held=()):
+    """The atoms (from 1) an end is judged on (D118): those of the bonds that form or break
+    between `start` and `end`, of `pairs` and of the `held` coordinates (lists of atoms from 1),
+    and every atom up to ACTIVE_REACH bonds from them at either end. Empty when nothing
+    reacts or is held: then the whole structure counts."""
+    formed, broken = bond_changes(start, end)
+    found = {i for pair in formed + broken for i in pair}
+    found |= {a - 1 for group in (*pairs, *held) for a in group}
+    if not found:
+        return []
+    near = {i: set() for i in range(len(start))}
+    for i, j in _bonds(start) | _bonds(end):
+        near[i].add(j)
+        near[j].add(i)
+    for _ in range(ACTIVE_REACH):
+        found |= {j for i in found for j in near[i]}
+    return sorted(i + 1 for i in found)
 
 
 def frames_of(path, index=None):
@@ -322,9 +435,62 @@ def _wrapped(change, size):
     return (change + 180) % 360 - 180 if size == 4 else change
 
 
-def trace(path, coordinates, targets=None):
+def read_scan_input(path):
+    """The `$constrain` coordinates ({"atoms", "value"}, value None for `auto`) and `$scan`
+    lines ({"constraint" (from 1), "start", "end", "points"}) of an xTB input file."""
+    sizes = {"distance": 2, "angle": 3, "dihedral": 4}
+    block, constraints, scans = None, [], []
+    with open(path, encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.split("#")[0].strip()
+            if not line:
+                continue
+            if line.startswith("$"):
+                block = None if line.startswith("$end") else line[1:].split()[0].lower()
+                continue
+            name, colon, rest = line.partition(":")
+            name = name.strip().lower()
+            if block == "constrain" and colon and name in sizes:
+                parts = [x.strip() for x in rest.split(",")]
+                size = sizes[name]
+                value = None if parts[size].lower() == "auto" else float(parts[size])
+                constraints.append({"atoms": [int(x) for x in parts[:size]], "value": value})
+            elif block == "scan" and colon and name.isdigit():
+                first, last, points = (x.strip() for x in rest.split(",")[:3])
+                scans.append({"constraint": int(name), "start": float(first),
+                              "end": float(last), "points": int(points)})  # fmt: skip
+    return constraints, scans
+
+
+def trace_input(path, input_path):
+    """`trace` with the coordinates, start values and targets of the stage's scan input: each
+    scanned constraint from its start to its end value, each other one held at its value."""
+    constraints, scans = read_scan_input(input_path)
+    coordinates, starts, targets = [], [], []
+    scanned = {}
+    for scan in scans:
+        if not 1 <= scan["constraint"] <= len(constraints):
+            raise ValueError(
+                f"{input_path}: $scan line {scan['constraint']} names no $constrain line "
+                f"(there are {len(constraints)}; they count from 1 in the order listed)"
+            )
+        scanned[scan["constraint"]] = scan
+    for n, item in enumerate(constraints, start=1):
+        scan = scanned.get(n)
+        if scan is None and item["value"] is None:
+            continue
+        coordinates.append(item["atoms"])
+        starts.append(scan["start"] if scan else item["value"])
+        targets.append(scan["end"] if scan else item["value"])
+    if not coordinates:
+        raise ValueError(f"{input_path}: no coordinate with a value to follow")
+    return trace(path, coordinates, targets, starts)
+
+
+def trace(path, coordinates, targets=None, starts=None):
     """Each structure's energy and the coordinates' values; with targets (one per coordinate),
-    whether each moved and reached its target."""
+    whether each moved and reached its target; with start values, whether the first structure
+    is at them (a first point that slipped away before the scan began is reported)."""
     frames = read_frames(path)
     if not frames:
         raise ValueError(f"{path} holds no structure")
@@ -347,15 +513,45 @@ def trace(path, coordinates, targets=None):
             last = measure(frames[-1][1], atoms)
             asked = abs(_wrapped(target - first, len(atoms)))
             went = abs(_wrapped(last - first, len(atoms)))
-            verdicts.append({
+            verdict = {
                 "atoms": "-".join(map(str, atoms)),
                 "first": round(first, 3),
                 "last": round(last, 3),
                 "target": target,
                 "moved": asked == 0 or went >= MOVED * asked,
                 "reached": abs(_wrapped(target - last, len(atoms))) <= REACHED[len(atoms)],
-            })  # fmt: skip
+            }
+            if starts:
+                start = starts[len(verdicts)]
+                verdict["start"] = start
+                verdict["first_slipped"] = (
+                    abs(_wrapped(first - start, len(atoms))) > FIRST_POINT[len(atoms)]
+                )
+                asked = abs(_wrapped(target - start, len(atoms)))
+                verdict["moved"] = asked == 0 or went >= MOVED * asked
+            verdicts.append(verdict)
         report["targets"] = verdicts
+        report["warnings"] = (
+            [
+                f"{v['atoms']}: the first structure is at {v['first']}, not at the start value "
+                f"{v['start']}: it relaxed away before the scan began (check the $constrain value "
+                "and the structure the stage starts from)"
+                for v in verdicts
+                if v.get("first_slipped")
+            ]
+            + [
+                f"{v['atoms']}: went only from {v['first']} to {v['last']} on the way to "
+                f"{v['target']}: the scan did not drive it (check the $scan line's number)"
+                for v in verdicts
+                if not v["moved"]
+            ]
+            + [
+                f"{v['atoms']}: held at {v['target']} but ended at {v['last']}: it was driven or "
+                "drifted (check the $scan line's number and the force constant)"
+                for v in verdicts
+                if v.get("start") == v["target"] and not v["reached"]
+            ]
+        )
     return report
 
 
@@ -375,9 +571,11 @@ def _top(energies, skip=()):
     return max(inner, key=lambda k: energies[k]) if inner else None
 
 
-def check(path, start, end, allowed=None):
+def check(path, start, end, allowed=None, active=None):
     """How a path does: its ends, stray bond changes, jumps, spikes and its highest point.
-    `allowed` lists more bonds (atom pairs from 1) that may form or break."""
+    `allowed` lists more bonds (atom pairs from 1) that may form or break; with `active` (atoms
+    from 1, `active_atoms`), the end is reached when those atoms fit the end (D118), and the
+    RMSD over all atoms is given beside it."""
     frames = read_frames(path)
     if not frames:
         raise ValueError(f"{path} holds no structure")
@@ -402,12 +600,21 @@ def check(path, start, end, allowed=None):
         return (energies[k] - energies[0]) * HARTREE_KCAL if k is not None else None
 
     end_rmsd = rmsd(frames[-1][1], end)
+    picked = [a - 1 for a in active or [] if 1 <= a <= len(end)]
+    judged = end_rmsd
+    if len(picked) >= 3 and len(picked) < len(end):
+        judged = rmsd([frames[-1][1][k] for k in picked], [end[k] for k in picked])
+    else:
+        picked = []
     largest = max(jumps) if jumps else 0.0
     report = {
         "structures": len(frames),
         "start_rmsd": rmsd(frames[0][1], start),
         "end_rmsd": end_rmsd,
-        "reached_end": end_rmsd <= GOOD_END_RMSD,
+        "active_atoms": len(picked) or len(end),
+        "active_end_rmsd": judged,
+        "judged_on": "the reacting atoms" if picked else "all atoms",
+        "reached_end": judged <= GOOD_END_RMSD,
         "stray_bond_changes": stray[:50],
         "largest_jump": largest,
         "largest_jump_after": jumps.index(largest) + 1 if jumps else None,
@@ -574,7 +781,8 @@ def main(argv=None):
     p.add_argument("-o", "--out", required=True)
     p = sub.add_parser("trace")
     p.add_argument("file")
-    p.add_argument("--atoms", action="append", nargs="+", type=int, required=True)
+    p.add_argument("--input")
+    p.add_argument("--atoms", action="append", nargs="+", type=int)
     p.add_argument("--to", action="append", type=float)
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("mode")
@@ -588,6 +796,10 @@ def main(argv=None):
     p.add_argument("--toward", required=True)
     p.add_argument("--step", type=float, default=0.1)
     p.add_argument("-o", "--out", required=True)
+    p = sub.add_parser("pathfinder")
+    p.add_argument("path")
+    p.add_argument("output")
+    p.add_argument("-o", "--out", required=True)
     p = sub.add_parser("join")
     p.add_argument("out")
     p.add_argument("stages", nargs="+")
@@ -598,6 +810,7 @@ def main(argv=None):
     p.add_argument("start")
     p.add_argument("end")
     p.add_argument("--mapping")
+    p.add_argument("--settings")
     p.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "diff":
@@ -615,10 +828,20 @@ def main(argv=None):
             handle.write("".join(format_frame(rows, comment) for comment, rows in picked))
         print(f"{args.out}: {len(picked)} structures")
     elif args.command == "trace":
-        report = trace(args.file, args.atoms, args.to)
+        if args.input:
+            report = trace_input(args.file, args.input)
+        elif args.atoms:
+            report = trace(args.file, args.atoms, args.to)
+        else:
+            parser.error("give the stage's --input scan.inp or --atoms")
         _print(report, args.json)
-        if any(not t["moved"] for t in report.get("targets", [])):
+        if report.get("warnings"):
             return 1
+    elif args.command == "pathfinder":
+        text = path_finder(args.path, args.output)
+        with open(args.out, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        print(f"{args.out}: {text.count(' energy: ')} structures, energies in Eh")
     elif args.command == "mode":
         _print(mode_report(read_xyz(args.ts), read_mode(args.mode), args.atoms), args.json)
     elif args.command == "displace":
@@ -638,7 +861,12 @@ def main(argv=None):
             with open(args.mapping, encoding="utf-8") as handle:
                 mapping = json.load(handle)
             allowed = mapping.get("formed", []) + mapping.get("broken", [])
-        _print(check(args.path, read_xyz(args.start), read_xyz(args.end), allowed), args.json)
+        active = None
+        if args.settings:
+            with open(args.settings, encoding="utf-8") as handle:
+                active = json.load(handle).get("active")
+        report = check(args.path, read_xyz(args.start), read_xyz(args.end), allowed, active)
+        _print(report, args.json)
     return 0
 
 
