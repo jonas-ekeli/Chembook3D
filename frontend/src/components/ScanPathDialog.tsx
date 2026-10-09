@@ -102,6 +102,9 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
   const review = reviewing ?? (plan ? !plan.match.confident : false)
   const chosenSolvent = solvent === undefined ? (plan?.solvent ?? null) : solvent
   const missing = plan?.ts_ends.filter((ts) => ts.guess && !held.some((h) => h.end === ts.end && h.ticked)) ?? []
+  // The end a typed coordinate is held at: the one picked, if it is a TS, else the first TS end
+  // (the TS may be the start, and swapping the ends changes which one it is).
+  const typedEnd = plan?.ts_ends.some((ts) => ts.end === typed.end) ? typed.end : (plan?.ts_ends[0]?.end ?? typed.end)
 
   const fix = (next: [number, number][]) => {
     if (plan) savePairs(plan.start.node_id, plan.end.node_id, next)
@@ -127,7 +130,13 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
     const a = measure(atoms.map((n) => startAtoms[n - 1]))
     const b = measure(atoms.map((n) => endAtoms[n - 1]))
     if (!a || !b) return
-    setHeld([...held, { end: typed.end, atoms, ticked: true, why: 'added by hand', kind: a.kind, start_value: a.value, end_value: b.value }])
+    // A coordinate already listed (in either direction) is ticked rather than listed twice.
+    const same = (h: Held) => h.end === typedEnd && [atoms, [...atoms].reverse()].some((order) => order.join('-') === h.atoms.join('-'))
+    if (held.some(same)) {
+      setHeld(held.map((h) => (same(h) ? { ...h, ticked: true } : h)))
+    } else {
+      setHeld([...held, { end: typedEnd, atoms, ticked: true, why: 'added by hand', kind: a.kind, start_value: a.value, end_value: b.value }])
+    }
     setTyped({ ...typed, text: '' })
     setTypedError(null)
   }
@@ -311,7 +320,7 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
               <span className="small">Hold another coordinate at</span>
               <select
                 aria-label="Held at"
-                value={typed.end}
+                value={typedEnd}
                 onChange={(event) => setTyped({ ...typed, end: event.target.value as 'start' | 'end' })}
               >
                 {plan.ts_ends.map((ts) => (

@@ -94,3 +94,42 @@ test('a scan path to a TS guess asks for its coordinates and sends the job', asy
   expect(jobs[0].scan_path.solvent).toBe('toluene')
   expect(jobs[0].scan_path.held.map((h) => h.atoms)).toEqual([[1, 2, 3]])
 })
+
+test('a coordinate typed by hand is held at a TS that is the start of the path', async ({ page }) => {
+  test.slow() // software WebGL is slow on the Windows runners
+  await newInvestigation(page, 'Scan path from a TS')
+  const stretched = reversed.map((atom, i) => (i === reversed.length - 7 ? (['H', atom[1] + 0.45, atom[2] + 0.45, atom[3]] as const) : atom))
+  const ids: string[] = []
+  for (const body of [
+    { label: 'guess', xyz: xyz(stretched), pos_x: 100, pos_y: 100, role: 'transition_state', charge: 0, multiplicity: 1 },
+    { label: 'product', xyz: xyz(GLYCEROL), pos_x: 400, pos_y: 100, charge: 0, multiplicity: 1 },
+  ]) {
+    const response = await page.request.post('/api/nodes', { data: body })
+    expect(response.ok()).toBeTruthy()
+    ids.push(((await response.json()) as { id: string }).id)
+  }
+  const edge = await page.request.post('/api/transitions', { data: { source_id: ids[0], target_id: ids[1] } })
+  expect(edge.ok()).toBeTruthy()
+  await page.reload()
+  await canvasNode(page, 'guess').click()
+  await canvasNode(page, 'product').click({ modifiers: ['Control'] })
+  await page.getByLabel('Selection inspector').getByRole('button', { name: 'Scan path…' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'Scan path' })
+  await expect(dialog.getByLabel('Scan path plan')).toContainText('From “guess” to “product”')
+  const held = dialog.getByLabel('Held at the start')
+  await expect(held).toBeVisible()
+  const atoms = dialog.getByLabel('Atoms to hold')
+  await atoms.fill('2 3')
+  await atoms.press('Enter')
+  const typed = held.getByRole('checkbox', { name: 'Hold distance 2–3' })
+  await expect(typed).toBeChecked()
+  await expect(dialog.getByRole('alert')).toHaveCount(0)
+  // The same bond typed the other way round is not listed twice.
+  await typed.uncheck()
+  await atoms.fill('3 2')
+  await atoms.press('Enter')
+  await expect(held.getByRole('checkbox', { name: /^Hold distance (2–3|3–2)$/ })).toHaveCount(1)
+  await expect(typed).toBeChecked()
+  await expect(dialog.getByRole('button', { name: 'Send' })).toBeEnabled()
+})
