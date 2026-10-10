@@ -395,6 +395,7 @@ class Keeper:
         self.logins: dict[str, Login] = {}
         self.lost: dict[str, str] = {}  # server id → why its connection ended
         self.stopping = asyncio.Event()
+        self.handlers: set[asyncio.Task] = set()  # open connections from the app
 
     # known hosts (D122b)
 
@@ -658,6 +659,10 @@ class Keeper:
                     await task
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            self.handlers.add(task)
+            task.add_done_callback(self.handlers.discard)
         try:
             line = await asyncio.wait_for(reader.readline(), 10)
             msg = json.loads(line)
@@ -741,6 +746,13 @@ async def serve(folder: Path, grace: float = EMPTY_GRACE, idle: float = IDLE_LIM
         watcher.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await watcher
+        # Let the connection that asked to quit get its answer, then end the rest, so none is
+        # left pending when the loop closes.
+        if keeper.handlers:
+            await asyncio.wait(set(keeper.handlers), timeout=2)
+        for task in list(keeper.handlers):
+            task.cancel()
+        await asyncio.gather(*keeper.handlers, return_exceptions=True)
         with contextlib.suppress(OSError, ValueError):
             if json.loads(path.read_text(encoding="utf-8")).get("token") == keeper.token:
                 path.unlink()

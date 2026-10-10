@@ -456,6 +456,7 @@ def test_a_wrong_token_gets_nothing(saga, config_dir, home):
         await writer.drain()
         line = await reader.readline()
         writer.close()
+        await writer.wait_closed()
         return line
 
     assert asyncio.run(ask("wrong")) == b""
