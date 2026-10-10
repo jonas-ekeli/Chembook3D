@@ -33,5 +33,5 @@ comment at its top.
 ## Python packages
 
 The backend's dependencies are installed by uv, not copied into this repository. They are under
-permissive licences (MIT, BSD, Apache-2.0, PSF); certifi is under MPL-2.0. `uv.lock` lists the
+permissive licences (MIT, BSD, Apache-2.0, PSF); certifi is under MPL-2.0, and asyncssh (the SSH connection of D122) under EPL-2.0 with GPL-2.0-or-later as its secondary licence. `uv.lock` lists the
 exact versions.
