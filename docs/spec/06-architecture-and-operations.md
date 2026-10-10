@@ -36,6 +36,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Confirmed items are marked
 - **The API is local-only:** it binds to 127.0.0.1 (NFR-SEC-01).
 - **Claude works through the same API (D91).** `chembook3d mcp`, started by Claude Code or Claude Desktop on the same computer, turns Claude's tool calls into API requests to the running app, so the rules above hold for it too. It never opens the database. Open tabs wait on `GET /api/live` and reload when something is changed elsewhere; deletes Claude asks for wait there for the user's Confirm, and only the app's page can answer them.
 - **Calculations go to Claude Code cloud sessions (D93).** `cloud_jobs.py` writes job folders in `jobs/`, commits and pushes only those (and the cloud files in `.claude/`) to the investigation's GitHub repository, and runs the person's own `claude --cloud`; the session runs xTB or CREST and pushes outputs to a branch of its own, which the app copies back from. The database never goes through this path, so nothing is merged.
+- **SSH servers through a keeper (D122).** The connection to a server such as Saga and its shell live in `chembook3d.remote.keeper`, a small process of its own on 127.0.0.1 that outlives the app; the app finds it through `remote/keeper.json` in the config folder (port and token) and relays the terminal and file copies to it.
 - The backend serves the built UI as static files, so running one command starts everything (P19).
 
 ## 3. Storage
@@ -72,7 +73,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Confirmed items are marked
 | NFR-DATA-04 | Crashes or kills during import leave no partial records. Orphaned copied files are cleaned up on next open. | P26 |
 | NFR-SEC-01 | The backend listens on the loopback interface only and has no remote access. | D42 |
 | NFR-SEC-02 | Imported files are parsed as data only. Nothing in them is executed. | — |
-| NFR-SEC-03 | The app stores no passwords or tokens. Git sync and cloud jobs sign in through the credential helper of the `git` and the sign-in of the `claude` installed on the computer, never through the app. | D71, D93 |
+| NFR-SEC-03 | The app stores no passwords or tokens. Git sync and cloud jobs sign in through the credential helper of the `git` and the sign-in of the `claude` installed on the computer, never through the app. An SSH login (D122) passes the password and one-time code typed in the app to the keeper for that login only, never to disk. | D71, D93, D122 |
 | NFR-PERF-01 | **No numerical performance targets are set.** Jonas has not confirmed any. The implementer should report load and render times on the reference example and on a stress case (see [07](07-validation-and-test-plan.md)) so targets can be set later. | HANDOFF |
 | NFR-UX-01 | Every destructive action (delete node, remove group member, delete step) asks for confirmation and lists what is affected. | P3 |
 | NFR-LIC-01 | Third-party libraries must allow use and redistribution in a tool Jonas may share (P27: permissive licences preferred; React Flow MIT, 3Dmol.js BSD, cclib BSD, FastAPI MIT, morfeus MIT with SciPy BSD, D81). | D6 |

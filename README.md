@@ -126,6 +126,21 @@ the folders and file paths on your computer, the output files themselves and the
 After updating Chembook3D, build the interface again (`uv run python scripts/build_frontend.py`),
 since the viewer inside the file is built with it.
 
+## Saga and other SSH servers
+
+The **Saga** button opens a tab in the side panel (beside Claude) for logging in to Saga with
+your password and the one-time code from your authenticator app, as `ssh` asks for them. Fill
+in your user name once; the host is `saga.sigma2.no`. The first time, the app shows Saga's host
+key fingerprint: compare it with the one Sigma2 publishes, then trust it. Once logged in, the tab
+is a terminal on Saga with your usual login environment, and shows the directory you are in.
+
+The connection stays open in a small background process on this computer, so closing
+Chembook3D and starting it again brings back the same terminal without a new login. A restart
+of the computer, sleep that drops the network, or Saga closing the connection needs a new
+login; **Log out** ends it, and it logs itself out after 12 hours without use. Your password
+and code are sent once and never saved, and a refused login is never tried again by itself
+(Sigma2 blocks addresses that keep failing). The **+** tab adds another server, such as Betzy.
+
 ## Claude in the app
 
 The **Claude** button opens a panel beside the notebook running

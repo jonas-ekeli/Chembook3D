@@ -23,6 +23,7 @@ from chembook3d.api.live import ChangeTracker, LiveState
 from chembook3d.api.live import router as live_router
 from chembook3d.api.notes import router as note_router
 from chembook3d.api.pathway import router as pathway_router
+from chembook3d.api.remote import router as remote_router
 from chembook3d.api.routes import close_and_push, router
 from chembook3d.api.scan_paths import router as scan_path_router
 from chembook3d.api.selectivity import router as selectivity_router
@@ -123,6 +124,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(note_router)
     app.include_router(turnover_router)
     app.include_router(claude_router)
+    app.include_router(remote_router)  # D122
     app.include_router(job_router)
     app.include_router(scan_path_router)  # D114
     app.include_router(view_state_router)  # D105

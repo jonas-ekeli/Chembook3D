@@ -2359,3 +2359,73 @@ table.scan-path-held input.drive-value {
 .scan-path-add input {
   width: auto;
 }
+
+/* D122: the side panel's tabs, and a server's tab */
+.side-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.5rem 0;
+  background: var(--panel);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.side-tabs [role='tab'] {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.side-tabs [role='tab'][aria-selected='true'] {
+  background: var(--bg);
+  font-weight: 600;
+}
+.side-tabs .dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #16a34a;
+}
+.side-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.side-pane[hidden] {
+  display: none;
+}
+.server-cwd {
+  padding: 0.25rem 0.75rem;
+  background: var(--panel);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.server-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.server-fields .field,
+.server-login .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.server-login .field {
+  margin-bottom: 0.5rem;
+  max-width: 22rem;
+}
+.server-banner {
+  white-space: pre-wrap;
+  font-size: 0.85em;
+  max-height: 12rem;
+  overflow: auto;
+}
+.fingerprint {
+  overflow-wrap: anywhere;
+}

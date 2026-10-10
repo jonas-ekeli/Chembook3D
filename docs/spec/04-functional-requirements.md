@@ -295,6 +295,20 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 
 **AC:** with the app open, Claude Code renames a node: the canvas shows the new name at once and the history marks it "claude". Asked to delete it, Claude waits; Refuse in the app keeps the node, Confirm deletes it.
 
+## FR-SSH · SSH servers such as Saga (D122)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-SSH-01 | The side panel lists the saved SSH servers (Saga first) with host, port and user name, which can be changed and added to; nothing secret is saved. | D122, A69 | after 5 |
+| FR-SSH-02 | "Log in" shows the server's prompts one after the other (hidden input where the server asks for it) and sends the answers once; a refused login says so and is not tried again by the app; an unknown host key is shown with its fingerprint to trust or cancel, and a changed one is refused. The password and code are never written to disk. | D122, A69, NFR-SEC-03 | after 5 |
+| FR-SSH-03 | The connection and its shell are held by a background keeper on this computer, so closing and starting the app again shows the same shell with its recent output and current directory, without a new login. Log out ends it; a dropped connection is reported and needs a new login. | D122, A69 | after 5 |
+| FR-SSH-04 | A logged-in server's tab is a terminal on its shell, with the user's login environment, and shows the shell's current directory. | D122 | after 5 |
+| FR-SSH-05 | Logging in, logging out and the terminal are refused unless the app listens on 127.0.0.1 and the request comes from this computer, for a loopback host name, from the app's own page (Origin), and the terminal needs a one-time token; Claude's MCP tools cannot reach them. | D122, D92, NFR-SEC-01 | after 5 |
+| FR-SSH-06 | "Import from here" lists the output files in the terminal's current directory; the chosen files are copied into the investigation and imported as from the file browser, one by one or as a batch import, with the server's name as origin device and `<server>:/path` as origin path. | D122, D97, D16 | after 5 |
+| FR-SSH-07 | "Send to <server>" on a node with coordinates writes `<label>.xyz` into the terminal's current directory, asking before it replaces a file; the app never deletes on the server. | D122 | after 5 |
+
+**AC:** log in to Saga with password and code, type `cd` into a calculation folder: the tab shows that folder; shut the app down and start it again: the same shell is there without a new login; Log out ends it.
+
 ## FR-HIST / FR-OV · History and overview
 
 | ID | Requirement | Trace | Phase |

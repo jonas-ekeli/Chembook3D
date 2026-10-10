@@ -65,7 +65,7 @@ QUIET = re.compile(
     r"|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|imports|imports/[^/]+|imports/[^/]+/preview"
     r"|batch-imports|batch-imports/[^/]+|batch-imports/[^/]+/preview"
-    r"|note-images|source-files/[^/]+/open|claude(/.*)?|presence(/.*)?|shutdown"
+    r"|note-images|source-files/[^/]+/open|claude(/.*)?|remote(/.*)?|presence(/.*)?|shutdown"
     r"|jobs|jobs/(?![^/]+/import-path$).*"  # importing a scan path changes the notebook
     r")$"
 )

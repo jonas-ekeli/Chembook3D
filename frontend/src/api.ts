@@ -1411,7 +1411,61 @@ export type ShutdownInfo = { launched: boolean; investigation: boolean; linked: 
 /** A `claude --cloud` launch of a calculation job that waits for the user's answer (D93). */
 export type LaunchQuestion = { job_id: string; name: string; screen: string }
 
+/** D122: a saved SSH server such as Saga, and its connection held by the keeper. */
+export type RemoteServer = {
+  id: string
+  name: string
+  host: string
+  port: number
+  username: string
+  connected: boolean
+  /** When the login happened (seconds since 1970). */
+  since: number | null
+  /** The shell's current directory, when it reports it. */
+  cwd: string | null
+  tracked: boolean
+  shell: 'running' | 'ended' | null
+  /** Why the last connection ended, when it was not a log out. */
+  lost: string | null
+}
+
+export type RemoteStatus = { enabled: boolean; reason: string | null; servers: RemoteServer[] }
+
+export type ServerFields = { id?: string; name: string; host: string; port: number; username: string }
+
+/** The next step of a login (D122b). */
+export type LoginStep = {
+  kind: 'prompts' | 'host_key' | 'connected' | 'failed' | 'waiting'
+  login: string | null
+  name: string
+  instructions: string
+  banner: string
+  prompts: { text: string; echo: boolean }[]
+  host: string | null
+  port: number | null
+  algorithm: string | null
+  fingerprint: string | null
+  message: string | null
+}
+
+const serverPath = (id: string) => `/remote/servers/${encodeURIComponent(id)}`
+const loginPath = (id: string) => `/remote/logins/${encodeURIComponent(id)}`
+
 export const api = {
+  remoteStatus: () => request<RemoteStatus>('GET', '/remote'),
+  saveServers: (servers: ServerFields[]) => request<RemoteServer[]>('PUT', '/remote/servers', { servers }),
+  remoteLogin: (id: string, body: { username?: string; rows: number; cols: number }) =>
+    request<LoginStep>('POST', `${serverPath(id)}/login`, body),
+  remoteAnswer: (login: string, answers: string[]) =>
+    request<LoginStep>('POST', `${loginPath(login)}/answer`, { answers }),
+  remoteNext: (login: string) => request<LoginStep>('POST', `${loginPath(login)}/next`),
+  remoteTrust: (login: string) => request<LoginStep>('POST', `${loginPath(login)}/trust`),
+  remoteCancel: (login: string) => request<void>('DELETE', loginPath(login)),
+  remoteLogout: (id: string) => request<void>('POST', `${serverPath(id)}/logout`),
+  remoteShell: (id: string, rows: number, cols: number) =>
+    request<void>('POST', `${serverPath(id)}/shell`, { rows, cols }),
+  /** A one-time token for a server's terminal WebSocket. */
+  remoteTerminal: (server: string) => request<{ token: string }>('POST', '/remote/terminals', { server }),
   claudeStatus: () => request<ClaudeStatus>('GET', '/claude'),
   claudeLaunches: () => request<LaunchQuestion[]>('GET', '/claude/launches'),
   /** A one-time token for the WebSocket showing that launch's screen. */
