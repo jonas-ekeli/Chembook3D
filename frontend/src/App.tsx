@@ -16,6 +16,7 @@ import {
   type Investigation,
   type Node,
   type NoteLayout,
+  type RemoteStatus,
   type Settings,
   type StandardState,
   type SyncConflict,
@@ -27,7 +28,6 @@ import { BasisSetsDialog } from './components/BasisSets'
 import { CloudJobsDialog } from './components/CloudJobsDialog'
 import { useScanPathImports } from './cloudJobs'
 import { CanvasPane, type CanvasEnergy } from './components/Canvas'
-import { ClaudePanel } from './components/ClaudePanel'
 import { EnergyDrawer, type DrawerPath, type DrawerView } from './components/EnergyDrawer'
 import { download } from './util'
 import { FilterMenu } from './components/FilterMenu'
@@ -43,6 +43,7 @@ import { Outline } from './components/Outline'
 import { Overview } from './components/Overview'
 import { AnalysesView } from './components/Analyses'
 import { ClaudeRequestDialog } from './components/ClaudeRequestDialog'
+import { SidePanel, type SideTab } from './components/SidePanel'
 import { LaunchNotices, ShutDownButton } from './components/ShutDown'
 import { useLive } from './live'
 import type { HydrogenMode } from './chem'
@@ -198,7 +199,13 @@ function App() {
   const [edgeEnergies, setEdgeEnergies] = useState(true)
   const [referenceId, setReferenceId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [claudeOpen, setClaudeOpen] = useState(false) // D92
+  // D92, D122: the side panel's tab (Claude or an SSH server), or null when it is hidden.
+  const [sideTab, setSideTab] = useState<SideTab | null>(null)
+  const [remote, setRemote] = useState<RemoteStatus | null>(null)
+  const loadRemote = useCallback(() => api.remoteStatus().then(setRemote, () => undefined), [])
+  useEffect(() => {
+    void loadRemote()
+  }, [loadRemote])
   // D79: the read-only copy exports the drawer's pathways, or one per branch (A30).
   const [drawerPaths, setDrawerPaths] = useState<DrawerPath[]>([])
   // D105: the drawer's tab and pathways, kept here so they outlast the drawer (History,
@@ -1255,12 +1262,22 @@ function App() {
           )}
           <span className="spacer" />
           <button
-            aria-pressed={claudeOpen}
-            onClick={() => setClaudeOpen(!claudeOpen)}
+            aria-pressed={sideTab === 'claude'}
+            onClick={() => setSideTab(sideTab === 'claude' ? null : 'claude')}
             title="Claude Code in a panel beside the notebook (D92)"
           >
             Claude
           </button>
+          {remote?.servers.map((server) => (
+            <button
+              key={server.id}
+              aria-pressed={sideTab === server.id}
+              onClick={() => setSideTab(sideTab === server.id ? null : server.id)}
+              title={`A terminal on ${server.name}, with files to and from its current directory (D122)`}
+            >
+              {server.name}
+            </button>
+          ))}
           <button onClick={() => setShowJobs(true)} title="Calculations handed to Claude Code cloud sessions (D93, D115)">
             Cloud jobs
           </button>
@@ -1427,11 +1444,12 @@ function App() {
             )}
           </main>
         )}
-          <ClaudePanel
+          <SidePanel
             key={investigation.folder}
-            open={claudeOpen}
-            onClose={() => setClaudeOpen(false)}
-            onAttention={() => setClaudeOpen(true)}
+            tab={sideTab}
+            onTab={setSideTab}
+            remote={remote}
+            onRemoteChanged={loadRemote}
           />
         </div>
         {dialogs}

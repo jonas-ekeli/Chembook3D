@@ -8,6 +8,7 @@ import { defineConfig } from '@playwright/test'
 // realpath expands Windows short names (RUNNER~1), matching the paths the backend shows.
 process.env.E2E_DIR ??= realpathSync.native(mkdtempSync(join(tmpdir(), 'chembook3d-e2e-')))
 const port = 8766
+const SAGA_PORT = 8767 // the fake Saga of the SSH server tests (D122)
 
 // D92: the Claude panel runs tests/fake_claude.py instead of Claude Code, through a `claude`
 // command as Windows (a .cmd file, as npm installs it) or a shell would find it.
@@ -43,17 +44,26 @@ export default defineConfig({
       ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH }
       : {},
   },
-  webServer: {
-    command: `uv run chembook3d --no-browser --port ${port}`,
-    cwd: resolve(import.meta.dirname, '..'),
-    url: `http://127.0.0.1:${port}/api/health`,
-    reuseExistingServer: false,
-    env: {
-      CHEMBOOK3D_CONFIG_DIR: join(process.env.E2E_DIR, 'config'),
-      CHEMBOOK3D_CLAUDE: fakeClaude(),
-      // D93: a cloud job's launch first asks a question, as the folder trust question does.
-      FAKE_CLAUDE_CLOUD: 'ask',
-      FAKE_CLAUDE_LOG: join(process.env.E2E_DIR, 'fake-claude-cloud.log'),
+  webServer: [
+    {
+      command: `uv run chembook3d --no-browser --port ${port}`,
+      cwd: resolve(import.meta.dirname, '..'),
+      url: `http://127.0.0.1:${port}/api/health`,
+      reuseExistingServer: false,
+      env: {
+        CHEMBOOK3D_CONFIG_DIR: join(process.env.E2E_DIR, 'config'),
+        CHEMBOOK3D_CLAUDE: fakeClaude(),
+        // D93: a cloud job's launch first asks a question, as the folder trust question does.
+        FAKE_CLAUDE_CLOUD: 'ask',
+        FAKE_CLAUDE_LOG: join(process.env.E2E_DIR, 'fake-claude-cloud.log'),
+      },
     },
-  },
+    // D122: a stand-in for Saga (tests/fake_ssh_server.py): password, then a one-time code.
+    {
+      command: `uv run python -m tests.fake_ssh_server --port ${SAGA_PORT} --root "${join(process.env.E2E_DIR, 'saga')}"`,
+      cwd: resolve(import.meta.dirname, '..'),
+      port: SAGA_PORT,
+      reuseExistingServer: false,
+    },
+  ],
 })
