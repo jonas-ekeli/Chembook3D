@@ -16,6 +16,7 @@ import {
   type Investigation,
   type Node,
   type NoteLayout,
+  type RemoteServer,
   type RemoteStatus,
   type Settings,
   type StandardState,
@@ -36,6 +37,7 @@ import { HistoryList } from './components/HistoryList'
 import { UndoImportDialog } from './components/UndoImportDialog'
 import { BatchImportDialog } from './components/BatchImportDialog'
 import { ImportDialog } from './components/ImportDialog'
+import { RemoteFilesDialog } from './components/RemoteFilesDialog'
 import { Modal } from './components/Modal'
 import { NodeInspector } from './components/NodeInspector'
 import { NoteEditor } from './components/NoteEditor'
@@ -74,6 +76,8 @@ type ImportRequest = {
   position: { x: number; y: number } | null
   /** Create a free species rather than a node (D69). */
   species?: boolean
+  /** D122e: an output on an SSH server instead of a file here. */
+  remote?: { server: string; path: string }
 }
 
 type InspectorSelection = Selection | { kind: 'branch'; id: string }
@@ -188,6 +192,9 @@ function App() {
   const [importRequest, setImportRequest] = useState<ImportRequest | null>(null)
   // D97: the folder whose outputs are being imported at once.
   const [batchFolder, setBatchFolder] = useState<string | null>(null)
+  // D122e: "Import from here" on a server's tab, then the files chosen there.
+  const [remoteFiles, setRemoteFiles] = useState<RemoteServer | null>(null)
+  const [remoteBatch, setRemoteBatch] = useState<{ server: string; paths: string[] } | null>(null)
   // D85: the pinned note being written: an existing one by id, or a new one on a node.
   const [noteEditing, setNoteEditing] = useState<{ noteId: string } | { nodeId: string } | null>(null)
   const [inspectorWidth, setInspectorWidth] = useState(520)
@@ -888,8 +895,9 @@ function App() {
       )}
       {importRequest && investigation && (
         <ImportDialog
-          key={`${importRequest.targetId}-${importRequest.files.length}-${importRequest.files[0]?.name ?? ''}`}
+          key={`${importRequest.targetId}-${importRequest.files.length}-${importRequest.files[0]?.name ?? ''}-${importRequest.remote?.path ?? ''}`}
           file={importRequest.files[0] ?? null}
+          remote={importRequest.remote ?? null}
           target={[...canvas.nodes, ...canvas.species].find((n) => n.id === importRequest.targetId) ?? null}
           nodes={[...canvas.nodes, ...canvas.species]}
           asSpecies={importRequest.species ?? false}
@@ -908,7 +916,7 @@ function App() {
             nextImport()
           }}
           onImportFolder={
-            importRequest.targetId || importRequest.species || importRequest.files.length > 0
+            importRequest.targetId || importRequest.species || importRequest.files.length > 0 || importRequest.remote
               ? undefined
               : (folder) => {
                   setImportRequest(null)
@@ -917,14 +925,30 @@ function App() {
           }
         />
       )}
-      {batchFolder && investigation && (
+      {remoteFiles && investigation && (
+        <RemoteFilesDialog
+          server={remoteFiles}
+          onClose={() => setRemoteFiles(null)}
+          onImport={({ server, paths, batch }) => {
+            setRemoteFiles(null)
+            if (batch) setRemoteBatch({ server, paths })
+            else setImportRequest({ targetId: null, files: [], position: null, remote: { server, path: paths[0] } })
+          }}
+        />
+      )}
+      {(batchFolder || remoteBatch) && investigation && (
         <BatchImportDialog
-          folder={batchFolder}
+          folder={batchFolder ?? ''}
+          remote={remoteBatch}
           nodes={[...canvas.nodes, ...canvas.species]}
           linked={investigation.linked}
-          onClose={() => setBatchFolder(null)}
+          onClose={() => {
+            setBatchFolder(null)
+            setRemoteBatch(null)
+          }}
           onImported={(result, message) => {
             setBatchFolder(null)
+            setRemoteBatch(null)
             setNotice(message)
             const first = result.files.find((f) => f.how === 'new' || f.how === 'derived' || f.how === 'group')
             if (first?.group_id) choose({ kind: 'group', id: first.group_id })
@@ -1450,6 +1474,7 @@ function App() {
             onTab={setSideTab}
             remote={remote}
             onRemoteChanged={loadRemote}
+            onImportFrom={setRemoteFiles}
           />
         </div>
         {dialogs}

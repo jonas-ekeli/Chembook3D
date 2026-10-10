@@ -100,3 +100,8 @@ def replace(items: object) -> list[Server]:
 
 def find(server_id: str) -> Server | None:
     return next((s for s in load() if s.id == server_id), None)
+
+
+def origin_path(server: Server, path: str) -> str:
+    """Where a file on a server came from, as an import records it (D122e): saga:/cluster/…"""
+    return re.sub(r"\s+", "-", server.name.strip().lower()) + ":" + path

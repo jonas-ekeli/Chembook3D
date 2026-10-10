@@ -22,6 +22,7 @@ import hmac
 import json
 import logging
 import os
+import posixpath
 import secrets
 import sys
 import time
@@ -63,6 +64,9 @@ RC = (
 )
 CWD_MARK = "\x1b]1337;CurrentDir="
 FALLBACK_WINDOW = 5.0  # a tracked shell ending this soon with "not found" falls back (A69)
+MAX_LISTED = 2000  # entries of a directory listed for "Import from here"
+MAX_DOWNLOAD = 2 * 1024**3  # bytes copied down in one import (A69)
+COPY_WAIT = 3600  # seconds the app waits for a copy
 
 log = logging.getLogger("chembook3d.keeper")
 
@@ -190,6 +194,13 @@ class Session:
     used: float  # time.monotonic() of the last input or file copy (A69 idle time)
     shell: Shell | None = None
     closing: str | None = None  # why the keeper is closing it
+    sftp: asyncssh.SFTPClient | None = None
+
+    async def files(self) -> asyncssh.SFTPClient:
+        """The SFTP client on this connection, opened the first time it is needed."""
+        if self.sftp is None:
+            self.sftp = await self.conn.start_sftp_client()
+        return self.sftp
 
 
 # ---------- a login ----------
@@ -583,10 +594,78 @@ class Keeper:
                 except (OSError, asyncssh.Error) as exc:
                     return {"ok": False, "error": f"Could not start a shell: {_reason(exc)}"}
             return {"ok": True}
+        if op in ("list", "download"):
+            session = self.sessions.get(str(msg.get("server")))
+            if session is None:
+                return {"ok": False, "error": "Not logged in."}
+            try:
+                if op == "list":
+                    return await self._list(session, msg.get("path"))
+                return await self._download(session, msg.get("paths"), msg.get("folder"))
+            except (OSError, asyncssh.Error) as exc:
+                session.sftp = None  # opened again next time
+                return {"ok": False, "error": f"{session.server['name']}: {_reason(exc)}"}
         if op == "quit":
             self.stopping.set()
             return {"ok": True}
         return {"ok": False, "error": f"Unknown operation {op!r}."}
+
+    async def _list(self, session: Session, path: object) -> dict:
+        """The files in a directory, by default the shell's current one (D122e)."""
+        sftp = await session.files()
+        if not isinstance(path, str) or not path:
+            path = session.shell.cwd if session.shell and session.shell.cwd else "."
+        path = await sftp.realpath(path)
+        entries = []
+        for entry in await sftp.readdir(path):
+            name = entry.filename
+            if name in (".", "..") or len(entries) >= MAX_LISTED:
+                continue
+            attrs = entry.attrs
+            kind = "file"
+            if attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY:
+                kind = "directory"
+            elif attrs.type == asyncssh.FILEXFER_TYPE_SYMLINK:
+                try:
+                    attrs = await sftp.stat(posixpath.join(path, name))
+                except (OSError, asyncssh.Error):
+                    continue
+                kind = "directory" if attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY else "file"
+            elif attrs.type not in (asyncssh.FILEXFER_TYPE_REGULAR, asyncssh.FILEXFER_TYPE_UNKNOWN):
+                continue
+            entries.append(
+                {"name": name, "kind": kind, "size": attrs.size, "modified": attrs.mtime}
+            )
+        return {"ok": True, "path": path, "entries": entries}
+
+    async def _download(self, session: Session, paths: object, folder: object) -> dict:
+        """Copy files down into a local folder the app chose, each under its own name."""
+        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+            return {"ok": False, "error": "Name the files to copy."}
+        if not isinstance(folder, str) or not Path(folder).is_dir():
+            return {"ok": False, "error": "The folder to copy into is not there."}
+        sftp = await session.files()
+        total = 0
+        copied, failed = [], []
+        for path in paths:
+            name = posixpath.basename(path)
+            if not path.startswith("/") or not name or name in (".", ".."):
+                failed.append({"path": path, "reason": "not a full path to a file"})
+                continue
+            try:
+                size = (await sftp.stat(path)).size or 0
+                total += size
+                if total > MAX_DOWNLOAD:
+                    failed.append({"path": path, "reason": "more than 2 GB in one import"})
+                    continue
+                local = Path(folder) / name
+                await sftp.get(path, str(local))
+            except (OSError, asyncssh.Error) as exc:
+                failed.append({"path": path, "reason": _reason(exc)})
+                continue
+            session.used = time.monotonic()
+            copied.append({"path": path, "local": str(local), "size": size})
+        return {"ok": True, "files": copied, "failed": failed}
 
     def _status(self) -> list[dict]:
         return [

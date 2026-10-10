@@ -32,6 +32,7 @@ export function ServerPanel({
   servers,
   open,
   onChanged,
+  onImportHere,
 }: {
   server: RemoteServer
   /** All saved servers, to save this one's changes among them. */
@@ -40,6 +41,8 @@ export function ServerPanel({
   open: boolean
   /** Reload the servers and their connections. */
   onChanged: () => Promise<void> | void
+  /** List the files in the shell's current directory to import some (D122e). */
+  onImportHere: () => void
 }) {
   const [edit, setEdit] = useState<ServerFields>(fields(server))
   const [error, setError] = useState<string | null>(null)
@@ -304,6 +307,11 @@ export function ServerPanel({
           <span className="muted small">Not logged in</span>
         )}
         <span className="spacer" />
+        {server.connected && (
+          <button onClick={onImportHere} title="Import outputs from the terminal's current directory">
+            Import from here
+          </button>
+        )}
         {server.connected && <button onClick={() => void logOut()}>Log out</button>}
       </div>
       {server.connected && (

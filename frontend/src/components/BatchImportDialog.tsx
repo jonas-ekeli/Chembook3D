@@ -96,12 +96,15 @@ function RowDetails({ row }: { row: BatchRow }) {
  * proposed node, and Import writes all ticked files in one transaction. Nothing is stored before. */
 export function BatchImportDialog({
   folder,
+  remote = null,
   nodes,
   linked = false,
   onClose,
   onImported,
 }: {
   folder: string
+  /** D122e: files on an SSH server, copied down and scanned instead of a folder here. */
+  remote?: { server: string; paths: string[] } | null
   nodes: Node[]
   /** The investigation syncs through Git, whose host refuses large files (FR-SYNC-09). */
   linked?: boolean
@@ -143,8 +146,8 @@ export function BatchImportDialog({
       setOptions(rest)
       setBusy(true)
       setPlan(null)
-      api
-        .scanFolder(folder, withSubfolders)
+      const scanning = remote ? api.remoteBatch(remote.server, remote.paths) : api.scanFolder(folder, withSubfolders)
+      scanning
         .then((result) => {
           const { rows: _rows, ...chosen } = rest
           return Object.values(chosen).some((v) => v != null) ? api.previewBatch(result.token, rest) : result
@@ -242,9 +245,9 @@ export function BatchImportDialog({
     >
       <div className="batch-import" aria-label="Folder import">
         <p>
-          <code>{folder}</code>
+          <code>{plan?.folder ?? folder}</code>
         </p>
-        <label className="check">
+        <label className="check" hidden={remote !== null}>
           <input
             type="checkbox"
             checked={recursive}

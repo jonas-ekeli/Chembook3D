@@ -20,6 +20,7 @@ import re
 import shutil
 import unicodedata
 from collections import deque
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePath
 from typing import Any
@@ -67,6 +68,12 @@ class Batch:
     files: list[BatchFile]
     other_count: int  # files that are no output (inputs, .chk, logs, side files)
     unreadable: list[dict[str, str]]  # outputs that could not be read, with the reason
+    shown: str | None = None  # where the files came from, when not `folder` (D122: saga:/…)
+    device: str | None = None  # their origin device unless chosen (D122: the server's name)
+
+    @property
+    def place(self) -> str:
+        return self.shown or str(self.folder)
 
 
 def _looks_like_output(head: str) -> bool:
@@ -106,10 +113,18 @@ def _candidates(folder: Path, recursive: bool, skip: Path | None) -> list[Path]:
 
 
 def scan(
-    staging: imports.Staging, folder: Path, recursive: bool, investigation: Path | None = None
+    staging: imports.Staging,
+    folder: Path,
+    recursive: bool,
+    investigation: Path | None = None,
+    origin: Callable[[str], str] | None = None,
+    shown: str | None = None,
+    device: str | None = None,
 ) -> Batch:
     """Stage every output in `folder`. Nothing is written to the investigation; the open
-    investigation's own folder is never scanned (its copies would all be "imported before")."""
+    investigation's own folder is never scanned (its copies would all be "imported before").
+    Files copied from elsewhere (D122) give `origin`, their origin path from their path in the
+    folder, and `shown`, where they came from."""
     try:
         folder = folder.expanduser().resolve()
     except OSError as exc:
@@ -118,7 +133,14 @@ def scan(
         raise BatchFailed(f"{folder} is not a folder")
     skip = investigation.resolve() if investigation else None
     batch = Batch(
-        token=new_id(), folder=folder, recursive=recursive, files=[], other_count=0, unreadable=[]
+        token=new_id(),
+        folder=folder,
+        recursive=recursive,
+        files=[],
+        other_count=0,
+        unreadable=[],
+        shown=shown,
+        device=device,
     )
     try:
         for path in _candidates(folder, recursive, skip):
@@ -134,7 +156,8 @@ def scan(
                 batch.unreadable.append({"path": relative, "reason": "cannot be read"})
                 continue
             try:
-                staged = staging.add(data, path.name, str(path))
+                where = origin(relative) if origin else str(path)
+                staged = staging.add(data, path.name, where, beside=path.parent, device=device)
             except imports.ImportFailed as exc:
                 batch.unreadable.append({"path": relative, "reason": str(exc)})
                 continue
@@ -443,7 +466,9 @@ def run(
     settings = app_settings.load()
     suffixes = options.suffixes if options.suffixes is not None else settings.batch_suffixes
     device = (
-        options.origin_device if options.origin_device is not None else settings.last_device
+        options.origin_device
+        if options.origin_device is not None
+        else batch.device or settings.last_device
     ).strip()
     skipped = _skipped(session, batch)
     ordered = _order(batch)
@@ -804,7 +829,7 @@ def run(
                 "batch_import",
                 entry_id,
                 "create",
-                new={"folder": str(batch.folder), "count": len(written), "files": written},
+                new={"folder": batch.place, "count": len(written), "files": written},
                 source="import",
             )
             session.flush()
@@ -828,7 +853,7 @@ def run(
     return (
         BatchPlan(
             token=batch.token,
-            folder=str(batch.folder),
+            folder=batch.place,
             recursive=batch.recursive,
             suffixes=list(suffixes),
             origin_device=device,

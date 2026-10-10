@@ -10,15 +10,21 @@ WebSocket takes a one-time token as the Claude panel's does.
 import asyncio
 import contextlib
 import json
+import posixpath
 import secrets
+import shutil
+import tempfile
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from chembook3d.api.claude import BUSY, POLICY, TOKEN_LIFETIME, _refusal, _size
-from chembook3d.remote import client, servers
+from chembook3d.api.routes import _investigation, _staging
+from chembook3d.remote import client, keeper, servers
+from chembook3d.services import batch_import, imports
 
 router = APIRouter(prefix="/api/remote")
 
@@ -253,6 +259,145 @@ async def new_shell(server_id: str, body: ShellIn, request: Request) -> None:
     """Start a new shell on a server still logged in, after the last one ended."""
     _check(request)
     await _keeper("shell", server=server_id, rows=body.rows, cols=body.cols)
+
+
+# ---------- files in the shell's directory (D122e) ----------
+
+# Names of files the import dialog reads (Gaussian, ORCA, xTB, CREST); the list shows the
+# others only when asked.
+OUTPUT_ENDINGS = (".log", ".out", ".output", ".xyz")
+
+
+class RemoteEntry(BaseModel):
+    name: str
+    kind: str  # file or directory
+    size: int | None = None
+    modified: int | None = None  # seconds since 1970
+    output: bool = False  # named as an output the import reads
+
+
+class RemoteListing(BaseModel):
+    server: str
+    path: str
+    entries: list[RemoteEntry]
+
+
+def _saved(server_id: str) -> servers.Server:
+    server = servers.find(server_id)
+    if server is None:
+        raise HTTPException(404, "That server is not in the list.")
+    return server
+
+
+@router.get("/servers/{server_id}/files")
+async def list_files(server_id: str, request: Request, path: str | None = None) -> RemoteListing:
+    """The files in the terminal's current directory, or in `path`."""
+    _check(request, page_only=False)
+    _saved(server_id)
+    answer = await _keeper("list", server=server_id, path=path)
+    entries = [
+        RemoteEntry(**entry, output=entry["name"].lower().endswith(OUTPUT_ENDINGS))
+        for entry in answer["entries"]
+    ]
+    entries.sort(key=lambda e: (e.kind != "directory", e.name.lower()))
+    return RemoteListing(server=server_id, path=answer["path"], entries=entries)
+
+
+class RemoteImportIn(BaseModel):
+    paths: list[str]  # full paths on the server
+    node_id: str | None = None  # import onto this node (one file)
+
+
+async def _copy_down(server: servers.Server, paths: list[str]) -> tuple[Path, list[dict]]:
+    """Copy the files into a temporary folder; the caller removes it."""
+    if not paths:
+        raise HTTPException(422, "Choose at least one file.")
+    if len({posixpath.basename(p) for p in paths}) != len(paths):
+        raise HTTPException(422, "Choose files from one directory.")
+    folder = Path(tempfile.mkdtemp(prefix="chembook3d-remote-"))
+    try:
+        answer = await _keeper(
+            "download", timeout=keeper.COPY_WAIT, server=server.id, paths=paths, folder=str(folder)
+        )
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+    if answer["failed"]:
+        shutil.rmtree(folder, ignore_errors=True)
+        reasons = "; ".join(f"{f['path']}: {f['reason']}" for f in answer["failed"])
+        raise HTTPException(422, f"Could not copy from {server.name}: {reasons}")
+    return folder, answer["files"]
+
+
+@router.post("/servers/{server_id}/import")
+async def import_file(server_id: str, body: RemoteImportIn, request: Request):
+    """Copy one output down and stage it as the import dialog does (its preview), with the
+    server as origin device and `<server>:/path` as origin path. Nothing is written yet."""
+    _check(request)
+    investigation = _investigation(request)
+    server = _saved(server_id)
+    if len(body.paths) != 1:
+        raise HTTPException(
+            422, "Import one file at a time here; several go through the batch import."
+        )
+    folder, copied = await _copy_down(server, body.paths)
+
+    def stage_and_plan():
+        try:
+            local = Path(copied[0]["local"])
+            staged = _staging(request).add(
+                local.read_bytes(),
+                local.name,
+                servers.origin_path(server, copied[0]["path"]),
+                beside=folder,
+                device=server.name,
+            )
+            options = imports.ImportOptions(target_node_id=body.node_id)
+            with investigation.sessions.begin() as session:
+                return imports.plan(session, staged, options).as_dict()
+        except imports.ImportFailed as exc:
+            raise HTTPException(422, str(exc)) from exc
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+    return await asyncio.to_thread(stage_and_plan)
+
+
+@router.post("/servers/{server_id}/batch-import")
+async def batch_files(server_id: str, body: RemoteImportIn, request: Request):
+    """Copy the chosen files down and scan them as a batch import (D97) does a folder; its
+    preview, with the server as origin device. Nothing is written yet."""
+    _check(request)
+    investigation = _investigation(request)
+    server = _saved(server_id)
+    folder, copied = await _copy_down(server, body.paths)
+    remote_dir = posixpath.dirname(copied[0]["path"]) if copied else ""
+
+    def scan():
+        try:
+            batch = batch_import.scan(
+                _staging(request),
+                folder,
+                False,
+                investigation.folder,
+                origin=lambda name: servers.origin_path(server, posixpath.join(remote_dir, name)),
+                shown=servers.origin_path(server, remote_dir),
+                device=server.name,
+            )
+        except batch_import.BatchFailed as exc:
+            raise HTTPException(422, str(exc)) from exc
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+        session = investigation.sessions()
+        try:
+            options = batch_import.BatchOptions()
+            plan, _ = batch_import.run(session, investigation.folder, batch, options, dry_run=True)
+            return plan.as_dict()
+        finally:
+            session.rollback()
+            session.close()
+
+    return await asyncio.to_thread(scan)
 
 
 class TerminalIn(BaseModel):
