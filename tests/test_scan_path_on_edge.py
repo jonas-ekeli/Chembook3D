@@ -137,8 +137,9 @@ def test_the_chip_never_changes_an_energy(open_client):
     client = open_client
     a, b, edge = ends(client)
     node_id, _ = scan_path(client)
+    output = (SCAN / "dce_scan.out").read_text(encoding="utf-8")
     for record in (a, b):
-        plan = upload(client, "dce_scan.out", (SCAN / "dce_scan.out").read_text(), record)
+        plan = upload(client, "dce_scan.out", output, record)
         commit(client, plan, target_node_id=record)
     options = client.get("/api/energies/options").json()
     level = options["levels"][0]["key"]
