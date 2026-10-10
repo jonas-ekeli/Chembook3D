@@ -21,10 +21,12 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from chembook3d.api import downloads
 from chembook3d.api.claude import BUSY, POLICY, TOKEN_LIFETIME, _refusal, _size
 from chembook3d.api.routes import _investigation, _staging
 from chembook3d.remote import client, keeper, servers
 from chembook3d.services import batch_import, imports
+from chembook3d.services import nodes as node_service
 
 router = APIRouter(prefix="/api/remote")
 
@@ -398,6 +400,41 @@ async def batch_files(server_id: str, body: RemoteImportIn, request: Request):
             session.close()
 
     return await asyncio.to_thread(scan)
+
+
+# ---------- a node's structure to the shell's directory (D122f) ----------
+
+
+class SendIn(BaseModel):
+    node_id: str
+    replace: bool = False  # the person said yes to replacing the file already there
+
+
+class SendOut(BaseModel):
+    path: str  # where it went, or the file already there
+    sent: bool  # False: a file of that name is there, and replace was not given
+    exists: bool  # a file of that name was there (replaced when sent)
+
+
+@router.post("/servers/{server_id}/send")
+async def send_structure(server_id: str, body: SendIn, request: Request) -> SendOut:
+    """Write the node's coordinates as `<label>.xyz` into the terminal's current directory,
+    named as Save .xyz names it. A file already there is replaced only with `replace`."""
+    _check(request)
+    investigation = _investigation(request)
+    _saved(server_id)
+    with investigation.sessions() as session:
+        try:
+            node = node_service.get(session, body.node_id)
+        except node_service.NodeNotFound as exc:
+            raise HTTPException(404, "Node not found") from exc
+        try:
+            text = node_service.to_xyz(node)
+        except node_service.NodeError as exc:
+            raise HTTPException(422, "This node has no coordinates to send.") from exc
+        name = downloads.file_name(node.label or "", node.id) + ".xyz"
+    answer = await _keeper("upload", server=server_id, name=name, text=text, replace=body.replace)
+    return SendOut(path=answer["path"], sent=answer["sent"], exists=answer["exists"])
 
 
 class TerminalIn(BaseModel):

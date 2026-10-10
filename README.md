@@ -146,6 +146,10 @@ the terminal is in. Pick one to import it as from the file browser, or several f
 import that matches each to a node. The files are copied into the investigation with
 `saga:/cluster/…` as their origin; nothing on Saga changes.
 
+**Send to Saga**, beside Save .xyz in a node's coordinates, writes the node's structure as
+`<label>.xyz` into the same directory, ready for an input file. If a file of that name is
+already there, the app asks before replacing it; it never deletes anything on Saga.
+
 ## Claude in the app
 
 The **Claude** button opens a panel beside the notebook running

@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import posixpath
+import re
 import secrets
 import sys
 import time
@@ -65,6 +66,8 @@ RC = (
 CWD_MARK = "\x1b]1337;CurrentDir="
 FALLBACK_WINDOW = 5.0  # a tracked shell ending this soon with "not found" falls back (A69)
 MAX_LISTED = 2000  # entries of a directory listed for "Import from here"
+MAX_UPLOAD = 10 * 1024**2  # bytes of one file sent to a server; a structure is a few kB
+SEND_NAME = re.compile(r"^[^/\x00-\x1f\x7f]{1,255}$")  # a file name the keeper writes
 MAX_DOWNLOAD = 2 * 1024**3  # bytes copied down in one import (A69)
 COPY_WAIT = 3600  # seconds the app waits for a copy
 
@@ -594,13 +597,17 @@ class Keeper:
                 except (OSError, asyncssh.Error) as exc:
                     return {"ok": False, "error": f"Could not start a shell: {_reason(exc)}"}
             return {"ok": True}
-        if op in ("list", "download"):
+        if op in ("list", "download", "upload"):
             session = self.sessions.get(str(msg.get("server")))
             if session is None:
                 return {"ok": False, "error": "Not logged in."}
             try:
                 if op == "list":
                     return await self._list(session, msg.get("path"))
+                if op == "upload":
+                    return await self._upload(
+                        session, msg.get("name"), msg.get("text"), msg.get("replace") is True
+                    )
                 return await self._download(session, msg.get("paths"), msg.get("folder"))
             except (OSError, asyncssh.Error) as exc:
                 session.sftp = None  # opened again next time
@@ -666,6 +673,36 @@ class Keeper:
             session.used = time.monotonic()
             copied.append({"path": path, "local": str(local), "size": size})
         return {"ok": True, "files": copied, "failed": failed}
+
+    async def _upload(self, session: Session, name: object, text: object, replace: bool) -> dict:
+        """Write a small text file into the shell's current directory (D122f). A file already
+        there is replaced only when the app says so, after asking; nothing is ever deleted."""
+        if not isinstance(name, str) or not SEND_NAME.match(name) or name in (".", ".."):
+            return {"ok": False, "error": "Not a file name the app can write."}
+        if not isinstance(text, str) or len(text) > MAX_UPLOAD:
+            return {"ok": False, "error": "Only a file of at most 10 MB can be sent."}
+        if session.shell is None or not session.shell.cwd:
+            return {"ok": False, "error": "The terminal has not reported its directory yet."}
+        sftp = await session.files()
+        path = posixpath.join(session.shell.cwd, name)
+        try:
+            there = await sftp.stat(path)
+        except asyncssh.SFTPNoSuchFile:
+            there = None
+        if there is not None and there.type == asyncssh.FILEXFER_TYPE_DIRECTORY:
+            return {"ok": False, "error": f"{path} is a directory."}
+        if there is not None and not replace:
+            return {"ok": True, "path": path, "sent": False, "exists": True}
+        try:
+            # "x" refuses a file that appeared since the check, so only a confirmed one is replaced.
+            async with sftp.open(path, "wb" if there is not None else "xb") as handle:
+                await handle.write(text.encode("utf-8"))
+        except asyncssh.SFTPFailure:
+            if there is None and await sftp.exists(path):
+                return {"ok": True, "path": path, "sent": False, "exists": True}
+            raise
+        session.used = time.monotonic()
+        return {"ok": True, "path": path, "sent": True, "exists": there is not None}
 
     def _status(self) -> list[dict]:
         return [

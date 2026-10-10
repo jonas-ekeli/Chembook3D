@@ -11,6 +11,7 @@ import {
   type Node,
   type NodeDeletePreview,
   type NodeFields,
+  type RemoteServer,
   type Settings,
 } from '../api'
 import { CalculationList } from './CalculationList'
@@ -123,6 +124,7 @@ export function NodeInspector({
   onUseAsReference,
   onEditNote,
   settings,
+  servers = [],
 }: {
   node: Node
   canvas: Canvas
@@ -142,6 +144,8 @@ export function NodeInspector({
   onEditNote: (noteId: string | null) => void
   /** The display unit for the step movie's energies (D101). */
   settings: Settings | null
+  /** Servers logged in to, for "Send to <server>" (D122f). */
+  servers?: RemoteServer[]
 }) {
   const nodes = [...canvas.nodes, ...canvas.species]
   // D69: a free species has no step, branch, group or edges; transitions list it instead.
@@ -445,6 +449,7 @@ export function NodeInspector({
           <XyzEditor
             key={node.xyz ?? ''}
             node={node}
+            servers={servers}
             onSaved={(saved, derived) =>
               onChanged(saved, derived ? `Saved as a new node derived from “${name(node)}”.` : undefined)
             }

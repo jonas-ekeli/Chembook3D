@@ -568,3 +568,59 @@ def test_import_refusals(at_work, local):
     assert at_work.post("/api/remote/servers/saga/import", json=one).status_code == 403
     at_work.post("/api/remote/servers/saga/logout", headers=ORIGIN)
     assert at_work.get("/api/remote/servers/saga/files").status_code == 409
+
+
+# ---------- T-SSH-08 send a node's structure to the terminal's directory ----------
+
+WATER = "3\nwater\nO 0.000 0.000 0.117\nH 0.000 0.757 -0.467\nH 0.000 -0.757 -0.467\n"
+
+
+def _node(local, label: str, coordinates: str | None = WATER) -> str:
+    node_id = local.post("/api/nodes", json={"label": label}).json()["id"]
+    if coordinates:
+        response = local.put(f"/api/nodes/{node_id}/geometry", json={"xyz": coordinates})
+        assert response.status_code == 200, response.text
+    return node_id
+
+
+def test_a_structure_is_sent_and_a_file_there_is_replaced_only_when_asked(at_work, saga):
+    node_id = _node(at_work, "Ru–CAAC TS1: syn")  # an en dash, a colon Windows refuses
+    send = {"node_id": node_id}
+    answer = at_work.post("/api/remote/servers/saga/send", json=send, headers=ORIGIN).json()
+    path = f"{WORK}/Ru–CAAC TS1_ syn.xyz"
+    assert answer == {"path": path, "sent": True, "exists": False}
+    written = saga.root / path.lstrip("/")
+    expected = at_work.get(f"/api/nodes/{node_id}/xyz").text
+    assert written.read_text(encoding="utf-8") == expected
+
+    # The same name again: nothing is written until the person says yes.
+    written.write_text("their own file\n", encoding="utf-8")
+    answer = at_work.post("/api/remote/servers/saga/send", json=send, headers=ORIGIN).json()
+    assert answer == {"path": path, "sent": False, "exists": True}
+    assert written.read_text(encoding="utf-8") == "their own file\n"
+    replace = {**send, "replace": True}
+    answer = at_work.post("/api/remote/servers/saga/send", json=replace, headers=ORIGIN).json()
+    assert answer == {"path": path, "sent": True, "exists": True}
+    assert written.read_text(encoding="utf-8") == expected
+    # Everything else in the directory is as it was.
+    assert sorted(p.name for p in written.parent.iterdir()) == sorted(
+        [TS, TS_SP, "job.gjf", "old", written.name]
+    )
+
+
+def test_send_refusals(at_work, saga):
+    bare = _node(at_work, "no coordinates", None)
+    response = at_work.post("/api/remote/servers/saga/send", json={"node_id": bare}, headers=ORIGIN)
+    assert response.status_code == 422 and "no coordinates" in response.json()["detail"]
+    (saga.root / WORK.lstrip("/") / "old.xyz").mkdir()
+    folder = _node(at_work, "old")
+    response = at_work.post(
+        "/api/remote/servers/saga/send", json={"node_id": folder, "replace": True}, headers=ORIGIN
+    )
+    assert response.status_code == 409 and "is a directory" in response.json()["detail"]
+    send = {"node_id": _node(at_work, "water")}
+    assert at_work.post("/api/remote/servers/saga/send", json=send).status_code == 403
+    at_work.post("/api/remote/servers/saga/logout", headers=ORIGIN)
+    response = at_work.post("/api/remote/servers/saga/send", json=send, headers=ORIGIN)
+    assert response.status_code == 409 and "Not logged in" in response.json()["detail"]
+    assert not (saga.root / WORK.lstrip("/") / "water.xyz").exists()

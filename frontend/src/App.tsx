@@ -1119,6 +1119,7 @@ function App() {
         onUseAsReference={() => setReferenceId(selectedNode.id)}
         onEditNote={(noteId) => setNoteEditing(noteId ? { noteId } : { nodeId: selectedNode.id })}
         settings={settings}
+        servers={remote?.enabled ? remote.servers.filter((s) => s.connected) : []}
       />
     )
   } else if (selectedGroup) {

@@ -1458,6 +1458,8 @@ export type RemoteEntry = {
   output: boolean
 }
 export type RemoteListing = { server: string; path: string; entries: RemoteEntry[] }
+/** D122f: where a structure went, or the file of that name already there (sent false). */
+export type RemoteSent = { path: string; sent: boolean; exists: boolean }
 
 const serverPath = (id: string) => `/remote/servers/${encodeURIComponent(id)}`
 const loginPath = (id: string) => `/remote/logins/${encodeURIComponent(id)}`
@@ -1482,6 +1484,9 @@ export const api = {
     request<ImportPlan>('POST', `${serverPath(id)}/import`, { paths: [path], node_id: nodeId ?? null }),
   /** Copy several outputs down and scan them as a batch import (D97, D122e). */
   remoteBatch: (id: string, paths: string[]) => request<BatchPlan>('POST', `${serverPath(id)}/batch-import`, { paths }),
+  /** Write a node's coordinates as <label>.xyz into the terminal's directory (D122f). */
+  remoteSend: (id: string, nodeId: string, replace = false) =>
+    request<RemoteSent>('POST', `${serverPath(id)}/send`, { node_id: nodeId, replace }),
   /** A one-time token for a server's terminal WebSocket. */
   remoteTerminal: (server: string) => request<{ token: string }>('POST', '/remote/terminals', { server }),
   claudeStatus: () => request<ClaudeStatus>('GET', '/claude'),

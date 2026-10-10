@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { forgetView } from './demoView.ts'
@@ -155,8 +155,28 @@ test('import outputs from the directory the Saga terminal is in', async ({ page 
   await dialog.getByRole('button', { name: 'Import 2 files' }).click()
   await expect(page.getByRole('status').getByText(/Imported 2 files from saga:/)).toBeVisible()
 
-  // Nothing changed on the server.
+  // Importing changed nothing on the server.
   expect(readdirSync(WORK).sort()).toEqual(['MeI_TS.gjf', 'MeI_TS.out', 'MeI_TS_QZ.out', 'MeI_min.out'])
+
+  // D122f, T-SSH-08: the node's structure goes back as MeI_TS.xyz, replacing a file only when asked.
+  await page.getByRole('list', { name: 'Nodes' }).getByText('MeI_TS', { exact: true }).click()
+  await expect(inspector.getByRole('heading', { name: 'MeI_TS' })).toBeVisible()
+  const coordinates = inspector.getByRole('region', { name: 'Coordinates' })
+  await coordinates.getByRole('button', { name: 'Send to Saga' }).click()
+  await expect(coordinates).toContainText('Wrote /cluster/work/ru-caac/MeI_TS.xyz on Saga')
+  const sent = join(WORK, 'MeI_TS.xyz')
+  expect(readFileSync(sent, 'utf-8')).toContain('MeI_TS')
+  writeFileSync(sent, 'my own edit\n')
+  await coordinates.getByRole('button', { name: 'Send to Saga' }).click()
+  const ask = page.getByRole('dialog', { name: 'Replace the file on Saga?' })
+  await expect(ask).toContainText('/cluster/work/ru-caac/MeI_TS.xyz is already there')
+  await ask.getByRole('button', { name: 'Keep it' }).click()
+  expect(readFileSync(sent, 'utf-8')).toBe('my own edit\n')
+  await coordinates.getByRole('button', { name: 'Send to Saga' }).click()
+  await ask.getByRole('button', { name: 'Replace' }).click()
+  await expect(coordinates).toContainText('Replaced /cluster/work/ru-caac/MeI_TS.xyz on Saga')
+  expect(readFileSync(sent, 'utf-8')).toContain('MeI_TS')
+
   await panel.getByRole('button', { name: 'Log out' }).click()
   await expect(panel).toContainText('Not logged in')
 })
