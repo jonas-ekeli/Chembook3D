@@ -15,6 +15,7 @@ const FIELD_LABELS: Record<string, string> = {
   step_id: 'Step',
   branch_id: 'Branch',
   group_id: 'Group',
+  path_edge_id: 'Scan path shown on edge',
 }
 
 /** Names of steps, branches, groups and nodes, to show ids in history entries readably. */
@@ -76,6 +77,7 @@ const ID_FIELDS = new Set([
   'parent_ids',
   'incoming_branch_ids',
   'reference_id',
+  'path_edge_id',
 ])
 
 const STRUCTURE_FIELDS: Record<string, string> = {

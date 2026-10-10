@@ -105,6 +105,15 @@ export type Node = {
   pos_y: number
   /** The orientation saved from the 3D view, used by the structure-mode card. */
   view_rotation: Rotation | null
+  /** D112: it has a scan path (an xTB path.xyz or xtbscan.log), so it can be shown on an edge. */
+  scan_path: boolean
+  /** D121: the edge a scan path node is shown on, as a chip there. */
+  path_edge_id: string | null
+  /** D121: set to show only the chip; layout, no history. */
+  on_edge_only: boolean
+  /** D121: its box is off the canvas now (set so, linked, still only a scan path, no edges or
+   * group of its own). */
+  on_edge: boolean
   created_at: string
   updated_at: string
 }
@@ -162,6 +171,52 @@ export type Transition = {
   species: TransitionSpecies[]
   /** W-BALANCE when the atoms or the charge do not balance. */
   warnings: Finding[]
+  /** D121: the scan paths run on this edge. Never the edge's energy (D27, EN-3). */
+  scan_paths: PathOnEdge[]
+}
+
+/** D121: a scan path shown on its edge. */
+export type PathOnEdge = {
+  node_id: string
+  label: string
+  /** The scan path whose movie the edge panel plays. */
+  calculation_id: string | null
+  /** Hartree: the path's top above its first kept point, at the path's own xTB level. */
+  top: number | null
+  /** D116, D118: the session's quality check; null when no job record says. */
+  gate: 'passed' | 'missed' | null
+  reached_end: boolean | null
+  /** Å: the end's RMSD over the reacting atoms (D118), and over all atoms. */
+  active_rmsd: number | null
+  end_rmsd: number | null
+  /** Its box is off the canvas; the chip stands for it. */
+  on_edge: boolean
+}
+
+/** D121: a path that did not reach its end: the session's gate missed, or it said so. */
+export const pathMissed = (p: PathOnEdge) => p.gate === 'missed' || p.reached_end === false
+
+/** D121: "+12.4 kcal/mol" for a path's top, or "top n/a". */
+export function pathTop(p: PathOnEdge, settings: Settings | null): string {
+  if (p.top === null) return 'top n/a'
+  const unit = settings?.energy_unit ?? 'kcal/mol'
+  const text = formatDelta(p.top, settings)
+  return `top ${p.top > 0 && !text.startsWith('-') ? '+' : ''}${text} ${unit}`
+}
+
+/** D121: the chip an edge shows for its scan paths: "xTB path · top +12.4 kcal/mol", or for
+ * several "xTB paths (2) · lowest top +9.8 kcal/mol". */
+export function pathChip(paths: PathOnEdge[], settings: Settings | null): { text: string; title: string; missed: boolean } {
+  const tops = paths.filter((p) => p.top !== null)
+  const lowest = tops.length ? tops.reduce((a, b) => ((b.top as number) < (a.top as number) ? b : a)) : null
+  const top = lowest ? pathTop(lowest, settings) : 'top n/a'
+  const text = paths.length === 1 ? `xTB path · ${top}` : `xTB paths (${paths.length}) · lowest ${top}`
+  const lines = paths.map(
+    (p) =>
+      `${p.label || 'Untitled path'}: ${pathTop(p, settings)}${pathMissed(p) ? ', did not reach end' : ''}${p.on_edge ? ' (shown on this edge only)' : ''}`,
+  )
+  lines.push('GFN2-xTB scan path, measured from its first kept point; not the edge’s barrier. Click to open.')
+  return { text, title: lines.join('\n'), missed: paths.some(pathMissed) }
 }
 
 export type TransitionSides = Partial<Pick<Transition, 'source_side' | 'target_side'>>
@@ -1409,6 +1464,9 @@ export const api = {
 
   nodes: () => request<Node[]>('GET', '/nodes'),
   setNodeKind: (id: string, kind: NodeKind) => request<Node>('PUT', `/nodes/${id}/kind`, { kind }),
+  /** D121: show a scan path node on an edge (null: on none); `on_edge_only` hides its box. */
+  setPathEdge: (id: string, edge_id: string | null, on_edge_only?: boolean) =>
+    request<Node>('PUT', `/nodes/${id}/path-edge`, { edge_id, ...(on_edge_only === undefined ? {} : { on_edge_only }) }),
   createNode: (fields: NodeFields & { kind?: NodeKind; xyz?: string; pos_x?: number; pos_y?: number }) =>
     request<Node>('POST', '/nodes', fields),
   updateNode: (id: string, fields: NodeFields) => request<Node>('PATCH', `/nodes/${id}`, fields),
@@ -1608,7 +1666,7 @@ export const api = {
   fetchJob: (id: string) =>
     request<{ branch: string; files: string[] }>('POST', `/jobs/${encodeURIComponent(id)}/fetch`),
   importPath: (id: string, again = false) =>
-    request<{ node_id: string; label: string }>(
+    request<{ node_id: string; label: string; on_edge: boolean }>(
       'POST',
       `/jobs/${encodeURIComponent(id)}/import-path${again ? '?again=true' : ''}`,
     ),

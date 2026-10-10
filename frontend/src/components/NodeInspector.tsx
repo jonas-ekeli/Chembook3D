@@ -28,6 +28,7 @@ import { Vibrations } from './Vibrations'
 import { StepMovie, type Movie } from './StepMovie'
 import { Viewer3D } from './Viewer3D'
 import { XyzEditor } from './XyzEditor'
+import { PathEdgeSection } from './ScanPathsOnEdge'
 
 const SYSTEM_TAGS = new Set(['optimization-incomplete'])
 
@@ -529,6 +530,10 @@ export function NodeInspector({
             </ul>
           )}
         </section>
+      )}
+
+      {!isSpecies && (node.path_edge_id || node.scan_path) && (
+        <PathEdgeSection node={node} canvas={canvas} onChanged={onChanged} onSelectTransition={onSelectTransition} />
       )}
 
       <section aria-label="Calculations section">

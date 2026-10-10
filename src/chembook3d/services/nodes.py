@@ -75,6 +75,7 @@ def snapshot(node: Node) -> dict[str, Any]:
         "step_id": node.step_id,
         "branch_id": node.branch_id,
         "group_id": node.group_id,
+        "path_edge_id": node.path_edge_id,
     }
 
 

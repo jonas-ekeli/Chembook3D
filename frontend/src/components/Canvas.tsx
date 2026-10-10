@@ -29,8 +29,10 @@ import {
 import '@xyflow/react/dist/style.css'
 import { toPng, toSvg } from 'html-to-image'
 import {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -44,6 +46,7 @@ import {
   balanceText,
   FADED_STATUSES,
   formatDelta,
+  pathChip,
   speciesChip,
   STATUS_LABEL,
   type Canvas as CanvasData,
@@ -53,6 +56,7 @@ import {
   type Node,
   type Note,
   type NoteLayout,
+  type PathOnEdge,
   type Settings,
   SIDES,
   isSide,
@@ -164,7 +168,13 @@ type TransitionData = {
   species: { text: string; direction: string; title: string }[]
   /** W-BALANCE messages, when the atoms or charge do not balance. */
   warnings: string[]
+  /** D121: the scan paths run on the edge, and the chip that stands for them. */
+  scanPaths: PathOnEdge[]
+  paths: { text: string; title: string; missed: boolean } | null
 }
+
+/** D121: what clicking an edge's scan path chip does (the edge's id). */
+const PathChipClick = createContext<((transitionId: string) => void) | null>(null)
 
 const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<FlowNode<StructureData>>) {
   const { node, colour, stepName, mode, faded, representative, energy } = data
@@ -372,6 +382,7 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
     labelY = (sourceY + 3 * c1[1] + 3 * c2[1] + targetY) / 8
   }
   const placer = useLabelPlacer()
+  const onPaths = useContext(PathChipClick)
   const label = useRef<HTMLDivElement>(null)
   const placement = useSyncExternalStore(placer.subscribe, () => placer.get(id))
   // Hand the line and the label's size to the placer after every render; it places again
@@ -433,6 +444,23 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
               {s.text}
             </span>
           ))}
+          {data.paths && (
+            <button
+              className={`chip scan-path-chip nodrag nopan${data.paths.missed ? ' missed' : ''}`}
+              title={data.paths.title}
+              onClick={(event) => {
+                event.stopPropagation()
+                onPaths?.(data.ids[0])
+              }}
+            >
+              {data.paths.missed && (
+                <span role="img" aria-label="Did not reach end">
+                  ⚠{' '}
+                </span>
+              )}
+              {data.paths.text}
+            </button>
+          )}
           {data.warnings.length > 0 && (
             <span className="warn-icon" role="img" aria-label="Does not balance" title={data.warnings.join('\n')}>
               ⚠
@@ -487,6 +515,7 @@ function CanvasView({
   onError,
   onOpenNote,
   onLayoutNote,
+  onOpenPaths,
   readOnly = false,
 }: {
   data: CanvasData
@@ -513,6 +542,8 @@ function CanvasView({
    * where it floats. */
   onOpenNote?: (noteId: string) => void
   onLayoutNote?: (noteId: string, layout: Partial<NoteLayout>) => void
+  /** D121: a click on an edge's scan path chip; by default it selects the edge. */
+  onOpenPaths?: (transitionId: string) => void
   /** The shared read-only copy (D79): nothing can be moved, connected, added or dropped. */
   readOnly?: boolean
 }) {
@@ -528,6 +559,10 @@ function CanvasView({
       placer.dispose()
     }
   }, [store, placer])
+  const pathChipClick = useCallback(
+    (id: string) => (onOpenPaths ? onOpenPaths(id) : onSelect({ kind: 'edge', id })),
+    [onOpenPaths, onSelect],
+  )
   const wrapper = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
@@ -709,7 +744,8 @@ function CanvasView({
     }
 
     for (const node of data.nodes) {
-      if (node.group_id || !nodeShown(node)) continue
+      // D121: a scan path shown on its edge only is drawn as the edge's chip.
+      if (node.group_id || !nodeShown(node) || node.on_edge) continue
       drawnAs.set(node.id, node.id)
       result.push({
         id: node.id,
@@ -759,6 +795,7 @@ function CanvasView({
         merged.crossBranch &&= t.cross_branch
         merged.faded &&= FADED_STATUSES.has(t.status)
         for (const s of speciesChips(t)) if (!merged.species.some((x) => x.text === s.text)) merged.species.push(s)
+        merged.scanPaths.push(...(t.scan_paths ?? []))
         merged.warnings.push(...t.warnings.map((w) => `${w.code}: ${w.message}`))
         same.selected ||= selected
         same.ariaLabel = `${merged.ids.length} transitions`
@@ -787,6 +824,8 @@ function CanvasView({
           energy: null,
           species: speciesChips(t),
           warnings: t.warnings.map((w) => `${w.code}: ${w.message}`),
+          scanPaths: [...(t.scan_paths ?? [])],
+          paths: null,
         },
       }
       between.set(`${source}>${target}`, drawn)
@@ -811,11 +850,15 @@ function CanvasView({
     return { flowNodes: result, flowEdges: edges }
   }, [data, mode, nodeEnergySource, filters, expanded, selection, multi, colours, stepNames, onToggleGroup, onGroupLayout, onGroupOrder, notesByNode, noteActions])
 
-  // FR-EN-02: ΔX = X(target) − X(source) on each edge, or n/a (EN-3).
+  // FR-EN-02: ΔX = X(target) − X(source) on each edge, or n/a (EN-3). D121: the scan path
+  // chips, in the energy unit, are always shown (A68) and never feed ΔX.
   const flowEdges = useMemo(() => {
     const view = energy.view
-    if (!energy.showEdges || !view) return plainEdges
+    const showEnergy = energy.showEdges && !!view
+    if (!showEnergy && !plainEdges.some((e) => e.data?.scanPaths.length)) return plainEdges
+    const chip = (d: TransitionData) => (d.scanPaths.length ? pathChip(d.scanPaths, energy.settings) : null)
     const edgeEnergy = ({ ids, representative }: TransitionData): EnergyText | null => {
+      if (!view) return null
       // A24, D70: a line standing for several edges shows the representatives' edge, if any.
       const id = ids.length === 1 ? ids[0] : representative
       const found = id ? view.edges[id] : undefined
@@ -828,7 +871,10 @@ function CanvasView({
             title: (energy.settings?.energy_unit ?? 'kcal/mol') + note,
           }
     }
-    return plainEdges.map((e) => ({ ...e, data: { ...e.data!, energy: edgeEnergy(e.data!) } }))
+    return plainEdges.map((e) => ({
+      ...e,
+      data: { ...e.data!, energy: showEnergy ? edgeEnergy(e.data!) : null, paths: chip(e.data!) },
+    }))
   }, [plainEdges, energy])
 
   // Local copy so dragging is smooth; replaced whenever the records change.
@@ -937,6 +983,7 @@ function CanvasView({
         if (files.length) onDropFiles(files, dropTarget(event), position(event))
       }}
     >
+      <PathChipClick.Provider value={pathChipClick}>
       <ReactFlow
         nodes={nodes}
         edges={flowEdges}
@@ -1033,6 +1080,7 @@ function CanvasView({
           </Panel>
         )}
       </ReactFlow>
+      </PathChipClick.Provider>
     </div>
   )
 }

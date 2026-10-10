@@ -191,6 +191,12 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
     onSelectBranch: (id: string) => setSelection({ kind: 'branch', id }),
     onSelectTransition: selectTransition,
   }
+  // D121: a scan path chip opens its path node, as the copy opens any node.
+  const openPaths = (id: string) => {
+    const first = canvas.transitions.find((t) => t.id === id)?.scan_paths?.[0]
+    if (first) selectNode(first.node_id)
+    else selectTransition(id)
+  }
   const selectPoint = (id: string) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id))
 
   const selectedNode =
@@ -225,7 +231,15 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
       />
     )
   } else if (selectedEdge) {
-    panel = <TransitionPanel key={selectedEdge.id} transition={selectedEdge} canvas={canvas} select={select} />
+    panel = (
+      <TransitionPanel
+        key={selectedEdge.id}
+        transition={selectedEdge}
+        canvas={canvas}
+        select={select}
+        settings={settings}
+      />
+    )
   } else if (selectedBranch) {
     panel = <BranchPanel key={selectedBranch.id} branch={selectedBranch} canvas={canvas} select={select} />
   } else {
@@ -337,6 +351,7 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
                 onDropFiles={ignore}
                 onPositions={ignore}
                 onError={ignore}
+                onOpenPaths={openPaths}
                 readOnly
               />
             </ReactFlowProvider>

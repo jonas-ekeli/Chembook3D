@@ -118,7 +118,7 @@ def _note_images(session: Session, notes: list[Any]) -> dict[str, str]:
 def snapshot_data(request: Request, session: Session, body: SnapshotIn) -> dict[str, Any]:
     investigation = _investigation(request)
     settings = app_settings.load()
-    canvas = pathway_api.canvas(session)
+    canvas = pathway_api.canvas(request, session)
     records = [*canvas.nodes, *canvas.species]
 
     calculations: dict[str, list[dict[str, Any]]] = {}

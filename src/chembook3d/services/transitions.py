@@ -178,6 +178,10 @@ def delete(session: Session, transition_id: str) -> None:
 
 
 def remove(session: Session, transitions: list[Transition]) -> None:
+    from chembook3d.services import scan_edges  # it reads the scan paths, which import this
+
+    # D121: their scan paths are kept, unlinked, with their boxes back on the canvas.
+    scan_edges.release(session, transitions)
     for transition in transitions:
         history.record(session, "transition", transition.id, "delete", old=snapshot(transition))
         session.delete(transition)

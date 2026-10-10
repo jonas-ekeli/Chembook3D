@@ -5,6 +5,7 @@ All rules live in the services; these handlers only translate."""
 from collections import Counter
 from dataclasses import asdict
 from datetime import date, datetime, time
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -34,7 +35,7 @@ from chembook3d.models import (
     Transition,
 )
 from chembook3d.services import alignment as alignment_service
-from chembook3d.services import atom_matching, layout, trajectory
+from chembook3d.services import atom_matching, layout, scan_edges, trajectory
 from chembook3d.services import branches as branch_service
 from chembook3d.services import groups as group_service
 from chembook3d.services import nodes as node_service
@@ -106,6 +107,20 @@ class TransitionSpeciesOut(BaseModel):
     count: int
 
 
+class PathOnEdgeOut(BaseModel):
+    """D121: a scan path shown on this edge. Never an energy of the edge (D27, EN-3)."""
+
+    node_id: str
+    label: str
+    calculation_id: str | None  # the scan path whose movie the edge panel plays
+    top: float | None  # hartree: the path's top above its first kept point (one xTB level)
+    gate: str | None  # "passed" or "missed" (D116, D118); None when no job record says
+    reached_end: bool | None
+    active_rmsd: float | None  # Å, the end over the reacting atoms (D118)
+    end_rmsd: float | None  # Å, over all atoms
+    on_edge: bool  # its box is off the canvas; the chip stands for it
+
+
 class TransitionOut(BaseModel):
     id: str
     source_id: str
@@ -120,6 +135,7 @@ class TransitionOut(BaseModel):
     target_side: str
     species: list[TransitionSpeciesOut]  # D69: free species that join or leave
     warnings: list[WarningOut]  # W-BALANCE
+    scan_paths: list[PathOnEdgeOut] = []  # D121: scan paths run on this edge
 
 
 class TransitionSpeciesIn(BaseModel):
@@ -359,8 +375,21 @@ def _branch_out(session: Session, branch: Branch, nodes: list[Node] | None = Non
     )
 
 
-def _transition_out(session: Session, transition: Transition) -> TransitionOut:
+def _transition_out(
+    session: Session,
+    transition: Transition,
+    paths: dict[str, list[scan_edges.PathOnEdge]] | None = None,
+) -> TransitionOut:
+    """`paths` are the scan paths on every edge (`scan_edges.on_edges`, which reads their
+    files); without them only the edge's paths are listed, with no tops."""
     facts = transition_service.describe(session, transition)
+    if paths is None:
+        paths = {
+            transition.id: [
+                scan_edges.describe(session, None, n, {})
+                for n in scan_edges.linked(session, transition.id)
+            ]
+        }
     return TransitionOut(
         id=transition.id,
         source_id=transition.source_id,
@@ -387,6 +416,7 @@ def _transition_out(session: Session, transition: Transition) -> TransitionOut:
         warnings=[
             WarningOut(**w.as_dict()) for w in species_service.balance_warnings(session, transition)
         ],
+        scan_paths=[PathOnEdgeOut(**asdict(p)) for p in paths.get(transition.id, [])],
         **facts,
     )
 
@@ -451,9 +481,15 @@ class OverviewOut(BaseModel):
 # ---------- canvas ----------
 
 
+def _folder(request: Request) -> Path | None:
+    investigation = getattr(request.app.state, "investigation", None)
+    return investigation.folder if investigation is not None else None
+
+
 @router.get("/canvas", response_model=CanvasOut)
-def canvas(session: DbSession):
+def canvas(request: Request, session: DbSession):
     """Everything the canvas draws, in one request."""
+    paths = scan_edges.on_edges(session, _folder(request))
     everything = node_service.list_nodes(session)
     nodes = [n for n in everything if not species_service.is_species(n)]
     counts = _step_counts(nodes)
@@ -463,7 +499,7 @@ def canvas(session: DbSession):
         steps=[_step_out(session, s, counts) for s in step_service.list_steps(session)],
         branches=[_branch_out(session, b, nodes) for b in branch_service.list_branches(session)],
         transitions=[
-            _transition_out(session, t) for t in transition_service.list_transitions(session)
+            _transition_out(session, t, paths) for t in transition_service.list_transitions(session)
         ],
         groups=[_group_out(session, g) for g in group_service.list_groups(session)],
         notes=[note_out(n) for n in note_service.list_all(session)],
@@ -571,8 +607,11 @@ def split_node(node_id: str, body: SplitIn, session: DbSession):
 
 
 @router.get("/transitions", response_model=list[TransitionOut])
-def list_transitions(session: DbSession):
-    return [_transition_out(session, t) for t in transition_service.list_transitions(session)]
+def list_transitions(request: Request, session: DbSession):
+    paths = scan_edges.on_edges(session, _folder(request))
+    return [
+        _transition_out(session, t, paths) for t in transition_service.list_transitions(session)
+    ]
 
 
 @router.post("/transitions", response_model=TransitionOut, status_code=201)

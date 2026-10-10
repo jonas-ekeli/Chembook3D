@@ -322,6 +322,11 @@ function NodeSearch({
               </span>
               <span className="node-meta">
                 <span className={`status status-${node.status}`}>{STATUS_LABEL[node.status]}</span>
+                {node.on_edge && (
+                  <span className="chip scan-path-chip" title="Shown on its edge only, as a chip (D121)">
+                    on edge
+                  </span>
+                )}
                 {node.formula && <span>{node.formula}</span>}
               </span>
             </button>

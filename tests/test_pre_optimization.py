@@ -3,7 +3,7 @@ T-IMP-16, T-IMP-17."""
 
 from chembook3d import investigation as inv
 from chembook3d.models import Calculation, HistoryEntry, InvestigationInfo, Node
-from chembook3d.services import history
+from chembook3d.services import history, repairs
 from tests import gaussian_text as g
 from tests.test_batch_import import nodes, row, run, scan
 from tests.test_import import calculations, commit, upload
@@ -167,7 +167,7 @@ def test_opening_an_old_notebook_repairs_the_geometry_levels(open_client, tmp_pa
             assert by_id[sps["lost"]].geometry_level_id is None  # left for the user
             assert by_id[sps["hand"]].geometry_level_id != dft.level_id  # set by hand: kept
             info = session.get(InvestigationInfo, 1)
-            assert info.repairs == ["geometry_levels"]
+            assert info.repairs == list(repairs.REPAIRS)
             sources = {e.source for e in session.query(HistoryEntry) if e.source == "repair"}
             assert sources == {"repair"}
     finally:
@@ -190,7 +190,7 @@ def test_a_new_investigation_needs_no_repair(tmp_path):
     created = inv.create_investigation(tmp_path / "new", "New")
     try:
         with created.sessions() as session:
-            assert session.get(InvestigationInfo, 1).repairs == ["geometry_levels"]
+            assert session.get(InvestigationInfo, 1).repairs == list(repairs.REPAIRS)
     finally:
         created.close()
 

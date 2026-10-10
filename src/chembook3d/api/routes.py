@@ -37,7 +37,15 @@ from chembook3d.models import (
     Node,
     SourceFile,
 )
-from chembook3d.services import basis_sets, energies, history, import_undo, imports, levels
+from chembook3d.services import (
+    basis_sets,
+    energies,
+    history,
+    import_undo,
+    imports,
+    levels,
+    scan_edges,
+)
 from chembook3d.services import files as file_service
 from chembook3d.services import nodes as node_service
 from chembook3d.services import species as species_service
@@ -131,6 +139,12 @@ class NodeOut(BaseModel):
     pos_x: float
     pos_y: float
     view_rotation: list[float] | None
+    # D121: the edge a scan path node is shown on; set to show only there; and whether its box
+    # is off the canvas now (set so, and still only a scan path with no edges or group).
+    scan_path: bool = False  # D112: it has a scan path calculation, so it can be shown on an edge
+    path_edge_id: str | None = None
+    on_edge_only: bool = False
+    on_edge: bool = False
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
@@ -432,6 +446,10 @@ def _node_out(session: Session, node: Node) -> NodeOut:
         pos_x=node.pos_x,
         pos_y=node.pos_y,
         view_rotation=node.view_rotation,
+        scan_path=scan_edges.has_scan_path(session, node.id),
+        path_edge_id=node.path_edge_id,
+        on_edge_only=node.on_edge_only,
+        on_edge=scan_edges.on_edge(session, node),
         created_at=node.created_at,
         updated_at=node.updated_at,
     )
@@ -784,6 +802,18 @@ def set_kind(node_id: str, body: KindIn, session: DbSession):
     """D69: turn a node into a free species, or back."""
     _get_node(session, node_id)
     return _node_out(session, species_service.set_kind(session, node_id, body.kind))
+
+
+class PathEdgeIn(BaseModel):
+    edge_id: str | None
+    on_edge_only: bool | None = None
+
+
+@router.put("/nodes/{node_id}/path-edge", response_model=NodeOut)
+def set_path_edge(node_id: str, body: PathEdgeIn, session: DbSession):
+    """D121: show a scan path node on an edge (or on none, unlinking it); `on_edge_only` takes
+    its box off the canvas so the edge's chip stands for it, or puts it back."""
+    return _node_out(session, scan_edges.link(session, node_id, body.edge_id, body.on_edge_only))
 
 
 @router.delete("/nodes/{node_id}", response_model=DeletePreview)

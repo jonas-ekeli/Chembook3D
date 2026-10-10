@@ -23,7 +23,7 @@ export function CloudJobsDialog({
 }: {
   linked: boolean
   onClose: () => void
-  onImported: (label: string, nodeId: string) => void
+  onImported: (label: string, nodeId: string, onEdge: boolean) => void
   onSelectNode: (id: string) => void
 }) {
   const [jobs, setJobs] = useState<CloudJob[] | null>(null)
@@ -62,7 +62,7 @@ export function CloudJobsDialog({
   const importPath = (job: CloudJob, again: boolean) =>
     act(`import:${job.id}`, async () => {
       const result = await api.importPath(job.id, again)
-      onImported(result.label, result.node_id)
+      onImported(result.label, result.node_id, result.on_edge)
       return `Imported the path as “${result.label}”.`
     })
 

@@ -224,7 +224,10 @@ TOOLS: list[ToolSpec] = [
         "GET",
         "/api/transitions",
         "All transitions (edges) with their status, sides, the free species that join or leave "
-        "on them and balance warnings. `direct` means no TS at either end ('no TS').",
+        "on them and balance warnings. `direct` means no TS at either end ('no TS'). "
+        "`scan_paths` lists the scan path nodes run on each edge (D121) with `top`, the path's "
+        "highest point above its first kept point in hartree at the path's own xTB level: it is "
+        "not the edge's barrier and never compares with DFT energies.",
     ),
     T(
         "list_groups",
@@ -383,6 +386,19 @@ TOOLS: list[ToolSpec] = [
         "place; a node with calculations keeps its geometry and a new derived node is made "
         "with the new coordinates (the answer says which, ID-5). To remove coordinates use "
         "remove_coordinates.",
+    ),
+    T(
+        "link_scan_path",
+        "write",
+        "PUT",
+        "/api/nodes/{node_id}/path-edge",
+        "Show a scan path node (one with an xTB path.xyz or xtbscan.log) on the edge it was run "
+        "on, as a chip there (D121), or on none with edge_id null. on_edge_only true takes its "
+        "box off the canvas so the chip stands for it; false puts it back. Nothing is rewired.",
+        help={
+            "edge_id": "Id of the transition, or null to unlink.",
+            "on_edge_only": "true: only the chip shows the path; false: its box is on the canvas.",
+        },
     ),
     T(
         "set_node_kind",

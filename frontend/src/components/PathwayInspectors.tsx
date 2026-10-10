@@ -22,6 +22,7 @@ import { Modal } from './Modal'
 import { Notes, TextField } from './Fields'
 import { AtomMatchDialog } from './AtomMatchDialog'
 import { ScanPathDialog } from './ScanPathDialog'
+import { ScanPathsSection } from './ScanPathsOnEdge'
 import { MAX_OVERLAY, OverlayDialog } from './OverlayDialog'
 import { CompareStericsDialog } from './Sterics'
 
@@ -226,18 +227,27 @@ function TransitionSpeciesSection({
 export function TransitionInspector({
   transition,
   canvas,
+  settings,
+  refreshKey,
   onChanged,
+  onNotice,
   onDeleted,
   onSelectNode,
   onSelectGroup,
 }: {
   transition: Transition
   canvas: Canvas
+  /** The energy unit for the scan paths' tops (D121). */
+  settings: Settings | null
+  refreshKey: number
   onChanged: () => void
+  /** D121: something changed through a scan path, with a notice to show. */
+  onNotice: (notice?: string) => void
   onDeleted: () => void
   onSelectNode: (id: string) => void
   onSelectGroup: (id: string) => void
 }) {
+  const paths = transition.scan_paths ?? []
   const [error, setError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState(false)
   const update = (fields: Partial<Pick<Transition, 'status' | 'notes' | 'source_side' | 'target_side'>>) =>
@@ -284,6 +294,14 @@ export function TransitionInspector({
         onChanged={onChanged}
         onSelectNode={onSelectNode}
       />
+      <ScanPathsSection
+        transition={transition}
+        canvas={canvas}
+        settings={settings}
+        refreshKey={refreshKey}
+        onChanged={onNotice}
+        onSelectNode={onSelectNode}
+      />
       <Notes key={transition.notes} notes={transition.notes} onSave={(notes) => update({ notes })} />
       {error && <p role="alert">{error}</p>}
       {confirm && (
@@ -303,6 +321,16 @@ export function TransitionInspector({
           }
         >
           <p>Only this transition is removed; both nodes stay.</p>
+          {paths.length > 0 && (
+            <>
+              <p>These scan paths stay as nodes, unlinked, with their boxes back on the canvas (INV-7):</p>
+              <ul aria-label="Scan paths kept">
+                {paths.map((p) => (
+                  <li key={p.node_id}>{p.label || 'Untitled path'}</li>
+                ))}
+              </ul>
+            </>
+          )}
         </Modal>
       )}
     </div>

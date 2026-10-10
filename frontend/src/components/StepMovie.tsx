@@ -42,6 +42,7 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
  * the path and put back (D117); `onTrimmed` gets the node, which may have moved to the new top. */
 export function StepMovie({
   nodeId,
+  calculationId = null,
   refreshKey,
   settings,
   vibrating,
@@ -51,6 +52,8 @@ export function StepMovie({
   onTrimmed,
 }: {
   nodeId: string
+  /** D121: the calculation whose movie starts by itself (the edge panel's scan path). */
+  calculationId?: string | null
   refreshKey: number
   settings: Settings | null
   vibrating: boolean
@@ -84,6 +87,15 @@ export function StepMovie({
   useEffect(() => {
     if (vibrating) setCalcId('')
   }, [vibrating])
+
+  // D121: start on the calculation asked for, once its list has loaded.
+  const [started, setStarted] = useState<string | null>(null)
+  useEffect(() => {
+    if (calculationId && started !== calculationId && calcs.some((c) => c.id === calculationId)) {
+      setStarted(calculationId)
+      setCalcId(calculationId)
+    }
+  }, [calculationId, calcs, started])
 
   useEffect(() => {
     setSteps(null)

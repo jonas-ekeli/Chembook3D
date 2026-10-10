@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 // T-UI-19, D115: a scan path that came back from its cloud session is imported by itself as a
-// node between its two ends, and the Cloud jobs list shows where each job stands.
+// node between its two ends, shown as its edge's chip (D121), and the Cloud jobs list shows where each job stands.
 const E2E_DIR = process.env.E2E_DIR!
 
 const START = [
@@ -94,10 +94,12 @@ test('a finished scan path is imported by itself and listed under Cloud jobs', a
 
   // Opening the investigation checks at once (then every few minutes).
   await page.reload()
-  await expect(page.getByRole('status').filter({ hasText: 'Scan path imported as “Path A to B”' })).toBeVisible({
-    timeout: 30_000,
-  })
-  await expect(page.getByRole('group', { name: 'Node Path A to B', exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Scan path imported as “Path A to B”, shown as a chip on its edge' }),
+  ).toBeVisible({ timeout: 30_000 })
+  // D121, A68: the path comes back on its edge only, as the edge's chip.
+  await expect(page.locator('.edge-label .scan-path-chip')).toHaveText(/^xTB path · top /)
+  await expect(page.getByRole('group', { name: 'Node Path A to B', exact: true })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Cloud jobs' }).click()
   const jobs = page.getByRole('dialog', { name: 'Cloud jobs' })

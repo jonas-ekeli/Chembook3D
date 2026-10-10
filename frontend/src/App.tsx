@@ -310,9 +310,13 @@ function App() {
   const claudeRequests = useLive(investigation?.folder ?? null, reload)
 
   // D115: a scan path that came back from its cloud session becomes a node by itself.
-  const pathImported = (label: string) => {
+  const pathImported = (label: string, _nodeId: string, onEdge: boolean) => {
     reload()
-    setNotice(`Scan path imported as “${label}”, between its two ends (it can be undone in History).`)
+    setNotice(
+      onEdge
+        ? `Scan path imported as “${label}”, shown as a chip on its edge (it can be undone in History).`
+        : `Scan path imported as “${label}”, between its two ends (it can be undone in History).`,
+    )
   }
   useScanPathImports(investigation?.folder ?? null, investigation?.linked ?? false, pathImported, (job, message) =>
     setNotice(`The scan path “${job.name}” could not be imported: ${message} (Cloud jobs)`),
@@ -1105,7 +1109,13 @@ function App() {
         key={selectedEdge.id}
         transition={selectedEdge}
         canvas={canvas}
+        settings={settings}
+        refreshKey={refreshKey}
         onChanged={reload}
+        onNotice={(text) => {
+          reload()
+          if (text) setNotice(text)
+        }}
         onDeleted={cleared}
         onSelectNode={(id) => selectNode(id, true)}
         onSelectGroup={selectGroup}

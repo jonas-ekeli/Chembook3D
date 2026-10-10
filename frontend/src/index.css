@@ -1535,6 +1535,34 @@ button.chip {
   border-color: #bdb4fe;
   color: #4a1fb8;
 }
+/* D121: a scan path shown on its edge; always xTB, never the edge's barrier (INV-8) */
+.chip.scan-path-chip {
+  pointer-events: auto;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.45;
+  background: #eff8ff;
+  border-color: #84caff;
+  color: #175cd3;
+  margin: 0;
+}
+.chip.scan-path-chip.missed {
+  background: #fffaeb;
+  border-color: #fdb022;
+  color: #93370d;
+}
+.warn-text {
+  color: #93370d;
+}
+.scan-path-rows li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.scan-path-rows li.chosen {
+  font-weight: 600;
+}
 .badge.species {
   background: #ecfdf3;
   color: #05603a;

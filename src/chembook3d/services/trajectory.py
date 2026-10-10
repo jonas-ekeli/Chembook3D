@@ -90,7 +90,7 @@ class Steps:
     trim: Trim | None = None  # D117: a scan path's kept points; None for any other calculation
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=32)  # the canvas reads every scan path shown on an edge (D121)
 def _read(path: str, modified: int, size: int) -> ParsedFile | None:
     """The parsed file; the cache key changes when the copy does (it never should)."""
     text = Path(path).read_bytes().decode("utf-8", errors="replace")

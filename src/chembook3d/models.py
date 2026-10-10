@@ -122,6 +122,17 @@ class Node(Base):
     # coordinates (about their centre) into the picture: x right, y up, z towards the viewer.
     # Structure-mode cards draw the node this way; None means the default (principal axes).
     view_rotation: Mapped[list[Any] | None] = mapped_column(default=None)
+    # D121: the edge a scan path node was run on, shown there as a chip; the link is in the
+    # history. `on_edge_only` takes the box off the canvas while the chip stands for it
+    # (layout, no history, like A29).
+    path_edge_id: Mapped[str | None] = mapped_column(
+        # use_alter: nodes and transitions point at each other.
+        ForeignKey(
+            "transitions.id", ondelete="SET NULL", use_alter=True, name="fk_nodes_path_edge_id"
+        ),
+        default=None,
+    )
+    on_edge_only: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
