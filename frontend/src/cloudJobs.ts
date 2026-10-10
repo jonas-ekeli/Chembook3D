@@ -34,7 +34,7 @@ export function statusText(job: CloudJob): string {
 export function useScanPathImports(
   folder: string | null,
   linked: boolean,
-  onImported: (label: string, nodeId: string) => void,
+  onImported: (label: string, nodeId: string, onEdge: boolean) => void,
   onFailed: (job: CloudJob, message: string) => void,
 ) {
   const imported = useRef(onImported)
@@ -55,7 +55,7 @@ export function useScanPathImports(
           if (!awaitingImport(job) || (job.status !== 'finished' && job.status !== 'fetched')) continue
           try {
             const result = await api.importPath(job.id)
-            if (!stopped) imported.current(result.label, result.node_id)
+            if (!stopped) imported.current(result.label, result.node_id, result.on_edge)
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err)
             // Another tab imported it a moment ago: nothing to say.

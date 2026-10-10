@@ -6,6 +6,8 @@ import Markdown from 'react-markdown'
 import {
   CALCULATION_TYPES,
   formatDelta,
+  pathMissed,
+  pathTop,
   ROLES,
   speciesChip,
   STATUS_LABEL,
@@ -498,11 +500,14 @@ export function TransitionPanel({
   transition,
   canvas,
   select,
+  settings,
 }: {
   transition: Transition
   canvas: Canvas
   select: Select
+  settings: Settings | null
 }) {
+  const paths = transition.scan_paths ?? []
   return (
     <div className="inspector" aria-label="Transition inspector">
       <div className="inspector-head">
@@ -550,6 +555,23 @@ export function TransitionPanel({
           </ul>
         )}
       </section>
+      {paths.length > 0 && (
+        <section aria-label="Scan paths">
+          <h3>Scan paths</h3>
+          <p className="muted">GFN2-xTB paths run on this edge; each top is from its own first point, not this edge’s barrier.</p>
+          <ul className="plain scan-path-rows">
+            {paths.map((p) => (
+              <li key={p.node_id}>
+                <button className="link" onClick={() => select.onSelectNode(p.node_id)}>
+                  {p.label || 'Untitled path'}
+                </button>
+                <span className={`chip scan-path-chip${pathMissed(p) ? ' missed' : ''}`}>{pathTop(p, settings)}</span>
+                {pathMissed(p) && <span className="warn-text">did not reach end</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <NotesView notes={transition.notes} />
     </div>
   )

@@ -181,7 +181,10 @@ test('the energy unit setting is kept', async ({ page }) => {
   // FR-SET-01
   await openInvestigation(page, join(E2E_DIR, 'demo'))
   await page.getByRole('button', { name: 'Settings' }).click()
+  // Reload only once the setting is saved.
+  const saved = page.waitForResponse((r) => r.url().endsWith('/api/settings') && r.request().method() === 'PUT')
   await page.getByLabel('Energy unit').selectOption('kJ/mol')
+  expect((await saved).ok()).toBe(true)
   await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click()
   await page.reload()
   await page.getByRole('button', { name: 'Settings' }).click()

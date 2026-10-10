@@ -145,7 +145,17 @@ def geometry_levels(session: Session, folder: Path) -> dict[str, int]:
     return counts
 
 
-REPAIRS: dict[str, Callable[[Session, Path], Any]] = {"geometry_levels": geometry_levels}
+def scan_path_edges(session: Session, folder: Path) -> dict[str, int]:
+    """D121: scan path nodes imported from cloud jobs before they remembered their edge."""
+    from chembook3d.services import scan_edges  # it imports the parsers through trajectory
+
+    return scan_edges.link_imported(session, folder)
+
+
+REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
+    "geometry_levels": geometry_levels,
+    "scan_path_edges": scan_path_edges,
+}
 
 
 def run(session: Session, folder: Path) -> dict[str, Any]:

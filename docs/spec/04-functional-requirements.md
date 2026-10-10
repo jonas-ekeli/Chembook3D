@@ -179,6 +179,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-CAN-06 | "Arrange branch" lays out one branch left to right in step order. Other positions are unchanged. | D33 | 3 |
 | FR-CAN-07 | Export a canvas image (viewport or full canvas). | D39 | 3 |
 | FR-CAN-08 | An investigation opens on what it showed when last used: energy level, energy type, reference, energies on edges, filters, expanded groups, and the energy drawer with its pathways. Saved in the investigation, not in the history. | D105 | 4 |
+| FR-CAN-09 | A scan path is shown on the edge it was run on as a chip with the path's own top (xTB, from its first kept point), which opens the path's chart and movie in the edge panel; the path node can be shown on its edge only. The chip never feeds any energy of the edge. | D121 | 4 |
 
 ## FR-3D · 3D viewer
 

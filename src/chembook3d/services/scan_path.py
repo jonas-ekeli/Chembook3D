@@ -1486,6 +1486,10 @@ def _import_result(session: Session, folder: Path, job_id: str, again: bool) -> 
             (base / FEEDBACK_FILE).is_file(),
         ),
     )
+    edge_id = ends.get("edge_id")
+    if isinstance(edge_id, str) and session.get(Transition, edge_id) is not None:
+        # D121: shown as a chip on the edge it was run on, its box off the canvas (A68).
+        options.path_edge_id, options.on_edge_only = edge_id, True
     if start is not None:
         group = session.get(GroupNode, start.group_id) if start.group_id else None
         options.step_id = start.step_id or (group.step_id if group else None)
@@ -1515,4 +1519,9 @@ def _import_result(session: Session, folder: Path, job_id: str, again: bool) -> 
         imported={"node_id": committed.node_id, "at": cloud_jobs.now()},
         import_error=None,
     )
-    return {"node_id": committed.node_id, "label": node.label if node else "", "job": job_id}
+    return {
+        "node_id": committed.node_id,
+        "label": node.label if node else "",
+        "job": job_id,
+        "on_edge": bool(node and node.on_edge_only),  # D121: shown as its edge's chip
+    }
