@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -464,3 +465,106 @@ def test_a_wrong_token_gets_nothing(saga, config_dir, home):
     asyncio.run(client.call("quit"))
     thread.join(10)
     loop.close()
+
+
+# ---------- T-SSH-07 import from the terminal's directory ----------
+
+FIXTURES = Path(__file__).parent / "fixtures" / "gaussian"
+TS = "aminationTS-full-unfrz-c1.log"
+TS_SP = "aminationTS-full-unfrz-c1_sp_tzpop.log"
+WORK = "/cluster/work/ru-caac"
+
+
+@pytest.fixture
+def at_work(local, saga, tmp_path):
+    """Logged in to the fake Saga with an investigation open and the shell in WORK, which
+    holds two outputs, an input and a subdirectory."""
+    work = saga.root / WORK.lstrip("/")
+    for name in (TS, TS_SP):
+        (work / name).write_bytes((FIXTURES / name).read_bytes())
+    (work / "job.gjf").write_text("#P B3LYP/6-31G(d) Opt\n\njob\n\n0 1\n", encoding="utf-8")
+    (work / "old").mkdir()
+    response = local.post(
+        "/api/investigations", json={"folder": str(tmp_path / "inv"), "name": "Ru"}
+    )
+    assert response.status_code == 200, response.text
+    _point_at(local, saga)
+    assert _log_in(local, saga)["kind"] == "connected"
+    with _terminal(local) as ws:
+        _read_until(ws, lambda text, m: "$ " in text)
+        ws.send_json({"type": "input", "data": f"cd {WORK}\r"})
+        _read_until(ws, lambda text, m: {"type": "cwd", "path": WORK} in m)
+    return local
+
+
+def _copies() -> set[str]:
+    return {p.name for p in Path(tempfile.gettempdir()).glob("chembook3d-remote-*")}
+
+
+def test_the_directory_is_listed_with_its_outputs(at_work):
+    listing = at_work.get("/api/remote/servers/saga/files").json()
+    assert listing["path"] == WORK
+    # Directories first, then by name.
+    assert [(e["name"], e["kind"], e["output"]) for e in listing["entries"]] == [
+        ("old", "directory", False),
+        (TS, "file", True),
+        (TS_SP, "file", True),
+        ("job.gjf", "file", False),
+    ]
+    ts = next(e for e in listing["entries"] if e["name"] == TS)
+    assert ts["size"] == (FIXTURES / TS).stat().st_size and ts["modified"]
+    other = at_work.get("/api/remote/servers/saga/files", params={"path": "/cluster/work"}).json()
+    assert [e["name"] for e in other["entries"]] == ["ru-caac"]
+
+
+def test_one_output_is_imported_with_the_server_as_its_origin(at_work, config_dir):
+    before = _copies()
+    plan = at_work.post(
+        "/api/remote/servers/saga/import", json={"paths": [f"{WORK}/{TS}"]}, headers=ORIGIN
+    ).json()
+    assert plan["origin"] == {"device": "Saga", "path": f"saga:{WORK}/{TS}", "name": TS}
+    assert _copies() == before  # the copy is removed once staged
+    response = at_work.post(f"/api/imports/{plan['token']}/commit", json={})
+    assert response.status_code == 200, response.text
+    node_id = response.json()["node_id"]
+    source = at_work.get(f"/api/nodes/{node_id}/calculations").json()[0]["source_file"]
+    assert (source["origin_device"], source["origin_path"]) == ("Saga", f"saga:{WORK}/{TS}")
+    download = at_work.get(f"/api/source-files/{source['id']}/download")
+    assert download.content == (FIXTURES / TS).read_bytes()
+    # The next import from this computer still offers this computer's name.
+    settings = json.loads((config_dir / "settings.json").read_text(encoding="utf-8"))
+    assert settings.get("last_device", "") != "Saga"
+
+
+def test_several_outputs_go_through_the_batch_import(at_work):
+    paths = [f"{WORK}/{name}" for name in (TS, TS_SP, "job.gjf")]
+    response = at_work.post(
+        "/api/remote/servers/saga/batch-import", json={"paths": paths}, headers=ORIGIN
+    )
+    assert response.status_code == 200, response.text
+    plan = response.json()
+    assert plan["folder"] == f"saga:{WORK}" and plan["origin_device"] == "Saga"
+    assert sorted(r["path"] for r in plan["rows"]) == sorted([TS, TS_SP])
+    assert plan["other_count"] == 1  # the input
+    result = at_work.post(f"/api/batch-imports/{plan['token']}/commit", json={})
+    assert result.status_code == 200, result.text
+    assert result.json()["imported"] == 2
+    nodes = at_work.get("/api/canvas").json()["nodes"]
+    origins = {
+        c["source_file"]["origin_path"]
+        for n in nodes
+        for c in at_work.get(f"/api/nodes/{n['id']}/calculations").json()
+    }
+    assert origins == {f"saga:{WORK}/{TS}", f"saga:{WORK}/{TS_SP}"}
+
+
+def test_import_refusals(at_work, local):
+    one = {"paths": [f"{WORK}/missing.log"]}
+    response = at_work.post("/api/remote/servers/saga/import", json=one, headers=ORIGIN)
+    assert response.status_code == 422 and "Could not copy from Saga" in response.json()["detail"]
+    two = {"paths": [f"{WORK}/{TS}", f"{WORK}/{TS_SP}"]}
+    response = at_work.post("/api/remote/servers/saga/import", json=two, headers=ORIGIN)
+    assert response.status_code == 422 and "batch import" in response.json()["detail"]
+    assert at_work.post("/api/remote/servers/saga/import", json=one).status_code == 403
+    at_work.post("/api/remote/servers/saga/logout", headers=ORIGIN)
+    assert at_work.get("/api/remote/servers/saga/files").status_code == 409

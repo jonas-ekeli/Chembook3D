@@ -1448,6 +1448,17 @@ export type LoginStep = {
   message: string | null
 }
 
+/** D122e: what is in a directory on a server, by default the terminal's current one. */
+export type RemoteEntry = {
+  name: string
+  kind: 'file' | 'directory'
+  size: number | null
+  modified: number | null
+  /** Named as an output the import reads (.log, .out, .output, .xyz). */
+  output: boolean
+}
+export type RemoteListing = { server: string; path: string; entries: RemoteEntry[] }
+
 const serverPath = (id: string) => `/remote/servers/${encodeURIComponent(id)}`
 const loginPath = (id: string) => `/remote/logins/${encodeURIComponent(id)}`
 
@@ -1464,6 +1475,13 @@ export const api = {
   remoteLogout: (id: string) => request<void>('POST', `${serverPath(id)}/logout`),
   remoteShell: (id: string, rows: number, cols: number) =>
     request<void>('POST', `${serverPath(id)}/shell`, { rows, cols }),
+  remoteFiles: (id: string, path?: string) =>
+    request<RemoteListing>('GET', `${serverPath(id)}/files${path ? `?${new URLSearchParams({ path })}` : ''}`),
+  /** Copy one output down and stage it: the import dialog's preview (D122e). */
+  remoteImport: (id: string, path: string, nodeId?: string | null) =>
+    request<ImportPlan>('POST', `${serverPath(id)}/import`, { paths: [path], node_id: nodeId ?? null }),
+  /** Copy several outputs down and scan them as a batch import (D97, D122e). */
+  remoteBatch: (id: string, paths: string[]) => request<BatchPlan>('POST', `${serverPath(id)}/batch-import`, { paths }),
   /** A one-time token for a server's terminal WebSocket. */
   remoteTerminal: (server: string) => request<{ token: string }>('POST', '/remote/terminals', { server }),
   claudeStatus: () => request<ClaudeStatus>('GET', '/claude'),

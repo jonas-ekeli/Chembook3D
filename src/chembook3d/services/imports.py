@@ -148,6 +148,9 @@ class StagedFile:
     size: int
     checksum: str
     parsed: ParsedFile | crest.Ensemble
+    # D122: copied from an SSH server, whose name is the origin device (not remembered as the
+    # device of the next import from this computer).
+    origin_device: str | None = None
 
     @property
     def path(self) -> Path:
@@ -163,10 +166,20 @@ class Staging:
         # files are staged here like single files.
         self.batches: dict[str, Any] = {}
 
-    def add(self, data: bytes, original_name: str, origin_path: str = "") -> StagedFile:
+    def add(
+        self,
+        data: bytes,
+        original_name: str,
+        origin_path: str = "",
+        beside: Path | None = None,
+        device: str | None = None,
+    ) -> StagedFile:
+        """`beside` is the local folder of files next to it (the origin path's folder unless
+        the file came from elsewhere, such as an SSH server, D122)."""
         text = data.decode("utf-8", errors="replace")
-        folder = Path(origin_path).parent if origin_path else None
-        parsed = read_file(text, original_name, folder)
+        if beside is None and origin_path:
+            beside = Path(origin_path).parent
+        parsed = read_file(text, original_name, beside)
         folder = Path(tempfile.mkdtemp(prefix="chembook3d-import-"))
         (folder / "upload").write_bytes(data)
         staged = StagedFile(
@@ -177,6 +190,7 @@ class Staging:
             size=len(data),
             checksum=hashlib.sha256(data).hexdigest(),
             parsed=parsed,
+            origin_device=device,
         )
         self._files[staged.token] = staged
         return staged
@@ -883,7 +897,7 @@ def plan(
     origin = {
         "device": options.origin_device
         if options.origin_device is not None
-        else settings.last_device,
+        else staged.origin_device or settings.last_device,
         "path": options.origin_path if options.origin_path is not None else staged.origin_path,
         "name": options.original_name or staged.original_name,
     }
@@ -982,7 +996,7 @@ def _plan_ensemble(
         origin={
             "device": options.origin_device
             if options.origin_device is not None
-            else settings.last_device,
+            else staged.origin_device or settings.last_device,
             "path": options.origin_path if options.origin_path is not None else staged.origin_path,
             "name": options.original_name or staged.original_name,
         },
@@ -1118,7 +1132,7 @@ def _commit_ensemble(
     except BaseException:
         shutil.rmtree(folder / FILES_DIR / source_id, ignore_errors=True)
         raise
-    if not dry_run:
+    if not dry_run and staged.origin_device is None:
         _remember_device(origin["device"])
     return CommitResult(
         node_id=None,
@@ -1355,7 +1369,7 @@ def commit(
         shutil.rmtree(folder / FILES_DIR / source_id, ignore_errors=True)
         raise
 
-    if not dry_run:
+    if not dry_run and staged.origin_device is None:
         _remember_device(origin["device"])
     return CommitResult(
         node_id=node.id,

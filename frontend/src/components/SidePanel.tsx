@@ -71,12 +71,15 @@ export function SidePanel({
   onTab,
   remote,
   onRemoteChanged,
+  onImportFrom,
 }: {
   /** The tab shown, or null when the panel is hidden. */
   tab: SideTab | null
   onTab: (tab: SideTab | null) => void
   remote: RemoteStatus | null
   onRemoteChanged: () => Promise<void> | void
+  /** "Import from here" on a server's tab (D122e). */
+  onImportFrom: (server: RemoteServer) => void
 }) {
   const [width, setWidth] = useState(560)
   const resizing = useRef<{ x: number; width: number } | null>(null)
@@ -142,6 +145,7 @@ export function SidePanel({
             servers={servers}
             open={tab === server.id}
             onChanged={onRemoteChanged}
+            onImportHere={() => onImportFrom(server)}
           />
         ))}
         {tab === NEW && (

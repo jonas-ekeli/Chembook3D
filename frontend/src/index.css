@@ -2429,3 +2429,39 @@ table.scan-path-held input.drive-value {
 .fingerprint {
   overflow-wrap: anywhere;
 }
+/* D122e: the files in a server's current directory */
+.remote-files > p:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  overflow-wrap: anywhere;
+}
+.remote-file-scroll {
+  max-height: 50vh;
+  overflow: auto;
+  margin: 0.5rem 0;
+}
+.remote-file-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.remote-file-table th,
+.remote-file-table td {
+  padding: 0.2rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.remote-file-table th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+.remote-file-table td:nth-child(2) {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.remote-file-table td.number {
+  text-align: right;
+  white-space: nowrap;
+}

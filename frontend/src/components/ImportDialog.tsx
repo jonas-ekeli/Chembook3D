@@ -302,11 +302,14 @@ export function ImportDialog({
   position = null,
   asSpecies = false,
   linked = false,
+  remote = null,
   onClose,
   onImported,
   onImportFolder,
 }: {
   file: File | null
+  /** D122e: an output on an SSH server, copied down and staged instead of a file here. */
+  remote?: { server: string; path: string } | null
   target: Node | null
   nodes: Node[]
   /** Start with "free species" ticked (D69). */
@@ -343,14 +346,14 @@ export function ImportDialog({
   }
 
   useEffect(() => {
-    if (!file || started.current) return
+    if ((!file && !remote) || started.current) return
     started.current = true
     setBusy(true)
-    api
-      .uploadImport(file, file.name, target?.id)
-      .then(staged, (err: unknown) => setError(errorText(err)))
-      .finally(() => setBusy(false))
-  }, [file, target])
+    const staging = remote
+      ? api.remoteImport(remote.server, remote.path, target?.id)
+      : api.uploadImport(file!, file!.name, target?.id)
+    staging.then(staged, (err: unknown) => setError(errorText(err))).finally(() => setBusy(false))
+  }, [file, remote, target])
 
   const fromPath = (path: string) => {
     setBusy(true)
@@ -429,7 +432,8 @@ export function ImportDialog({
       }
     >
       {error && <p role="alert">{error}</p>}
-      {!plan && !file && (
+      {!plan && remote && busy && <p className="muted">Copying {remote.path} …</p>}
+      {!plan && !file && !remote && (
         <>
           <p>
             Choose a Gaussian, ORCA or xTB output file, an xTB scan (xtbscan.log or path.xyz) or a CREST conformer

@@ -141,6 +141,11 @@ login; **Log out** ends it, and it logs itself out after 12 hours without use. Y
 and code are sent once and never saved, and a refused login is never tried again by itself
 (Sigma2 blocks addresses that keep failing). The **+** tab adds another server, such as Betzy.
 
+**Import from here** lists the output files (`.log`, `.out`, `.output`, `.xyz`) in the directory
+the terminal is in. Pick one to import it as from the file browser, or several for a batch
+import that matches each to a node. The files are copied into the investigation with
+`saga:/cluster/…` as their origin; nothing on Saga changes.
+
 ## Claude in the app
 
 The **Claude** button opens a panel beside the notebook running
