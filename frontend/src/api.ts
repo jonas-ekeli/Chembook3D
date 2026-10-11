@@ -1427,11 +1427,31 @@ export type RemoteServer = {
   shell: 'running' | 'ended' | null
   /** Why the last connection ended, when it was not a log out. */
   lost: string | null
+  /** D123a: the next shell forwards X11 windows to this display on this computer. */
+  x11: boolean
+  x11_display: string
+  /** The display the running shell forwards to, and whether an X server answers there. */
+  shell_x11: string | null
+  x11_ready: boolean | null
 }
 
 export type RemoteStatus = { enabled: boolean; reason: string | null; servers: RemoteServer[] }
 
-export type ServerFields = { id?: string; name: string; host: string; port: number; username: string }
+export type ServerFields = {
+  id?: string
+  name: string
+  host: string
+  port: number
+  username: string
+  x11?: boolean
+  x11_display?: string
+}
+
+/** What is saved of a server, to save the list again. */
+export function serverFields(server: RemoteServer): ServerFields {
+  const { id, name, host, port, username, x11, x11_display } = server
+  return { id, name, host, port, username, x11, x11_display }
+}
 
 /** The next step of a login (D122b). */
 export type LoginStep = {
@@ -1475,8 +1495,9 @@ export const api = {
   remoteTrust: (login: string) => request<LoginStep>('POST', `${loginPath(login)}/trust`),
   remoteCancel: (login: string) => request<void>('DELETE', loginPath(login)),
   remoteLogout: (id: string) => request<void>('POST', `${serverPath(id)}/logout`),
-  remoteShell: (id: string, rows: number, cols: number) =>
-    request<void>('POST', `${serverPath(id)}/shell`, { rows, cols }),
+  /** A new shell after the last one ended, or in place of the running one (`restart`). */
+  remoteShell: (id: string, rows: number, cols: number, restart = false) =>
+    request<void>('POST', `${serverPath(id)}/shell`, { rows, cols, restart }),
   remoteFiles: (id: string, path?: string) =>
     request<RemoteListing>('GET', `${serverPath(id)}/files${path ? `?${new URLSearchParams({ path })}` : ''}`),
   /** Copy one output down and stage it: the import dialog's preview (D122e). */

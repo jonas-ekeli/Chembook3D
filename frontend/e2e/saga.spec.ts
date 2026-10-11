@@ -73,6 +73,23 @@ test('log in to Saga with password and code, and come back to the same shell', a
   await expect(page.getByRole('complementary', { name: 'Claude' })).toContainText('Claude')
   await page.getByRole('complementary', { name: 'Claude' }).getByRole('tab', { name: /Saga/ }).click()
 
+  // D123a, T-SSH-09: X11 ticked takes effect in a new shell, which says no X server answers.
+  const x11 = panel.getByTestId('server-x11')
+  await x11.getByLabel('X11 windows').check()
+  await x11.getByLabel('X11 display').fill('127.0.0.1:99.0')
+  await x11.getByRole('button', { name: 'Save' }).click()
+  await expect(x11).toContainText('Takes effect in a new shell.')
+  page.once('dialog', (dialog) => void dialog.accept())
+  await x11.getByRole('button', { name: 'New shell' }).click()
+  await expect(x11).toContainText('No X server answers on 127.0.0.1:99.0')
+  await expect(terminal).toContainText('Welcome to the fake Saga.')
+  await x11.getByLabel('X11 windows').uncheck()
+  await x11.getByRole('button', { name: 'Save' }).click()
+  page.once('dialog', (dialog) => void dialog.accept())
+  await x11.getByRole('button', { name: 'New shell' }).click()
+  await expect(x11).not.toContainText('X server')
+  await expect(x11).not.toContainText('new shell')
+
   await panel.getByRole('button', { name: 'Log out' }).click()
   await expect(panel).toContainText('Not logged in')
   await expect(panel.getByRole('button', { name: 'Log in' })).toBeVisible()

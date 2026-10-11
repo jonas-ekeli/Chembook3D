@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from chembook3d.app import create_app
 from chembook3d.remote import client, keeper
-from tests.fake_ssh_server import CODE, PASSWORD, USER, FakeSaga
+from tests.fake_ssh_server import CODE, PASSWORD, USER, FakeSaga, FakeXServer, free_display
 
 APP = "http://127.0.0.1:8765"
 ORIGIN = {"origin": APP}
@@ -54,7 +54,7 @@ def local(home, config_dir):
     client.stop_quietly()  # the keeper outlives the app on purpose; not the test
 
 
-def _point_at(local, saga, username=USER) -> str:
+def _point_at(local, saga, username=USER, **x11) -> str:
     response = local.put(
         "/api/remote/servers",
         json={
@@ -65,6 +65,7 @@ def _point_at(local, saga, username=USER) -> str:
                     "host": "127.0.0.1",
                     "port": saga.port,
                     "username": username,
+                    **x11,
                 }
             ]
         },
@@ -147,6 +148,7 @@ def test_saga_is_the_first_server_and_nothing_secret_is_saved(local, config_dir)
             **{"id": "saga", "name": "Saga", "host": "saga.sigma2.no", "port": 22},
             **{"username": "", "connected": False, "since": None, "cwd": None, "tracked": False},
             **{"shell": None, "lost": None},
+            **{"x11": False, "x11_display": "localhost:0.0", "shell_x11": None, "x11_ready": None},
         }
     ]
     servers = [
@@ -166,13 +168,16 @@ def test_saga_is_the_first_server_and_nothing_secret_is_saved(local, config_dir)
     ]
     assert saved[0]["id"] == "saga" and saved[1]["id"]
     on_disk = json.loads((config_dir / "remote" / "servers.json").read_text(encoding="utf-8"))
-    assert set(on_disk["servers"][0]) == {"id", "name", "host", "port", "username"}
+    assert set(on_disk["servers"][0]) == {
+        *{"id", "name", "host", "port", "username", "x11", "x11_display"}
+    }
 
     for bad, why in (
         ({"name": "Saga", "host": "saga sigma2", "username": "x"}, "host name"),
         ({"name": "Saga", "host": "saga.sigma2.no", "port": 0}, "port"),
         ({"name": "Saga", "host": "saga.sigma2.no", "username": "jo nas"}, "user name"),
         ({"name": "", "host": "saga.sigma2.no"}, "name"),
+        ({"name": "Saga", "host": "saga.sigma2.no", "x11_display": "Xming"}, "X11 display"),
     ):
         response = local.put("/api/remote/servers", json={"servers": [bad]}, headers=ORIGIN)
         assert response.status_code == 422 and why in response.json()["detail"], response.text
@@ -381,6 +386,70 @@ def test_bash_reports_its_directory_after_each_command(local, tmp_path):
                 ws, lambda text, m: "bash " in text and "i" in text.split("bash ")[-1]
             )
         assert _status(local)["cwd"] == str(work) and _status(local)["tracked"] is True
+    finally:
+        fake.stop()
+
+
+# ---------- T-SSH-09 X11 forwarding ----------
+
+
+def _xclient(local) -> str:
+    """Run an X program in the terminal; what it printed."""
+    with _terminal(local) as ws:
+        _read_until(ws, lambda text, m: "$ " in text)
+        ws.send_json({"type": "input", "data": "xclient\r"})
+        text, _ = _read_until(ws, lambda text, m: re.search(r"xclient: .*\n", text))
+    return re.search(r"xclient: (.*)\n", text).group(1)
+
+
+def test_x11_windows_reach_the_x_server_on_this_computer(local, saga):
+    xming = FakeXServer()
+    try:
+        _point_at(local, saga, x11=True, x11_display=xming.display)
+        assert _log_in(local, saga)["kind"] == "connected"
+        status = _status(local)
+        assert status["shell_x11"] == xming.display and status["x11_ready"] is True
+        assert saga.record.displays[0]  # the server was asked to forward
+        assert _xclient(local) == "fake X server"
+        # The X server sees the keeper's own cookie, not the one the server handed out.
+        assert len(xming.cookies) == 1 and len(xming.cookies[0]) == 16
+
+        # Turned off: the running shell keeps it until a new shell takes its place.
+        _point_at(local, saga, x11=False, x11_display=xming.display)
+        assert _status(local)["shell_x11"] == xming.display
+        response = local.post(
+            "/api/remote/servers/saga/shell", json={"restart": True}, headers=ORIGIN
+        )
+        assert response.status_code == 200, response.text
+        status = _status(local)
+        assert status["shell"] == "running" and status["shell_x11"] is None
+        assert status["x11_ready"] is None and saga.record.displays[-1] is None
+        assert _xclient(local) == "cannot open display"
+
+        # And on again, in a new shell, without a new login.
+        _point_at(local, saga, x11=True, x11_display=xming.display)
+        local.post("/api/remote/servers/saga/shell", json={"restart": True}, headers=ORIGIN)
+        assert _xclient(local) == "fake X server"
+        assert saga.record.logins == 1 and len(saga.record.commands) == 3
+    finally:
+        xming.stop()
+
+
+def test_no_x_server_is_reported(local, saga):
+    _point_at(local, saga, x11=True, x11_display=free_display())
+    assert _log_in(local, saga)["kind"] == "connected"
+    status = _status(local)
+    assert status["shell"] == "running" and status["x11_ready"] is False
+
+
+def test_a_server_refusing_x11_still_gives_a_shell(local, tmp_path):
+    fake = FakeSaga(tmp_path / "no-x11", x11=False).start()
+    try:
+        _point_at(local, fake, x11=True)
+        assert _log_in(local, fake)["kind"] == "connected"
+        assert _status(local)["shell"] == "running"
+        assert fake.record.displays == [None]
+        assert _xclient(local) == "cannot open display"
     finally:
         fake.stop()
 

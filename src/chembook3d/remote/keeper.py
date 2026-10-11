@@ -33,7 +33,7 @@ from pathlib import Path
 
 import asyncssh
 
-PROTOCOL = 1
+PROTOCOL = 2  # 2: X11 forwarding (D123a)
 KEEPER_FILE = "keeper.json"
 KNOWN_HOSTS = "known_hosts"
 LOG_FILE = "keeper.log"
@@ -70,6 +70,13 @@ MAX_UPLOAD = 10 * 1024**2  # bytes of one file sent to a server; a structure is 
 SEND_NAME = re.compile(r"^[^/\x00-\x1f\x7f]{1,255}$")  # a file name the keeper writes
 MAX_DOWNLOAD = 2 * 1024**3  # bytes copied down in one import (A69)
 COPY_WAIT = 3600  # seconds the app waits for a copy
+# X11 forwarding (D123a): a display as DISPLAY names one, [host]:number[.screen]; the X server
+# listens on TCP port 6000 + number, or on a local socket when there is no host (Linux).
+X11_DISPLAY = re.compile(
+    r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[[0-9A-Fa-f:.]{2,45}\])?:\d{1,2}(?:\.\d{1,2})?$"
+)
+X11_BASE_PORT = 6000
+X11_CHECK_WAIT = 1.0  # seconds to wait for the X server to answer
 
 log = logging.getLogger("chembook3d.keeper")
 
@@ -89,6 +96,36 @@ SHELL_COMMAND = (
 def host_pattern(host: str, port: int) -> str:
     """How known_hosts names a host: the bare name on port 22, else [host]:port."""
     return host if port == 22 else f"[{host}]:{port}"
+
+
+def clean_display(value: object) -> str | None:
+    """An X11 display to forward to, or None (off or not a display)."""
+    if isinstance(value, str) and X11_DISPLAY.match(value.strip()):
+        return value.strip()
+    return None
+
+
+async def x11_answers(display: str) -> bool:
+    """Something answers on the X server's port (Xming on localhost:0.0), checked by connecting
+    and closing again. Windows opened through the forwarding connect on their own each time, so
+    an X server started later still works."""
+    host, _, number = display.rpartition(":")
+    number = number.split(".")[0]
+    host = host.strip("[]")
+    try:
+        if host in ("", "unix"):
+            if sys.platform == "win32":
+                return False
+            opening = asyncio.open_unix_connection(f"/tmp/.X11-unix/X{number}")
+        else:
+            opening = asyncio.open_connection(host, X11_BASE_PORT + int(number))
+        _, writer = await asyncio.wait_for(opening, X11_CHECK_WAIT)
+    except (OSError, TimeoutError, ValueError):
+        return False
+    writer.close()
+    with contextlib.suppress(OSError, ConnectionError):
+        await writer.wait_closed()
+    return True
 
 
 def clean_server(data: object) -> dict | None:
@@ -119,9 +156,10 @@ class Shell:
     """One interactive shell on a server: its recent output, its current directory and the
     terminals attached to it."""
 
-    def __init__(self, process: asyncssh.SSHClientProcess, tracked: bool):
+    def __init__(self, process: asyncssh.SSHClientProcess, tracked: bool, x11: str | None = None):
         self.process = process
         self.tracked = tracked  # the current directory is reported (D122d)
+        self.x11 = x11  # the X11 display its windows are forwarded to (D123a)
         self.started = time.monotonic()
         self.chunks: deque[str] = deque()
         self.kept = 0
@@ -198,6 +236,7 @@ class Session:
     shell: Shell | None = None
     closing: str | None = None  # why the keeper is closing it
     sftp: asyncssh.SFTPClient | None = None
+    x11: str | None = None  # the X11 display the next shell forwards to (D123a)
 
     async def files(self) -> asyncssh.SFTPClient:
         """The SFTP client on this connection, opened the first time it is needed."""
@@ -215,6 +254,7 @@ class Login:
     server: dict
     rows: int
     cols: int
+    x11: str | None = None
     id: str = field(default_factory=lambda: secrets.token_urlsafe(12))
     events: asyncio.Queue = field(default_factory=asyncio.Queue)
     answers: asyncio.Queue = field(default_factory=asyncio.Queue)
@@ -293,7 +333,9 @@ class Login:
                 connect_timeout=CONNECT_TIMEOUT,
                 login_timeout=PROMPT_WAIT * 3,
             )
-            session = Session(server=server, conn=conn, since=time.time(), used=time.monotonic())
+            session = Session(
+                server=server, conn=conn, since=time.time(), used=time.monotonic(), x11=self.x11
+            )
             client.session = session
             await keeper.open_shell(session, self.rows, self.cols)
             keeper.add(session)
@@ -490,18 +532,29 @@ class Keeper:
     async def open_shell(
         self, session: Session, rows: int, cols: int, tracked: bool = True
     ) -> None:
+        previous = session.shell
+        if previous is not None and previous.ended is None:
+            # A new shell in place of one still running (D123a: X11 turned on or off). Its
+            # channel is closed first, so the connection lets go of its X11 display.
+            previous.end("A new shell was started.")
+            previous.process.close()
+            with contextlib.suppress(OSError, asyncssh.Error, TimeoutError):
+                await asyncio.wait_for(previous.process.wait_closed(), 5)
+        x11 = session.x11
+        forwarding: dict = {}
+        if x11 is not None:
+            # A server refusing X11 still gives the shell, without windows (D123a).
+            forwarding = {"x11_forwarding": "ignore_failure", "x11_display": x11}
         process = await session.conn.create_process(
             SHELL_COMMAND if tracked else None,
             term_type=TERM,
             term_size=(max(10, cols), max(2, rows)),
             encoding=None,
             stderr=asyncssh.STDOUT,
+            **forwarding,
         )
-        shell = Shell(process, tracked)
-        previous = session.shell
+        shell = Shell(process, tracked, x11)
         session.shell = shell
-        if previous is not None and previous.ended is None:
-            previous.end("A new shell was started.")
         asyncio.create_task(self._pump(session, shell, rows, cols))
 
     async def _pump(self, session: Session, shell: Shell, rows: int, cols: int) -> None:
@@ -543,7 +596,7 @@ class Keeper:
             return {
                 "ok": True,
                 "protocol": PROTOCOL,
-                "sessions": self._status(),
+                "sessions": await self._status(),
                 "lost": dict(self.lost),
             }
         if op == "login":
@@ -555,7 +608,13 @@ class Keeper:
                 return {"ok": True, "kind": "connected", "login": None}
             for login in [x for x in self.logins.values() if x.server["id"] == server["id"]]:
                 login.cancel()
-            login = Login(self, server, _int(msg.get("rows"), 24), _int(msg.get("cols"), 80))
+            login = Login(
+                self,
+                server,
+                _int(msg.get("rows"), 24),
+                _int(msg.get("cols"), 80),
+                x11=clean_display(msg.get("x11")),
+            )
             self.logins[login.id] = login
             self.lost.pop(server["id"], None)
             login.start()
@@ -589,7 +648,10 @@ class Keeper:
             session = self.sessions.get(str(msg.get("server")))
             if session is None:
                 return {"ok": False, "error": "Not logged in."}
-            if session.shell is None or session.shell.ended is not None:
+            if "x11" in msg:
+                session.x11 = clean_display(msg.get("x11"))
+            restart = msg.get("restart") is True
+            if restart or session.shell is None or session.shell.ended is not None:
                 try:
                     await self.open_shell(
                         session, _int(msg.get("rows"), 24), _int(msg.get("cols"), 80)
@@ -704,7 +766,16 @@ class Keeper:
         session.used = time.monotonic()
         return {"ok": True, "path": path, "sent": True, "exists": there is not None}
 
-    def _status(self) -> list[dict]:
+    async def _status(self) -> list[dict]:
+        sessions = list(self.sessions.values())
+
+        async def x11_ready(session: Session) -> bool | None:
+            shell = session.shell
+            if shell is None or shell.ended is not None or shell.x11 is None:
+                return None
+            return await x11_answers(shell.x11)
+
+        ready = await asyncio.gather(*(x11_ready(session) for session in sessions))
         return [
             {
                 "server": session.server,
@@ -712,8 +783,10 @@ class Keeper:
                 "cwd": session.shell.cwd if session.shell else None,
                 "tracked": bool(session.shell and session.shell.tracked),
                 "shell": "ended" if session.shell is None or session.shell.ended else "running",
+                "x11": session.shell.x11 if session.shell else None,
+                "x11_ready": answers,
             }
-            for session in self.sessions.values()
+            for session, answers in zip(sessions, ready, strict=True)
         ]
 
     async def attach(

@@ -306,6 +306,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-SSH-05 | Logging in, logging out and the terminal are refused unless the app listens on 127.0.0.1 and the request comes from this computer, for a loopback host name, from the app's own page (Origin), and the terminal needs a one-time token; Claude's MCP tools cannot reach them. | D122, D92, NFR-SEC-01 | after 5 |
 | FR-SSH-06 | "Import from here" lists the output files in the terminal's current directory; one chosen file is copied into the investigation and opens the import dialog, several open the batch import (D97), as from the file browser; nothing changes on the server; with the server's name as origin device and `<server>:/path` as origin path. | D122, D97, D16 | after 5 |
 | FR-SSH-07 | "Send to <server>" on a node with coordinates writes `<label>.xyz` into the terminal's current directory, asking before it replaces a file; the app never deletes on the server. | D122 | after 5 |
+| FR-SSH-08 | A server can forward X11 windows to an X server on this computer (Xming on `localhost:0.0`): ticked per server, used from the next shell (New shell replaces the running one without a new login); a server refusing X11 still gives the shell; the tab says when no X server answers on the display. | D123, A70 | after 5 |
 
 **AC:** log in to Saga with password and code, type `cd` into a calculation folder: the tab shows that folder; shut the app down and start it again: the same shell is there without a new login; Log out ends it.
 

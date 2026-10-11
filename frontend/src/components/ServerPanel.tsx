@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, ApiError, type LoginStep, type RemoteServer, type ServerFields } from '../api'
+import { api, ApiError, serverFields as fields, type LoginStep, type RemoteServer, type ServerFields } from '../api'
 import { browserKey, openXterm, socketUrl, type Xterm } from '../terminal'
 
 // D122: a server's tab in the side panel (SidePanel.tsx). Logged out, it shows the server's
 // details and "Log in", which shows the server's own prompts (password, then the one-time
 // code) and an unknown host key to trust. Logged in, it is a terminal on the shell the keeper
-// holds, so closing the app and starting it again shows the same shell.
+// holds, so closing the app and starting it again shows the same shell. With X11 ticked (D123a)
+// the shell forwards X11 windows (Molden) to an X server on this computer such as Xming.
 
 type Shell = Xterm & {
   socket: WebSocket | null
@@ -16,10 +17,6 @@ type Shell = Xterm & {
 function errorMessage(err: unknown): string {
   if (err instanceof ApiError && typeof err.detail === 'string') return err.detail
   return err instanceof Error ? err.message : String(err)
-}
-
-function fields(server: RemoteServer): ServerFields {
-  return { id: server.id, name: server.name, host: server.host, port: server.port, username: server.username }
 }
 
 function since(seconds: number | null): string {
@@ -72,7 +69,9 @@ export function ServerPanel({
     edit.name !== server.name ||
     edit.host !== server.host ||
     edit.port !== server.port ||
-    edit.username !== server.username
+    edit.username !== server.username ||
+    edit.x11 !== server.x11 ||
+    edit.x11_display !== server.x11_display
 
   const detach = () => {
     const current = shell.current
@@ -234,10 +233,11 @@ export function ServerPanel({
     await onChanged()
   }
 
-  const newShell = async () => {
+  const newShell = async (restart = false) => {
+    if (restart && !window.confirm('Start a new shell? Whatever runs in the current one stops.')) return
     const { rows, cols } = size()
     try {
-      await api.remoteShell(server.id, rows, cols)
+      await api.remoteShell(server.id, rows, cols, restart)
       await onChanged()
       await attach()
     } catch (err) {
@@ -246,6 +246,49 @@ export function ServerPanel({
   }
 
   const account = `${server.username}@${server.host}${server.port === 22 ? '' : `:${server.port}`}`
+  const x11Fields = (
+    <>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={edit.x11 ?? false}
+          onChange={(event) => setEdit({ ...edit, x11: event.target.checked })}
+        />{' '}
+        X11 windows
+      </label>
+      {edit.x11 && (
+        <label className="check">
+          on{' '}
+          <input
+            aria-label="X11 display"
+            size={14}
+            value={edit.x11_display ?? ''}
+            onChange={(event) => setEdit({ ...edit, x11_display: event.target.value })}
+          />
+        </label>
+      )}
+    </>
+  )
+  // D123a: the running shell's forwarding, and whether an X server answers on its display.
+  const wanted = server.x11 ? server.x11_display : null
+  const x11State =
+    server.shell !== 'running' ? null : wanted !== server.shell_x11 ? (
+      <>
+        <span className="muted small">Takes effect in a new shell.</span>
+        <button onClick={() => void newShell(true)}>New shell</button>
+      </>
+    ) : server.shell_x11 && server.x11_ready === false ? (
+      <>
+        <span className="warn small" role="alert">
+          No X server answers on {server.shell_x11}. Start Xming; windows open once it runs.
+        </span>
+        <button className="link" onClick={() => void onChanged()}>
+          Check again
+        </button>
+      </>
+    ) : server.shell_x11 ? (
+      <span className="muted small">Windows open on {server.shell_x11}.</span>
+    ) : null
   const login = step !== null && (
     <div className="server-login" role="group" aria-label={`Log in to ${server.name}`}>
       {step.kind === 'host_key' ? (
@@ -331,6 +374,22 @@ export function ServerPanel({
           )}
         </div>
       )}
+      {server.connected && (
+        <div className="server-x11" data-testid="server-x11">
+          {x11Fields}
+          {changed && (
+            <button onClick={() => void save()} disabled={busy}>
+              Save
+            </button>
+          )}
+          {!changed && x11State}
+          {error && (
+            <span role="alert" className="error small">
+              {error}
+            </span>
+          )}
+        </div>
+      )}
       {!server.connected && (
         <div className="claude-intro">
           {server.lost && (
@@ -377,6 +436,9 @@ export function ServerPanel({
                   <span>Name</span>
                   <input value={edit.name} onChange={(event) => setEdit({ ...edit, name: event.target.value })} />
                 </label>
+              </div>
+              <div className="server-x11 plain" title="Forward windows such as Molden's to an X server on this computer (Xming)">
+                {x11Fields}
               </div>
               <div className="buttons">
                 <button className="primary" disabled={busy || !edit.username.trim()} onClick={logIn}>

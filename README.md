@@ -150,6 +150,11 @@ import that matches each to a node. The files are copied into the investigation 
 `<label>.xyz` into the same directory, ready for an input file. If a file of that name is
 already there, the app asks before replacing it; it never deletes anything on Saga.
 
+**X11 windows**: tick it in the Saga tab and start Xming, and programs such as Molden typed in
+the terminal (`molden TS1-2.out &`) open their windows on this computer, as from a terminal with
+Xming. The display is `localhost:0.0`, Xming's own. The change takes effect in a new shell; the
+tab offers **New shell** and says when no X server answers.
+
 ## Claude in the app
 
 The **Claude** button opens a panel beside the notebook running

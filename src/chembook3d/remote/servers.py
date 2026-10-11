@@ -1,5 +1,6 @@
 """The saved SSH servers (D122a), kept in `remote/servers.json` in the config folder: a name, a
-host, a port and a user name each, never a secret. Saga is the first."""
+host, a port and a user name each, never a secret, and whether the shell forwards X11 windows
+to a display on this computer (D123a). Saga is the first."""
 
 import json
 import re
@@ -7,6 +8,7 @@ import secrets
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from chembook3d.remote.keeper import clean_display
 from chembook3d.settings import config_dir
 
 SERVERS_FILE = "servers.json"
@@ -16,6 +18,7 @@ HOST = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$|^[0-9A-Fa-
 USERNAME = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._@-]{0,63}$")
 SERVER_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 MAX_SERVERS = 20
+X11_DISPLAY = "localhost:0.0"  # A70: where Xming listens by default
 
 
 class ServerError(ValueError):
@@ -29,6 +32,13 @@ class Server:
     host: str
     port: int = 22
     username: str = ""
+    x11: bool = False  # A70: off until ticked
+    x11_display: str = X11_DISPLAY
+
+    @property
+    def forwarding(self) -> str | None:
+        """The display the next shell forwards X11 windows to, or None."""
+        return self.x11_display if self.x11 else None
 
 
 def folder() -> Path:
@@ -56,12 +66,24 @@ def clean(data: object, known_ids: set[str] | None = None) -> Server:
     username = str(data.get("username") or "").strip()
     if username and not USERNAME.match(username):
         raise ServerError(f"“{username}” is not a user name the app can use.")
+    x11 = data.get("x11", False) is True
+    display = str(data.get("x11_display") or X11_DISPLAY).strip()
+    if clean_display(display) is None:
+        raise ServerError(f"“{display}” is not an X11 display such as localhost:0.0.")
     server_id = data.get("id")
     if not isinstance(server_id, str) or not SERVER_ID.match(server_id):
         server_id = None
     if server_id is None or (known_ids is not None and server_id in known_ids):
         server_id = secrets.token_hex(4)
-    return Server(id=server_id, name=name, host=host, port=port, username=username)
+    return Server(
+        id=server_id,
+        name=name,
+        host=host,
+        port=port,
+        username=username,
+        x11=x11,
+        x11_display=display,
+    )
 
 
 def load() -> list[Server]:
