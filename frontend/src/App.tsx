@@ -210,6 +210,12 @@ function App() {
   const [sideTab, setSideTab] = useState<SideTab | null>(null)
   const [remote, setRemote] = useState<RemoteStatus | null>(null)
   const loadRemote = useCallback(() => api.remoteStatus().then(setRemote, () => undefined), [])
+  // A cd in a server's terminal: Send to and Import from here follow it without a reload (D122).
+  const followCwd = useCallback(
+    (id: string, cwd: string | null) =>
+      setRemote((r) => r && { ...r, servers: r.servers.map((s) => (s.id === id ? { ...s, cwd } : s)) }),
+    [],
+  )
   useEffect(() => {
     void loadRemote()
   }, [loadRemote])
@@ -1476,6 +1482,7 @@ function App() {
             remote={remote}
             onRemoteChanged={loadRemote}
             onImportFrom={setRemoteFiles}
+            onCwd={followCwd}
           />
         </div>
         {dialogs}

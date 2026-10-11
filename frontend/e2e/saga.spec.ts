@@ -162,6 +162,10 @@ test('import outputs from the directory the Saga terminal is in', async ({ page 
   await page.getByRole('list', { name: 'Nodes' }).getByText('MeI_TS', { exact: true }).click()
   await expect(inspector.getByRole('heading', { name: 'MeI_TS' })).toBeVisible()
   const coordinates = inspector.getByRole('region', { name: 'Coordinates' })
+  // The button follows the terminal's cd, not the directory at login.
+  const sendButton = coordinates.getByRole('button', { name: 'Send to Saga' })
+  await expect(sendButton).toBeEnabled()
+  await expect(sendButton).toHaveAttribute('title', /into \/cluster\/work\/ru-caac on Saga/)
   await coordinates.getByRole('button', { name: 'Send to Saga' }).click()
   await expect(coordinates).toContainText('Wrote /cluster/work/ru-caac/MeI_TS.xyz on Saga')
   const sent = join(WORK, 'MeI_TS.xyz')

@@ -33,6 +33,7 @@ export function ServerPanel({
   open,
   onChanged,
   onImportHere,
+  onCwd,
 }: {
   server: RemoteServer
   /** All saved servers, to save this one's changes among them. */
@@ -43,6 +44,8 @@ export function ServerPanel({
   onChanged: () => Promise<void> | void
   /** List the files in the shell's current directory to import some (D122e). */
   onImportHere: () => void
+  /** The terminal's directory changed, for the rest of the app (Send to, D122f). */
+  onCwd: (path: string | null) => void
 }) {
   const [edit, setEdit] = useState<ServerFields>(fields(server))
   const [error, setError] = useState<string | null>(null)
@@ -110,8 +113,11 @@ export function ServerPanel({
           | { type: 'cwd'; path: string }
           | { type: 'exit'; message: string }
         if (message.type === 'output') term.write(message.data)
-        else if (message.type === 'hello') setCwd(message.cwd)
-        else if (message.type === 'cwd') setCwd(message.path)
+        else if (message.type === 'hello' || message.type === 'cwd') {
+          const path = message.type === 'hello' ? message.cwd : message.path
+          setCwd(path)
+          onCwd(path)
+        }
         else {
           current.ended = true
           if (shell.current === current) setEnded(message.message)
