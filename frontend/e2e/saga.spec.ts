@@ -1,5 +1,5 @@
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { forgetView } from './demoView.ts'
 
@@ -10,6 +10,7 @@ const E2E_DIR = process.env.E2E_DIR!
 // Synthetic --Link1-- chains with a custom basis set, written by global-setup.ts
 const CUSTOM = join(E2E_DIR, 'gaussian')
 const WORK = join(E2E_DIR, 'saga', 'cluster', 'work', 'ru-caac')
+const FIXTURES = resolve(import.meta.dirname, '..', '..', 'tests', 'fixtures')
 
 test.describe.configure({ mode: 'serial' }) // the second test finds the server saved and trusted
 
@@ -197,6 +198,80 @@ test('import outputs from the directory the Saga terminal is in', async ({ page 
   await ask.getByRole('button', { name: 'Replace' }).click()
   await expect(coordinates).toContainText('Replaced /cluster/work/ru-caac/MeI_TS.xyz on Saga')
   expect(readFileSync(sent, 'utf-8')).toContain('MeI_TS')
+
+  await panel.getByRole('button', { name: 'Log out' }).click()
+  await expect(panel).toContainText('Not logged in')
+})
+
+test('inspect a running job from the Saga terminal, then import it', async ({ page }) => {
+  // D123c, T-UI-27: `inspect FILE` in the terminal opens the Inspect window; Refresh reads the
+  // job again as it runs; "Import this file" goes on to the import.
+  mkdirSync(WORK, { recursive: true })
+  const full = readFileSync(join(FIXTURES, 'gaussian', 'aminationTS-full-unfrz-c1.log'), 'utf-8')
+  const lines = full.split('\n')
+  const running = join(WORK, 'TS1.log')
+  writeFileSync(running, lines.slice(0, Math.floor(lines.length / 3)).join('\n'))
+  await newInvestigation(page, 'Saga inspect test')
+  await page.getByRole('button', { name: 'Saga', exact: true }).click()
+  const panel = page.getByRole('complementary', { name: 'Saga' })
+  await panel.getByRole('button', { name: 'Log in' }).click()
+  const login = panel.getByRole('group', { name: 'Log in to Saga' })
+  await login.getByLabel('Password:').fill('correct horse')
+  await login.getByRole('button', { name: 'Send' }).click()
+  await login.getByLabel('Verification code:').fill('123456')
+  await login.getByRole('button', { name: 'Send' }).click()
+  const terminal = panel.getByTestId('server-terminal')
+  await expect(terminal).toContainText('Welcome to the fake Saga.')
+  await expect(panel.getByTestId('server-cwd')).toContainText('inspect FILE')
+  await terminal.click()
+  await page.keyboard.type('cd /cluster/work/ru-caac')
+  await page.keyboard.press('Enter')
+  await expect(panel.getByTestId('server-cwd')).toContainText('/cluster/work/ru-caac')
+  await page.keyboard.type('inspect TS1.log')
+  await page.keyboard.press('Enter')
+
+  const window = page.getByRole('dialog', { name: 'Inspect TS1.log' })
+  await expect(window).toContainText('saga:/cluster/work/ru-caac/TS1.log')
+  await expect(window).toContainText('has not ended normally')
+  const steps = window.getByRole('table', { name: 'Job steps' })
+  await expect(steps.getByRole('row')).toHaveCount(2) // the header and one step
+  await expect(steps).toContainText('TS optimization')
+  await expect(steps).toContainText('not (yet)')
+  const shown = window.getByLabel('Structure shown')
+  await expect(shown).toContainText(/Structure (\d+) of \1/) // on the last structure
+  await expect(window.getByRole('table', { name: 'Convergence criteria' })).toContainText('Maximum force')
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT })
+
+  // The job ends: Refresh reads it again, now with its frequency step and the imaginary mode.
+  writeFileSync(running, full)
+  await window.getByRole('button', { name: 'Refresh' }).click()
+  await expect(steps.getByRole('row')).toHaveCount(3)
+  await expect(window).not.toContainText('has not ended normally')
+  await steps.getByRole('row', { name: /Frequency/ }).click()
+  const mode = window.getByLabel('Animate mode')
+  await expect(mode.locator('option').nth(1)).toHaveText(/^Mode \d+: \d+\.\di cm⁻¹$/)
+  await mode.selectOption({ index: 1 })
+
+  await window.getByRole('button', { name: 'Import this file' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Import calculation output' })
+  await expect(dialog.getByRole('table', { name: 'Job steps' })).toBeVisible()
+  await expect(dialog.getByLabel('Origin device')).toHaveValue('Saga')
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(readdirSync(WORK)).toContain('TS1.log')
+
+  // A file on this computer opens from the import dialog's file browser.
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  const browse = page.getByRole('dialog', { name: 'Import calculation output' })
+  // wait for the first listing, so it cannot replace the folder typed below
+  await expect(browse.getByLabel('Folder path')).not.toHaveValue('')
+  await browse.getByLabel('Folder path').fill(WORK)
+  await browse.getByRole('button', { name: 'Go' }).click()
+  await browse.getByRole('listitem').filter({ hasText: 'TS1.log' }).getByRole('button', { name: 'Inspect' }).click()
+  await expect(window).toContainText(running)
+  await expect(steps.getByRole('row')).toHaveCount(3)
+  await window.getByRole('button', { name: 'Close' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 
   await panel.getByRole('button', { name: 'Log out' }).click()
   await expect(panel).toContainText('Not logged in')

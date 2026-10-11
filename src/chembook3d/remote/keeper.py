@@ -33,7 +33,7 @@ from pathlib import Path
 
 import asyncssh
 
-PROTOCOL = 2  # 2: X11 forwarding (D123a)
+PROTOCOL = 3  # 2: X11 forwarding (D123a); 3: the `inspect` command (D123c)
 KEEPER_FILE = "keeper.json"
 KNOWN_HOSTS = "known_hosts"
 LOG_FILE = "keeper.log"
@@ -53,17 +53,25 @@ WATCH_EVERY = 5
 
 # The shell (D122d): bash run as an SSH login runs it (the system's and the user's login
 # files), plus a prompt hook reporting the current directory after each command with an OSC
-# 1337 CurrentDir sequence, which terminals that do not know it ignore. One line without "!",
-# so a login shell other than bash (tcsh) passes it on unchanged.
+# 1337 CurrentDir sequence, which terminals that do not know it ignore, and an `inspect FILE`
+# command asking the app to open files in its Inspect window with an OSC 1337 Inspect sequence
+# (D123c). One line without "!", so a login shell other than bash (tcsh) passes it on unchanged.
 RC = (
     "[ -r /etc/profile ] && . /etc/profile; "
     "if [ -r ~/.bash_profile ]; then . ~/.bash_profile; "
     "elif [ -r ~/.bash_login ]; then . ~/.bash_login; "
     "elif [ -r ~/.profile ]; then . ~/.profile; fi; "
     "__chembook3d_cwd() { printf '\\033]1337;CurrentDir=%s\\007' \"$PWD\"; }; "
-    'PROMPT_COMMAND="__chembook3d_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"'
+    'PROMPT_COMMAND="__chembook3d_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"; '
+    "inspect() { "
+    '[ $# -gt 0 ] || { echo "usage: inspect FILE... (opens each file in Chembook3D)" >&2; '
+    "return 2; }; "
+    'local f; for f in "$@"; do '
+    "if [ -f \"$f\" ]; then printf '\\033]1337;Inspect=%s\\007' "
+    '"$(cd "$(dirname -- "$f")" && pwd)/$(basename -- "$f")"; '
+    'else echo "inspect: $f: no such file" >&2; fi; done; }'
 )
-CWD_MARK = "\x1b]1337;CurrentDir="
+REPORT_MARK = "\x1b]1337;"  # CurrentDir=<path> or Inspect=<path>, ended by BEL
 FALLBACK_WINDOW = 5.0  # a tracked shell ending this soon with "not found" falls back (A69)
 MAX_LISTED = 2000  # entries of a directory listed for "Import from here"
 MAX_UPLOAD = 10 * 1024**2  # bytes of one file sent to a server; a structure is a few kB
@@ -173,34 +181,39 @@ class Shell:
         text = self._decoder.decode(data)
         if not text:
             return
-        cwd = self._track(text)
+        reports = self._track(text)
         self.chunks.append(text)
         self.kept += len(text)
         while self.kept > OUTPUT_KEEP and len(self.chunks) > 1:
             self.kept -= len(self.chunks.popleft())
         self._send({"type": "output", "data": text})
-        if cwd is not None and cwd != self.cwd:
-            self.cwd = cwd
-            self._send({"type": "cwd", "path": cwd})
+        for key, value in reports:
+            if key == "CurrentDir" and value != self.cwd:
+                self.cwd = value
+                self._send({"type": "cwd", "path": value})
+            elif key == "Inspect" and value.startswith("/"):
+                self._send({"type": "inspect", "path": value})
 
-    def _track(self, text: str) -> str | None:
-        """The last directory reported in `text`, joined to what an earlier piece cut short."""
+    def _track(self, text: str) -> list[tuple[str, str]]:
+        """The reports in `text` (current directory, files to inspect) in order, joined to
+        what an earlier piece cut short."""
         scan = self._carry + text
-        found = None
+        found: list[tuple[str, str]] = []
         position = 0
         while True:
-            start = scan.find(CWD_MARK, position)
+            start = scan.find(REPORT_MARK, position)
             if start < 0:
                 # The start of a report may be split off at the end.
-                tail = scan[max(position, len(scan) - len(CWD_MARK) + 1) :]
+                tail = scan[max(position, len(scan) - len(REPORT_MARK) + 1) :]
                 escape = tail.find("\x1b")
                 self._carry = tail[escape:] if escape >= 0 else ""
                 return found
-            end = scan.find("\x07", start + len(CWD_MARK))
+            end = scan.find("\x07", start + len(REPORT_MARK))
             if end < 0:
                 self._carry = scan[start:] if len(scan) - start <= 8192 else ""
                 return found
-            found = scan[start + len(CWD_MARK) : end]
+            key, _, value = scan[start + len(REPORT_MARK) : end].partition("=")
+            found.append((key, value))
             position = end + 1
 
     def replay(self) -> str:
@@ -782,6 +795,8 @@ class Keeper:
                 "since": session.since,
                 "cwd": session.shell.cwd if session.shell else None,
                 "tracked": bool(session.shell and session.shell.tracked),
+                # D123c: the shell has the `inspect` command (it runs the prompt hook's RC)
+                "inspect": bool(session.shell and session.shell.tracked),
                 "shell": "ended" if session.shell is None or session.shell.ended else "running",
                 "x11": session.shell.x11 if session.shell else None,
                 "x11_ready": answers,

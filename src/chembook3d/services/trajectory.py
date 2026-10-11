@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from chembook3d import pathtools
 from chembook3d.models import Calculation, CalculationType, Node
 from chembook3d.parsers import xtb
-from chembook3d.parsers.common import Criterion, ParsedFile
+from chembook3d.parsers.common import Criterion, ParsedFile, ParsedStep
 from chembook3d.services import files as file_service
 from chembook3d.services import geometry, history, imports
 from chembook3d.services import nodes as node_service
@@ -107,6 +107,36 @@ def _same(a: list[list[Any]], b: list[list[Any]]) -> bool:
     )
 
 
+def frames_of(step: ParsedStep, reference: list[list[Any]] | None = None) -> list[Frame]:
+    """The step's structures, a structure printed twice in a row shown once, each turned onto
+    `reference` (else the last structure) where it has the same atoms. Also read by the
+    Inspect window (D123c)."""
+    frames: list[Frame] = []
+    converged = set(step.converged_geometries)
+    for n, atoms in enumerate(step.geometries):
+        rows = imports._rows(atoms) or []
+        energy = step.geometry_energies[n] if n < len(step.geometry_energies) else None
+        point = step.geometry_points[n] if n < len(step.geometry_points) else None
+        stage = step.geometry_stages[n] if n < len(step.geometry_stages) else None
+        criteria = step.geometry_criteria[n] if n < len(step.geometry_criteria) else []
+        frame = Frame(rows, energy, point, n in converged, stage, criteria=criteria)
+        if frames and _same(frames[-1].rows, rows):
+            # Shown once: the later energy (the final evaluation's) if it has one.
+            last = frames[-1]
+            last.energy = energy if energy is not None else last.energy
+            last.point = point if point is not None else last.point
+            last.converged = last.converged or frame.converged
+            last.criteria = criteria or last.criteria
+            continue
+        frames.append(frame)
+
+    reference = reference or (frames[-1].rows if frames else None)
+    for frame in frames:
+        if geometry.elements(frame.rows) == geometry.elements(reference):
+            frame.rows = geometry.place(reference, frame.rows).rows
+    return frames
+
+
 def read_steps(folder: Path, calculation: Calculation) -> Steps:
     source = calculation.source_file
     if source is None or calculation.step_index is None:
@@ -127,29 +157,7 @@ def read_steps(folder: Path, calculation: Calculation) -> Steps:
     if step is None or not step.geometries:
         raise StepsUnavailable(f"No structures were found for this step in {source.original_name}")
 
-    frames: list[Frame] = []
-    converged = set(step.converged_geometries)
-    for n, atoms in enumerate(step.geometries):
-        rows = imports._rows(atoms) or []
-        energy = step.geometry_energies[n] if n < len(step.geometry_energies) else None
-        point = step.geometry_points[n] if n < len(step.geometry_points) else None
-        stage = step.geometry_stages[n] if n < len(step.geometry_stages) else None
-        criteria = step.geometry_criteria[n] if n < len(step.geometry_criteria) else []
-        frame = Frame(rows, energy, point, n in converged, stage, criteria=criteria)
-        if frames and _same(frames[-1].rows, rows):
-            # Shown once: the later energy (the final evaluation's) if it has one.
-            last = frames[-1]
-            last.energy = energy if energy is not None else last.energy
-            last.point = point if point is not None else last.point
-            last.converged = last.converged or frame.converged
-            last.criteria = criteria or last.criteria
-            continue
-        frames.append(frame)
-
-    reference = calculation.geometry or frames[-1].rows
-    for frame in frames:
-        if geometry.elements(frame.rows) == geometry.elements(reference):
-            frame.rows = geometry.place(reference, frame.rows).rows
+    frames = frames_of(step, calculation.geometry)
     points = {f.point for f in frames if f.point is not None}
     steps = Steps(scan=step.scan, points=len(points), frames=frames)
     if is_scan_path(calculation):

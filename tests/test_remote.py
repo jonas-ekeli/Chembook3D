@@ -147,7 +147,7 @@ def test_saga_is_the_first_server_and_nothing_secret_is_saved(local, config_dir)
         {
             **{"id": "saga", "name": "Saga", "host": "saga.sigma2.no", "port": 22},
             **{"username": "", "connected": False, "since": None, "cwd": None, "tracked": False},
-            **{"shell": None, "lost": None},
+            **{"shell": None, "lost": None, "inspect": False},
             **{"x11": False, "x11_display": "localhost:0.0", "shell_x11": None, "x11_ready": None},
         }
     ]
@@ -385,7 +385,20 @@ def test_bash_reports_its_directory_after_each_command(local, tmp_path):
             seen, _ = _read_until(
                 ws, lambda text, m: "bash " in text and "i" in text.split("bash ")[-1]
             )
-        assert _status(local)["cwd"] == str(work) and _status(local)["tracked"] is True
+            # D123c: `inspect FILE` asks the app to open the file, by its full path.
+            (work / "TS 1.out").write_text("output\n")
+            ws.send_json({"type": "input", "data": "inspect 'TS 1.out' missing.log\r"})
+            text, _ = _read_until(
+                ws,
+                lambda text, m: (
+                    {"type": "inspect", "path": f"{work}/TS 1.out"} in m
+                    and "inspect: missing.log: no such file" in text
+                ),
+            )
+            ws.send_json({"type": "input", "data": "inspect\r"})
+            _read_until(ws, lambda text, m: "usage: inspect FILE" in text)
+        status = _status(local)
+        assert status["cwd"] == str(work) and status["tracked"] is True and status["inspect"]
     finally:
         fake.stop()
 
@@ -465,6 +478,16 @@ def test_the_directory_report_split_over_pieces():
     shell.feed("\x1b]1337;CurrentDir=/a\x07x\x1b]1337;CurrentDir=/b ø\x07".encode())
     assert shell.cwd == "/b ø"
     assert shell.replay().startswith("out\x1b]1337")
+    # D123c: a file to inspect is passed on as it comes, with the directory in order.
+    viewer: asyncio.Queue = asyncio.Queue()
+    shell.viewers.add(viewer)
+    for piece in (b"\x1b]1337;Insp", b"ect=/w/a.out\x07\x1b]1337;CurrentDir=/w\x07$ "):
+        shell.feed(piece)
+    messages = [viewer.get_nowait() for _ in range(viewer.qsize())]
+    assert [m for m in messages if m["type"] != "output"] == [
+        {"type": "inspect", "path": "/w/a.out"},
+        {"type": "cwd", "path": "/w"},
+    ]
 
 
 def test_the_keeper_logs_out_after_the_idle_time_and_ends_when_empty(
@@ -637,6 +660,51 @@ def test_import_refusals(at_work, local):
     assert at_work.post("/api/remote/servers/saga/import", json=one).status_code == 403
     at_work.post("/api/remote/servers/saga/logout", headers=ORIGIN)
     assert at_work.get("/api/remote/servers/saga/files").status_code == 409
+
+
+# ---------- T-SSH-10 inspect a file on the server (D123c) ----------
+
+
+def test_a_file_on_the_server_is_inspected_from_the_terminal(at_work, saga):
+    with _terminal(at_work) as ws:
+        _read_until(ws, lambda text, m: "$ " in text)
+        ws.send_json({"type": "input", "data": f"inspect {TS}\r"})
+        _, messages = _read_until(ws, lambda text, m: any(x["type"] == "inspect" for x in m))
+    path = next(m["path"] for m in messages if m["type"] == "inspect")
+    assert path == f"{WORK}/{TS}"
+
+    before = _copies()
+    remote = saga.root / path.lstrip("/")
+    full = remote.read_text(encoding="utf-8")
+    lines = full.splitlines(keepends=True)
+    remote.write_text("".join(lines[: len(lines) // 3]), encoding="utf-8")  # still running
+    body = {"server": "saga", "path": path}
+    response = at_work.post("/api/inspections", json=body, headers=ORIGIN)
+    assert response.status_code == 200, response.text
+    shown = response.json()
+    assert (shown["name"], shown["path"]) == (TS, f"saga:{path}")
+    assert (shown["server"], shown["server_name"]) == ("saga", "Saga")
+    assert len(shown["steps"]) == 1 and shown["steps"][0]["termination"] == "abnormal"
+    assert len(_copies() - before) == 1  # kept while the window is open
+
+    remote.write_text(full, encoding="utf-8")
+    again = at_work.post(f"/api/inspections/{shown['id']}/refresh", headers=ORIGIN).json()
+    assert len(again["steps"]) == 2 and again["steps"][1]["imaginary"] == 1
+    assert len(_copies() - before) == 1  # the new copy in place of the old
+
+    plan = at_work.post(f"/api/inspections/{shown['id']}/import", json={}, headers=ORIGIN).json()
+    assert plan["origin"] == {"device": "Saga", "path": f"saga:{path}", "name": TS}
+    assert at_work.get("/api/canvas").json()["nodes"] == []
+    at_work.delete(f"/api/inspections/{shown['id']}", headers=ORIGIN)
+    assert _copies() == before
+    # Nothing was changed on the server.
+    assert remote.read_text(encoding="utf-8") == full
+
+
+def test_inspecting_a_missing_server_file(at_work):
+    body = {"server": "saga", "path": f"{WORK}/missing.log"}
+    response = at_work.post("/api/inspections", json=body, headers=ORIGIN)
+    assert response.status_code == 422 and "Could not copy from Saga" in response.json()["detail"]
 
 
 # ---------- T-SSH-08 send a node's structure to the terminal's directory ----------

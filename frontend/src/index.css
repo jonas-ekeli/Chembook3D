@@ -2521,3 +2521,78 @@ table.scan-path-held input.drive-value {
   text-align: right;
   white-space: nowrap;
 }
+
+/* D123c: the Inspect window: the file's job steps, then the 3D view beside the movie */
+.inspect {
+  display: grid;
+  gap: 0.5rem;
+}
+.inspect-origin {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.inspect .warning {
+  margin: 0;
+  color: #93370d;
+}
+.inspect-steps {
+  max-height: 22vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.inspect-steps table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.inspect-steps th,
+.inspect-steps td {
+  text-align: left;
+  padding: 0.2rem 0.4rem;
+  white-space: nowrap;
+}
+.inspect-steps th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  font-weight: 500;
+}
+.inspect-steps tbody tr {
+  cursor: pointer;
+}
+.inspect-steps tbody tr:hover {
+  background: var(--accent-soft);
+}
+.inspect-steps tbody tr.chosen {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.inspect-route {
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inspect-view {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+.inspect-side {
+  margin-top: 0;
+}
+@media (max-width: 900px) {
+  .inspect-view {
+    grid-template-columns: 1fr;
+  }
+}
+.file-row {
+  display: flex;
+  align-items: center;
+}
+.file-row .file-entry {
+  flex: 1;
+}
+.file-row > .small {
+  margin: 0 0.3rem;
+}

@@ -66,6 +66,7 @@ QUIET = re.compile(
     r"|imports|imports/[^/]+|imports/[^/]+/preview"
     r"|batch-imports|batch-imports/[^/]+|batch-imports/[^/]+/preview"
     r"|note-images|source-files/[^/]+/open|claude(/.*)?|remote(/.*)?|presence(/.*)?|shutdown"
+    r"|inspections(/.*)?"  # D123c: reading a file, and staging it for the import preview
     r"|jobs|jobs/(?![^/]+/import-path$).*"  # importing a scan path changes the notebook
     r")$"
 )

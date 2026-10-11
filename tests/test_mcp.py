@@ -52,6 +52,7 @@ NOT_OFFERED = re.compile(
     r"|scan-paths"  # D114: the Scan path dialog's Send starts a cloud session
     r"|claude(/.*)?"  # the Claude panel (D92): Claude never starts terminals
     r"|remote(/.*)?"  # D122: logging in to a server is for the app's own page only
+    r"|inspections(/.*)?"  # D123c: the Inspect window, the page's own like the server's
     r"|presence(/.*)?|shutdown)$"  # D107: tabs coming and going, and the Shut down button
 )
 

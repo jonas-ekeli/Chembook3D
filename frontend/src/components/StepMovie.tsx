@@ -591,7 +591,7 @@ type ChartItem = { n: number; energy: number | null; removed: boolean; spike: bo
 /** ΔE of each structure shown, with the shown one marked; a click shows the nearest one. On a
  * scan path (D117) removed points are hollow and grey, a cut is a dashed line (red over 0.5 Å),
  * spikes are marked, and dragging across the chart (or shift-clicking) chooses a section. */
-function EnergyChart({
+export function EnergyChart({
   items,
   cuts,
   at,
@@ -777,7 +777,7 @@ function criterionValue(value: number): string {
  * structure shown, each criterion's value, threshold and whether it is met; beside it the
  * criterion over every structure on a log scale, its threshold dashed. A click on a line shows
  * the nearest structure. */
-function Convergence({
+export function Convergence({
   items,
   at,
   onPick,

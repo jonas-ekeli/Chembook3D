@@ -16,6 +16,8 @@ from chembook3d.api.claude import Panel
 from chembook3d.api.claude import router as claude_router
 from chembook3d.api.energies import router as energy_router
 from chembook3d.api.import_undo import router as undo_router
+from chembook3d.api.inspect import inspections
+from chembook3d.api.inspect import router as inspect_router
 from chembook3d.api.jobs import router as job_router
 from chembook3d.api.lifetime import SHUTDOWN_PUSH_TIMEOUT, Lifetime, watch
 from chembook3d.api.lifetime import router as lifetime_router
@@ -82,6 +84,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.claude_panel.close_all()  # stop Claude Code in any open panel (D92)
     app.state.cloud_jobs.close_all()  # and `claude --cloud` launchers; sessions go on (D93)
     app.state.staging.clear()  # previewed but not imported files (FR-IMP-05)
+    inspections(app).close_all()  # copies of server files in Inspect windows (D123c)
     if app.state.investigation is not None:  # release the lock file on shutdown (P22)
         # A linked investigation is also pushed, with a short time limit (FR-SYNC-05);
         # what does not get through is pushed when it is next opened (FR-SYNC-04).
@@ -125,6 +128,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(turnover_router)
     app.include_router(claude_router)
     app.include_router(remote_router)  # D122
+    app.include_router(inspect_router)  # D123c
     app.include_router(job_router)
     app.include_router(scan_path_router)  # D114
     app.include_router(view_state_router)  # D105

@@ -30,6 +30,7 @@ export function ServerPanel({
   open,
   onChanged,
   onImportHere,
+  onInspect,
   onCwd,
 }: {
   server: RemoteServer
@@ -41,6 +42,8 @@ export function ServerPanel({
   onChanged: () => Promise<void> | void
   /** List the files in the shell's current directory to import some (D122e). */
   onImportHere: () => void
+  /** D123c: `inspect FILE` was typed in the terminal: open the file in the Inspect window. */
+  onInspect: (path: string) => void
   /** The terminal's directory changed, for the rest of the app (Send to, D122f). */
   onCwd: (path: string | null) => void
 }) {
@@ -110,8 +113,10 @@ export function ServerPanel({
           | { type: 'output'; data: string }
           | { type: 'hello'; cwd: string | null }
           | { type: 'cwd'; path: string }
+          | { type: 'inspect'; path: string }
           | { type: 'exit'; message: string }
         if (message.type === 'output') term.write(message.data)
+        else if (message.type === 'inspect') onInspect(message.path)
         else if (message.type === 'hello' || message.type === 'cwd') {
           const path = message.type === 'hello' ? message.cwd : message.path
           setCwd(path)
@@ -357,7 +362,10 @@ export function ServerPanel({
         )}
         <span className="spacer" />
         {server.connected && (
-          <button onClick={onImportHere} title="Import outputs from the terminal's current directory">
+          <button
+            onClick={onImportHere}
+            title="Import or inspect outputs from the terminal's current directory"
+          >
             Import from here
           </button>
         )}
@@ -371,6 +379,12 @@ export function ServerPanel({
             </>
           ) : (
             <span className="muted small">This shell does not report its current directory.</span>
+          )}
+          {server.inspect && (
+            <span className="muted small" title="Opens the file in the Inspect window, without importing it">
+              {' '}
+              · type <code>inspect FILE</code> to look at a file here
+            </span>
           )}
         </div>
       )}

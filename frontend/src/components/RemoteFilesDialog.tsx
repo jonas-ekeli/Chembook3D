@@ -4,7 +4,8 @@ import { Modal } from './Modal'
 
 // D122e: "Import from here" lists the files in the terminal's current directory on a server.
 // One chosen output opens the import dialog; several open the batch import (D97). The files
-// are copied down only then, into the investigation as any import is.
+// are copied down only then, into the investigation as any import is. One chosen file can
+// instead be opened in the Inspect window (D123c), which imports nothing.
 
 export type RemoteImport = { server: string; paths: string[]; batch: boolean }
 
@@ -38,10 +39,12 @@ export function RemoteFilesDialog({
   server,
   onClose,
   onImport,
+  onInspect,
 }: {
   server: RemoteServer
   onClose: () => void
   onImport: (request: RemoteImport) => void
+  onInspect: (target: { server: string; path: string }) => void
 }) {
   const [listing, setListing] = useState<RemoteListing | null>(null)
   const [path, setPath] = useState<string | undefined>(undefined) // undefined: the terminal's directory
@@ -88,6 +91,13 @@ export function RemoteFilesDialog({
       actions={
         <>
           <button onClick={onClose}>Cancel</button>
+          <button
+            disabled={paths.length !== 1}
+            onClick={() => onInspect({ server: server.id, path: paths[0] })}
+            title="Look at the file (steps, structures, convergence, modes) without importing it"
+          >
+            Inspect
+          </button>
           <button
             disabled={paths.length === 0}
             onClick={() => onImport({ server: server.id, paths, batch: true })}
@@ -185,8 +195,9 @@ export function RemoteFilesDialog({
               </table>
             </div>
             <p className="muted small">
-              One file opens the import dialog; several go through the batch import, which matches each to a node. Files
-              are copied into the investigation; nothing changes on {server.name}.
+              One file opens the import dialog, or the Inspect window to look at it first; several go through the batch
+              import, which matches each to a node. Files are copied into the investigation; nothing changes on{' '}
+              {server.name}.
             </p>
           </>
         )}
