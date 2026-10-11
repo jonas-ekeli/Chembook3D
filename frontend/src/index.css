@@ -2404,6 +2404,23 @@ table.scan-path-held input.drive-value {
   border-bottom: 1px solid var(--border);
   overflow-wrap: anywhere;
 }
+.server-x11 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  padding: 0.25rem 0.75rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.server-x11.plain {
+  padding: 0 0 0.75rem;
+  background: none;
+  border: 0;
+}
+.server-x11 .warn {
+  color: #b54708;
+}
 .server-fields {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { api, ApiError, type RemoteServer, type RemoteStatus } from '../api'
+import { api, ApiError, serverFields, type RemoteServer, type RemoteStatus } from '../api'
 import { ClaudePanel } from './ClaudePanel'
 import { ServerPanel } from './ServerPanel'
 
@@ -23,7 +23,7 @@ function NewServer({ servers, onSaved }: { servers: RemoteServer[]; onSaved: (id
     setError(null)
     try {
       const saved = await api.saveServers([
-        ...servers.map(({ id, name, host, port, username }) => ({ id, name, host, port, username })),
+        ...servers.map(serverFields),
         { name: name.trim(), host: host.trim(), port, username: username.trim() },
       ])
       onSaved(saved[saved.length - 1].id)

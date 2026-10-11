@@ -5,6 +5,9 @@ current directory reported after each command as bash with the keeper's hook doe
 works on Windows too; `real_shell=True` runs the command the keeper sends in the real bash
 instead (Linux only). Files live in `root`, which SFTP shows as `/`.
 
+X11 forwarding (D123a) is allowed unless `x11=False`; the tiny shell's `xclient` connects to the
+forwarded display as an X program would, and `FakeXServer` stands in for Xming on this side.
+
 Run as a script for the UI tests: `python -m tests.fake_ssh_server --port 8767 --root <folder>`.
 """
 
@@ -13,12 +16,15 @@ import asyncio
 import contextlib
 import os
 import posixpath
+import socket
+import socketserver
 import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import asyncssh
+from asyncssh.x11 import walk_xauth
 
 USER = "jonas"
 PASSWORD = "correct horse"
@@ -33,6 +39,7 @@ class Record:
     answers: list[list[str]] = field(default_factory=list)  # every keyboard-interactive answer
     logins: int = 0  # successful logins
     commands: list[str | None] = field(default_factory=list)  # each session's command
+    displays: list[str | None] = field(default_factory=list)  # each session's X11 display
 
 
 class _Server(asyncssh.SSHServer):
@@ -75,10 +82,12 @@ class _Server(asyncssh.SSHServer):
 
 
 class FakeSaga:
-    def __init__(self, root: Path, real_shell: bool = False, port: int = 0):
+    def __init__(self, root: Path, real_shell: bool = False, port: int = 0, x11: bool = True):
         self.root = root
         self.real_shell = real_shell
         self.port = port
+        self.x11 = x11
+        self.xauthority = root / ".Xauthority"  # the cookies of the forwarded displays
         self.code = CODE
         self.record = Record()
         self.connections: list = []
@@ -103,6 +112,8 @@ class FakeSaga:
             sftp_factory=lambda chan: asyncssh.SFTPServer(chan, chroot=root.encode()),
             encoding=None,
             line_editor=False,
+            x11_forwarding=self.x11,
+            x11_auth_path=str(self.xauthority),
         )
         self.port = self._server.sockets[0].getsockname()[1]
 
@@ -158,16 +169,18 @@ class FakeSaga:
 
     async def _session(self, process: asyncssh.SSHServerProcess) -> None:
         self.record.commands.append(process.command)
+        self.record.displays.append(process.channel.get_x11_display())
         if self.real_shell and process.command:
             await _real(process)
         else:
-            await _FakeShell(self.root, process).run()
+            await _FakeShell(self.root, process, self.xauthority).run()
 
 
 class _FakeShell:
-    def __init__(self, root: Path, process: asyncssh.SSHServerProcess):
+    def __init__(self, root: Path, process: asyncssh.SSHServerProcess, xauthority: Path):
         self.root = root
         self.process = process
+        self.xauthority = xauthority
         self.cwd = HOME
 
     def _write(self, text: str) -> None:
@@ -180,14 +193,47 @@ class _FakeShell:
     def _local(self, path: str) -> Path:
         return self.root / path.lstrip("/")
 
-    def _run(self, line: str) -> bool:
+    async def _xclient(self) -> None:
+        """Open the forwarded display as an X program does: the connection setup with the
+        display's cookie, then wait for the X server's answer and print it."""
+        display = self.process.channel.get_x11_display()
+        if not display:
+            self._write("xclient: cannot open display\n")
+            return
+        host, number = display.rsplit(":", 1)
+        number = number.split(".")[0]
+        entries = walk_xauth(str(self.xauthority))
+        entry = next(e for e in entries if e.dpynum == number.encode())
+        prefix = b"l\x00" + b"".join(
+            n.to_bytes(2, "little") for n in (11, 0, len(entry.proto), len(entry.data), 0)
+        )
+        try:
+            reader, writer = await asyncio.open_connection(host, 6000 + int(number))
+        except OSError as exc:
+            self._write(f"xclient: {exc}\n")
+            return
+        try:
+            writer.write(prefix + _pad(entry.proto) + _pad(entry.data))
+            await writer.drain()
+            reply = await asyncio.wait_for(reader.read(100), 10)
+        except (OSError, TimeoutError):
+            reply = b""
+        finally:
+            writer.close()
+            with contextlib.suppress(OSError, ConnectionError):
+                await writer.wait_closed()
+        self._write(f"xclient: {reply.decode('utf-8', 'replace') or 'no answer'}\n")
+
+    async def _run(self, line: str) -> bool:
         words = line.split()
         if not words:
             return True
         command, args = words[0], words[1:]
         if command == "exit":
             return False
-        if command == "cd":
+        if command == "xclient":
+            await self._xclient()
+        elif command == "cd":
             target = posixpath.normpath(posixpath.join(self.cwd, args[0] if args else HOME))
             if self._local(target).is_dir():
                 self.cwd = target
@@ -220,7 +266,7 @@ class _FakeShell:
             for char in data.decode("utf-8", errors="replace"):
                 if char in "\r\n":
                     self._write("\n")
-                    if not self._run(line):
+                    if not await self._run(line):
                         self._write("logout\n")
                         self.process.exit(0)
                         return
@@ -238,6 +284,64 @@ class _FakeShell:
                     line += char
                     self._write(char)
         self.process.exit(0)
+
+
+def _pad(data: bytes) -> bytes:
+    return data + b"\x00" * (-len(data) % 4)
+
+
+class FakeXServer:
+    """A stand-in for Xming: listens on 127.0.0.1 port 6000 + display, records the cookie each
+    X program connects with and answers "fake X server"."""
+
+    def __init__(self):
+        self.cookies: list[bytes] = []
+        fake = self
+
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self) -> None:
+                data = b""
+                with contextlib.suppress(OSError):
+                    while len(data) < 12:
+                        data += self.request.recv(4096) or b"!" * 12
+                    name, cookie = (int.from_bytes(data[i : i + 2], "little") for i in (6, 8))
+                    need = 12 + len(_pad(b"x" * name)) + len(_pad(b"x" * cookie))
+                    while len(data) < need:
+                        more = self.request.recv(4096)
+                        if not more:
+                            return
+                        data += more
+                    start = 12 + len(_pad(b"x" * name))
+                    fake.cookies.append(data[start : start + cookie])
+                    self.request.sendall(b"fake X server")
+
+        for display in range(40, 100):
+            try:
+                self._server = socketserver.ThreadingTCPServer(
+                    ("127.0.0.1", 6000 + display), Handler
+                )
+            except OSError:
+                continue
+            self.display = f"127.0.0.1:{display}.0"
+            break
+        else:
+            raise OSError("no free X11 display port")
+        self._server.daemon_threads = True
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+
+def free_display() -> str:
+    """A display nothing answers on."""
+    for display in range(40, 100):
+        with socket.socket() as probe:
+            if probe.connect_ex(("127.0.0.1", 6000 + display)) != 0:
+                return f"127.0.0.1:{display}.0"
+    raise OSError("every X11 display port answers")
 
 
 async def _real(process: asyncssh.SSHServerProcess) -> None:

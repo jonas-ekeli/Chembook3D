@@ -74,6 +74,8 @@ class ServerIn(BaseModel):
     host: str
     port: int = 22
     username: str = ""
+    x11: bool = False
+    x11_display: str = servers.X11_DISPLAY
 
 
 class ServerOut(BaseModel):
@@ -82,12 +84,16 @@ class ServerOut(BaseModel):
     host: str
     port: int
     username: str
+    x11: bool = False  # the next shell forwards X11 windows (D123a)
+    x11_display: str = servers.X11_DISPLAY
     connected: bool = False
     since: float | None = None  # when the login happened (seconds since 1970)
     cwd: str | None = None  # the shell's current directory, when it reports it
     tracked: bool = False  # the shell reports its current directory (D122d)
     shell: str | None = None  # "running" or "ended" while connected
     lost: str | None = None  # why the last connection ended, when it was not a log out
+    shell_x11: str | None = None  # the display the running shell forwards to
+    x11_ready: bool | None = None  # something answers on that display (Xming is running)
 
 
 class RemoteStatus(BaseModel):
@@ -108,6 +114,8 @@ def _out(saved: list[servers.Server], held: dict) -> list[ServerOut]:
             host=server.host,
             port=server.port,
             username=server.username,
+            x11=server.x11,
+            x11_display=server.x11_display,
         )
         if session is not None:
             out.connected = True
@@ -115,6 +123,8 @@ def _out(saved: list[servers.Server], held: dict) -> list[ServerOut]:
             out.cwd = session.get("cwd")
             out.tracked = bool(session.get("tracked"))
             out.shell = session.get("shell")
+            out.shell_x11 = session.get("x11")
+            out.x11_ready = session.get("x11_ready")
             # What the connection was opened with, even if the saved server changed since.
             out.host = session["server"]["host"]
             out.port = session["server"]["port"]
@@ -212,7 +222,15 @@ async def login(server_id: str, body: LoginIn, request: Request) -> LoginStep:
         await client.ensure()
     except client.KeeperError as exc:
         raise HTTPException(500, str(exc)) from exc
-    return _step(await _keeper("login", server=server.__dict__, rows=body.rows, cols=body.cols))
+    return _step(
+        await _keeper(
+            "login",
+            server=server.__dict__,
+            rows=body.rows,
+            cols=body.cols,
+            x11=server.forwarding,
+        )
+    )
 
 
 class AnswersIn(BaseModel):
@@ -254,13 +272,29 @@ async def logout(server_id: str, request: Request) -> None:
 class ShellIn(BaseModel):
     rows: int = 24
     cols: int = 80
+    restart: bool = False  # in place of the one running (X11 turned on or off, D123a)
 
 
 @router.post("/servers/{server_id}/shell")
 async def new_shell(server_id: str, body: ShellIn, request: Request) -> None:
-    """Start a new shell on a server still logged in, after the last one ended."""
+    """Start a new shell on a server still logged in, after the last one ended or in its place,
+    with the server's X11 setting as saved now."""
     _check(request)
-    await _keeper("shell", server=server_id, rows=body.rows, cols=body.cols)
+    server = _saved(server_id)
+    if server.x11 and (await _keeper("ping")).get("protocol", 1) < 2:
+        raise HTTPException(
+            409,
+            f"The connection to {server.name} was opened by an older version of Chembook3D, "
+            "which cannot forward X11. Log out and log in again.",
+        )
+    await _keeper(
+        "shell",
+        server=server_id,
+        rows=body.rows,
+        cols=body.cols,
+        restart=body.restart,
+        x11=server.forwarding,
+    )
 
 
 # ---------- files in the shell's directory (D122e) ----------
