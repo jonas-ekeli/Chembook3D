@@ -194,6 +194,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-3D-07 | Named alignment sets keep each node's alignment atoms in the investigation, to reuse and extend. | D80, A31 | after 5 |
 | FR-3D-08 | Play the structures of an optimization or scan as a movie in the node's 3D view, with each structure's energy; for a scan, optionally only the converged structure of each point. Take the structure shown as the geometry: in place on a scan path node, otherwise on a new derived node. Remove points or sections from a scan path and put them back, the file unchanged, the top chosen again over the kept points and each cut's jump shown. | D101, A48, D112, A58, D117, A63 | after 5 |
 | FR-3D-09 | Match the atoms of two structures of the same atoms numbered differently, review the match side by side with the bonds that form or break, fix pairs by hand, and save the second renumbered in the first's order. | D113, A59 | after 5 |
+| FR-3D-10 | The step movie shows, for the structure shown, the convergence criteria the optimizer printed for it (Gaussian's maximum and RMS force and displacement with the predicted energy change, ORCA's energy change, RMS and maximum gradient and step) with value, threshold and whether each is met, and each criterion over all structures on a log scale with its threshold dashed; for calculations imported earlier too, nothing stored. | D123, A70 | after 5 |
 
 ## FR-STER · Buried volume and steric maps (D81)
 

@@ -226,6 +226,16 @@ class ModesOut(BaseModel):
     modes: list[list[list[float]]]  # [mode][atom][dx, dy, dz]
 
 
+class CriterionOut(BaseModel):
+    """D123b: a convergence criterion the optimizer printed for a structure."""
+
+    name: str  # e.g. "Maximum force", "RMS step", "Energy change"
+    value: float
+    threshold: float | None  # None: only reported (Gaussian's predicted energy change)
+    converged: bool | None
+    unit: str  # Eh, Eh/bohr or bohr
+
+
 class StepFrameOut(BaseModel):
     geometry: list[list[Any]]  # [[element, x, y, z], ...], placed on the final geometry
     energy: float | None  # hartree
@@ -233,6 +243,7 @@ class StepFrameOut(BaseModel):
     converged: bool
     stage: int | None = None  # D112: a scan path's stage, when the file names it
     removed: bool = False  # D117: left out of the scan path by hand
+    criteria: list[CriterionOut] = []  # D123b: empty where the optimizer printed none
 
 
 class CutOut(BaseModel):
@@ -769,6 +780,7 @@ def _steps_out(calculation: Calculation, steps: trajectory.Steps) -> StepsOut:
                 converged=f.converged,
                 stage=f.stage,
                 removed=f.removed,
+                criteria=[CriterionOut(**asdict(c)) for c in f.criteria],
             )
             for f in steps.frames
         ],

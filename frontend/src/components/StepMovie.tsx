@@ -5,6 +5,7 @@ import {
   formatDelta,
   geometryToXyz,
   type Calculation,
+  type Criterion,
   type Node,
   type Settings,
   type StepFrame,
@@ -412,6 +413,14 @@ export function StepMovie({
               Drag across the chart, or shift-click a second point, to choose a section.
             </p>
           )}
+          <Convergence
+            items={shown.map(({ frame, n }) => ({ n, criteria: frame.criteria ?? [] }))}
+            at={at}
+            onPick={(i) => {
+              setPlaying(false)
+              setIndex(i)
+            }}
+          />
         </>
       )}
     </div>
@@ -756,5 +765,175 @@ function EnergyChart({
         </span>
       </div>
     </div>
+  )
+}
+
+/** A criterion's value, in one form for every row so they compare at a glance. */
+function criterionValue(value: number): string {
+  return value === 0 ? '0' : value.toExponential(2)
+}
+
+/** D123b: the convergence criteria the optimizer printed, as Molden shows them: for the
+ * structure shown, each criterion's value, threshold and whether it is met; beside it the
+ * criterion over every structure on a log scale, its threshold dashed. A click on a line shows
+ * the nearest structure. */
+function Convergence({
+  items,
+  at,
+  onPick,
+}: {
+  items: { n: number; criteria: Criterion[] }[]
+  at: number
+  onPick: (index: number) => void
+}) {
+  const names = useMemo(() => {
+    const seen: string[] = []
+    for (const item of items) for (const c of item.criteria) if (!seen.includes(c.name)) seen.push(c.name)
+    return seen
+  }, [items])
+  if (names.length === 0) return null
+  const current = items[at]
+  const own = current?.criteria ?? []
+  const judged = own.filter((c) => c.converged !== null)
+  return (
+    <details className="step-criteria" open>
+      <summary className="small">
+        Convergence of structure {current ? current.n + 1 : ''}
+        {own.length === 0
+          ? ': none printed for it'
+          : judged.length > 0 && `: ${judged.filter((c) => c.converged).length} of ${judged.length} met`}
+      </summary>
+      <table className="step-criteria-table small" aria-label="Convergence criteria">
+        <thead>
+          <tr>
+            <th>Criterion</th>
+            <th>Value</th>
+            <th>Threshold</th>
+            <th>Met</th>
+            <th className="muted" title="Each structure's value on a log scale; the threshold dashed">
+              All structures
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {names.map((name) => {
+            const c = own.find((x) => x.name === name)
+            const unit = items.flatMap((item) => item.criteria).find((x) => x.name === name)?.unit ?? ''
+            return (
+              <tr key={name}>
+                <td className="step-criteria-name">
+                  {name} <span className="muted">{unit}</span>
+                </td>
+                <td className="mono">{c ? criterionValue(c.value) : '–'}</td>
+                <td className="mono">{c && c.threshold !== null ? criterionValue(c.threshold) : '–'}</td>
+                <td>
+                  {c?.converged === true && <span className="criterion-met">✓ yes</span>}
+                  {c?.converged === false && <span className="criterion-unmet">✗ no</span>}
+                </td>
+                <td className="step-criteria-spark">
+                  <CriterionLine name={name} items={items} at={at} onPick={onPick} />
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </details>
+  )
+}
+
+/** One criterion over the structures: |value| on a log scale with its threshold dashed. */
+function CriterionLine({
+  name,
+  items,
+  at,
+  onPick,
+}: {
+  name: string
+  items: { n: number; criteria: Criterion[] }[]
+  at: number
+  onPick: (index: number) => void
+}) {
+  const svg = useRef<SVGSVGElement>(null)
+  const values = items.map((item) => item.criteria.find((c) => c.name === name) ?? null)
+  const threshold = values.find((c) => c?.threshold !== null && c?.threshold !== undefined)?.threshold ?? null
+  const sizes = values.map((c) => (c ? Math.abs(c.value) : null))
+  const positive = [...sizes, threshold].filter((v): v is number => v !== null && v > 0)
+  if (positive.length === 0) return null
+  // A value printed as zero sits at the bottom, a decade under the smallest one.
+  const floor = Math.min(...positive) / 10
+  const log = (v: number) => Math.log10(Math.max(v, floor))
+  const low = log(floor)
+  const high = Math.max(...positive.map(log))
+  const span = high - low || 1
+  const width = 160
+  const height = 28
+  const pad = 3
+  const x = (i: number) => pad + (items.length > 1 ? (i / (items.length - 1)) * (width - 2 * pad) : 0)
+  const y = (v: number) => pad + ((high - log(v)) / span) * (height - 2 * pad)
+  const runs: string[][] = [[]]
+  sizes.forEach((v, i) => {
+    if (v === null) {
+      if (runs[runs.length - 1].length > 0) runs.push([])
+    } else runs[runs.length - 1].push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`)
+  })
+  const pick = (clientX: number) => {
+    const box = svg.current?.getBoundingClientRect()
+    if (!box || items.length < 2) return
+    const fraction = ((clientX - box.left) / box.width) * width
+    onPick(Math.max(0, Math.min(items.length - 1, Math.round(((fraction - pad) / (width - 2 * pad)) * (items.length - 1)))))
+  }
+  const shown = sizes[at]
+  return (
+    <svg
+      ref={svg}
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={`${name} per structure`}
+      onClick={(event) => pick(event.clientX)}
+    >
+      <title>
+        {name}: {shown !== null && shown !== undefined ? criterionValue(values[at]!.value) : 'not printed'}
+        {threshold !== null ? ` (threshold ${criterionValue(threshold)})` : ''}
+      </title>
+      {threshold !== null && (
+        <line
+          className="criterion-threshold"
+          x1={0}
+          x2={width}
+          y1={y(threshold)}
+          y2={y(threshold)}
+          stroke="var(--muted)"
+          strokeWidth={1}
+          strokeDasharray="4 3"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+      {runs.map((run, k) =>
+        run.length > 1 ? (
+          <polyline
+            key={k}
+            points={run.join(' ')}
+            fill="none"
+            stroke="var(--accent)"
+            strokeWidth={1.5}
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null,
+      )}
+      <line x1={x(at)} x2={x(at)} y1={0} y2={height} stroke="var(--muted)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+      {shown !== null && shown !== undefined && (
+        <line
+          x1={x(at)}
+          x2={x(at)}
+          y1={y(shown) - 3}
+          y2={y(shown) + 3}
+          stroke="var(--accent)"
+          strokeWidth={4}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+    </svg>
   )
 }

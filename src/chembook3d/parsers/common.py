@@ -24,6 +24,19 @@ class Route:
 
 
 @dataclass
+class Criterion:
+    """D123b: one convergence criterion an optimizer printed for a structure, as Molden shows
+    it: the value, the threshold it must get below (None for one only reported) and whether
+    the program counted it as met."""
+
+    name: str
+    value: float
+    threshold: float | None
+    converged: bool | None
+    unit: str = ""
+
+
+@dataclass
 class ParsedStep:
     index: int  # 1-based position in the file
     route: Route | None = None
@@ -38,6 +51,9 @@ class ParsedStep:
     geometry_energies: list[float | None] = field(default_factory=list)
     geometry_points: list[int | None] = field(default_factory=list)
     converged_geometries: list[int] = field(default_factory=list)
+    # D123b: per structure in `geometries`, the convergence criteria the optimizer printed for
+    # it (an empty list where it printed none). Empty when no structure has any.
+    geometry_criteria: list[list[Criterion]] = field(default_factory=list)
     scan: str | None = None  # "relaxed" (an optimization per point) or "rigid"
     # D112: an xTB scan path's stage per structure (empty when the file names none), and the
     # structure (0-based) its node takes when that is not the last one: the path's top.

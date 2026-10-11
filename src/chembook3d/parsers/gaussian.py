@@ -15,7 +15,7 @@ import json
 import re
 from typing import Any
 
-from chembook3d.parsers.common import ParsedFile, ParsedStep, Route
+from chembook3d.parsers.common import Criterion, ParsedFile, ParsedStep, Route
 from chembook3d.xyz import ELEMENTS, Atom
 
 PROGRAM = "Gaussian"
@@ -181,6 +181,10 @@ _TEMPERATURE_RE = re.compile(
 )
 _CHARGE_RE = re.compile(r"^ Charge =\s*(-?\d+) Multiplicity =\s*(\d+)")
 _ORIENTATIONS = ("Input orientation:", "Z-Matrix orientation:", "Standard orientation:")
+# D123b: Berny's convergence table after each optimization step, and its predicted change.
+_CRITERION_RE = re.compile(r"^ (Maximum|RMS)\s+(Force|Displacement)\s+(\S+)\s+(\S+)\s+(YES|NO)\s*$")
+_PREDICTED_RE = re.compile(r"^ Predicted change in Energy=\s*(\S+)")
+_UNITS = {"Force": "Eh/bohr", "Displacement": "bohr"}
 _SCAN_POINT_RE = re.compile(r"^ Step number\s+\d+ out of a maximum of\s+\d+ on scan point\s+(\d+)")
 
 
@@ -305,6 +309,7 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
     energies: dict[str, list[float | None]] = {name: [] for name in _ORIENTATIONS}
     points: dict[str, list[int | None]] = {name: [] for name in _ORIENTATIONS}
     converged: dict[str, list[int]] = {name: [] for name in _ORIENTATIONS}
+    criteria: dict[str, list[list[Criterion]]] = {name: [] for name in _ORIENTATIONS}
     basis: dict[int, str] = {}
     ecp: dict[int, str] = {}
     frequencies: list[float] = []
@@ -319,6 +324,7 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
                 orientations[line.strip()].append(atoms)
                 energies[line.strip()].append(None)
                 points[line.strip()].append(None)
+                criteria[line.strip()].append([])
             continue
         elif line.startswith(" SCF Done:"):
             step.scf_energy = float(line.split()[4])
@@ -331,6 +337,34 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
                 last = len(orientations[name]) - 1
                 if last >= 0 and last not in converged[name]:
                     converged[name].append(last)
+        elif (match := _CRITERION_RE.match(line)) is not None:
+            # The table belongs to the structure the forces were computed on: the last one.
+            size, kind = match.group(1), match.group(2)
+            try:
+                value, threshold = (float(match.group(k).replace("D", "E")) for k in (3, 4))
+            except ValueError:  # ******** for a value too large to print
+                pass
+            else:
+                found = Criterion(
+                    f"{size} {kind.lower()}",
+                    value,
+                    threshold,
+                    match.group(5) == "YES",
+                    _UNITS[kind],
+                )
+                for name in _ORIENTATIONS:
+                    if criteria[name]:
+                        criteria[name][-1].append(found)
+        elif (match := _PREDICTED_RE.match(line)) is not None:
+            try:
+                value = float(match.group(1).replace("D", "E"))
+            except ValueError:
+                pass
+            else:
+                found = Criterion("Predicted energy change", value, None, None, "Eh")
+                for name in _ORIENTATIONS:
+                    if criteria[name]:
+                        criteria[name][-1].append(found)
         elif (match := _SCAN_POINT_RE.match(line)) is not None:
             step.scan = "relaxed"
             for name in _ORIENTATIONS:
@@ -383,6 +417,8 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
             step.geometry_energies = energies[name]
             step.geometry_points = points[name]
             step.converged_geometries = converged[name]
+            if any(criteria[name]):
+                step.geometry_criteria = criteria[name]
             break
     if step.scan == "rigid":  # every structure of a rigid scan is one of its points
         step.geometry_points = list(range(1, len(step.geometries) + 1))

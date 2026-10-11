@@ -13,7 +13,7 @@ frequencies, imaginary ones negative as ORCA prints them.
 
 import re
 
-from chembook3d.parsers.common import ParsedFile, ParsedStep, Route
+from chembook3d.parsers.common import Criterion, ParsedFile, ParsedStep, Route
 from chembook3d.xyz import Atom, element_of
 
 PROGRAM = "ORCA"
@@ -179,6 +179,24 @@ def _read_input(lines: list[str]) -> tuple[list[str], list[str]]:
     return words, echoed
 
 
+# D123b: the rows of the "Geometry convergence" table printed after each optimization cycle.
+_CRITERION = re.compile(
+    r"^\s+(Energy change|RMS gradient|MAX gradient|RMS step|MAX step)"
+    r"\s+(\S+)\s+(\S+)\s+(YES|NO)\s*$"
+)
+_CRITERION_UNITS = {"energy": "Eh", "gradient": "Eh/bohr", "step": "bohr"}
+
+
+def _criterion(match: re.Match) -> Criterion | None:
+    try:
+        value, threshold = float(match.group(2)), float(match.group(3))
+    except ValueError:
+        return None
+    name = match.group(1).replace("MAX", "Maximum")
+    unit = _CRITERION_UNITS[name.split()[-1].lower() if "change" not in name else "energy"]
+    return Criterion(name, value, threshold, match.group(4) == "YES", unit)
+
+
 def _read_coordinates(lines: list[str], start: int) -> tuple[list[Atom], int]:
     """`CARTESIAN COORDINATES (ANGSTROEM)` at lines[start], then dashes, then atoms."""
     atoms = []
@@ -250,6 +268,7 @@ def _parse_block(lines: list[str], step: ParsedStep, geometries: bool = True) ->
                 step.geometries.append(atoms)
                 step.geometry_energies.append(None)
                 step.geometry_points.append(point)
+                step.geometry_criteria.append([])
                 if final_evaluation and step.converged_geometries:
                     step.converged_geometries[-1] = len(step.geometries) - 1
                 final_evaluation = False
@@ -262,6 +281,10 @@ def _parse_block(lines: list[str], step: ParsedStep, geometries: bool = True) ->
             else:
                 if step.geometry_energies:
                     step.geometry_energies[-1] = energies[-1]
+        elif (match := _CRITERION.match(line)) and step.geometry_criteria:
+            # The table belongs to the cycle's structure, the last one read.
+            if (found := _criterion(match)) is not None:
+                step.geometry_criteria[-1].append(found)
         elif match := re.search(r"RELAXED SURFACE SCAN STEP\s+(\d+)", line):
             step.scan, point = "relaxed", int(match.group(1))
         elif stripped == "* Parameter Scan Calculation *":
@@ -313,6 +336,8 @@ def _parse_block(lines: list[str], step: ParsedStep, geometries: bool = True) ->
         i += 1
     if energies:
         step.scf_energy = energies[-1]
+    if not any(step.geometry_criteria):
+        step.geometry_criteria = []
     if step.scan == "rigid":  # every structure of a rigid scan is one of its points
         step.geometry_points = list(range(1, len(step.geometries) + 1))
         step.converged_geometries = list(range(len(step.geometries)))

@@ -48,6 +48,12 @@ test('play a relaxed scan, its converged points only, with the measurement follo
   await expect(movie.getByRole('img', { name: 'Energy per structure' })).toBeVisible()
   await expect(inspector.getByRole('alert')).toHaveCount(0)
 
+  // D123b: the criteria Gaussian printed for the structure shown, each over the structures.
+  const criteria = movie.getByRole('table', { name: 'Convergence criteria' })
+  await expect(movie.getByText('Convergence of structure 1: 4 of 4 met')).toBeVisible()
+  await expect(criteria.getByRole('row', { name: /Maximum force/ })).toContainText('✓ yes')
+  await expect(criteria.getByRole('img', { name: 'RMS displacement per structure' })).toBeVisible()
+
   // The scanned dihedral, measured on the structure shown, moves 30° per point.
   await inspector.getByLabel('Atom numbers').fill('10 9 4 3')
   await inspector.getByLabel('Atom numbers').press('Enter')

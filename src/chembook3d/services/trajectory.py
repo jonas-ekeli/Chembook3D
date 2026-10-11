@@ -4,7 +4,8 @@ FR-3D-08).
 Nothing is stored for this: the structures and their energies are read again from the
 calculation's copied output file when asked, so calculations imported before D101 have them
 too. Each structure is turned onto the calculation's final geometry, so the movie does not
-jump about and ends on the structure the node shows.
+jump about and ends on the structure the node shows. Each structure carries the convergence
+criteria the optimizer printed for it (D123b), so calculations imported earlier have them too.
 
 The structure shown can be taken over as a node's geometry (D112, `use_frame`): in place on a
 scan path node, whose calculations are all xTB relaxed scans read from `xtbscan.log` or
@@ -15,7 +16,7 @@ touched, the calculation lists the points it leaves out (`removed_points`), and 
 is chosen again over the points kept, with each cut's jump measured as `pathtools.py` does.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,7 @@ from sqlalchemy.orm import Session
 from chembook3d import pathtools
 from chembook3d.models import Calculation, CalculationType, Node
 from chembook3d.parsers import xtb
-from chembook3d.parsers.common import ParsedFile
+from chembook3d.parsers.common import Criterion, ParsedFile
 from chembook3d.services import files as file_service
 from chembook3d.services import geometry, history, imports
 from chembook3d.services import nodes as node_service
@@ -53,6 +54,7 @@ class Frame:
     converged: bool  # an optimization (or a scan point's) converged on this structure
     stage: int | None = None  # D112: the stage of a scan path that names its stages
     removed: bool = False  # D117: left out of the path by hand
+    criteria: list[Criterion] = field(default_factory=list)  # D123b: as the optimizer printed
 
 
 @dataclass
@@ -132,13 +134,15 @@ def read_steps(folder: Path, calculation: Calculation) -> Steps:
         energy = step.geometry_energies[n] if n < len(step.geometry_energies) else None
         point = step.geometry_points[n] if n < len(step.geometry_points) else None
         stage = step.geometry_stages[n] if n < len(step.geometry_stages) else None
-        frame = Frame(rows, energy, point, n in converged, stage)
+        criteria = step.geometry_criteria[n] if n < len(step.geometry_criteria) else []
+        frame = Frame(rows, energy, point, n in converged, stage, criteria=criteria)
         if frames and _same(frames[-1].rows, rows):
             # Shown once: the later energy (the final evaluation's) if it has one.
             last = frames[-1]
             last.energy = energy if energy is not None else last.energy
             last.point = point if point is not None else last.point
             last.converged = last.converged or frame.converged
+            last.criteria = criteria or last.criteria
             continue
         frames.append(frame)
 

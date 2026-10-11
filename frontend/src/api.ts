@@ -355,7 +355,11 @@ export type StepFrame = {
   stage: number | null
   /** D117: left out of the scan path by hand. */
   removed: boolean
+  /** D123b: the convergence criteria the optimizer printed for this structure. */
+  criteria: Criterion[]
 }
+/** D123b: one convergence criterion; `threshold` null for one only reported (predicted ΔE). */
+export type Criterion = { name: string; value: number; threshold: number | null; converged: boolean | null; unit: string }
 /** D117: where removed points leave a gap between two kept frames (0-based frame indices). */
 export type TrimCut = { before: number; after: number; removed: number; jump: number | null; large: boolean }
 /** D117: a scan path over its kept points. `top` is the frame the node takes, `shown` the frame
