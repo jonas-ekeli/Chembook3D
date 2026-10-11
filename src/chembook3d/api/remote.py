@@ -90,6 +90,7 @@ class ServerOut(BaseModel):
     since: float | None = None  # when the login happened (seconds since 1970)
     cwd: str | None = None  # the shell's current directory, when it reports it
     tracked: bool = False  # the shell reports its current directory (D122d)
+    inspect: bool = False  # the shell has the `inspect FILE` command (D123c)
     shell: str | None = None  # "running" or "ended" while connected
     lost: str | None = None  # why the last connection ended, when it was not a log out
     shell_x11: str | None = None  # the display the running shell forwards to
@@ -122,6 +123,7 @@ def _out(saved: list[servers.Server], held: dict) -> list[ServerOut]:
             out.since = session.get("since")
             out.cwd = session.get("cwd")
             out.tracked = bool(session.get("tracked"))
+            out.inspect = bool(session.get("inspect"))
             out.shell = session.get("shell")
             out.shell_x11 = session.get("x11")
             out.x11_ready = session.get("x11_ready")

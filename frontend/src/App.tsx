@@ -16,6 +16,7 @@ import {
   type Investigation,
   type Node,
   type NoteLayout,
+  type InspectTarget,
   type RemoteServer,
   type RemoteStatus,
   type Settings,
@@ -37,6 +38,7 @@ import { HistoryList } from './components/HistoryList'
 import { UndoImportDialog } from './components/UndoImportDialog'
 import { BatchImportDialog } from './components/BatchImportDialog'
 import { ImportDialog } from './components/ImportDialog'
+import { InspectWindow } from './components/InspectWindow'
 import { RemoteFilesDialog } from './components/RemoteFilesDialog'
 import { Modal } from './components/Modal'
 import { NodeInspector } from './components/NodeInspector'
@@ -78,6 +80,8 @@ type ImportRequest = {
   species?: boolean
   /** D122e: an output on an SSH server instead of a file here. */
   remote?: { server: string; path: string }
+  /** D123c: the file read in the Inspect window, staged from its copy. */
+  inspection?: { id: string; name: string }
 }
 
 type InspectorSelection = Selection | { kind: 'branch'; id: string }
@@ -195,6 +199,8 @@ function App() {
   // D122e: "Import from here" on a server's tab, then the files chosen there.
   const [remoteFiles, setRemoteFiles] = useState<RemoteServer | null>(null)
   const [remoteBatch, setRemoteBatch] = useState<{ server: string; paths: string[] } | null>(null)
+  // D123c: the file shown in the Inspect window.
+  const [inspecting, setInspecting] = useState<InspectTarget | null>(null)
   // D85: the pinned note being written: an existing one by id, or a new one on a node.
   const [noteEditing, setNoteEditing] = useState<{ noteId: string } | { nodeId: string } | null>(null)
   const [inspectorWidth, setInspectorWidth] = useState(520)
@@ -550,15 +556,17 @@ function App() {
   }
 
   const nextImport = () =>
-    setImportRequest((current) =>
-      current && current.files.length > 1
+    setImportRequest((current) => {
+      // The Inspect window's copy is no longer needed once its import is done or cancelled.
+      if (current?.inspection) void api.closeInspection(current.inspection.id)
+      return current && current.files.length > 1
         ? {
             ...current,
             files: current.files.slice(1),
             position: current.position && { x: current.position.x, y: current.position.y + 90 },
           }
-        : null,
-    )
+        : null
+    })
 
   const changed = (node: Node, message?: string) => {
     setNotice(message ?? null)
@@ -901,9 +909,10 @@ function App() {
       )}
       {importRequest && investigation && (
         <ImportDialog
-          key={`${importRequest.targetId}-${importRequest.files.length}-${importRequest.files[0]?.name ?? ''}-${importRequest.remote?.path ?? ''}`}
+          key={`${importRequest.targetId}-${importRequest.files.length}-${importRequest.files[0]?.name ?? ''}-${importRequest.remote?.path ?? ''}-${importRequest.inspection?.id ?? ''}`}
           file={importRequest.files[0] ?? null}
           remote={importRequest.remote ?? null}
+          inspection={importRequest.inspection ?? null}
           target={[...canvas.nodes, ...canvas.species].find((n) => n.id === importRequest.targetId) ?? null}
           nodes={[...canvas.nodes, ...canvas.species]}
           asSpecies={importRequest.species ?? false}
@@ -922,13 +931,21 @@ function App() {
             nextImport()
           }}
           onImportFolder={
-            importRequest.targetId || importRequest.species || importRequest.files.length > 0 || importRequest.remote
+            importRequest.targetId ||
+            importRequest.species ||
+            importRequest.files.length > 0 ||
+            importRequest.remote ||
+            importRequest.inspection
               ? undefined
               : (folder) => {
                   setImportRequest(null)
                   setBatchFolder(folder)
                 }
           }
+          onInspect={(path) => {
+            setImportRequest(null)
+            setInspecting({ path })
+          }}
         />
       )}
       {remoteFiles && investigation && (
@@ -939,6 +956,28 @@ function App() {
             setRemoteFiles(null)
             if (batch) setRemoteBatch({ server, paths })
             else setImportRequest({ targetId: null, files: [], position: null, remote: { server, path: paths[0] } })
+          }}
+          onInspect={(target) => {
+            setRemoteFiles(null)
+            setInspecting(target)
+          }}
+        />
+      )}
+      {inspecting && (
+        <InspectWindow
+          key={`${inspecting.server ?? ''}:${inspecting.path}`}
+          target={inspecting}
+          settings={settings}
+          canImport={Boolean(investigation)}
+          onClose={() => setInspecting(null)}
+          onImport={(found) => {
+            setInspecting(null)
+            setImportRequest({
+              targetId: null,
+              files: [],
+              position: null,
+              inspection: { id: found.id, name: found.name },
+            })
           }}
         />
       )}
@@ -1482,6 +1521,7 @@ function App() {
             remote={remote}
             onRemoteChanged={loadRemote}
             onImportFrom={setRemoteFiles}
+            onInspect={setInspecting}
             onCwd={followCwd}
           />
         </div>

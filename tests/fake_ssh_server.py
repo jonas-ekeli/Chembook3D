@@ -246,6 +246,13 @@ class _FakeShell:
             self._write("  ".join(names) + ("\n" if names else ""))
         elif command == "echo":
             self._write(" ".join(args) + "\n")
+        elif command == "inspect":  # as the keeper's RC defines it (D123c)
+            for name in args:
+                target = posixpath.normpath(posixpath.join(self.cwd, name))
+                if self._local(target).is_file():
+                    self.process.stdout.write(f"\x1b]1337;Inspect={target}\x07".encode())
+                else:
+                    self._write(f"inspect: {name}: no such file\n")
         else:
             self._write(f"{command}: command not found\n")
         return True

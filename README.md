@@ -155,6 +155,13 @@ the terminal (`molden TS1-2.out &`) open their windows on this computer, as from
 Xming. The display is `localhost:0.0`, Xming's own. The change takes effect in a new shell; the
 tab offers **New shell** and says when no X server answers.
 
+**Inspect** a file without importing it: type `inspect TS1-2.out` in the terminal, or pick a file
+in **Import from here** or in the import dialog's file browser and press **Inspect**. The window
+shows the job steps, plays the optimization with its energy and convergence criteria (as Molden
+shows them), and animates the normal modes. For a job still running, **Refresh** (or **Every
+30 s**) reads it again; **Import this file** goes on to the import. It also opens xyz files and
+xTB's `xtbopt.log`. Nothing is imported and nothing on Saga changes.
+
 ## Claude in the app
 
 The **Claude** button opens a panel beside the notebook running

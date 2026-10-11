@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import tempfile
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePath
 from typing import Any
@@ -116,8 +117,9 @@ SCAN_OUTPUT_FILES = 200
 SCAN_OUTPUT_SIZE = 50_000_000
 
 
-def scan_outputs(folder: Path) -> list[str]:
-    """The xTB outputs in `folder` (not its subfolders) that ran a relaxed scan."""
+def scan_outputs(folder: Path, wrote: Callable[[str], bool] = xtb.ran_relaxed_scan) -> list[str]:
+    """The xTB outputs in `folder` (not its subfolders) that ran a relaxed scan, or `wrote`
+    something else."""
     found = []
     try:
         children = sorted(folder.iterdir(), key=lambda p: p.name.lower())[:SCAN_OUTPUT_FILES]
@@ -134,7 +136,7 @@ def scan_outputs(folder: Path) -> list[str]:
             text = child.read_bytes().decode("utf-8", errors="replace")
         except OSError:
             continue
-        if xtb.ran_relaxed_scan(text):
+        if wrote(text):
             found.append(text)
     return found
 

@@ -12,12 +12,16 @@ optimization prints its final structure.
 A relaxed scan (`$scan`) writes the optimized structure of each point to `xtbscan.log`, not to
 its output; that file, and the `path.xyz` a scan path job writes in the same layout, are read
 by `parse_structures` as one relaxed scan (D112).
+
+An optimization writes each cycle's structure, energy and gradient norm to `xtbopt.log`, which
+is not imported (its results are in the output) but can be inspected (D123c,
+`parse_optimization_log`).
 """
 
 import re
 import shlex
 
-from chembook3d.parsers.common import ParsedFile, ParsedStep, Route
+from chembook3d.parsers.common import Criterion, ParsedFile, ParsedStep, Route
 from chembook3d.xyz import ELEMENTS, Atom, element_of
 
 PROGRAM = "xTB"
@@ -31,6 +35,20 @@ SOLVATION_FLAGS = {"--alpb": "ALPB", "--gbsa": "GBSA", "-g": "GBSA", "--cosmo": 
                    "--tmcosmo": "COSMO", "--cpcmx": "CPCM-X"}  # fmt: skip
 
 _FLOAT = r"[-+]?\d+\.\d*(?:[EeDd][-+]?\d+)?"
+
+# D123b: the energy change (Eh) and gradient norm (Eh/bohr) each optimization level converges
+# below (xTB's `--opt LEVEL`, as its SETUP block prints them; normal is the default).
+OPT_LEVELS = {
+    "crude": (5e-4, 1e-2),
+    "sloppy": (1e-4, 6e-3),
+    "loose": (5e-5, 4e-3),
+    "lax": (2e-5, 2e-3),
+    "normal": (5e-6, 1e-3),
+    "tight": (1e-6, 8e-4),
+    "vtight": (1e-7, 2e-4),
+    "extreme": (5e-8, 5e-5),
+}
+DEFAULT_LEVEL = "normal"
 
 
 class NotXtbOutput(ValueError):
@@ -148,6 +166,47 @@ _SUMMARY = {
     "h": re.compile(r"^\s+\| TOTAL ENTHALPY\s+(" + _FLOAT + ") Eh"),
     "g": re.compile(r"^\s+\| TOTAL FREE ENERGY\s+(" + _FLOAT + ") Eh"),
 }
+# D123b: an optimization cycle's energy and change, and its gradient norm; the thresholds in
+# the SETUP block.
+_CYCLE_ENERGY = re.compile(
+    r"^ \* total energy\s*:\s*" + _FLOAT + r" Eh\s+change\s+(" + _FLOAT + ")"
+)
+_CYCLE_GNORM = re.compile(r"^\s+gradient norm\s*:\s*(" + _FLOAT + ")")
+_ENERGY_THRESHOLD = re.compile(r"^\s+:\s+energy convergence\s+(" + _FLOAT + ") Eh")
+_GRADIENT_THRESHOLD = re.compile(r"^\s+:\s+grad\. convergence\s+(" + _FLOAT + ") Eh")
+
+
+def criteria(change: float | None, gnorm: float | None, thresholds: tuple[float, float]):
+    """D123b: what xTB's optimizer checks on a structure: the energy change from the previous
+    cycle and the gradient norm, each below its threshold."""
+    energy_threshold, gradient_threshold = thresholds
+    found = []
+    if change is not None:
+        found.append(
+            Criterion(
+                "Energy change", change, energy_threshold, abs(change) < energy_threshold, "Eh"
+            )
+        )
+    if gnorm is not None:
+        found.append(
+            Criterion(
+                "Gradient norm", gnorm, gradient_threshold, gnorm < gradient_threshold, "Eh/bohr"
+            )
+        )
+    return found
+
+
+def thresholds_of(lines: list[str]) -> tuple[float, float] | None:
+    """The optimization thresholds an output's SETUP block prints, if it has one."""
+    energy = gradient = None
+    for line in lines:
+        if energy is None and (match := _ENERGY_THRESHOLD.match(line)):
+            energy = float(match.group(1))
+        elif gradient is None and (match := _GRADIENT_THRESHOLD.match(line)):
+            gradient = float(match.group(1))
+        if energy is not None and gradient is not None:
+            return energy, gradient
+    return None
 
 
 def _parse_block(lines: list[str], step: ParsedStep) -> None:
@@ -156,11 +215,16 @@ def _parse_block(lines: list[str], step: ParsedStep) -> None:
     raw_frequencies: list[float] = []
     reduced_masses: list[float] = []
     linear = False
+    cycle: tuple[float | None, float | None] = (None, None)  # D123b: the last cycle's change, gnorm
     i = 0
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
-        if stripped == "final structure:":
+        if match := _CYCLE_ENERGY.match(line):
+            cycle = (float(match.group(1)), None)
+        elif cycle[0] is not None and (match := _CYCLE_GNORM.match(line)):
+            cycle = (cycle[0], float(match.group(1)))
+        elif stripped == "final structure:":
             atoms = _read_final_structure(lines, i)
             if atoms:
                 step.geometries.append(atoms)
@@ -199,6 +263,11 @@ def _parse_block(lines: list[str], step: ParsedStep) -> None:
         i += 1
 
     step.scf_energy = total if total is not None else (energies[-1] if energies else None)
+    thresholds = thresholds_of(lines)
+    if step.geometries and cycle[0] is not None and thresholds is not None:
+        # The final structure is the last cycle's: its energy change and gradient norm.
+        step.geometry_criteria = [[] for _ in step.geometries[:-1]]
+        step.geometry_criteria.append(criteria(*cycle, thresholds))
     if raw_frequencies:
         # Drop the translations and rotations, printed as ±0.00 (5 for a linear molecule).
         zero = 5 if linear else 6
@@ -509,4 +578,92 @@ def parse_structures(text: str, name: str = "", outputs: list[str] | None = None
     if step.scf_energy is None:
         missing.append("total energy")
     step.missing = missing
+    return ParsedFile(program=PROGRAM, version=version, steps=[step])
+
+
+# ---------- the optimization log (D123c) ----------
+
+
+def is_optimization_log(text: str) -> bool:
+    """`xtbopt.log`: structures whose comment lines carry `energy:` and `gnorm:` (a scan's
+    `xtbscan.log` has no `gnorm:`, a scan path's `path.xyz` names its stages)."""
+    if not looks_like_structures(text):
+        return False
+    keys = _comment(text.lstrip("\ufeff").splitlines()[1])[0]
+    return "gnorm" in keys and "stage" not in keys
+
+
+def wrote_optimization_log(text: str) -> bool:
+    """An xTB output of an optimization that wrote `xtbopt.log`."""
+    return looks_like_xtb(text) and thresholds_of(text.splitlines()[:2000]) is not None
+
+
+def _optimization_output(outputs: list[str], last: list[Atom]) -> str | None:
+    """The output beside the log that wrote it: the one whose final structure is the log's last,
+    else the only optimization there."""
+    for text in outputs:
+        lines = text.splitlines()
+        for n, line in enumerate(lines):
+            if line.strip() == "final structure:":
+                if _same_structure(_read_final_structure(lines, n), last):
+                    return text
+                break
+    return outputs[0] if len(outputs) == 1 else None
+
+
+def parse_optimization_log(
+    text: str, name: str = "", outputs: list[str] | None = None
+) -> ParsedFile:
+    """D123c: xTB's optimization log as one optimization whose structures are its cycles, each
+    with its energy, energy change and gradient norm against the thresholds the output beside
+    it printed (`outputs`: the xTB optimization outputs in its folder), else the normal
+    level's. A log still being written ends on its last whole structure."""
+    frames, cut = _frames(text)
+    if not frames:
+        raise NotXtbOutput("no structures were found")
+    output = _optimization_output(outputs or [], frames[-1][2])
+    lines = output.splitlines() if output is not None else []
+    thresholds = thresholds_of(lines) if lines else None
+    missing = []
+    if thresholds is None:
+        thresholds = OPT_LEVELS[DEFAULT_LEVEL]
+        missing.append(
+            f"convergence thresholds (taken as xTB's {DEFAULT_LEVEL} level; the output of the "
+            "run was not found beside it)"
+        )
+    call = next((c for _, c, _ in frames if c), []) or (_call(lines) if lines else [])
+    route = route_from_call(call, _method(lines, call) or DEFAULT_METHOD)
+    route.job_type = "optimization"
+    route.compound_freq = False
+    charge, multiplicity = _charge_multiplicity(lines, call) if lines else (None, None)
+    if charge is None:
+        charge = _int(_flag_value(call, "--chrg", "-c")) or 0
+    if multiplicity is None:
+        multiplicity = 1 if _electrons(frames[0][2], charge) % 2 == 0 else 2
+
+    energies = [_float(keys.get("energy")) for keys, _, _ in frames]
+    gnorms = [_float(keys.get("gnorm")) for keys, _, _ in frames]
+    found = []
+    for n, gnorm in enumerate(gnorms):
+        before, now = (energies[n - 1] if n else None), energies[n]
+        change = now - before if now is not None and before is not None else None
+        found.append(criteria(change, gnorm, thresholds))
+    last = found[-1]
+    converged = len(last) == 2 and all(c.converged for c in last)
+    step = ParsedStep(
+        index=1,
+        route=route,
+        title=name or None,
+        charge=charge,
+        multiplicity=multiplicity,
+        geometries=[atoms for _, _, atoms in frames],
+        geometry_energies=energies,
+        geometry_criteria=found,
+        converged_geometries=[len(frames) - 1] if converged else [],
+        scf_energy=energies[-1],
+        optimization_converged=converged,
+        termination="abnormal" if cut or not converged else "normal",
+        missing=missing,
+    )
+    version = frames[0][0].get("xtb") or (_version(lines) if lines else None)
     return ParsedFile(program=PROGRAM, version=version, steps=[step])

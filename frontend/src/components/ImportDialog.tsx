@@ -52,10 +52,13 @@ function nameFilter(text: string): (name: string) => boolean {
 function FileBrowser({
   onPick,
   onPickFolder,
+  onInspect,
 }: {
   onPick: (path: string) => void
   /** D97: import every output in the folder shown. */
   onPickFolder?: (path: string) => void
+  /** D123c: open a file in the Inspect window instead. */
+  onInspect?: (path: string) => void
 }) {
   const [listing, setListing] = useState<FolderListing | null>(null)
   const [path, setPath] = useState('')
@@ -116,10 +119,22 @@ function FileBrowser({
         {entries.map((entry) => (
           <li key={entry.path}>
             {entry.is_file ? (
-              <button className="folder file-entry" onClick={() => onPick(entry.path)}>
-                <span>📄 {entry.name}</span>
-                <span className="muted">{entry.size !== null ? formatSize(entry.size) : ''}</span>
-              </button>
+              <div className="file-row">
+                <button className="folder file-entry" onClick={() => onPick(entry.path)}>
+                  <span>📄 {entry.name}</span>
+                  <span className="muted">{entry.size !== null ? formatSize(entry.size) : ''}</span>
+                </button>
+                {onInspect && (
+                  <button
+                    className="small"
+                    aria-label={`Inspect ${entry.name}`}
+                    title="Look at the file without importing it"
+                    onClick={() => onInspect(entry.path)}
+                  >
+                    Inspect
+                  </button>
+                )}
+              </div>
             ) : (
               <button className="folder" onClick={() => go(entry.path)}>
                 📁 {entry.name}
@@ -303,13 +318,17 @@ export function ImportDialog({
   asSpecies = false,
   linked = false,
   remote = null,
+  inspection = null,
   onClose,
   onImported,
   onImportFolder,
+  onInspect,
 }: {
   file: File | null
   /** D122e: an output on an SSH server, copied down and staged instead of a file here. */
   remote?: { server: string; path: string } | null
+  /** D123c: the file of an Inspect window, staged from the copy it read. */
+  inspection?: { id: string; name: string } | null
   target: Node | null
   nodes: Node[]
   /** Start with "free species" ticked (D69). */
@@ -326,6 +345,8 @@ export function ImportDialog({
   onImported: (imported: { kind: 'node' | 'group'; id: string }, notice: string) => void
   /** D97: switch to importing a whole folder (offered when importing new nodes). */
   onImportFolder?: (folder: string) => void
+  /** D123c: open a file of the file browser in the Inspect window instead. */
+  onInspect?: (path: string) => void
 }) {
   const [plan, setPlan] = useState<ImportPlan | null>(null)
   const [options, setOptions] = useState<ImportOptions>({
@@ -346,14 +367,16 @@ export function ImportDialog({
   }
 
   useEffect(() => {
-    if ((!file && !remote) || started.current) return
+    if ((!file && !remote && !inspection) || started.current) return
     started.current = true
     setBusy(true)
-    const staging = remote
-      ? api.remoteImport(remote.server, remote.path, target?.id)
-      : api.uploadImport(file!, file!.name, target?.id)
+    const staging = inspection
+      ? api.importInspected(inspection.id, target?.id)
+      : remote
+        ? api.remoteImport(remote.server, remote.path, target?.id)
+        : api.uploadImport(file!, file!.name, target?.id)
     staging.then(staged, (err: unknown) => setError(errorText(err))).finally(() => setBusy(false))
-  }, [file, remote, target])
+  }, [file, remote, inspection, target])
 
   const fromPath = (path: string) => {
     setBusy(true)
@@ -433,7 +456,7 @@ export function ImportDialog({
     >
       {error && <p role="alert">{error}</p>}
       {!plan && remote && busy && <p className="muted">Copying {remote.path} …</p>}
-      {!plan && !file && !remote && (
+      {!plan && !file && !remote && !inspection && (
         <>
           <p>
             Choose a Gaussian, ORCA or xTB output file, an xTB scan (xtbscan.log or path.xyz) or a CREST conformer
@@ -462,6 +485,13 @@ export function ImportDialog({
           </p>
           <FileBrowser
             onPick={fromPath}
+            onInspect={
+              onInspect &&
+              ((path) => {
+                if (token.current) void api.cancelImport(token.current)
+                onInspect(path)
+              })
+            }
             onPickFolder={
               onImportFolder &&
               ((folder) => {

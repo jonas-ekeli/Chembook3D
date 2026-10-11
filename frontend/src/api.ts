@@ -385,6 +385,44 @@ export type Steps = {
   trim: Trim | null
 }
 
+/** D123c: a file read for the Inspect window: on this computer (`server` null) or on a server. */
+export type InspectTarget = { path: string; server?: string | null }
+/** One job step of an inspected file; `job_type` "structures" for an xyz file. */
+export type InspectStep = {
+  index: number
+  job_type: string
+  route: string
+  method: string | null
+  basis: string | null
+  charge: number | null
+  multiplicity: number | null
+  termination: 'normal' | 'abnormal'
+  energy: number | null
+  optimization_converged: boolean | null
+  frequencies: number[]
+  imaginary: number
+  scan: 'relaxed' | 'rigid' | null
+  points: number
+  frames: StepFrame[]
+  modes: Modes | null
+  missing: string[]
+}
+export type Inspection = {
+  id: string
+  name: string
+  /** Where the file is, as an import records it (saga:/cluster/… on a server). */
+  path: string
+  server: string | null
+  server_name: string | null
+  size: number
+  /** When it was read (seconds since 1970). */
+  read_at: number
+  program: string
+  version: string | null
+  warnings: string[]
+  steps: InspectStep[]
+}
+
 /** D80: all atoms (when they correspond), chosen atoms, or the stored coordinates. */
 export type OverlayAlign = 'all' | 'atoms' | 'none'
 
@@ -1437,6 +1475,8 @@ export type RemoteServer = {
   /** The display the running shell forwards to, and whether an X server answers there. */
   shell_x11: string | null
   x11_ready: boolean | null
+  /** D123c: the shell has the `inspect FILE` command. */
+  inspect: boolean
 }
 
 export type RemoteStatus = { enabled: boolean; reason: string | null; servers: RemoteServer[] }
@@ -1512,6 +1552,14 @@ export const api = {
   /** Write a node's coordinates as <label>.xyz into the terminal's directory (D122f). */
   remoteSend: (id: string, nodeId: string, replace = false) =>
     request<RemoteSent>('POST', `${serverPath(id)}/send`, { node_id: nodeId, replace }),
+  /** D123c: read a file for the Inspect window, again on Refresh; nothing is imported. */
+  inspect: (target: InspectTarget) =>
+    request<Inspection>('POST', '/inspections', { path: target.path, server: target.server ?? null }),
+  refreshInspection: (id: string) => request<Inspection>('POST', `/inspections/${encodeURIComponent(id)}/refresh`),
+  closeInspection: (id: string) => request<void>('DELETE', `/inspections/${encodeURIComponent(id)}`),
+  /** Stage the inspected file (the copy made last) for the import dialog's preview. */
+  importInspected: (id: string, nodeId?: string | null) =>
+    request<ImportPlan>('POST', `/inspections/${encodeURIComponent(id)}/import`, { node_id: nodeId ?? null }),
   /** A one-time token for a server's terminal WebSocket. */
   remoteTerminal: (server: string) => request<{ token: string }>('POST', '/remote/terminals', { server }),
   claudeStatus: () => request<ClaudeStatus>('GET', '/claude'),

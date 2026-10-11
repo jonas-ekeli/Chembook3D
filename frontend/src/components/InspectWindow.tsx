@@ -1,0 +1,400 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  api,
+  ApiError,
+  CALCULATION_TYPES,
+  formatDelta,
+  geometryToXyz,
+  type Inspection,
+  type InspectStep,
+  type InspectTarget,
+  type Settings,
+} from '../api'
+import { hartree, withDisplacements } from '../util'
+import { Modal } from './Modal'
+import { Convergence, EnergyChart } from './StepMovie'
+import { Viewer3D } from './Viewer3D'
+
+// D123c: the Inspect window reads an output or xyz file, on this computer or on a server,
+// without importing it: its job steps, the structures of a step with their energies and
+// convergence criteria, and its normal modes. Refresh reads it again for a job still running
+// and keeps the structure shown; "Import this file" goes on to the import with the same copy.
+
+const SPEEDS = [1, 2, 5, 10, 20, 30]
+const AUTO_REFRESH = 30_000 // ms (A70)
+// A step opens on its last structure, the latest of a job still running, and stays on the last
+// one as Refresh brings more until another is chosen.
+const LAST = Number.MAX_SAFE_INTEGER
+
+function errorText(err: unknown): string {
+  if (err instanceof ApiError && typeof err.detail === 'string') return err.detail
+  return err instanceof Error ? err.message : String(err)
+}
+
+function jobLabel(step: InspectStep): string {
+  if (step.job_type === 'structures') return 'Structures'
+  const label = CALCULATION_TYPES[step.job_type] ?? step.job_type
+  return step.scan ? `${label} (${step.scan} scan)` : label
+}
+
+function size(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(0)} kB`
+  return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+}
+
+/** The step a file opens on: the last with a movie (an optimization or scan), else the last
+ * with a structure. */
+function firstShown(steps: InspectStep[]): number {
+  const movie = [...steps].reverse().find((s) => s.frames.length > 1)
+  const any = [...steps].reverse().find((s) => s.frames.length > 0)
+  return (movie ?? any ?? steps[steps.length - 1])?.index ?? 1
+}
+
+function frequency(value: number): string {
+  return value < 0 ? `${Math.abs(value).toFixed(1)}i` : value.toFixed(1)
+}
+
+export function InspectWindow({
+  target,
+  settings,
+  canImport,
+  onClose,
+  onImport,
+}: {
+  target: InspectTarget
+  settings: Settings | null
+  /** An investigation is open, so the file can be imported into it. */
+  canImport: boolean
+  onClose: () => void
+  /** Go on to the import dialog with this inspection's copy. */
+  onImport: (inspection: Inspection) => void
+}) {
+  const [inspection, setInspection] = useState<Inspection | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(true)
+  const [stepIndex, setStepIndex] = useState<number | null>(null)
+  const [index, setIndex] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const [speed, setSpeed] = useState(5)
+  const [mode, setMode] = useState('')
+  const [auto, setAuto] = useState(false)
+  // The window's inspection, to close it on the server when the window goes.
+  const opened = useRef<string | null>(null)
+  const closing = useRef(false)
+
+  useEffect(() => {
+    let cancelled = false
+    api.inspect(target).then(
+      (found) => {
+        opened.current = found.id
+        if (cancelled) {
+          void api.closeInspection(found.id)
+          return
+        }
+        setInspection(found)
+        setStepIndex(firstShown(found.steps))
+        setIndex(LAST)
+        setBusy(false)
+      },
+      (err: unknown) => {
+        if (cancelled) return
+        setError(errorText(err))
+        setBusy(false)
+      },
+    )
+    return () => {
+      cancelled = true
+      if (opened.current && !closing.current) void api.closeInspection(opened.current)
+      opened.current = null
+    }
+  }, [target])
+
+  const refresh = useCallback(() => {
+    const id = opened.current
+    if (!id) return
+    setBusy(true)
+    api.refreshInspection(id).then(
+      (found) => {
+        setInspection(found)
+        setError(null)
+        setBusy(false)
+        // The same step if it is still there; the structure shown is kept by its number.
+        setStepIndex((current) =>
+          current !== null && found.steps.some((s) => s.index === current) ? current : firstShown(found.steps),
+        )
+      },
+      (err: unknown) => {
+        setError(errorText(err))
+        setBusy(false)
+      },
+    )
+  }, [])
+
+  useEffect(() => {
+    if (!auto) return
+    const timer = setInterval(refresh, AUTO_REFRESH)
+    return () => clearInterval(timer)
+  }, [auto, refresh])
+
+  const step = useMemo(() => inspection?.steps.find((s) => s.index === stepIndex) ?? null, [inspection, stepIndex])
+  const frames = useMemo(() => step?.frames ?? [], [step])
+  const count = frames.length
+  const at = Math.min(index, Math.max(count - 1, 0))
+  const xyzFrames = useMemo(() => frames.map((f, n) => geometryToXyz(f.geometry, `structure ${n + 1}`)), [frames])
+  const modes = step?.modes ?? null
+  const vibration = useMemo(() => {
+    const chosen = mode === '' ? -1 : Number(mode)
+    return modes && chosen >= 0 ? { xyz: withDisplacements(modes.xyz, modes.modes[chosen]) } : null
+  }, [modes, mode])
+
+  useEffect(() => {
+    if (!playing || count < 2 || vibration) return
+    const timer = setInterval(() => setIndex((i) => (Math.min(i, count - 1) + 1) % count), 1000 / speed)
+    return () => clearInterval(timer)
+  }, [playing, speed, count, vibration])
+
+  const choose = (next: number) => {
+    setStepIndex(next)
+    setIndex(LAST)
+    setPlaying(false)
+    setMode('')
+  }
+  const move = (by: number) => {
+    setPlaying(false)
+    setIndex((at + by + count) % count)
+  }
+  const close = () => {
+    closing.current = true
+    if (opened.current) void api.closeInspection(opened.current)
+    opened.current = null
+    onClose()
+  }
+  const importIt = () => {
+    if (!inspection) return
+    // The import goes on with this copy; the window's own copy is closed by the import.
+    closing.current = true
+    opened.current = null
+    onImport(inspection)
+  }
+
+  const unit = settings?.energy_unit ?? 'kcal/mol'
+  const current = frames[at] ?? null
+  const last = [...frames].reverse().find((f) => f.energy !== null)?.energy ?? null
+  const title = inspection ? `Inspect ${inspection.name}` : 'Inspect'
+
+  return (
+    <Modal
+      title={title}
+      onClose={close}
+      wide
+      actions={
+        <>
+          <label className="check" title="Read the file again every 30 seconds while this window is open">
+            <input type="checkbox" checked={auto} disabled={!inspection} onChange={(event) => setAuto(event.target.checked)} />
+            Every 30 s
+          </label>
+          <button onClick={refresh} disabled={!inspection || busy} title="Read the file again, for a job still running">
+            Refresh
+          </button>
+          <button
+            onClick={importIt}
+            disabled={!inspection || !canImport}
+            title={canImport ? 'Go on to the import preview with this file' : 'Open an investigation to import into it'}
+          >
+            Import this file
+          </button>
+          <button className="primary" onClick={close}>
+            Close
+          </button>
+        </>
+      }
+    >
+      <div className="inspect" aria-label="Inspected file">
+        {error && <p role="alert">{error}</p>}
+        {!inspection && busy && (
+          <p className="muted">{target.server ? `Copying ${target.path} …` : `Reading ${target.path} …`}</p>
+        )}
+        {inspection && (
+          <>
+            <p className="inspect-origin small">
+              <span className="mono">{inspection.path}</span> · {inspection.program}
+              {inspection.version ? ` ${inspection.version}` : ''} · {size(inspection.size)} · read at{' '}
+              {new Date(inspection.read_at * 1000).toLocaleTimeString()}
+              {busy && <span className="muted"> · reading again…</span>}
+            </p>
+            {inspection.warnings.map((warning) => (
+              <p key={warning} className="warning small">
+                {warning}
+              </p>
+            ))}
+            <div className="inspect-steps">
+              <table className="small" aria-label="Job steps">
+                <thead>
+                  <tr>
+                    <th>Step</th>
+                    <th>Job</th>
+                    <th>Route</th>
+                    <th>Charge, mult.</th>
+                    <th>Ended</th>
+                    <th>Last SCF energy</th>
+                    <th>Imaginary</th>
+                    <th>Structures</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inspection.steps.map((s) => (
+                    <tr
+                      key={s.index}
+                      className={s.index === stepIndex ? 'chosen' : undefined}
+                      aria-selected={s.index === stepIndex}
+                      onClick={() => choose(s.index)}
+                    >
+                      <td>{s.index}</td>
+                      <td>
+                        {jobLabel(s)}
+                        {s.optimization_converged === true && <span className="criterion-met"> ✓</span>}
+                        {s.optimization_converged === false && (
+                          <span className="criterion-unmet" title="The optimization has not converged">
+                            {' '}
+                            ✗
+                          </span>
+                        )}
+                      </td>
+                      <td className="mono inspect-route" title={s.route}>
+                        {s.route || s.method || '–'}
+                      </td>
+                      <td>
+                        {s.charge ?? '?'}, {s.multiplicity ?? '?'}
+                      </td>
+                      <td className={s.termination === 'normal' ? undefined : 'criterion-unmet'}>
+                        {s.termination === 'normal' ? 'normally' : 'not (yet)'}
+                      </td>
+                      <td className="mono">{hartree(s.energy)}</td>
+                      <td>{s.frequencies.length ? s.imaginary : '–'}</td>
+                      <td>{s.frames.length || '–'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {step && step.missing.length > 0 && (
+              <p className="muted small">Not in the file: {step.missing.join('; ')}.</p>
+            )}
+            {step && count === 0 && (
+              <p className="muted">
+                This step prints no structure{step.job_type !== 'single_point' && inspection.program === 'xTB'
+                  ? '; xTB writes each optimization cycle to xtbopt.log, which can be inspected for the movie'
+                  : ''}
+                .
+              </p>
+            )}
+            {step && count > 0 && (
+              <div className="inspect-view">
+                <Viewer3D
+                  models={[{ xyz: xyzFrames[count - 1] }]}
+                  trajectory={vibration ? null : { frames: xyzFrames, index: at }}
+                  vibration={vibration}
+                />
+                <div className="inspect-side step-movie">
+                  {modes && (
+                    <select aria-label="Animate mode" value={mode} onChange={(event) => setMode(event.target.value)}>
+                      <option value="">No mode animation</option>
+                      {modes.order.map((n) => (
+                        <option key={n} value={n}>
+                          Mode {n + 1}: {frequency(modes.frequencies[n])} cm⁻¹
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {count > 1 && !vibration && (
+                    <div className="step-controls">
+                      <button className="small" aria-label="Previous structure" onClick={() => move(-1)}>
+                        ◀
+                      </button>
+                      <button
+                        className="small"
+                        aria-label={playing ? 'Pause' : 'Play'}
+                        onClick={() => setPlaying(!playing)}
+                      >
+                        {playing ? '❚❚' : '▶'}
+                      </button>
+                      <button className="small" aria-label="Next structure" onClick={() => move(1)}>
+                        ▶|
+                      </button>
+                      <input
+                        type="range"
+                        aria-label="Structure"
+                        min={0}
+                        max={count - 1}
+                        value={at}
+                        onChange={(event) => {
+                          setPlaying(false)
+                          setIndex(Number(event.target.value))
+                        }}
+                      />
+                      <select aria-label="Speed" value={speed} onChange={(event) => setSpeed(Number(event.target.value))}>
+                        {SPEEDS.map((s) => (
+                          <option key={s} value={s}>
+                            {s}/s
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {!vibration && (
+                    <p className="step-info small" aria-label="Structure shown">
+                      Structure {at + 1} of {count}
+                      {current?.point !== null && current?.point !== undefined && ` · scan point ${current.point} of ${step.points}`}
+                      {current?.converged && ' · converged'}
+                      {' · '}
+                      <span className="mono">E = {hartree(current?.energy)}</span>
+                      {current?.energy !== null && current?.energy !== undefined && last !== null && count > 1 && (
+                        <>
+                          {' · '}
+                          <span className="mono">
+                            ΔE = {formatDelta(current.energy - last, settings)} {unit}
+                          </span>{' '}
+                          <span className="muted">to the last structure</span>
+                        </>
+                      )}
+                    </p>
+                  )}
+                  {!vibration && (
+                    <>
+                      <EnergyChart
+                        items={frames.map((f, n) => ({ n, energy: f.energy, removed: false, spike: false }))}
+                        cuts={[]}
+                        at={at}
+                        last={last}
+                        unit={unit}
+                        settings={settings}
+                        selected={null}
+                        onPick={(i) => {
+                          setPlaying(false)
+                          setIndex(i)
+                        }}
+                      />
+                      <Convergence
+                        items={frames.map((f, n) => ({ n, criteria: f.criteria }))}
+                        at={at}
+                        onPick={(i) => {
+                          setPlaying(false)
+                          setIndex(i)
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+            <p className="muted small">
+              Read without importing: nothing is written to the investigation
+              {inspection.server_name ? ` or on ${inspection.server_name}; the copy is deleted when this window closes` : ''}.
+            </p>
+          </>
+        )}
+      </div>
+    </Modal>
+  )
+}

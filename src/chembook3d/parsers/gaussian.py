@@ -10,6 +10,7 @@ ParsedStep.missing so the import can report it as W-PARSE (FR-IMP-04). Energies 
 hartree exactly as printed.
 """
 
+import contextlib
 import hashlib
 import json
 import re
@@ -200,10 +201,15 @@ def _read_orientation(lines: list[str], start: int) -> tuple[list[Atom], int]:
     while i < len(lines) and not _is_dashes(lines[i]):
         parts = lines[i].split()
         if len(parts) >= 6:
-            number = int(parts[1])
-            if number > 0:  # skip dummy and ghost atoms
-                atoms.append(Atom(ELEMENTS[number - 1], *(float(v) for v in parts[-3:])))
+            try:
+                number = int(parts[1])
+                if number > 0:  # skip dummy and ghost atoms
+                    atoms.append(Atom(ELEMENTS[number - 1], *(float(v) for v in parts[-3:])))
+            except (ValueError, IndexError):  # a line cut off in a file still being written
+                return [], i
         i += 1
+    if i >= len(lines):
+        return [], i  # the file ends inside the table (a job still running, D123c)
     return atoms, i
 
 
@@ -326,7 +332,7 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
                 points[line.strip()].append(None)
                 criteria[line.strip()].append([])
             continue
-        elif line.startswith(" SCF Done:"):
+        elif line.startswith(" SCF Done:") and len(line.split()) > 4:
             step.scf_energy = float(line.split()[4])
             for name in _ORIENTATIONS:
                 if energies[name]:
@@ -438,7 +444,8 @@ def _read_mode_block(lines: list[str], start: int, count: int, step: ParsedStep)
     modes: list[list[list[float]]] = [[] for _ in range(count)]
     while i < len(lines) and not lines[i].lstrip().startswith("Atom"):
         if lines[i].startswith(" Red. masses --"):
-            step.reduced_masses += [float(v) for v in lines[i].split()[3:]]
+            with contextlib.suppress(ValueError):
+                step.reduced_masses += [float(v) for v in lines[i].split()[3:]]
         if lines[i].startswith(" Frequencies") or not lines[i].strip():
             return i
         i += 1
@@ -447,7 +454,10 @@ def _read_mode_block(lines: list[str], start: int, count: int, step: ParsedStep)
         parts = lines[i].split()
         if len(parts) != 2 + 3 * count or not parts[0].isdigit():
             break
-        values = [float(v) for v in parts[2:]]
+        try:
+            values = [float(v) for v in parts[2:]]
+        except ValueError:  # cut off in a file still being written (D123c)
+            break
         for m in range(count):
             modes[m].append(values[3 * m : 3 * m + 3])
         i += 1
