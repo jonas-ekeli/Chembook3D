@@ -83,11 +83,11 @@ export function XyzEditor({
           {servers.map((server) => (
             <button
               key={server.id}
-              disabled={!node.xyz || !server.cwd}
+              disabled={!node.xyz}
               title={
-                server.cwd
-                  ? `Write the saved coordinates as an .xyz file into ${server.cwd} on ${server.name}`
-                  : `The ${server.name} terminal has not reported its directory`
+                node.xyz
+                  ? `Write the saved coordinates as an .xyz file into ${server.cwd ?? 'the directory the terminal is in'} on ${server.name}`
+                  : 'This node has no coordinates to send'
               }
               onClick={() => void send(server)}
             >
