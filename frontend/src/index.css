@@ -2290,6 +2290,45 @@ pre.basis-text {
 .step-chart-hint {
   margin: 0;
 }
+/* D123b: the convergence criteria of the structure shown, and each over the structures */
+.step-criteria summary {
+  cursor: pointer;
+}
+.step-criteria-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.step-criteria-table th,
+.step-criteria-table td {
+  text-align: left;
+  padding: 0.1rem 0.3rem;
+  white-space: nowrap;
+}
+.step-criteria-table th {
+  font-weight: 500;
+}
+.step-criteria-table .step-criteria-name {
+  white-space: normal;
+}
+.step-criteria-spark {
+  width: 35%;
+}
+.step-criteria-spark svg {
+  display: block;
+  width: 100%;
+  min-width: 5rem;
+  height: 28px;
+  cursor: pointer;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.criterion-met {
+  color: #067647;
+}
+.criterion-unmet {
+  color: var(--danger);
+}
 .step-controls select {
   width: auto;
 }

@@ -79,6 +79,52 @@ def test_orca_optimization_and_relaxed_scan_mark_the_final_evaluation():
     assert scan.converged_geometries == [3]
 
 
+# ---------- D123b convergence criteria ----------
+
+
+def _table(criteria) -> list[tuple]:
+    return [(c.name, c.value, c.threshold, c.converged) for c in criteria]
+
+
+def test_gaussian_convergence_table_belongs_to_the_structure_its_forces_were_computed_on():
+    step = gaussian.parse(read("gaussian", "aziridinium-phos-full-c1.log")).steps[0]
+    assert len(step.geometry_criteria) == len(step.geometries)
+    first = step.geometry_criteria[0]
+    assert _table(first)[0] == ("Maximum force", 0.022921, 0.000015, False)
+    assert [c.name for c in first] == [
+        "Maximum force",
+        "RMS force",
+        "Maximum displacement",
+        "RMS displacement",
+        "Predicted energy change",
+    ]
+    assert _table(first)[-1] == ("Predicted energy change", -4.626117e-03, None, None)
+    assert {c.unit for c in first} == {"Eh/bohr", "bohr", "Eh"}
+    converged = step.geometry_criteria[step.converged_geometries[0]]
+    assert [c.converged for c in converged[:4]] == [True] * 4
+    # The final structure, printed again after the optimization, has no table of its own.
+    assert step.geometry_criteria[-1] == []
+
+
+def test_orca_geometry_convergence_per_cycle():
+    step = orca.parse(read("orca", "dvb_gopt.out")).steps[0]
+    assert [len(c) for c in step.geometry_criteria] == [4, 5, 5, 0]
+    assert _table(step.geometry_criteria[0]) == [
+        ("RMS gradient", 0.0003360624, 0.0001, False),
+        ("Maximum gradient", 0.0007463819, 0.0003, False),
+        ("RMS step", 0.0008673375, 0.002, True),
+        ("Maximum step", 0.0021272942, 0.004, True),
+    ]
+    assert step.geometry_criteria[1][0].name == "Energy change"
+    assert [c.unit for c in step.geometry_criteria[1]] == ["Eh", *["Eh/bohr"] * 2, *["bohr"] * 2]
+
+
+def test_no_criteria_where_none_are_printed():
+    for program, name in (("gaussian", "dvb_scan_unrelaxed.log"), ("orca", "dvb_ir.out")):
+        parse = gaussian.parse if program == "gaussian" else orca.parse
+        assert all(s.geometry_criteria == [] for s in parse(read(program, name)).steps)
+
+
 # ---------- the API ----------
 
 
@@ -91,6 +137,16 @@ def test_optimization_steps_end_on_the_final_geometry(open_client):
     assert len(data["frames"]) == len(parsed.geometries) - 1
     assert [f["energy"] for f in data["frames"]] == parsed.geometry_energies[:-1]
     assert [f["converged"] for f in data["frames"]] == [False] * (len(data["frames"]) - 1) + [True]
+    # D123b: each structure's convergence table, the last one's kept when it is shown once.
+    assert [len(f["criteria"]) for f in data["frames"]] == [5] * len(data["frames"])
+    assert data["frames"][0]["criteria"][0] == {
+        "name": "Maximum force",
+        "value": 0.022921,
+        "threshold": 0.000015,
+        "converged": False,
+        "unit": "Eh/bohr",
+    }
+    assert [c["converged"] for c in data["frames"][-1]["criteria"]][:4] == [True] * 4
     # The last structure is the calculation's final geometry, as stored, unmoved.
     final = data["frames"][-1]["geometry"]
     stored = [[a.element, a.x, a.y, a.z] for a in parsed.final_geometry]
