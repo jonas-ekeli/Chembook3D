@@ -127,8 +127,7 @@ function FileBrowser({
                 {onInspect && (
                   <button
                     className="small"
-                    aria-label={`Inspect ${entry.name}`}
-                    title="Look at the file without importing it"
+                    title={`Look at ${entry.name} without importing it`}
                     onClick={() => onInspect(entry.path)}
                   >
                     Inspect

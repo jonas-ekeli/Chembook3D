@@ -263,9 +263,11 @@ test('inspect a running job from the Saga terminal, then import it', async ({ pa
   // A file on this computer opens from the import dialog's file browser.
   await page.getByRole('button', { name: 'Import file…' }).click()
   const browse = page.getByRole('dialog', { name: 'Import calculation output' })
+  // wait for the first listing, so it cannot replace the folder typed below
+  await expect(browse.getByLabel('Folder path')).not.toHaveValue('')
   await browse.getByLabel('Folder path').fill(WORK)
   await browse.getByRole('button', { name: 'Go' }).click()
-  await browse.getByRole('button', { name: 'Inspect TS1.log' }).click()
+  await browse.getByRole('listitem').filter({ hasText: 'TS1.log' }).getByRole('button', { name: 'Inspect' }).click()
   await expect(window).toContainText(running)
   await expect(steps.getByRole('row')).toHaveCount(3)
   await window.getByRole('button', { name: 'Close' }).click()
