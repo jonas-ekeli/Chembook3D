@@ -6,7 +6,8 @@ Tools come in three kinds: "read" (changes nothing), "write" (changes the invest
 click in the app) and "confirm" (deletes something: the app asks the user first, D91).
 Not offered: opening, closing, creating or cloning investigations, sync, folder browsing,
 opening files with other programs, app settings and the read-only export. Calculation jobs for
-cloud sessions (D93) commit and push only their own job folder.
+cloud sessions (D93) commit and push only their own job folder. Files on a logged-in SSH server
+are read only, in the terminal's current directory and below (D124); logging in is not offered.
 """
 
 from dataclasses import dataclass, field
@@ -356,6 +357,89 @@ TOOLS: list[ToolSpec] = [
         "Check a scan path between two nodes or groups joined by an edge (D114): the atom "
         "match, charge, multiplicity, solvent, and for a TS end the coordinates suggested to "
         "hold. Changes nothing; the user sends the job from the app's Scan path dialog.",
+    ),
+    # ---------- files on a logged-in server such as Saga, read only (D124) ----------
+    T(
+        "list_servers",
+        "read",
+        "GET",
+        "/api/server-files",
+        "The SSH servers (Saga, ...) the app knows: whether the user is logged in and the "
+        "current directory of the server's terminal in the app. Only that directory and the "
+        "ones below it can be read; the user moves it with cd. You cannot log in.",
+    ),
+    T(
+        "list_server_files",
+        "read",
+        "GET",
+        "/api/server-files/{server_id}/files",
+        "The files in the server terminal's current directory (or a directory below it): "
+        "name, kind, size, time.",
+        help={
+            "server_id": "Id of a logged-in server, from list_servers (e.g. 'saga').",
+            "path": "A directory relative to the terminal's current directory (or a full path "
+            "under it); empty for the directory itself.",
+        },
+    ),
+    T(
+        "read_server_file",
+        "read",
+        "GET",
+        "/api/server-files/{server_id}/read",
+        "Read a text file on the server (an output, input, log or job script) with numbered "
+        "lines: a page (start, lines), its end (tail) or the lines matching a search with "
+        "some lines around each. Outputs can be tens of MB: start with tail or search "
+        "(e.g. 'Error termination', 'Normal termination', 'SCF Done', 'Converged?', "
+        "'imaginary frequencies'), not with the whole file. At most 2000 lines or 200 kB per "
+        "answer.",
+        help={
+            "server_id": "Id of a logged-in server, from list_servers.",
+            "path": "The file, relative to the terminal's current directory or a full path "
+            "under it.",
+            "start": "First line of the page (1-based); with search, the line to search from.",
+            "lines": "Lines in the page (default 400, at most 2000).",
+            "tail": "Read the last this many lines instead of a page.",
+            "search": "Show the lines containing this text (case-insensitive by default).",
+            "regex": "The search is a Python regular expression.",
+            "ignore_case": "Ignore upper and lower case in the search (default true).",
+            "context": "Lines shown before and after each match (default 2, at most 10).",
+            "last": "With search: show the last matches rather than the first (at most 200).",
+        },
+    ),
+    T(
+        "summarize_server_file",
+        "read",
+        "GET",
+        "/api/server-files/{server_id}/summary",
+        "A Gaussian, ORCA, xTB or CREST output (or an xyz file) on the server read as the "
+        "app's Inspect window reads it, without importing it: per job step the route, method, "
+        "basis, charge, multiplicity, termination, last SCF energy, whether the optimization "
+        "converged, frequencies with the imaginary ones, and every structure's energy and "
+        "convergence criteria. The best first look at a job: did it converge, why did it stop, "
+        "how many imaginary frequencies. Works on a job still running.",
+        help={
+            "server_id": "Id of a logged-in server, from list_servers.",
+            "path": "The output, relative to the terminal's current directory or a full path "
+            "under it.",
+        },
+    ),
+    T(
+        "get_server_structure",
+        "read",
+        "GET",
+        "/api/server-files/{server_id}/structure",
+        "One structure of an output or xyz file on the server as XYZ text (by default the "
+        "last structure of the last step that has any), to look at a geometry or compare it "
+        "with a node. Nothing is imported.",
+        help={
+            "server_id": "Id of a logged-in server, from list_servers.",
+            "path": "The file, relative to the terminal's current directory or a full path "
+            "under it.",
+            "step": "Job step number as summarize_server_file lists it (default: the last with "
+            "structures).",
+            "frame": "Structure number in the step, 1-based; negative counts from the end "
+            "(default -1, the last).",
+        },
     ),
     # ---------- changing ----------
     T(

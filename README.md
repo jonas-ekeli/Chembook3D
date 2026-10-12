@@ -162,6 +162,12 @@ shows them), and animates the normal modes. For a job still running, **Refresh**
 30 s**) reads it again; **Import this file** goes on to the import. It also opens xyz files and
 xTB's `xtbopt.log`. Nothing is imported and nothing on Saga changes.
 
+**Ask Claude about files on Saga**: while you are logged in, the Claude panel can read the files
+in the directory the Saga terminal is in, and in the directories below it, without importing
+them: "did TS1 converge?", "why did the job in opt2 stop?", "how many imaginary frequencies has
+the last frequency job?". `cd` in the terminal to where the jobs are first; Claude cannot read
+above that directory, cannot log in, and never writes, deletes or runs anything on Saga.
+
 ## Claude in the app
 
 The **Claude** button opens a panel beside the notebook running
