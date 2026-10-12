@@ -812,7 +812,7 @@ def test_claude_reads_pages_the_end_and_searches_without_changing_anything(at_wo
     for n in (500, 501, 70_000, 99_990):
         lines[n - 1] = f" Error termination via Lnk1e at line {n}"
     big = work / "big.log"
-    big.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    big.write_bytes(("\n".join(lines) + "\n").encode())  # \n on Windows too, as on Saga
     assert big.stat().st_size > keeper.MAX_READ
     before = _reads()
 
@@ -864,7 +864,7 @@ def test_claude_reads_pages_the_end_and_searches_without_changing_anything(at_wo
     assert _text(small).splitlines()[1:] == ["Last 2 lines of 5:", "      4\t", "      5\t0 1"]
 
     # A grown file is copied again; the copies go at log out.
-    big.write_text("\n".join(lines[:10]) + "\n", encoding="utf-8")
+    big.write_bytes(("\n".join(lines[:10]) + "\n").encode())
     again = at_work.get("/api/server-files/saga/read", params={"path": "big.log", "search": "x"})
     assert "no match in lines 1-10" in _text(again)
     assert len(_reads() - before) == 1  # small enough to read without a copy; the old one stays
