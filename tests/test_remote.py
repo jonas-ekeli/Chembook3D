@@ -11,11 +11,15 @@ import threading
 import time
 from pathlib import Path
 
+import anyio
 import asyncssh
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from chembook3d.app import create_app
+from chembook3d.mcp_server import Bridge
+from chembook3d.mcp_tools import BY_NAME, READ_ONLY_TOOLS
 from chembook3d.remote import client, keeper
 from tests.fake_ssh_server import CODE, PASSWORD, USER, FakeSaga, FakeXServer, free_display
 
@@ -761,3 +765,232 @@ def test_send_refusals(at_work, saga):
     response = at_work.post("/api/remote/servers/saga/send", json=send, headers=ORIGIN)
     assert response.status_code == 409 and "Not logged in" in response.json()["detail"]
     assert not (saga.root / WORK.lstrip("/") / "water.xyz").exists()
+
+
+# ---------- T-SSH-11..14 Claude reads files in the terminal's directory (D124) ----------
+
+
+def _reads() -> set[str]:
+    return {p.name for p in Path(tempfile.gettempdir()).glob("chembook3d-read-*")}
+
+
+def _text(response) -> str:
+    assert response.status_code == 200, response.text
+    return response.text
+
+
+def test_claude_sees_the_servers_and_the_files_in_the_terminals_directory(at_work):
+    # No Origin, as Claude's MCP server sends.
+    listed = at_work.get("/api/server-files").json()["servers"]
+    assert listed == [
+        {
+            **{"id": "saga", "name": "Saga", "host": "127.0.0.1", "username": USER},
+            **{"logged_in": True, "cwd": WORK, "readable": True, "reason": None},
+        }
+    ]
+    files = at_work.get("/api/server-files/saga/files").json()
+    assert files["path"] == WORK
+    assert [(e["name"], e["kind"]) for e in files["entries"]] == [
+        ("old", "directory"),
+        (TS, "file"),
+        (TS_SP, "file"),
+        ("job.gjf", "file"),
+    ]
+    below = at_work.get("/api/server-files/saga/files", params={"path": "old"}).json()
+    assert (below["path"], below["entries"]) == (f"{WORK}/old", [])
+    for outside in ("..", "/cluster/work", "old/../..", "/"):
+        response = at_work.get("/api/server-files/saga/files", params={"path": outside})
+        assert response.status_code == 409, outside
+        assert "outside the terminal's current directory" in response.json()["detail"]
+    foreign = {"origin": "https://evil.example"}
+    assert at_work.get("/api/server-files/saga/files", headers=foreign).status_code == 403
+
+
+def test_claude_reads_pages_the_end_and_searches_without_changing_anything(at_work, saga):
+    work = saga.root / WORK.lstrip("/")
+    lines = [f"line {n:06d} of a long output" for n in range(1, 100_001)]
+    for n in (500, 501, 70_000, 99_990):
+        lines[n - 1] = f" Error termination via Lnk1e at line {n}"
+    big = work / "big.log"
+    big.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert big.stat().st_size > keeper.MAX_READ
+    before = _reads()
+
+    first = _text(at_work.get("/api/server-files/saga/read", params={"path": "big.log"}))
+    shown = first.splitlines()
+    assert re.match(rf"saga:{WORK}/big\.log \(2\.\d MB, modified 20\d\d-", shown[0])
+    assert shown[1] == "Lines 1-400; the file goes on: start=401."
+    assert shown[2] == "      1\tline 000001 of a long output" and len(shown) == 402
+    assert _reads() == before  # read from the start of the file, not copied
+
+    deep = at_work.get(
+        "/api/server-files/saga/read", params={"path": "big.log", "start": 99_995, "lines": 50}
+    )
+    shown = _text(deep).splitlines()
+    assert shown[1] == "Lines 99995-100000 of 100000."
+    assert shown[-1] == " 100000\tline 100000 of a long output"
+    assert len(_reads() - before) == 1  # one copy, kept
+
+    end = _text(at_work.get("/api/server-files/saga/read", params={"path": "big.log", "tail": 3}))
+    assert end.splitlines()[1:] == [
+        "Last 3 lines (line numbers unknown without reading the whole file):",
+        "line 099998 of a long output",
+        "line 099999 of a long output",
+        "line 100000 of a long output",
+    ]
+
+    params = {"path": "big.log", "search": "error TERMINATION", "context": 1}
+    found = _text(at_work.get("/api/server-files/saga/read", params=params)).splitlines()
+    assert found[1] == 'Search for "error TERMINATION": 4 matching lines in lines 1-100000.'
+    assert found[2:7] == [
+        "    499\tline 000499 of a long output",
+        "    500\t Error termination via Lnk1e at line 500",
+        "    501\t Error termination via Lnk1e at line 501",
+        "    502\tline 000502 of a long output",
+        "--",
+    ]
+    assert len(_reads() - before) == 1  # the same copy again
+    params = {"path": "big.log", "search": r"line (7|9)\d+$", "regex": True, "context": 0}
+    params |= {"last": True, "ignore_case": False}
+    found = _text(at_work.get("/api/server-files/saga/read", params=params)).splitlines()
+    assert found[1].endswith("2 matching lines in lines 1-100000.")
+    assert found[2:] == [
+        "  70000\t Error termination via Lnk1e at line 70000",
+        "--",
+        "  99990\t Error termination via Lnk1e at line 99990",
+    ]
+
+    small = at_work.get("/api/server-files/saga/read", params={"path": "job.gjf", "tail": 2})
+    assert _text(small).splitlines()[1:] == ["Last 2 lines of 5:", "      4\t", "      5\t0 1"]
+
+    # A grown file is copied again; the copies go at log out.
+    big.write_text("\n".join(lines[:10]) + "\n", encoding="utf-8")
+    again = at_work.get("/api/server-files/saga/read", params={"path": "big.log", "search": "x"})
+    assert "no match in lines 1-10" in _text(again)
+    assert len(_reads() - before) == 1  # small enough to read without a copy; the old one stays
+    at_work.post("/api/remote/servers/saga/logout", headers=ORIGIN)
+    assert _reads() == before
+    assert sorted(p.name for p in work.iterdir()) == sorted(
+        [TS, TS_SP, "job.gjf", "old", "big.log"]
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need extra rights on Windows")
+def test_a_link_out_of_the_directory_is_not_followed_and_cd_moves_what_is_readable(at_work, saga):
+    home = saga.root / "cluster" / "home" / USER
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "secret.txt").write_text("not for Claude\n", encoding="utf-8")
+    work = saga.root / WORK.lstrip("/")
+    (work / "secret.txt").symlink_to(home / "secret.txt")
+    (work / "ts.log").symlink_to(work / TS)
+    (work / "away").symlink_to(home, target_is_directory=True)
+
+    listed = at_work.get("/api/server-files/saga/files").json()["entries"]
+    kinds = {e["name"]: e["kind"] for e in listed}
+    assert (kinds["secret.txt"], kinds["away"], kinds["ts.log"]) == ("outside", "outside", "file")
+    for path in ("secret.txt", "away/secret.txt", f"{WORK}/away/secret.txt"):
+        response = at_work.get("/api/server-files/saga/read", params={"path": path})
+        assert response.status_code == 409, path
+        assert f"/cluster/home/{USER}" in response.json()["detail"]
+    assert "not for Claude" not in at_work.get("/api/server-files/saga/files?path=away").text
+    inside = at_work.get("/api/server-files/saga/read", params={"path": "ts.log", "lines": 1})
+    assert _text(inside).startswith(f"saga:{WORK}/{TS} (")  # by the path it resolves to
+
+    with _terminal(at_work) as ws:
+        _read_until(ws, lambda text, m: "$ " in text)
+        ws.send_json({"type": "input", "data": f"cd /cluster/home/{USER}\r"})
+        _read_until(ws, lambda text, m: {"type": "cwd", "path": f"/cluster/home/{USER}"} in m)
+    secret = at_work.get("/api/server-files/saga/read", params={"path": "secret.txt"})
+    assert "not for Claude" in _text(secret)
+    response = at_work.get("/api/server-files/saga/read", params={"path": f"{WORK}/{TS}"})
+    assert response.status_code == 409
+
+
+def test_an_output_is_summarised_and_its_structures_read(at_work, saga):
+    summary = at_work.get("/api/server-files/saga/summary", params={"path": TS})
+    assert summary.status_code == 200, summary.text
+    found = summary.json()
+    assert (found["path"], found["program"]) == (f"saga:{WORK}/{TS}", "Gaussian")
+    steps = found["steps"]
+    assert [s["job_type"] for s in steps] == ["ts_optimization", "frequency"]
+    assert steps[0]["optimization_converged"] is True
+    assert steps[1]["imaginary"] == 1 and steps[1]["imaginary_frequencies"][0] < 0
+    rows = steps[0]["structure_list"]
+    assert len(rows) == steps[0]["structures"] > 1 and rows[-1]["converged"] is True
+    assert rows[-1]["criteria"]["Maximum force"][1:] == [1.5e-05, True] and rows[-1]["energy"] < 0
+
+    last = _text(at_work.get("/api/server-files/saga/structure", params={"path": TS}))
+    head = last.splitlines()
+    assert int(head[0]) == steps[-1]["atoms"]
+    assert head[1].startswith(f"saga:{WORK}/{TS} step 2 structure 1 of 1 E=-")
+    first = at_work.get("/api/server-files/saga/structure", params={"path": TS, "step": 1})
+    assert _text(first).splitlines()[1].endswith(" converged")
+    params = {"path": TS, "step": 1, "frame": 1}
+    one = _text(at_work.get("/api/server-files/saga/structure", params=params)).splitlines()
+    assert one[1].startswith(f"saga:{WORK}/{TS} step 1 structure 1 of {steps[0]['structures']}")
+    for bad in ({"step": 7}, {"step": 1, "frame": 999}):
+        response = at_work.get("/api/server-files/saga/structure", params={"path": TS, **bad})
+        assert response.status_code == 422, bad
+    copied = _reads()
+    at_work.post("/api/remote/servers/saga/logout", headers=ORIGIN)
+    assert not copied & _reads()
+
+
+def test_what_claude_cannot_read(at_work, saga, monkeypatch):
+    work = saga.root / WORK.lstrip("/")
+    (work / "data.chk").write_bytes(b"\x00\x01binary" * 100)
+    read = "/api/server-files/saga/read"
+    for params, status, why in (
+        ({"path": "data.chk"}, 422, "not a text file"),
+        ({"path": "missing.log"}, 409, "Saga"),
+        ({"path": "old"}, 409, "is a directory"),
+        ({"path": "job.gjf", "start": 9}, 422, "has 5 lines"),
+        ({"path": "job.gjf", "search": "(", "regex": True}, 422, "regular expression"),
+    ):
+        response = at_work.get(read, params=params)
+        assert response.status_code == status and why in response.json()["detail"], params
+    response = at_work.get("/api/server-files/saga/summary", params={"path": "job.gjf"})
+    assert response.status_code == 422
+    assert at_work.get("/api/server-files/betzy/files").status_code == 404
+
+    with monkeypatch.context() as patched:  # a keeper from before D124
+        patched.setattr("chembook3d.api.server_files.READER_PROTOCOL", keeper.PROTOCOL + 1)
+        response = at_work.get("/api/server-files/saga/files")
+    assert response.status_code == 409 and "logs out and logs in again" in response.json()["detail"]
+
+    at_work.post("/api/remote/servers/saga/logout", headers=ORIGIN)
+    status = at_work.get("/api/server-files").json()["servers"][0]
+    assert (status["logged_in"], status["readable"]) == (False, False)
+    response = at_work.get(read, params={"path": "job.gjf"})
+    assert response.status_code == 409
+    assert "Claude cannot log in" in response.json()["detail"]
+
+
+def test_claudes_tools_read_the_server_and_are_allowed_without_asking(at_work):
+    tools = {
+        "list_servers",
+        "list_server_files",
+        "read_server_file",
+        "summarize_server_file",
+        "get_server_structure",
+    }
+    assert tools <= READ_ONLY_TOOLS and all(BY_NAME[t].method == "GET" for t in tools)
+
+    async def run():
+        http = httpx.AsyncClient(transport=httpx.ASGITransport(app=at_work.app), base_url=APP)
+        async with http:
+            bridge = Bridge(APP, http=http)
+            servers = await bridge.call("list_servers", {})
+            assert not servers.isError and f'"cwd": "{WORK}"' in servers.content[0].text
+            tail = await bridge.call(
+                "read_server_file", {"server_id": "saga", "path": "job.gjf", "tail": 1}
+            )
+            assert tail.content[0].text.splitlines()[-1] == "      5\t0 1"
+            xyz = await bridge.call("get_server_structure", {"server_id": "saga", "path": TS})
+            assert xyz.content[0].text.splitlines()[1].startswith(f"saga:{WORK}/{TS} step 2")
+            away = await bridge.call("list_server_files", {"server_id": "saga", "path": ".."})
+            assert away.isError and "outside the terminal's current directory" in (
+                away.content[0].text
+            )
+
+    anyio.run(run)

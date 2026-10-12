@@ -16,6 +16,7 @@ shell's output and takes its input until either side closes.
 
 import argparse
 import asyncio
+import base64
 import codecs
 import contextlib
 import hmac
@@ -33,7 +34,9 @@ from pathlib import Path
 
 import asyncssh
 
-PROTOCOL = 3  # 2: X11 forwarding (D123a); 3: the `inspect` command (D123c)
+# 2: X11 forwarding (D123a); 3: the `inspect` command (D123c); 4: `read`, and `within` on `list`
+# and `download`, for Claude reading files (D124)
+PROTOCOL = 4
 KEEPER_FILE = "keeper.json"
 KNOWN_HOSTS = "known_hosts"
 LOG_FILE = "keeper.log"
@@ -78,6 +81,7 @@ MAX_UPLOAD = 10 * 1024**2  # bytes of one file sent to a server; a structure is 
 SEND_NAME = re.compile(r"^[^/\x00-\x1f\x7f]{1,255}$")  # a file name the keeper writes
 MAX_DOWNLOAD = 2 * 1024**3  # bytes copied down in one import (A69)
 COPY_WAIT = 3600  # seconds the app waits for a copy
+MAX_READ = 1024**2  # bytes of a file one `read` returns (D124)
 # X11 forwarding (D123a): a display as DISPLAY names one, [host]:number[.screen]; the X server
 # listens on TCP port 6000 + number, or on a local socket when there is no host (Linux).
 X11_DISPLAY = re.compile(
@@ -415,6 +419,33 @@ def _reason(exc: BaseException) -> str:
     return str(exc) or type(exc).__name__
 
 
+class Outside(ValueError):
+    """D124: a path Claude may not read: outside the shell's current directory, or no directory
+    reported yet."""
+
+
+async def within(session: Session, sftp: asyncssh.SFTPClient, path: object) -> str:
+    """D124: the full path `path` names (relative to the shell's current directory, symlinks
+    followed by the server's realpath), refused unless it is that directory or below it."""
+    shell = session.shell
+    if shell is None or not shell.cwd:
+        raise Outside(
+            f"The {session.server['name']} terminal has not reported its current directory, so "
+            "no file can be read there."
+        )
+    if path is not None and not isinstance(path, str):
+        raise Outside("The path must be text.")
+    root = await sftp.realpath(shell.cwd)
+    target = await sftp.realpath(posixpath.join(shell.cwd, path or "."))
+    if target != root and not target.startswith(root.rstrip("/") + "/"):
+        raise Outside(
+            f"{target} is outside the terminal's current directory {root}; only that directory "
+            "and the ones below it can be read. The user can cd there in the "
+            f"{session.server['name']} tab."
+        )
+    return target
+
+
 class _Client(asyncssh.SSHClient):
     def __init__(self, keeper: "Keeper", login: Login):
         self._keeper = keeper
@@ -672,18 +703,25 @@ class Keeper:
                 except (OSError, asyncssh.Error) as exc:
                     return {"ok": False, "error": f"Could not start a shell: {_reason(exc)}"}
             return {"ok": True}
-        if op in ("list", "download", "upload"):
+        if op in ("list", "download", "upload", "read"):
             session = self.sessions.get(str(msg.get("server")))
             if session is None:
                 return {"ok": False, "error": "Not logged in."}
+            inside = msg.get("within") is True  # D124: only the shell's directory and below
             try:
                 if op == "list":
-                    return await self._list(session, msg.get("path"))
+                    return await self._list(session, msg.get("path"), inside)
                 if op == "upload":
                     return await self._upload(
                         session, msg.get("name"), msg.get("text"), msg.get("replace") is True
                     )
-                return await self._download(session, msg.get("paths"), msg.get("folder"))
+                if op == "read":
+                    return await self._read(
+                        session, msg.get("path"), msg.get("offset"), msg.get("length")
+                    )
+                return await self._download(session, msg.get("paths"), msg.get("folder"), inside)
+            except Outside as exc:
+                return {"ok": False, "error": str(exc), "outside": True}
             except (OSError, asyncssh.Error) as exc:
                 session.sftp = None  # opened again next time
                 return {"ok": False, "error": f"{session.server['name']}: {_reason(exc)}"}
@@ -692,12 +730,17 @@ class Keeper:
             return {"ok": True}
         return {"ok": False, "error": f"Unknown operation {op!r}."}
 
-    async def _list(self, session: Session, path: object) -> dict:
-        """The files in a directory, by default the shell's current one (D122e)."""
+    async def _list(self, session: Session, path: object, inside: bool = False) -> dict:
+        """The files in a directory, by default the shell's current one (D122e). `inside`
+        (D124): only that directory or one below it, and a link out of it is listed without
+        following it."""
         sftp = await session.files()
-        if not isinstance(path, str) or not path:
-            path = session.shell.cwd if session.shell and session.shell.cwd else "."
-        path = await sftp.realpath(path)
+        if inside:
+            path = await within(session, sftp, path)
+        else:
+            if not isinstance(path, str) or not path:
+                path = session.shell.cwd if session.shell and session.shell.cwd else "."
+            path = await sftp.realpath(path)
         entries = []
         for entry in await sftp.readdir(path):
             name = entry.filename
@@ -709,7 +752,12 @@ class Keeper:
                 kind = "directory"
             elif attrs.type == asyncssh.FILEXFER_TYPE_SYMLINK:
                 try:
+                    if inside:
+                        await within(session, sftp, posixpath.join(path, name))
                     attrs = await sftp.stat(posixpath.join(path, name))
+                except Outside:
+                    entries.append({"name": name, "kind": "outside"})
+                    continue
                 except (OSError, asyncssh.Error):
                     continue
                 kind = "directory" if attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY else "file"
@@ -720,8 +768,11 @@ class Keeper:
             )
         return {"ok": True, "path": path, "entries": entries}
 
-    async def _download(self, session: Session, paths: object, folder: object) -> dict:
-        """Copy files down into a local folder the app chose, each under its own name."""
+    async def _download(
+        self, session: Session, paths: object, folder: object, inside: bool = False
+    ) -> dict:
+        """Copy files down into a local folder the app chose, each under its own name. `inside`
+        (D124): only from the shell's directory or below, each file by the path it resolves to."""
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
             return {"ok": False, "error": "Name the files to copy."}
         if not isinstance(folder, str) or not Path(folder).is_dir():
@@ -735,19 +786,59 @@ class Keeper:
                 failed.append({"path": path, "reason": "not a full path to a file"})
                 continue
             try:
-                size = (await sftp.stat(path)).size or 0
+                if inside:
+                    path = await within(session, sftp, path)
+                    name = posixpath.basename(path)
+                attrs = await sftp.stat(path)
+                size = attrs.size or 0
                 total += size
                 if total > MAX_DOWNLOAD:
                     failed.append({"path": path, "reason": "more than 2 GB in one import"})
                     continue
                 local = Path(folder) / name
                 await sftp.get(path, str(local))
+            except Outside as exc:
+                failed.append({"path": path, "reason": str(exc)})
+                continue
             except (OSError, asyncssh.Error) as exc:
                 failed.append({"path": path, "reason": _reason(exc)})
                 continue
             session.used = time.monotonic()
-            copied.append({"path": path, "local": str(local), "size": size})
+            copied.append(
+                {"path": path, "local": str(local), "size": size, "modified": attrs.mtime}
+            )
         return {"ok": True, "files": copied, "failed": failed}
+
+    async def _read(self, session: Session, path: object, offset: object, length: object) -> dict:
+        """D124: bytes of a file in the shell's current directory or below, for Claude: at most
+        MAX_READ from `offset` (from the end when negative), with the file's size and time. A
+        `length` of 0 reads only those."""
+        if not isinstance(path, str) or not path:
+            return {"ok": False, "error": "Name the file to read."}
+        sftp = await session.files()
+        path = await within(session, sftp, path)
+        attrs = await sftp.stat(path)
+        if attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY:
+            return {"ok": False, "error": f"{path} is a directory."}
+        size = attrs.size or 0
+        start = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
+        start = max(size + start, 0) if start < 0 else min(start, size)
+        count = length if isinstance(length, int) and not isinstance(length, bool) else MAX_READ
+        count = max(0, min(count, MAX_READ, size - start))
+        data = b""
+        if count:
+            async with sftp.open(path, "rb") as handle:
+                await handle.seek(start)
+                data = await handle.read(count)
+            session.used = time.monotonic()
+        return {
+            "ok": True,
+            "path": path,
+            "size": size,
+            "modified": attrs.mtime,
+            "offset": start,
+            "data": base64.b64encode(data).decode("ascii"),
+        }
 
     async def _upload(self, session: Session, name: object, text: object, replace: bool) -> dict:
         """Write a small text file into the shell's current directory (D122f). A file already

@@ -269,6 +269,9 @@ async def logout(server_id: str, request: Request) -> None:
     _check(request)
     with contextlib.suppress(client.KeeperError):
         await client.call("logout", server=server_id)
+    copied = getattr(request.app.state, "server_copies", None)
+    if copied is not None:  # D124: Claude's copies of the server's files
+        copied.forget(server_id)
 
 
 class ShellIn(BaseModel):
