@@ -79,6 +79,49 @@ test('play a relaxed scan, its converged points only, with the measurement follo
   await expect(window.getByLabel('Atom numbers')).toBeVisible()
 })
 
+test('the Inspect window shows a scan by its converged points too', async ({ page }) => {
+  // D125, T-UI-28
+  await newInvestigation(page, 'Inspect scan')
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  const browse = page.getByRole('dialog', { name: 'Import calculation output' })
+  // wait for the first listing, so it cannot replace the folder typed below
+  await expect(browse.getByLabel('Folder path')).not.toHaveValue('')
+  await browse.getByLabel('Folder path').fill(join(FIXTURES, 'gaussian'))
+  await browse.getByRole('button', { name: 'Go' }).click()
+  await browse
+    .getByRole('listitem')
+    .filter({ hasText: 'dvb_scan_relaxed.log' })
+    .getByRole('button', { name: 'Inspect' })
+    .click()
+
+  const window = page.getByRole('dialog', { name: 'Inspect dvb_scan_relaxed.log' })
+  const shown = window.getByLabel('Structure shown')
+  const slider = window.getByLabel('Structure', { exact: true })
+  const only = window.getByLabel('Converged points only')
+  // A scan opens on its converged points, one per scan point, on the last.
+  await expect(only).toBeChecked()
+  await expect(slider).toHaveAttribute('max', '12')
+  await expect(shown).toContainText('Structure 61 of 61 · scan point 13 of 13 · converged')
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT })
+  await window.getByRole('button', { name: 'Previous structure' }).click()
+  await expect(shown).toContainText('scan point 12 of 13 · converged')
+  const point12 = /Structure (\d+) of 61/.exec((await shown.textContent()) ?? '')![1]
+
+  // Every structure, keeping the one shown.
+  await only.uncheck()
+  await expect(slider).toHaveAttribute('max', '60')
+  await expect(shown).toContainText(`Structure ${point12} of 61 · scan point 12 of 13 · converged`)
+  await window.getByRole('button', { name: 'Previous structure' }).click()
+  await expect(shown).toContainText(`Structure ${Number(point12) - 1} of 61 · scan point 12 of 13`)
+  await expect(shown).not.toContainText('converged')
+  // Back to the converged points: the structure's own point.
+  await only.check()
+  await expect(slider).toHaveAttribute('max', '12')
+  await expect(shown).toContainText(`Structure ${point12} of 61 · scan point 12 of 13 · converged`)
+  await window.getByRole('button', { name: 'Close' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
 test('an xTB scan plays, and "Use this structure" changes a path node in place', async ({ page }) => {
   // D112, T-UI-16
   test.slow()

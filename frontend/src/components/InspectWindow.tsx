@@ -19,6 +19,8 @@ import { Viewer3D } from './Viewer3D'
 // without importing it: its job steps, the structures of a step with their energies and
 // convergence criteria, and its normal modes. Refresh reads it again for a job still running
 // and keeps the structure shown; "Import this file" goes on to the import with the same copy.
+// A scan shows only the structure each point converged on unless every structure is asked for,
+// as the step movie does (D125, D101).
 
 const SPEEDS = [1, 2, 5, 10, 20, 30]
 const AUTO_REFRESH = 30_000 // ms (A70)
@@ -78,6 +80,7 @@ export function InspectWindow({
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(5)
   const [mode, setMode] = useState('')
+  const [convergedOnly, setConvergedOnly] = useState(true)
   const [auto, setAuto] = useState(false)
   // The window's inspection, to close it on the server when the window goes.
   const opened = useRef<string | null>(null)
@@ -139,9 +142,20 @@ export function InspectWindow({
 
   const step = useMemo(() => inspection?.steps.find((s) => s.index === stepIndex) ?? null, [inspection, stepIndex])
   const frames = useMemo(() => step?.frames ?? [], [step])
-  const count = frames.length
+  // D125: a scan whose points have converged can be shown one structure per point; until the
+  // first point of a running scan converges, every structure is shown.
+  const filterable =
+    step?.scan !== null && step?.scan !== undefined && frames.some((f) => f.converged) && frames.some((f) => !f.converged)
+  const shown = useMemo(() => {
+    const all = frames.map((frame, n) => ({ frame, n }))
+    return filterable && convergedOnly ? all.filter(({ frame }) => frame.converged) : all
+  }, [frames, filterable, convergedOnly])
+  const count = shown.length
   const at = Math.min(index, Math.max(count - 1, 0))
-  const xyzFrames = useMemo(() => frames.map((f, n) => geometryToXyz(f.geometry, `structure ${n + 1}`)), [frames])
+  const xyzFrames = useMemo(
+    () => shown.map(({ frame, n }) => geometryToXyz(frame.geometry, `structure ${n + 1}`)),
+    [shown],
+  )
   const modes = step?.modes ?? null
   const vibration = useMemo(() => {
     const chosen = mode === '' ? -1 : Number(mode)
@@ -164,6 +178,16 @@ export function InspectWindow({
     setPlaying(false)
     setIndex((at + by + count) % count)
   }
+  /** Shows the scan's converged points only, or every structure, keeping the structure shown
+   * (its point's converged structure), or the last while the last is shown. */
+  const showConverged = (only: boolean) => {
+    setConvergedOnly(only)
+    if (index >= count - 1) return setIndex(LAST)
+    const keep = shown[at]?.n ?? 0
+    const next = frames.map((frame, n) => ({ frame, n })).filter(({ frame }) => !only || frame.converged)
+    const found = next.findIndex(({ n }) => n >= keep)
+    setIndex(found < 0 ? LAST : found)
+  }
   const close = () => {
     closing.current = true
     if (opened.current) void api.closeInspection(opened.current)
@@ -179,8 +203,8 @@ export function InspectWindow({
   }
 
   const unit = settings?.energy_unit ?? 'kcal/mol'
-  const current = frames[at] ?? null
-  const last = [...frames].reverse().find((f) => f.energy !== null)?.energy ?? null
+  const current = shown[at]?.frame ?? null
+  const last = [...shown].reverse().find(({ frame }) => frame.energy !== null)?.frame.energy ?? null
   const title = inspection ? `Inspect ${inspection.name}` : 'Inspect'
 
   return (
@@ -281,7 +305,7 @@ export function InspectWindow({
             {step && step.missing.length > 0 && (
               <p className="muted small">Not in the file: {step.missing.join('; ')}.</p>
             )}
-            {step && count === 0 && (
+            {step && frames.length === 0 && (
               <p className="muted">
                 This step prints no structure{step.job_type !== 'single_point' && inspection.program === 'xTB'
                   ? '; xTB writes each optimization cycle to xtbopt.log, which can be inspected for the movie'
@@ -342,9 +366,19 @@ export function InspectWindow({
                       </select>
                     </div>
                   )}
+                  {filterable && !vibration && (
+                    <label className="check" title="One structure per scan point: the one its optimization converged on">
+                      <input
+                        type="checkbox"
+                        checked={convergedOnly}
+                        onChange={(event) => showConverged(event.target.checked)}
+                      />
+                      Converged points only
+                    </label>
+                  )}
                   {!vibration && (
                     <p className="step-info small" aria-label="Structure shown">
-                      Structure {at + 1} of {count}
+                      Structure {(shown[at]?.n ?? 0) + 1} of {frames.length}
                       {current?.point !== null && current?.point !== undefined && ` · scan point ${current.point} of ${step.points}`}
                       {current?.converged && ' · converged'}
                       {' · '}
@@ -363,7 +397,7 @@ export function InspectWindow({
                   {!vibration && (
                     <>
                       <EnergyChart
-                        items={frames.map((f, n) => ({ n, energy: f.energy, removed: false, spike: false }))}
+                        items={shown.map(({ frame, n }) => ({ n, energy: frame.energy, removed: false, spike: false }))}
                         cuts={[]}
                         at={at}
                         last={last}
@@ -376,7 +410,7 @@ export function InspectWindow({
                         }}
                       />
                       <Convergence
-                        items={frames.map((f, n) => ({ n, criteria: f.criteria }))}
+                        items={shown.map(({ frame, n }) => ({ n, criteria: frame.criteria }))}
                         at={at}
                         onPick={(i) => {
                           setPlaying(false)
