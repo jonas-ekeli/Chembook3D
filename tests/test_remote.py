@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 from chembook3d.app import create_app
 from chembook3d.mcp_server import Bridge
-from chembook3d.mcp_tools import BY_NAME, READ_ONLY_TOOLS
+from chembook3d.mcp_tools import BY_NAME, PANEL_ALLOWED, READ_ONLY_TOOLS, TOOLS
 from chembook3d.remote import client, keeper
 from tests.fake_ssh_server import CODE, PASSWORD, USER, FakeSaga, FakeXServer, free_display
 
@@ -153,6 +153,7 @@ def test_saga_is_the_first_server_and_nothing_secret_is_saved(local, config_dir)
             **{"username": "", "connected": False, "since": None, "cwd": None, "tracked": False},
             **{"shell": None, "lost": None, "inspect": False},
             **{"x11": False, "x11_display": "localhost:0.0", "shell_x11": None, "x11_ready": None},
+            **{"claude_writes": False, "claude_written": []},
         }
     ]
     servers = [
@@ -786,6 +787,7 @@ def test_claude_sees_the_servers_and_the_files_in_the_terminals_directory(at_wor
         {
             **{"id": "saga", "name": "Saga", "host": "127.0.0.1", "username": USER},
             **{"logged_in": True, "cwd": WORK, "readable": True, "reason": None},
+            "writes": False,
         }
     ]
     files = at_work.get("/api/server-files/saga/files").json()
@@ -994,3 +996,172 @@ def test_claudes_tools_read_the_server_and_are_allowed_without_asking(at_work):
             )
 
     anyio.run(run)
+
+
+# ---------- T-SSH-15..19 Claude writes new files once the user allows it (D126) ----------
+
+
+def _allow(local, allow=True, headers=ORIGIN):
+    return local.put(
+        "/api/remote/servers/saga/claude-writes", json={"allow": allow}, headers=headers
+    )
+
+
+def _write(local, path, text="#P B3LYP/def2SVP Opt\n", **more):
+    return local.post("/api/server-files/saga/write", json={"path": path, "text": text, **more})
+
+
+def test_writing_is_off_until_the_apps_page_turns_it_on_and_at_every_login(at_work, saga):
+    work = saga.root / WORK.lstrip("/")
+    response = _write(at_work, "new.gjf")
+    assert response.status_code == 409
+    assert "Let Claude write new files here" in response.json()["detail"]
+    # Claude's requests carry no Origin: it cannot give itself the go-ahead.
+    assert _allow(at_work, headers={}).status_code == 403
+    assert _allow(at_work, headers={"origin": "https://evil.example"}).status_code == 403
+    assert _write(at_work, "new.gjf").status_code == 409
+    assert not (work / "new.gjf").exists()
+
+    assert _allow(at_work).status_code == 200
+    assert _status(at_work)["claude_writes"] is True
+    assert at_work.get("/api/server-files").json()["servers"][0]["writes"] is True
+    assert _write(at_work, "new.gjf").status_code == 200
+    assert _allow(at_work, False).status_code == 200  # Stop
+    assert _write(at_work, "other.gjf").status_code == 409
+
+    _allow(at_work)
+    at_work.post("/api/remote/servers/saga/logout", headers=ORIGIN)
+    assert _log_in(at_work, saga)["kind"] == "connected"
+    status = _status(at_work)
+    assert (status["claude_writes"], status["claude_written"]) == (False, [])
+
+
+def test_a_new_file_and_its_folders_are_written_and_listed(at_work, saga):
+    work = saga.root / WORK.lstrip("/")
+    _allow(at_work)
+    with _terminal(at_work) as ws:
+        _read_until(ws, lambda text, m: "$ " in text)
+        response = _write(at_work, "TS1_opt.gjf", "%chk=TS1_opt.chk\r\n#P Opt\r\n")
+        assert response.status_code == 200, response.text
+        _, messages = _read_until(ws, lambda text, m: any(x["type"] == "written" for x in m))
+    answer = response.json()
+    assert answer["path"] == f"saga:{WORK}/TS1_opt.gjf" and answer["size"] == 24
+    assert (answer["folders"], answer["diff"], answer["based_on"]) == ([], None, None)
+    written = work / "TS1_opt.gjf"
+    assert written.read_bytes() == b"%chk=TS1_opt.chk\n#P Opt\n"  # LF, as on Saga
+    if sys.platform != "win32":
+        assert written.stat().st_mode & 0o111 == 0  # never executable
+    assert next(m for m in messages if m["type"] == "written")["path"] == f"{WORK}/TS1_opt.gjf"
+
+    deep = _write(at_work, f"{WORK}/conformers/c01/c01.xyz", WATER)
+    assert deep.status_code == 200, deep.text
+    assert deep.json()["folders"] == [f"{WORK}/conformers", f"{WORK}/conformers/c01"]
+    assert (work / "conformers" / "c01" / "c01.xyz").read_text(encoding="utf-8") == WATER
+    assert _write(at_work, "conformers/c02.xyz", WATER).json()["folders"] == []
+
+    listed = _status(at_work)["claude_written"]
+    assert [w["path"] for w in listed] == [
+        f"{WORK}/TS1_opt.gjf",
+        f"{WORK}/conformers/c01/c01.xyz",
+        f"{WORK}/conformers/c02.xyz",
+    ]
+    assert all(w["time"] > 0 and w["size"] > 0 for w in listed)
+
+
+def test_a_file_there_is_never_replaced_and_an_edit_is_a_copy(at_work, saga):
+    work = saga.root / WORK.lstrip("/")
+    before = (work / "job.gjf").read_bytes()
+    _allow(at_work)
+    response = _write(at_work, "job.gjf", "overwritten?\n")
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "never replaces a file" in detail and "job_v2.gjf" in detail
+    for directory in ("old", f"{WORK}/old"):
+        assert _write(at_work, directory).status_code == 409
+    assert (work / "job.gjf").read_bytes() == before
+
+    edited = before.decode().replace("Opt", "Opt Freq")
+    copy = _write(at_work, "job_v2.gjf", edited, based_on="job.gjf")
+    assert copy.status_code == 200, copy.text
+    answer = copy.json()
+    assert answer["based_on"] == f"saga:{WORK}/job.gjf"
+    assert "-#P B3LYP/6-31G(d) Opt\n+#P B3LYP/6-31G(d) Opt Freq" in answer["diff"]
+    assert answer["diff"].startswith("--- job.gjf\n+++ job_v2.gjf")
+    assert f"{WORK}/job.gjf is unchanged" in answer["note"]
+    assert (work / "job.gjf").read_bytes() == before
+    # The next copy of either name is _v3.
+    for name in ("job.gjf", "job_v2.gjf"):
+        assert "job_v3.gjf" in _write(at_work, name, "x\n").json()["detail"]
+    assert sorted(p.name for p in work.iterdir()) == sorted(
+        [TS, TS_SP, "job.gjf", "job_v2.gjf", "old"]
+    )
+
+
+def test_what_claude_cannot_write(at_work, saga, monkeypatch):
+    work = saga.root / WORK.lstrip("/")
+    home = saga.root / "cluster" / "home" / USER
+    home.mkdir(parents=True, exist_ok=True)
+    _allow(at_work)
+    for path, why in (
+        (".bashrc", "starting with a dot"),
+        (".ssh/authorized_keys", "starting with a dot"),
+        ("jobs/.hidden.sh", "starting with a dot"),
+        ("../escape.gjf", "current directory"),
+        ("old/../../escape.gjf", "current directory"),
+        ("/cluster/work/escape.gjf", "outside the terminal's current directory"),
+        (f"/cluster/home/{USER}/x.gjf", "outside the terminal's current directory"),
+        ("", "Name the file"),
+        (f"{TS}/x.gjf", "is a file, not a directory"),
+    ):
+        response = _write(at_work, path)
+        assert response.status_code == 409, (path, response.text)
+        assert why in response.json()["detail"], (path, response.json())
+    too_big = _write(at_work, "big.txt", "x" * (keeper.MAX_WRITE + 1))
+    assert too_big.status_code == 409 and "at most 1 MB" in too_big.json()["detail"]
+    assert "Only text" in _write(at_work, "nul.txt", "a\x00b").json()["detail"]
+    missing = _write(at_work, "copy.gjf", "x\n", based_on="missing.gjf")
+    assert missing.status_code == 409 and not (work / "copy.gjf").exists()
+    if sys.platform != "win32":  # symlinks need extra rights on Windows
+        (work / "away").symlink_to(home, target_is_directory=True)
+        (work / "dangling.gjf").symlink_to(home / "nothing.gjf")
+        assert "leads outside" in _write(at_work, "away/x.gjf").json()["detail"]
+        assert "never replaces" in _write(at_work, "dangling.gjf").json()["detail"]
+        assert not (home / "x.gjf").exists() and not (home / "nothing.gjf").exists()
+    assert not list(home.iterdir())
+    assert sorted(p.name for p in work.iterdir() if not p.is_symlink()) == sorted(
+        [TS, TS_SP, "job.gjf", "old"]
+    )
+
+    with monkeypatch.context() as patched:  # a keeper from before D126
+        patched.setattr("chembook3d.api.server_files.WRITER_PROTOCOL", keeper.PROTOCOL + 1)
+        response = _write(at_work, "new.gjf")
+    assert response.status_code == 409 and "cannot let Claude write" in response.json()["detail"]
+    at_work.post("/api/remote/servers/saga/logout", headers=ORIGIN)
+    assert "Claude cannot log in" in _write(at_work, "new.gjf").json()["detail"]
+
+
+def test_claudes_write_tool_needs_only_the_apps_go_ahead_and_nothing_deletes(at_work, saga):
+    spec = BY_NAME["write_server_file"]
+    assert (spec.kind, spec.method, spec.allowed_in_app) == ("write", "POST", True)
+    assert "write_server_file" in PANEL_ALLOWED and "write_server_file" not in READ_ONLY_TOOLS
+    # Nothing Claude has deletes, renames or runs anything on a server.
+    assert {t.name for t in TOOLS if "/server-files" in t.path and t.method != "GET"} == {
+        "write_server_file"
+    }
+
+    async def run():
+        http = httpx.AsyncClient(transport=httpx.ASGITransport(app=at_work.app), base_url=APP)
+        async with http:
+            bridge = Bridge(APP, http=http)
+            off = await bridge.call(
+                "write_server_file", {"server_id": "saga", "path": "a.gjf", "text": "x\n"}
+            )
+            assert off.isError and "Let Claude write new files here" in off.content[0].text
+            assert _allow(at_work).status_code == 200
+            done = await bridge.call(
+                "write_server_file", {"server_id": "saga", "path": "a.gjf", "text": "x\n"}
+            )
+            assert not done.isError and f"saga:{WORK}/a.gjf" in done.content[0].text
+
+    anyio.run(run)
+    assert (saga.root / WORK.lstrip("/") / "a.gjf").read_text(encoding="utf-8") == "x\n"

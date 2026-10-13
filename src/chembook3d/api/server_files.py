@@ -11,10 +11,19 @@ server, and nothing is added to the investigation; logging in stays the app's pa
 (D122d). A file's end and its first pages are read as byte ranges; a search, a page deeper in
 or a summary copies the file once into a temporary folder, kept while the file's size and time
 stay the same and dropped at log out and when the app stops.
+
+Writing (D126, FR-SSH-13): once the user turns on "Let Claude write new files here" in the
+server's tab (the page's own route in `api/remote.py`; off at every login), `write_server_file`
+creates new text files in the terminal's current directory and below, with new folders on the
+way. A file that is there already is never replaced: the keeper creates with SFTP's exclusive
+create and answers with the next free name for a copy (name_v2.ext). Nothing is ever deleted,
+renamed, appended to or run.
 """
 
 import asyncio
 import base64
+import difflib
+import posixpath
 import re
 import shutil
 import tempfile
@@ -46,6 +55,8 @@ MAX_CONTEXT = 10
 CACHE_LIMIT = 1024**3  # bytes of copied files kept at once
 MAX_STRUCTURES = 300  # structures of a step listed in a summary; the first and last are kept
 READER_PROTOCOL = 4  # the keeper version that reads for Claude and checks the directory
+WRITER_PROTOCOL = 5  # the keeper version that writes new files for Claude (D126)
+MAX_DIFF = 300  # lines of an edited copy's difference shown
 
 
 # ---------- copies of whole files ----------
@@ -147,16 +158,18 @@ async def _keeper(server: servers.Server, op: str, **fields) -> dict:
         raise HTTPException(409, message) from exc
 
 
-async def _reader(request: Request, server_id: str) -> servers.Server:
-    """The server, logged in through a keeper that checks the directory (D124)."""
+async def _reader(request: Request, server_id: str, write: bool = False) -> servers.Server:
+    """The server, logged in through a keeper that checks the directory (D124) and, to
+    `write`, writes new files (D126)."""
     _check(request, page_only=False)
     server = _saved(server_id)
     ping = await _keeper(server, "ping")
-    if ping.get("protocol", 1) < READER_PROTOCOL:
+    if ping.get("protocol", 1) < (WRITER_PROTOCOL if write else READER_PROTOCOL):
+        what = "write" if write else "read"
         raise HTTPException(
             409,
             f"The connection to {server.name} was opened by an older version of Chembook3D, "
-            "which cannot let Claude read files. The user logs out and logs in again.",
+            f"which cannot let Claude {what} files. The user logs out and logs in again.",
         )
     return server
 
@@ -255,6 +268,7 @@ class ServerReadable(BaseModel):
     cwd: str | None  # the terminal's current directory: what Claude may read, with below it
     readable: bool
     reason: str | None = None  # why not, when not
+    writes: bool = False  # D126: the user lets Claude write new files there in this login
 
 
 class ServersReadable(BaseModel):
@@ -289,6 +303,7 @@ async def list_servers(request: Request) -> ServersReadable:
                 cwd=cwd,
                 readable=reason is None,
                 reason=reason,
+                writes=bool(session and session.get("writes")),
             )
         )
     return ServersReadable(servers=result)
@@ -625,3 +640,88 @@ async def get_server_structure(
     if found.converged:
         comment += " converged"
     return PlainTextResponse(xyz.format_xyz(atoms, comment=comment))
+
+
+# ---------- writing new files (D126) ----------
+
+
+class WriteIn(BaseModel):
+    path: str
+    text: str
+    based_on: str | None = None
+
+
+class WriteOut(BaseModel):
+    server: str
+    path: str  # where it was written, as server:/full/path
+    size: int  # bytes
+    folders: list[str]  # folders made for it
+    based_on: str | None = None  # the original of an edited copy, unchanged
+    diff: str | None = None  # the copy against its original, unified, for the user
+    note: str
+
+
+def _difference(original: bytes, name: str, text: str, new_name: str) -> str:
+    before = original.decode("utf-8", errors="replace").splitlines()
+    after = text.replace("\r\n", "\n").splitlines()
+    lines = list(difflib.unified_diff(before, after, name, new_name, n=2, lineterm=""))
+    if not lines:
+        return "(no difference)"
+    if len(lines) > MAX_DIFF:
+        lines = lines[:MAX_DIFF] + [f"[… {len(lines) - MAX_DIFF} more lines of difference]"]
+    return "\n".join(lines)
+
+
+@router.post("/{server_id}/write")
+async def write_server_file(server_id: str, body: WriteIn, request: Request) -> WriteOut:
+    """D126: a new text file in the terminal's current directory or below, only while the user
+    lets Claude write. An existing file is never replaced, edited or deleted: to change one,
+    write a copy under a new name with `based_on` naming the original, and the answer shows the
+    difference."""
+    server = await _reader(request, server_id, write=True)
+    original: _Meta | None = None
+    if body.based_on:
+        original = await _meta(server, body.based_on, head=keeper.MAX_READ)
+        if _binary(original.head):
+            raise HTTPException(422, f"{original.path} is not a text file.")
+    answer = await _keeper(
+        server,
+        "write",
+        path=body.path,
+        text=body.text,
+        based_on=original.path if original else None,
+    )
+    if not answer.get("written"):
+        free = answer.get("free")
+        instead = f" Write it as {posixpath.basename(free)} instead." if free else ""
+        raise HTTPException(
+            409,
+            f"{answer['path']} is there already, and Claude never replaces a file.{instead} "
+            "The user deletes the original themselves if they want.",
+        )
+    diff = None
+    note = f"Written as a new file on {server.name}; nothing else there changed."
+    if original is not None:
+        if original.size > len(original.head):
+            diff = "(the original is too large to compare)"
+        else:
+            diff = _difference(
+                original.head,
+                posixpath.basename(original.path),
+                body.text,
+                posixpath.basename(answer["path"]),
+            )
+        note += (
+            f" {original.path} is unchanged; show the user the difference. If they want the "
+            "original gone they delete it themselves (you may give them the rm command to copy, "
+            "never run it)."
+        )
+    return WriteOut(
+        server=server.id,
+        path=servers.origin_path(server, answer["path"]),
+        size=answer["size"],
+        folders=answer.get("folders") or [],
+        based_on=servers.origin_path(server, original.path) if original else None,
+        diff=diff,
+        note=note,
+    )

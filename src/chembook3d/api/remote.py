@@ -78,6 +78,16 @@ class ServerIn(BaseModel):
     x11_display: str = servers.X11_DISPLAY
 
 
+class WrittenOut(BaseModel):
+    """D126: a file Claude wrote on the server in this login."""
+
+    path: str
+    size: int
+    time: float  # seconds since 1970
+    based_on: str | None = None  # the file it is an edited copy of
+    folders: list[str] = []  # folders made for it
+
+
 class ServerOut(BaseModel):
     id: str
     name: str
@@ -95,6 +105,8 @@ class ServerOut(BaseModel):
     lost: str | None = None  # why the last connection ended, when it was not a log out
     shell_x11: str | None = None  # the display the running shell forwards to
     x11_ready: bool | None = None  # something answers on that display (Xming is running)
+    claude_writes: bool = False  # D126: the user lets Claude write new files in this login
+    claude_written: list[WrittenOut] = []  # what Claude wrote in this login, oldest first
 
 
 class RemoteStatus(BaseModel):
@@ -127,6 +139,8 @@ def _out(saved: list[servers.Server], held: dict) -> list[ServerOut]:
             out.shell = session.get("shell")
             out.shell_x11 = session.get("x11")
             out.x11_ready = session.get("x11_ready")
+            out.claude_writes = bool(session.get("writes"))
+            out.claude_written = [WrittenOut(**w) for w in session.get("written") or []]
             # What the connection was opened with, even if the saved server changed since.
             out.host = session["server"]["host"]
             out.port = session["server"]["port"]
@@ -272,6 +286,20 @@ async def logout(server_id: str, request: Request) -> None:
     copied = getattr(request.app.state, "server_copies", None)
     if copied is not None:  # D124: Claude's copies of the server's files
         copied.forget(server_id)
+
+
+class ClaudeWritesIn(BaseModel):
+    allow: bool
+
+
+@router.put("/servers/{server_id}/claude-writes")
+async def claude_writes(server_id: str, body: ClaudeWritesIn, request: Request) -> None:
+    """D126: the user's go-ahead for Claude to write new files in the terminal's current
+    directory and below, until log out or until taken back. Only the app's own page can give
+    it (Origin required), so Claude can never turn it on itself."""
+    _check(request)
+    _saved(server_id)
+    await _keeper("writes", server=server_id, allow=body.allow)
 
 
 class ShellIn(BaseModel):

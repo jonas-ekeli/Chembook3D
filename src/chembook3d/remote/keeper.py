@@ -35,8 +35,9 @@ from pathlib import Path
 import asyncssh
 
 # 2: X11 forwarding (D123a); 3: the `inspect` command (D123c); 4: `read`, and `within` on `list`
-# and `download`, for Claude reading files (D124)
-PROTOCOL = 4
+# and `download`, for Claude reading files (D124); 5: `write` and `writes`, Claude writing new
+# files once the user allows it (D126)
+PROTOCOL = 5
 KEEPER_FILE = "keeper.json"
 KNOWN_HOSTS = "known_hosts"
 LOG_FILE = "keeper.log"
@@ -82,6 +83,12 @@ SEND_NAME = re.compile(r"^[^/\x00-\x1f\x7f]{1,255}$")  # a file name the keeper 
 MAX_DOWNLOAD = 2 * 1024**3  # bytes copied down in one import (A69)
 COPY_WAIT = 3600  # seconds the app waits for a copy
 MAX_READ = 1024**2  # bytes of a file one `read` returns (D124)
+# A72: what Claude may write once the user allows it (D126)
+MAX_WRITE = 1024**2  # bytes of one file
+MAX_WRITTEN = 200  # files written in one login
+MAX_DEPTH = 8  # folders below the current directory
+WRITE_PART = re.compile(r"^[^./\x00-\x1f\x7f][^/\x00-\x1f\x7f]{0,254}$")  # no hidden names
+WRITE_MODE = 0o644  # never executable
 # X11 forwarding (D123a): a display as DISPLAY names one, [host]:number[.screen]; the X server
 # listens on TCP port 6000 + number, or on a local socket when there is no host (Linux).
 X11_DISPLAY = re.compile(
@@ -254,6 +261,8 @@ class Session:
     closing: str | None = None  # why the keeper is closing it
     sftp: asyncssh.SFTPClient | None = None
     x11: str | None = None  # the X11 display the next shell forwards to (D123a)
+    writes: bool = False  # D126: the user let Claude write new files; off at every login
+    written: list[dict] = field(default_factory=list)  # what Claude wrote in this login
 
     async def files(self) -> asyncssh.SFTPClient:
         """The SFTP client on this connection, opened the first time it is needed."""
@@ -444,6 +453,30 @@ async def within(session: Session, sftp: asyncssh.SFTPClient, path: object) -> s
             f"{session.server['name']} tab."
         )
     return target
+
+
+async def _taken(sftp: asyncssh.SFTPClient, path: str) -> bool:
+    """Something is at `path`: a file, a directory or a link, even one leading nowhere."""
+    try:
+        await sftp.lstat(path)
+    except asyncssh.SFTPNoSuchFile:
+        return False
+    return True
+
+
+async def _free(sftp: asyncssh.SFTPClient, path: str) -> str | None:
+    """D126: the first free name for a copy of `path`: name_v2.ext, name_v3.ext, ..."""
+    folder, name = posixpath.split(path)
+    stem, ext = posixpath.splitext(name)
+    match = re.fullmatch(r"(.*)_v(\d+)", stem)
+    start = 2
+    if match:
+        stem, start = match[1], int(match[2]) + 1
+    for number in range(start, start + 100):
+        candidate = posixpath.join(folder, f"{stem}_v{number}{ext}")
+        if not await _taken(sftp, candidate):
+            return candidate
+    return None
 
 
 class _Client(asyncssh.SSHClient):
@@ -703,7 +736,15 @@ class Keeper:
                 except (OSError, asyncssh.Error) as exc:
                     return {"ok": False, "error": f"Could not start a shell: {_reason(exc)}"}
             return {"ok": True}
-        if op in ("list", "download", "upload", "read"):
+        if op == "writes":
+            session = self.sessions.get(str(msg.get("server")))
+            if session is None:
+                return {"ok": False, "error": "Not logged in."}
+            session.writes = msg.get("allow") is True
+            allowed = "may" if session.writes else "may not"
+            log.info("Claude %s write on %s", allowed, session.server["host"])
+            return {"ok": True, "writes": session.writes}
+        if op in ("list", "download", "upload", "read", "write"):
             session = self.sessions.get(str(msg.get("server")))
             if session is None:
                 return {"ok": False, "error": "Not logged in."}
@@ -718,6 +759,10 @@ class Keeper:
                 if op == "read":
                     return await self._read(
                         session, msg.get("path"), msg.get("offset"), msg.get("length")
+                    )
+                if op == "write":
+                    return await self._write(
+                        session, msg.get("path"), msg.get("text"), msg.get("based_on")
                     )
                 return await self._download(session, msg.get("paths"), msg.get("folder"), inside)
             except Outside as exc:
@@ -870,6 +915,105 @@ class Keeper:
         session.used = time.monotonic()
         return {"ok": True, "path": path, "sent": True, "exists": there is not None}
 
+    async def _write(self, session: Session, path: object, text: object, based_on: object) -> dict:
+        """D126: a new text file for Claude in the shell's current directory or below, with any
+        new folders on the way, only while the user allows it. A file that is there already
+        (a link too) is never opened: SFTP's exclusive create refuses it, so nothing is
+        replaced, and nothing is ever deleted, renamed or made executable."""
+        name = session.server["name"]
+        if not session.writes:
+            return {
+                "ok": False,
+                "off": True,
+                "error": f'Writing is off on {name}. The user turns on "Let Claude write new '
+                f"files here\" in the app's {name} tab; Claude cannot turn it on.",
+            }
+        if len(session.written) >= MAX_WRITTEN:
+            return {
+                "ok": False,
+                "error": f"Claude has written {MAX_WRITTEN} files in this login, the most it may; "
+                "the user logs out and in again to allow more.",
+            }
+        if not isinstance(text, str) or "\x00" in text:
+            return {"ok": False, "error": "Only text can be written."}
+        data = text.replace("\r\n", "\n").encode("utf-8")
+        if len(data) > MAX_WRITE:
+            return {"ok": False, "error": f"A file may be at most {MAX_WRITE // 1024**2} MB."}
+        shell = session.shell
+        if shell is None or not shell.cwd:
+            raise Outside(f"The {name} terminal has not reported its current directory.")
+        if not isinstance(path, str) or not path.strip():
+            return {"ok": False, "error": "Name the file to write."}
+        sftp = await session.files()
+        root = await sftp.realpath(shell.cwd)
+        relative = path
+        if path.startswith("/"):
+            for base in {shell.cwd.rstrip("/"), root.rstrip("/")}:
+                if path.startswith(base + "/"):
+                    relative = path[len(base) + 1 :]
+                    break
+            else:
+                raise Outside(
+                    f"{path} is outside the terminal's current directory {root}; Claude writes "
+                    f"only there and below. The user can cd there in the {name} tab."
+                )
+        parts = [p for p in relative.split("/") if p not in ("", ".")]
+        if not parts or len(parts) > MAX_DEPTH + 1:
+            return {"ok": False, "error": "Name a file in the current directory or below it."}
+        for part in parts:
+            if part == "..":
+                raise Outside("Claude writes only in the terminal's current directory and below.")
+            if not WRITE_PART.match(part) or len(part.encode("utf-8")) > 255:
+                return {
+                    "ok": False,
+                    "error": f'"{part}" is not a name Claude may write: no names starting '
+                    "with a dot, no control characters.",
+                }
+        folder = root
+        made: list[str] = []
+        for part in parts[:-1]:
+            step = posixpath.join(folder, part)
+            try:
+                attrs = await sftp.stat(step)
+            except asyncssh.SFTPNoSuchFile:
+                await sftp.mkdir(step)  # refused by the server if it appeared meanwhile
+                made.append(step)
+                folder = step
+                continue
+            if attrs.type != asyncssh.FILEXFER_TYPE_DIRECTORY:
+                return {"ok": False, "error": f"{step} is a file, not a directory."}
+            folder = await sftp.realpath(step)
+            if folder != root and not folder.startswith(root.rstrip("/") + "/"):
+                raise Outside(f"{step} leads outside the terminal's current directory {root}.")
+        target = posixpath.join(folder, parts[-1])
+        if await _taken(sftp, target):
+            return {"ok": True, "path": target, "written": False, "free": await _free(sftp, target)}
+        try:
+            attrs = asyncssh.SFTPAttrs(permissions=WRITE_MODE)
+            async with sftp.open(target, "xb", attrs) as handle:
+                await handle.write(data)
+        except asyncssh.SFTPFailure:
+            if await _taken(sftp, target):
+                return {
+                    "ok": True,
+                    "path": target,
+                    "written": False,
+                    "free": await _free(sftp, target),
+                }
+            raise
+        session.used = time.monotonic()
+        record = {
+            "path": target,
+            "size": len(data),
+            "time": time.time(),
+            "based_on": based_on if isinstance(based_on, str) else None,
+            "folders": made,
+        }
+        session.written.append(record)
+        shell._send({"type": "written", **record})
+        log.info("Claude wrote %d bytes on %s", len(data), session.server["host"])
+        return {"ok": True, "written": True, **record}
+
     async def _status(self) -> list[dict]:
         sessions = list(self.sessions.values())
 
@@ -891,6 +1035,8 @@ class Keeper:
                 "shell": "ended" if session.shell is None or session.shell.ended else "running",
                 "x11": session.shell.x11 if session.shell else None,
                 "x11_ready": answers,
+                "writes": session.writes,  # D126
+                "written": session.written,
             }
             for session, answers in zip(sessions, ready, strict=True)
         ]
