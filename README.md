@@ -128,18 +128,21 @@ since the viewer inside the file is built with it.
 
 ## Saga and other SSH servers
 
-The **Saga** button opens a tab in the side panel (beside Claude) for logging in to Saga with
-your password and the one-time code from your authenticator app, as `ssh` asks for them. Fill
+The **HPC** button opens a tab in the side panel (beside Claude) where you choose the cluster
+(Saga first) and log in to it with your password and the one-time code from your authenticator app, as `ssh` asks for them. Fill
 in your user name once; the host is `saga.sigma2.no`. The first time, the app shows Saga's host
 key fingerprint: compare it with the one Sigma2 publishes, then trust it. Once logged in, the tab
 is a terminal on Saga with your usual login environment, and shows the directory you are in.
+The button and the tab then carry the cluster's name (**Saga**); **+** beside the tab logs in to
+another cluster at the same time.
 
 The connection stays open in a small background process on this computer, so closing
 Chembook3D and starting it again brings back the same terminal without a new login. A restart
 of the computer, sleep that drops the network, or Saga closing the connection needs a new
 login; **Log out** ends it, and it logs itself out after 12 hours without use. Your password
 and code are sent once and never saved, and a refused login is never tried again by itself
-(Sigma2 blocks addresses that keep failing). The **+** tab adds another server, such as Betzy.
+(Sigma2 blocks addresses that keep failing). **Add a cluster…** in the tab's Cluster list adds
+another server; Betzy and Olivia are offered ready-filled.
 
 **Import from here** lists the output files (`.log`, `.out`, `.output`, `.xyz`) in the directory
 the terminal is in. Pick one to import it as from the file browser, or several for a batch
