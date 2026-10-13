@@ -30,6 +30,7 @@ test('a read-only copy opens from disk with no server and changes nothing', asyn
   const before = await (await page.request.get('/api/canvas')).json()
   await canvasNode(page, 'T-S0').click()
   await page.getByLabel('Node inspector').getByRole('button', { name: 'Use as energy reference' }).click()
+  await page.getByRole('button', { name: 'Energy', exact: true }).click()
 
   // With no pathway in the drawer, the copy has one per branch.
   await page.getByRole('button', { name: 'Share read-only copy…' }).click()
@@ -56,7 +57,7 @@ test('a read-only copy opens from disk with no server and changes nothing', asyn
   await shared.goto(pathToFileURL(path).href)
   await expect(shared).toHaveTitle(/Demo investigation/)
   await expect(shared.getByText('Read-only copy', { exact: true })).toBeVisible()
-  // The reference chosen when exporting is kept; energy mode shows ΔG from it.
+  // The reference and the energy mode chosen when exporting are kept (D128): ΔG from it.
   await expect(canvasNode(shared, 'A-S2')).toContainText('ΔG 14.80')
   await expect(canvasNode(shared, 'B-S3')).toContainText('ΔG -6.00')
   await expect(shared.locator('.edge-energy', { hasText: 'ΔG 18.00' })).toBeVisible()
@@ -125,7 +126,8 @@ test('the copy holds the pathways in the drawer', async ({ page }) => {
   await (await download).saveAs(path)
 
   await page.goto(pathToFileURL(path).href)
-  await page.getByRole('button', { name: 'Profile and table' }).click()
+  // D128: the drawer was open when the copy was made, so it opens open.
+  await expect(page.getByRole('button', { name: 'Profile and table' })).toHaveAttribute('aria-pressed', 'true')
   const shared = page.getByLabel('Energy drawer')
   await expect(shared.getByRole('group', { name: /^Pathway / })).toHaveCount(1)
   await expect(shared.getByRole('group', { name: 'Pathway B' })).toBeVisible()
@@ -134,4 +136,39 @@ test('the copy holds the pathways in the drawer', async ({ page }) => {
   await expect(canvasNode(page, 'B-S1')).toBeVisible()
   await page.getByRole('button', { name: 'Energy', exact: true }).click()
   await expect(canvasNode(page, 'B-S1')).toContainText('ΔG 0.00')
+})
+
+test('the copy opens on the view the app showed, then on the reader\'s own choices', async ({ page }) => {
+  // T-UI-31, T-SHARE-03; FR-SHARE-05, D128
+  await openDemo(page)
+  await page.getByRole('button', { name: 'Structure', exact: true }).click()
+  const view = page.getByRole('group', { name: 'Energy view' })
+  await view.getByLabel('Energy type').selectOption('E')
+  await view.getByLabel('Energies on edges').uncheck()
+  await page.getByRole('button', { name: 'Profile and table' }).click()
+  await page.getByLabel('Energy drawer').getByRole('button', { name: 'Energy table' }).click()
+  await page.getByRole('button', { name: 'Share read-only copy…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Share a read-only copy' })
+  const download = page.waitForEvent('download')
+  await dialog.getByRole('button', { name: 'Save file' }).click()
+  const path = join(E2E_DIR, 'copy-view.html')
+  await (await download).saveAs(path)
+
+  await page.goto(pathToFileURL(path).href)
+  const shared = page.getByRole('group', { name: 'Energy view' })
+  await expect(page.getByRole('button', { name: 'Structure', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(canvasNode(page, 'A-S2').getByRole('img', { name: 'Structure' })).toBeVisible()
+  await expect(shared.getByLabel('Energy type')).toHaveValue('E')
+  await expect(shared.getByLabel('Energies on edges')).not.toBeChecked()
+  const drawer = page.getByLabel('Energy drawer')
+  await expect(drawer.getByRole('table', { name: 'Energy table' })).toBeVisible()
+
+  // What the reader chooses in the copy is remembered in their browser, for this copy.
+  await page.getByRole('button', { name: 'Compact', exact: true }).click()
+  await shared.getByLabel('Energy type').selectOption('G')
+  await drawer.getByRole('button', { name: 'Energy profile' }).click()
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Compact', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(shared.getByLabel('Energy type')).toHaveValue('G')
+  await expect(drawer.getByRole('img', { name: 'Energy profile' })).toBeVisible()
 })

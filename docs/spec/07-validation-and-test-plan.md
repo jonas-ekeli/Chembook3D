@@ -187,6 +187,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-SYNC-07 | Open a linked investigation from an older schema | Asks before upgrading (FR-SYNC-07) |
 | T-SHARE-01 | Export the demo, open the file from disk with no server | Canvas, node details, calculations and a profile show; changing level and type works; no request leaves the page (FR-SHARE-01–03) |
 | T-SHARE-02 | Search the exported file for the investigation folder and the original paths of imported files | Not found (FR-SHARE-04) |
+| T-SHARE-03 | Export with a node view, level, energy type, filters, expanded groups and drawer chosen, then with none sent | The copy holds that view, without deleted records and unknown values; with none sent, the investigation's remembered view (D105); each copy has its own `copy_id` (FR-SHARE-05, D128) |
 | T-MCP-01 | A change from one client, then reads, failed requests and computations that change nothing | Other clients are told of the change, the one that made it is not; the rest count no change (FR-MCP-04) |
 | T-MCP-02 | A node created and changed by Claude, then by the user | History source "claude", then "manual" (FR-MCP-06) |
 | T-MCP-03 | Report two nodes, an edge and an energy view; delete one node | Claude reads them by name with the level, type and reference; the deleted one is left out (FR-MCP-05) |
@@ -292,6 +293,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-28 | The Inspect window shows a scan by its converged points | Inspecting the relaxed scan `dvb_scan_relaxed.log` from the import dialog's file browser opens with "Converged points only" ticked, 13 structures on the slider and structure 61 of 61 (scan point 13, converged) shown; unticking keeps the structure shown and offers all 61; going back one shows an unconverged structure of the same point, and ticking again returns to that point's converged structure (FR-3D-11, D125) |
 | T-UI-29 | Let Claude write new files in the Saga tab | Before the go-ahead a write is refused; ticking "Let Claude write new files here" shows where Claude may write; a write lists "Written by Claude (1)" with its path at once and the file is on the server; Stop puts the box back and writes are refused again (FR-SSH-13, D126) |
 | T-UI-30 | The HPC button and tab | Before login the button reads HPC and its tab chooses Saga; after login the button and tab read Saga, with "+" beside it and no HPC button; after log out both read HPC again; Add a cluster… offers Betzy and Olivia, Betzy fills its host, is added and chosen, and is removed again (FR-SSH-15, D127) |
+| T-UI-31 | The read-only copy opens on the app's view | Structure mode, energy type E, edge energies off and the drawer's table chosen in the app open the same in the copy; Compact, G and the profile chosen in the copy are back after a reload (FR-SHARE-05, D128) |
 
 ## 8. Performance observation (no targets)
 

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef } from 'react'
 import { energyTypeName, type EnergyType, type Settings } from '../api'
 import { ProfileChart } from '../components/ProfileChart'
 import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
@@ -18,6 +18,8 @@ export function SnapshotDrawer({
   type,
   referenceId,
   onReference,
+  tab,
+  onTab,
   onSelectNode,
 }: {
   data: SnapshotData
@@ -27,9 +29,10 @@ export function SnapshotDrawer({
   type: EnergyType
   referenceId: string | null
   onReference: (id: string) => void
+  tab: 'profile' | 'table'
+  onTab: (tab: 'profile' | 'table') => void
   onSelectNode: (id: string) => void
 }) {
-  const [tab, setTab] = useState<'profile' | 'table'>('profile')
   const svgRef = useRef<SVGSVGElement>(null)
   const canvas = data.canvas
   const paths = data.paths
@@ -74,10 +77,10 @@ export function SnapshotDrawer({
     <section className="drawer" aria-label="Energy drawer">
       <div className="drawer-head">
         <div className="segmented" role="group" aria-label="Drawer tab">
-          <button aria-pressed={tab === 'profile'} onClick={() => setTab('profile')}>
+          <button aria-pressed={tab === 'profile'} onClick={() => onTab('profile')}>
             Energy profile
           </button>
-          <button aria-pressed={tab === 'table'} onClick={() => setTab('table')}>
+          <button aria-pressed={tab === 'table'} onClick={() => onTab('table')}>
             Energy table
           </button>
         </div>

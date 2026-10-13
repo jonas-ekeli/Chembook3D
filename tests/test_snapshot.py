@@ -143,6 +143,47 @@ def test_drawer_pathways_are_exported_and_checked(client, page, tmp_path):
     export(client, {"paths": [{"ids": [ids["T-S0"], ids["B-S3"]]}]}, status=422)
 
 
+def test_copy_opens_on_the_view_shown(client, page, tmp_path):
+    # D128, FR-SHARE-05, T-SHARE-03
+    make_demo(tmp_path / "demo")
+    client.post("/api/investigations/open", json={"folder": str(tmp_path / "demo")})
+    canvas = client.get("/api/canvas").json()
+    level = client.get("/api/energies/options").json()["levels"][0]["key"]
+    branch = canvas["branches"][0]["id"]
+    group = canvas["groups"][0]["id"] if canvas["groups"] else None
+    view = {
+        "mode": "structure",
+        "level": level,
+        "energy_type": "E",
+        "edge_energies": False,
+        "filters": {"branches": [branch, "gone"], "statuses": ["rejected"], "steps": []},
+        "expanded": [g for g in (group, "gone") if g],
+        "drawer": {"open": True, "tab": "table", "paths": []},
+        "junk": "x" * 10_000,
+    }
+    first = data_of(export(client, {"view": view}))
+    assert first["view"] == {
+        "mode": "structure",
+        "level": level,
+        "energy_type": "E",
+        "edge_energies": False,
+        "filters": {"branches": [branch], "statuses": ["rejected"], "steps": []},
+        "expanded": [group] if group else [],
+        "drawer": {"open": True, "tab": "table"},
+    }
+    # Each copy has its own name, so a reader's choices in one are kept for that one alone.
+    second = data_of(export(client, {"view": view | {"mode": "sideways"}}))
+    assert second["copy_id"] != first["copy_id"]
+    assert second["view"]["mode"] is None
+
+    # Sent no view, the copy opens on the investigation's remembered one (D105).
+    remembered = {"level": level, "energy_type": "H", "drawer": {"open": True}}
+    client.put("/api/view-state", json=remembered)
+    saved = data_of(export(client))["view"]
+    assert (saved["mode"], saved["level"], saved["energy_type"]) == (None, level, "H")
+    assert saved["drawer"] == {"open": True, "tab": "profile"}
+
+
 def test_viewer_not_built(open_client, monkeypatch):
     monkeypatch.setattr(snapshot, "template_path", lambda: None)
     response = export(open_client, status=409)
