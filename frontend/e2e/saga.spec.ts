@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { forgetView } from './demoView.ts'
@@ -57,6 +57,23 @@ test('log in to Saga with password and code, and come back to the same shell', a
   await page.keyboard.type('cd /cluster/work/ru-caac')
   await page.keyboard.press('Enter')
   await expect(panel.getByTestId('server-cwd')).toContainText('/cluster/work/ru-caac')
+
+  // D126, T-UI-29: Claude writes only after the go-ahead in this tab; what it writes is listed.
+  const write = (path: string) =>
+    page.request.post('/api/server-files/saga/write', { data: { path, text: '#P Opt\n' } })
+  expect((await write('claude-off.gjf')).status()).toBe(409)
+  const writes = panel.getByTestId('server-writes')
+  await writes.getByLabel('Let Claude write new files here').click()
+  await expect(writes).toContainText('Claude may write new files in /cluster/work/ru-caac and below.')
+  expect((await write('inputs/TS1_opt.gjf')).status()).toBe(200)
+  await expect(writes.getByText('Written by Claude (1)')).toBeVisible()
+  await writes.getByText('Written by Claude (1)').click()
+  await expect(writes).toContainText('/cluster/work/ru-caac/inputs/TS1_opt.gjf')
+  expect(readFileSync(join(WORK, 'inputs', 'TS1_opt.gjf'), 'utf-8')).toBe('#P Opt\n')
+  await writes.getByRole('button', { name: 'Stop' }).click()
+  await expect(writes.getByLabel('Let Claude write new files here')).not.toBeChecked()
+  expect((await write('after-stop.gjf')).status()).toBe(409)
+  rmSync(join(WORK, 'inputs'), { recursive: true }) // the next test lists the directory
 
   // The page goes away and comes back: still logged in, same shell, same directory.
   await page.reload()

@@ -166,7 +166,15 @@ xTB's `xtbopt.log`. Nothing is imported and nothing on Saga changes.
 in the directory the Saga terminal is in, and in the directories below it, without importing
 them: "did TS1 converge?", "why did the job in opt2 stop?", "how many imaginary frequencies has
 the last frequency job?". `cd` in the terminal to where the jobs are first; Claude cannot read
-above that directory, cannot log in, and never writes, deletes or runs anything on Saga.
+above that directory, cannot log in, and never deletes or runs anything on Saga.
+
+**Let Claude write new files here**: tick it in the Saga tab and Claude may create new files
+(inputs, job scripts, xyz files, notes) in the terminal's directory and in new or existing
+folders below it, until you log out or press **Stop**; it is off again at every login. The tab
+lists what Claude wrote. Claude never replaces, edits or deletes a file: for a change it writes
+a copy such as `TS1_v2.gjf` and shows you the difference, and if you want files deleted it gives
+you an `rm` command to copy and run yourself. Names starting with a dot are refused, and a file
+is at most 1 MB.
 
 ## Claude in the app
 

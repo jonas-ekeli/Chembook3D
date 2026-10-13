@@ -2452,6 +2452,25 @@ table.scan-path-held input.drive-value {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
+.server-writes {
+  padding: 0.25rem 0.75rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.server-writes-on {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  color: #b54708;
+}
+.written-list {
+  margin: 0.25rem 0;
+  padding-left: 1.25rem;
+  max-height: 8rem;
+  overflow-y: auto;
+}
 .server-x11.plain {
   padding: 0 0 0.75rem;
   background: none;

@@ -7,6 +7,8 @@ import { browserKey, openXterm, socketUrl, type Xterm } from '../terminal'
 // code) and an unknown host key to trust. Logged in, it is a terminal on the shell the keeper
 // holds, so closing the app and starting it again shows the same shell. With X11 ticked (D123a)
 // the shell forwards X11 windows (Molden) to an X server on this computer such as Xming.
+// "Let Claude write new files here" (D126) is the user's go-ahead for Claude's
+// `write_server_file`, off at every login; the files Claude wrote are listed below it.
 
 type Shell = Xterm & {
   socket: WebSocket | null
@@ -114,9 +116,11 @@ export function ServerPanel({
           | { type: 'hello'; cwd: string | null }
           | { type: 'cwd'; path: string }
           | { type: 'inspect'; path: string }
+          | { type: 'written'; path: string }
           | { type: 'exit'; message: string }
         if (message.type === 'output') term.write(message.data)
         else if (message.type === 'inspect') onInspect(message.path)
+        else if (message.type === 'written') void onChanged()
         else if (message.type === 'hello' || message.type === 'cwd') {
           const path = message.type === 'hello' ? message.cwd : message.path
           setCwd(path)
@@ -247,6 +251,16 @@ export function ServerPanel({
       await attach()
     } catch (err) {
       setEnded(errorMessage(err))
+    }
+  }
+
+  const claudeWrites = async (allow: boolean) => {
+    setError(null)
+    try {
+      await api.remoteClaudeWrites(server.id, allow)
+      await onChanged()
+    } catch (err) {
+      setError(errorMessage(err))
     }
   }
 
@@ -385,6 +399,47 @@ export function ServerPanel({
               {' '}
               · type <code>inspect FILE</code> to look at a file here
             </span>
+          )}
+        </div>
+      )}
+      {server.connected && (
+        <div className="server-writes" data-testid="server-writes">
+          {server.claude_writes ? (
+            <div className="server-writes-on" role="status">
+              <span>
+                Claude may write new files in <code>{cwd ?? 'the current directory'}</code> and below.
+              </span>{' '}
+              <button onClick={() => void claudeWrites(false)}>Stop</button>
+            </div>
+          ) : (
+            <label
+              className="check"
+              title="Claude may then create new files (inputs, job scripts) where the terminal is. It never replaces, edits, deletes or runs anything. Off again at every login."
+            >
+              <input type="checkbox" checked={false} onChange={() => void claudeWrites(true)} /> Let Claude write
+              new files here
+            </label>
+          )}
+          {server.claude_written.length > 0 && (
+            <details>
+              <summary className="muted small">Written by Claude ({server.claude_written.length})</summary>
+              <ul className="written-list">
+                {server.claude_written.map((file) => (
+                  <li key={file.path}>
+                    <code>{file.path}</code>{' '}
+                    <span className="muted small">
+                      {since(file.time)}
+                      {file.based_on && (
+                        <>
+                          {' '}
+                          · copy of <code>{file.based_on}</code>
+                        </>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
         </div>
       )}

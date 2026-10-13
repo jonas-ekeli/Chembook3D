@@ -1477,6 +1477,21 @@ export type RemoteServer = {
   x11_ready: boolean | null
   /** D123c: the shell has the `inspect FILE` command. */
   inspect: boolean
+  /** D126: the user lets Claude write new files in the current directory in this login. */
+  claude_writes: boolean
+  /** What Claude wrote in this login, oldest first. */
+  claude_written: WrittenFile[]
+}
+
+/** D126: a file Claude wrote on a server. */
+export type WrittenFile = {
+  path: string
+  size: number
+  /** Seconds since 1970. */
+  time: number
+  /** The original of an edited copy, unchanged. */
+  based_on: string | null
+  folders: string[]
 }
 
 export type RemoteStatus = { enabled: boolean; reason: string | null; servers: RemoteServer[] }
@@ -1539,6 +1554,9 @@ export const api = {
   remoteTrust: (login: string) => request<LoginStep>('POST', `${loginPath(login)}/trust`),
   remoteCancel: (login: string) => request<void>('DELETE', loginPath(login)),
   remoteLogout: (id: string) => request<void>('POST', `${serverPath(id)}/logout`),
+  /** D126: let Claude write new files in the terminal's directory until log out, or stop it. */
+  remoteClaudeWrites: (id: string, allow: boolean) =>
+    request<void>('PUT', `${serverPath(id)}/claude-writes`, { allow }),
   /** A new shell after the last one ended, or in place of the running one (`restart`). */
   remoteShell: (id: string, rows: number, cols: number, restart = false) =>
     request<void>('POST', `${serverPath(id)}/shell`, { rows, cols, restart }),

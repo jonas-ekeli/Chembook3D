@@ -3,11 +3,14 @@ app's API. Their inputs come from the API's own schemas (the app's OpenAPI descr
 in-process), so a tool always takes what its route takes.
 
 Tools come in three kinds: "read" (changes nothing), "write" (changes the investigation, like a
-click in the app) and "confirm" (deletes something: the app asks the user first, D91).
+click in the app) and "confirm" (deletes something: the app asks the user first, D91). A write
+tool whose go-ahead the user gives in the app itself (`allowed_in_app`, D126) needs no second
+question in the Claude panel.
 Not offered: opening, closing, creating or cloning investigations, sync, folder browsing,
 opening files with other programs, app settings and the read-only export. Calculation jobs for
 cloud sessions (D93) commit and push only their own job folder. Files on a logged-in SSH server
-are read only, in the terminal's current directory and below (D124); logging in is not offered.
+are read in the terminal's current directory and below (D124), and new files written there once
+the user allows it in the app (D126); logging in, deleting and running are not offered.
 """
 
 from dataclasses import dataclass, field
@@ -26,6 +29,7 @@ class ToolSpec:
     description: str
     exclude: tuple[str, ...] = ()  # body fields the tool does not offer
     help: dict[str, str] = field(default_factory=dict)  # descriptions of its inputs
+    allowed_in_app: bool = False  # D126: the user's go-ahead is a switch in the app's page
 
 
 ID_HELP = "Ids come from list or get tools (or get_selection); they are opaque strings."
@@ -358,7 +362,7 @@ TOOLS: list[ToolSpec] = [
         "match, charge, multiplicity, solvent, and for a TS end the coordinates suggested to "
         "hold. Changes nothing; the user sends the job from the app's Scan path dialog.",
     ),
-    # ---------- files on a logged-in server such as Saga, read only (D124) ----------
+    # ---------- files on a logged-in server such as Saga: read (D124), new ones written (D126)
     T(
         "list_servers",
         "read",
@@ -440,6 +444,29 @@ TOOLS: list[ToolSpec] = [
             "frame": "Structure number in the step, 1-based; negative counts from the end "
             "(default -1, the last).",
         },
+    ),
+    T(
+        "write_server_file",
+        "write",
+        "POST",
+        "/api/server-files/{server_id}/write",
+        "Write a NEW text file (an input, a job script, an xyz, notes) in the server terminal's "
+        "current directory or a folder below it (new folders are made), only after the user "
+        "turned on 'Let Claude write new files here' in the app's server tab (list_servers "
+        "shows `writes`). An existing file is never replaced, edited or deleted: to change one, "
+        "write a copy named like name_v2.ext with based_on naming the original, show the user "
+        "the difference from the answer, and say the original is unchanged. In a Gaussian copy "
+        "point %chk (and %oldchk if needed) at the new name. You cannot delete or run anything: "
+        "for deleting, give the user an rm command naming each file to copy themselves.",
+        help={
+            "server_id": "Id of a logged-in server, from list_servers.",
+            "path": "The new file, relative to the terminal's current directory (e.g. "
+            "'TS1_opt.gjf' or 'conformers/c01.xyz'); no names starting with a dot.",
+            "text": "The whole file as text (at most 1 MB); written with LF line endings.",
+            "based_on": "For an edited copy: the original file, which stays unchanged; the "
+            "answer then shows the difference.",
+        },
+        allowed_in_app=True,
     ),
     # ---------- changing ----------
     T(
@@ -914,6 +941,9 @@ for _name, _action in ACTIONS.items():
 BY_NAME = {t.name: t for t in TOOLS}
 # The tools that change nothing; a client may allow them without asking (the panel, D92).
 READ_ONLY_TOOLS = frozenset(t.name for t in TOOLS if t.kind == "read")
+# What the Claude panel allows without asking (D92): the read tools, and those whose go-ahead the
+# user gives in the app's page (D126).
+PANEL_ALLOWED = READ_ONLY_TOOLS | frozenset(t.name for t in TOOLS if t.allowed_in_app)
 
 
 # ---------- input schemas ----------

@@ -3,7 +3,8 @@ in the app's Claude panel through a WebSocket (`api/claude.py`).
 
 Only `claude` is ever started, never a shell. It runs in an app-managed working folder per
 investigation, with settings written there on every start: the chembook3d MCP server (D91) as
-its only MCP server, the notebook's read tools pre-approved, its write tools asking first, and
+its only MCP server, the notebook's read tools pre-approved (and writing new server files, whose
+go-ahead is a switch in the app, D126), its write tools asking first, and
 shell, file editing and web tools denied. It uses the person's own Claude Code sign-in; the app
 stores no credentials.
 """
@@ -94,7 +95,17 @@ an output, `read_server_file` with `tail` or `search` for details (outputs can b
 These are the person's files: read them only when they ask about them, and never import them or
 act on them unless asked. If a file is outside the terminal's directory, ask the person to `cd`
 there; if they are not logged in, ask them to log in in the server's tab. You cannot log in,
-write, delete or run anything on a server.
+delete or run anything on a server.
+
+Writing new files there (D126): only when the person asks for files (inputs, job scripts, xyz,
+notes) and has turned on "Let Claude write new files here" in the server's tab (`list_servers`
+shows `writes`; you cannot turn it on, so ask them to). `write_server_file` creates a new file
+in the terminal's directory or a folder below it and never replaces one. Never edit a file in
+place: write a copy named like `TS1_v2.gjf` with `based_on` naming the original, show the
+difference the answer gives, and say the original is unchanged. In a Gaussian copy point
+`%chk` (and `%oldchk` if needed) at the new name, so two jobs never write one checkpoint. If
+the person wants files deleted, give them one command to copy and run themselves, naming each
+file (`rm -i -- a.gjf b.gjf`, never `rm -r` or a bare wildcard); never run it.
 
 Shell, file editing and web tools are switched off in this panel; the job tools do the git
 and cloud work themselves.
@@ -134,13 +145,14 @@ def install_hint() -> dict[str, str]:
 
 
 def notebook_server() -> tuple[dict, list[str]] | None:
-    """The chembook3d MCP server (D91) and its read-only tools, or None in a version of the app
+    """The chembook3d MCP server (D91) and the tools the panel allows without asking (the read
+    tools, D92, and those the user allows in the app, D126), or None in a version of the app
     that does not have it yet (Claude then has no notebook tools)."""
     try:
         from chembook3d import mcp_tools  # type: ignore[attr-defined]
     except ImportError:
         return None
-    read_only = sorted(tool.name for tool in mcp_tools.TOOLS if tool.kind == "read")
+    read_only = sorted(mcp_tools.PANEL_ALLOWED)
     # The app's own Python runs `chembook3d mcp`, so it works without uv on the PATH.
     server = {"type": "stdio", "command": sys.executable, "args": ["-m", "chembook3d.cli", "mcp"]}
     return server, read_only
