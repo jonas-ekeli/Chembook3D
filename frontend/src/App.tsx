@@ -48,6 +48,7 @@ import { Overview } from './components/Overview'
 import { AnalysesView } from './components/Analyses'
 import { ClaudeRequestDialog } from './components/ClaudeRequestDialog'
 import { SidePanel, type SideTab } from './components/SidePanel'
+import { HPC, hpcLabel } from './hpc'
 import { LaunchNotices, ShutDownButton } from './components/ShutDown'
 import { useLive } from './live'
 import type { HydrogenMode } from './chem'
@@ -1338,16 +1339,18 @@ function App() {
           >
             Claude
           </button>
-          {remote?.servers.map((server) => (
+          {remote?.enabled && (
             <button
-              key={server.id}
-              aria-pressed={sideTab === server.id}
-              onClick={() => setSideTab(sideTab === server.id ? null : server.id)}
-              title={`A terminal on ${server.name}, with files to and from its current directory (D122)`}
+              aria-pressed={sideTab !== null && sideTab !== 'claude'}
+              onClick={() => {
+                const first = remote.servers.find((s) => s.connected)
+                setSideTab(sideTab !== null && sideTab !== 'claude' ? null : (first?.id ?? HPC))
+              }}
+              title="Log in to a cluster such as Saga: a terminal there, with files to and from its current directory (D122, D127)"
             >
-              {server.name}
+              {hpcLabel(remote.servers)}
             </button>
-          ))}
+          )}
           <button onClick={() => setShowJobs(true)} title="Calculations handed to Claude Code cloud sessions (D93, D115)">
             Cloud jobs
           </button>
