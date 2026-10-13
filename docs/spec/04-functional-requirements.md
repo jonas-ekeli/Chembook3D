@@ -281,6 +281,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-SHARE-02 | The file shows the canvas with its view modes and filters, the details, notes and calculations of every record, the 3D view with measuring and the included vibrations, and the energies, profile and table at every level and energy type (A30). | D79, A30 | after 5 |
 | FR-SHARE-03 | Nothing in the file can be edited, and it makes no network request. | D79 | after 5 |
 | FR-SHARE-04 | The file holds no local paths (investigation folder, original paths and devices of imported files), no copied output files and no change history. | D79 | after 5 |
+| FR-SHARE-05 | The file opens on the view the app showed when it was made: node view, level of theory, energy type, energies on edges, filters, expanded groups and the energy drawer, besides the reference and pathways (A30); what a reader then chooses is remembered in their browser for that copy. | D128, A73 | after 5 |
 
 **AC:** export the demo investigation, open the file with the server stopped: the canvas, a node's calculations and 3D view, and a profile at another level show, nothing can be edited, and the file contains no folder path.
 

@@ -86,11 +86,15 @@ def save(session: Session, data: Any) -> None:
 
 
 def load(session: Session) -> dict[str, Any]:
-    """The saved view, without what has been deleted since. A reference, a group, a branch or
-    a step that is gone is dropped, and so is a pathway through a deleted node; a choice at a
-    pathway's fork is given its current label and status."""
+    """The saved view, without what has been deleted since."""
     info = session.get(InvestigationInfo, 1)
-    state = clean(info.view_state if info else {})
+    return current(session, clean(info.view_state if info else {}))
+
+
+def current(session: Session, state: dict[str, Any]) -> dict[str, Any]:
+    """A cleaned view without the records that no longer exist. A reference, a group, a branch
+    or a step that is gone is dropped, and so is a pathway through a deleted node; a choice at
+    a pathway's fork is given its current label and status."""
     nodes = {n.id: n for n in session.scalars(select(Node).where(Node.kind == NodeKind.NODE))}
     groups = {g.id: g for g in session.scalars(select(GroupNode))}
     branches = set(session.scalars(select(Branch.id)))

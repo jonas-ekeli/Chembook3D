@@ -623,7 +623,17 @@ function App() {
   const saveSnapshot = () => {
     setSharing('saving')
     setShareError(null)
-    api.exportSnapshot(drawerPaths, referenceId).then(
+    // D128: the copy opens on what is shown here.
+    const view = {
+      mode,
+      level: energyLevel,
+      energy_type: energyType,
+      edge_energies: edgeEnergies,
+      filters,
+      expanded: [...expanded],
+      drawer: { open: drawerOpen, tab: drawerView?.tab ?? 'profile' },
+    }
+    api.exportSnapshot(drawerPaths, referenceId, view).then(
       ({ blob, name }) => {
         const url = URL.createObjectURL(blob)
         download(url, name)

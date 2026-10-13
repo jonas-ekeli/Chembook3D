@@ -5,11 +5,13 @@ with every record it shows written into it as JSON. It opens from disk with no s
 everything the viewer can show is computed here, by the same code the API answers with:
 energies at every composite level and type, and the profiles and tables of the exported
 pathways for each reference the reader may choose. It holds no local paths, no copied output
-files and no history (FR-SHARE-04)."""
+files and no history (FR-SHARE-04). It opens on the view the app showed when it was made (D128):
+the node view, energy level and type, filters, expanded groups and the drawer."""
 
 import base64
 import gzip
 import json
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -27,7 +29,7 @@ from chembook3d.api.routes import DbSession, _calculation_out, _investigation
 from chembook3d.models import Calculation, CalculationType
 from chembook3d.services import nodes as node_service
 from chembook3d.services import notes as note_service
-from chembook3d.services import pathways, species
+from chembook3d.services import pathways, species, view_state
 from chembook3d.services.energies import Energies, LevelKey
 from chembook3d.services.records import RecordError
 
@@ -46,6 +48,9 @@ MODE_DECIMALS = 4
 # path in the investigation folder stay on this computer.
 SOURCE_FIELDS = ("original_name", "size", "checksum", "imported_at")
 
+# The canvas's node views (canvasView.ts); the app keeps the one chosen in the browser.
+MODES = ("compact", "energy", "structure")
+
 
 class PathIn(BaseModel):
     ids: list[str]
@@ -55,6 +60,8 @@ class PathIn(BaseModel):
 class SnapshotIn(BaseModel):
     paths: list[PathIn] = []  # the drawer's pathways; none: one per branch (A30)
     reference_id: str | None = None
+    # D128: what the app shows, as saved for D105 plus the node view; none: the saved view.
+    view: dict[str, Any] | None = None
 
 
 def template_path() -> Path | None:
@@ -105,6 +112,26 @@ def _paths(session: Session, body: SnapshotIn) -> list[dict[str, Any]]:
             continue  # a branch without nodes has no pathway
         found.append({"ids": extended.path, "branch_id": branch.id})
     return found
+
+
+def _view(session: Session, body: SnapshotIn) -> dict[str, Any]:
+    """D128: the view the copy opens on. The reference and the pathways come separately."""
+    sent = body.view
+    state = (
+        view_state.current(session, view_state.clean(sent))
+        if sent is not None
+        else view_state.load(session)
+    )
+    mode = sent.get("mode") if sent is not None else None
+    return {
+        "mode": mode if mode in MODES else None,
+        "level": state["level"],
+        "energy_type": state["energy_type"],
+        "edge_energies": state["edge_energies"],
+        "filters": state["filters"],
+        "expanded": state["expanded"],
+        "drawer": {"open": state["drawer"]["open"], "tab": state["drawer"]["tab"]},
+    }
 
 
 def _note_images(session: Session, notes: list[Any]) -> dict[str, str]:
@@ -186,6 +213,8 @@ def snapshot_data(request: Request, session: Session, body: SnapshotIn) -> dict[
     return {
         "format": "chembook3d-snapshot",
         "version": 1,
+        # D128: names this copy, so a reader's own choices are remembered for it alone.
+        "copy_id": uuid.uuid4().hex,
         "app_version": __version__,
         "exported_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "investigation": {"name": investigation.name},
@@ -210,6 +239,7 @@ def snapshot_data(request: Request, session: Session, body: SnapshotIn) -> dict[
         "views": views,
         "paths": paths,
         "reference_id": body.reference_id if body.reference_id in known else None,
+        "view": _view(session, body),
         "profiles": profiles,
     }
 

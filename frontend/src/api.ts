@@ -1436,6 +1436,12 @@ export type ViewState = {
   }
 }
 
+/** D128: the view a read-only copy opens on, as the app showed it when the copy was made. */
+export type SharedViewState = Omit<ViewState, 'reference_id' | 'drawer'> & {
+  mode: 'compact' | 'energy' | 'structure' | null
+  drawer: { open: boolean; tab: 'profile' | 'table' }
+}
+
 /** D107: what a tab's long poll on the backend's presence says. */
 export type Presence = {
   /** Started by the launcher: the server stops when the last tab has closed. */
@@ -1785,11 +1791,12 @@ export const api = {
   exportSnapshot: async (
     paths: { ids: string[]; branch_id: string | null }[],
     referenceId: string | null,
+    view: SharedViewState,
   ): Promise<{ blob: Blob; name: string }> => {
     const response = await fetch('/api/snapshot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths, reference_id: referenceId }),
+      body: JSON.stringify({ paths, reference_id: referenceId, view }),
     })
     if (!response.ok) {
       let detail: unknown = null

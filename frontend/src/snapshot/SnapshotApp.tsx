@@ -1,13 +1,13 @@
 import { ReactFlowProvider } from '@xyflow/react'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { energyTypeName, STATUS_LABEL, type Canvas, type EnergyType, type GroupLayout } from '../api'
 import type { HydrogenMode } from '../chem'
-import { NO_FILTERS, type Filters, type Selection, type ViewMode } from '../canvasView'
+import type { Filters, Selection, ViewMode } from '../canvasView'
 import { CanvasPane, type CanvasEnergy } from '../components/Canvas'
 import { FilterMenu } from '../components/FilterMenu'
 import { HydrogenDisplay } from '../display'
 import { NoteImageSource } from '../notes'
-import { energyView, referenceIds, sharedSettings, type SnapshotData } from './data'
+import { energyView, openingView, referenceIds, rememberView, sharedSettings, type SnapshotData } from './data'
 import { SnapshotDrawer } from './Drawer'
 import { AboutPanel, BranchPanel, GroupPanel, NodePanel, TransitionPanel } from './Panels'
 
@@ -112,23 +112,26 @@ function SharedOutline({
 
 /** The read-only copy of an investigation (D79): the canvas, the side panel and the energy
  * drawer of the app, with everything that edits left out. The reader's choices (view mode,
- * filters, level, type, reference, expanded groups) change only what is shown. */
+ * filters, level, type, reference, expanded groups) change only what is shown. It opens on the
+ * view the app showed when it was made, and remembers the reader's own choices (D128). */
 export function SnapshotApp({ data }: { data: SnapshotData }) {
   const settings = useMemo(() => sharedSettings(data), [data])
   const references = useMemo(() => referenceIds(data), [data])
   const [canvas, setCanvas] = useState(data.canvas)
   const [selection, setSelection] = useState<PanelSelection>(null)
   const [focus, setFocus] = useState<{ id: string; n: number } | null>(null)
-  const [mode, setMode] = useState<ViewMode>(data.reference_id ? 'energy' : 'compact')
-  const [filters, setFilters] = useState<Filters>(NO_FILTERS)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [hydrogens, setHydrogens] = useState<HydrogenMode>(data.settings.hydrogens)
+  const [opening] = useState(() => openingView(data))
+  const [mode, setMode] = useState<ViewMode>(opening.mode)
+  const [filters, setFilters] = useState<Filters>(opening.filters)
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(opening.expanded))
+  const [hydrogens, setHydrogens] = useState<HydrogenMode>(opening.hydrogens)
   const noteImage = useCallback((id: string) => data.note_images?.[id], [data])
-  const [energyLevel, setEnergyLevel] = useState<string | null>(null)
-  const [energyType, setEnergyType] = useState<EnergyType>('G')
-  const [edgeEnergies, setEdgeEnergies] = useState(true)
-  const [referenceId, setReferenceId] = useState<string | null>(data.reference_id)
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [energyLevel, setEnergyLevel] = useState<string | null>(opening.level)
+  const [energyType, setEnergyType] = useState<EnergyType>(opening.energyType)
+  const [edgeEnergies, setEdgeEnergies] = useState(opening.edgeEnergies)
+  const [referenceId, setReferenceId] = useState<string | null>(opening.referenceId)
+  const [drawerOpen, setDrawerOpen] = useState(opening.drawerOpen)
+  const [drawerTab, setDrawerTab] = useState(opening.drawerTab)
   const [inspectorWidth, setInspectorWidth] = useState(520)
   const resizing = useRef<{ x: number; width: number } | null>(null)
 
@@ -155,6 +158,21 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
     () => ({ view, type: shownType, showEdges: edgeEnergies, referenceId, settings }),
     [view, shownType, edgeEnergies, referenceId, settings],
   )
+
+  useEffect(() => {
+    rememberView(data, {
+      mode,
+      level: energyLevel,
+      energyType,
+      edgeEnergies,
+      referenceId,
+      filters,
+      expanded: [...expanded],
+      drawerOpen,
+      drawerTab,
+      hydrogens,
+    })
+  }, [data, mode, energyLevel, energyType, edgeEnergies, referenceId, filters, expanded, drawerOpen, drawerTab, hydrogens])
 
   const toggleGroup = useCallback((id: string) => {
     setExpanded((current) => {
@@ -300,6 +318,14 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
                 </option>
               ))}
             </select>
+            {options.standard_state === '1 M' && (shownType === 'G' || shownType === 'G_qh') && (
+              <span
+                className="badge"
+                title="Free energies are at the 1 M standard state: each node and free species includes RT ln(V_m / 1 L mol⁻¹)"
+              >
+                1 M
+              </span>
+            )}
             <label className="check" title="Show ΔX on transitions (FR-CAN-03)">
               <input type="checkbox" checked={edgeEnergies} onChange={(event) => setEdgeEnergies(event.target.checked)} />
               <span>Energies on edges</span>
@@ -384,6 +410,8 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
               type={shownType}
               referenceId={referenceId}
               onReference={setReferenceId}
+              tab={drawerTab}
+              onTab={setDrawerTab}
               onSelectNode={selectPoint}
             />
           </div>
