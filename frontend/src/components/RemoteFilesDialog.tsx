@@ -4,8 +4,9 @@ import { Modal } from './Modal'
 
 // D122e: "Import from here" lists the files in the terminal's current directory on a server.
 // One chosen output opens the import dialog; several open the batch import (D97). The files
-// are copied down only then, into the investigation as any import is. One chosen file can
-// instead be opened in the Inspect window (D123c), which imports nothing.
+// are copied down only then, into the investigation as any import is. The chosen files can
+// instead be opened in the Inspect window (D123c), which imports nothing, several as a list to
+// step through (D129).
 
 export type RemoteImport = { server: string; paths: string[]; batch: boolean }
 
@@ -44,7 +45,7 @@ export function RemoteFilesDialog({
   server: RemoteServer
   onClose: () => void
   onImport: (request: RemoteImport) => void
-  onInspect: (target: { server: string; path: string }) => void
+  onInspect: (targets: { server: string; path: string }[]) => void
 }) {
   const [listing, setListing] = useState<RemoteListing | null>(null)
   const [path, setPath] = useState<string | undefined>(undefined) // undefined: the terminal's directory
@@ -92,11 +93,11 @@ export function RemoteFilesDialog({
         <>
           <button onClick={onClose}>Cancel</button>
           <button
-            disabled={paths.length !== 1}
-            onClick={() => onInspect({ server: server.id, path: paths[0] })}
-            title="Look at the file (steps, structures, convergence, modes) without importing it"
+            disabled={paths.length === 0}
+            onClick={() => onInspect(paths.map((path) => ({ server: server.id, path })))}
+            title="Look at the files (steps, structures, convergence, modes) without importing them, one after another"
           >
-            Inspect
+            Inspect{paths.length > 1 ? ` (${paths.length})` : ''}
           </button>
           <button
             disabled={paths.length === 0}
@@ -196,7 +197,7 @@ export function RemoteFilesDialog({
             </div>
             <p className="muted small">
               One file opens the import dialog, or the Inspect window to look at it first; several go through the batch
-              import, which matches each to a node. Files are copied into the investigation; nothing changes on{' '}
+              import, which matches each to a node, or can be looked at one after another in the Inspect window. Files are copied into the investigation; nothing changes on{' '}
               {server.name}.
             </p>
           </>

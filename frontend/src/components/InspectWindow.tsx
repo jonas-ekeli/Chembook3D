@@ -20,7 +20,10 @@ import { Viewer3D } from './Viewer3D'
 // convergence criteria, and its normal modes. Refresh reads it again for a job still running
 // and keeps the structure shown; "Import this file" goes on to the import with the same copy.
 // A scan shows only the structure each point converged on unless every structure is asked for,
-// as the step movie does (D125, D101).
+// as the step movie does (D125, D101). Several files (`inspect *.log`, several chosen in "Import
+// from here", a name filter in the file browser) are stepped through with Previous and Next, one
+// read at a time; the window's choices (Every 30 s, converged points, speed) stay from file to
+// file (D129).
 
 const SPEEDS = [1, 2, 5, 10, 20, 30]
 const AUTO_REFRESH = 30_000 // ms (A70)
@@ -53,18 +56,23 @@ function firstShown(steps: InspectStep[]): number {
   return (movie ?? any ?? steps[steps.length - 1])?.index ?? 1
 }
 
+function baseName(path: string): string {
+  return path.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || path
+}
+
 function frequency(value: number): string {
   return value < 0 ? `${Math.abs(value).toFixed(1)}i` : value.toFixed(1)
 }
 
 export function InspectWindow({
-  target,
+  targets,
   settings,
   canImport,
   onClose,
   onImport,
 }: {
-  target: InspectTarget
+  /** The files to look at, in order; the first is shown first (D129). */
+  targets: InspectTarget[]
   settings: Settings | null
   /** An investigation is open, so the file can be imported into it. */
   canImport: boolean
@@ -72,6 +80,8 @@ export function InspectWindow({
   /** Go on to the import dialog with this inspection's copy. */
   onImport: (inspection: Inspection) => void
 }) {
+  const [file, setFile] = useState(0)
+  const target = targets[Math.min(file, targets.length - 1)]
   const [inspection, setInspection] = useState<Inspection | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(true)
@@ -119,6 +129,7 @@ export function InspectWindow({
     setBusy(true)
     api.refreshInspection(id).then(
       (found) => {
+        if (opened.current !== id) return // another file is shown now
         setInspection(found)
         setError(null)
         setBusy(false)
@@ -128,6 +139,7 @@ export function InspectWindow({
         )
       },
       (err: unknown) => {
+        if (opened.current !== id) return
         setError(errorText(err))
         setBusy(false)
       },
@@ -188,6 +200,17 @@ export function InspectWindow({
     const found = next.findIndex(({ n }) => n >= keep)
     setIndex(found < 0 ? LAST : found)
   }
+  /** D129: show another of the files; the one shown is closed as the next is read. */
+  const goTo = (next: number) => {
+    if (next === file || next < 0 || next >= targets.length) return
+    setFile(next)
+    setInspection(null)
+    setError(null)
+    setBusy(true)
+    setStepIndex(null)
+    setPlaying(false)
+    setMode('')
+  }
   const close = () => {
     closing.current = true
     if (opened.current) void api.closeInspection(opened.current)
@@ -205,7 +228,7 @@ export function InspectWindow({
   const unit = settings?.energy_unit ?? 'kcal/mol'
   const current = shown[at]?.frame ?? null
   const last = [...shown].reverse().find(({ frame }) => frame.energy !== null)?.frame.energy ?? null
-  const title = inspection ? `Inspect ${inspection.name}` : 'Inspect'
+  const title = `Inspect ${inspection?.name ?? baseName(target.path)}`
 
   return (
     <Modal
@@ -235,6 +258,31 @@ export function InspectWindow({
       }
     >
       <div className="inspect" aria-label="Inspected file">
+        {targets.length > 1 && (
+          <div className="inspect-files" role="group" aria-label="Files to inspect">
+            <button className="small" disabled={file === 0} onClick={() => goTo(file - 1)} title="The file before">
+              ◀ Previous file
+            </button>
+            <select aria-label="File" value={file} onChange={(event) => goTo(Number(event.target.value))}>
+              {targets.map((t, n) => (
+                <option key={`${n}:${t.path}`} value={n} title={t.path}>
+                  {baseName(t.path)}
+                </option>
+              ))}
+            </select>
+            <span className="muted small">
+              {file + 1} of {targets.length}
+            </span>
+            <button
+              className="small"
+              disabled={file === targets.length - 1}
+              onClick={() => goTo(file + 1)}
+              title="The file after"
+            >
+              Next file ▶
+            </button>
+          </div>
+        )}
         {error && <p role="alert">{error}</p>}
         {!inspection && busy && (
           <p className="muted">{target.server ? `Copying ${target.path} …` : `Reading ${target.path} …`}</p>

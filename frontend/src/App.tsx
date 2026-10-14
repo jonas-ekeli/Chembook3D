@@ -200,8 +200,15 @@ function App() {
   // D122e: "Import from here" on a server's tab, then the files chosen there.
   const [remoteFiles, setRemoteFiles] = useState<RemoteServer | null>(null)
   const [remoteBatch, setRemoteBatch] = useState<{ server: string; paths: string[] } | null>(null)
-  // D123c: the file shown in the Inspect window.
-  const [inspecting, setInspecting] = useState<InspectTarget | null>(null)
+  // D123c: the files shown in the Inspect window. D129: several are one list, stepped through in
+  // the window; a new list replaces it.
+  const [inspecting, setInspecting] = useState<{ id: number; targets: InspectTarget[] } | null>(null)
+  const inspectCount = useRef(0)
+  const inspect = useCallback((targets: InspectTarget[]) => {
+    if (targets.length === 0) return
+    inspectCount.current += 1
+    setInspecting({ id: inspectCount.current, targets })
+  }, [])
   // D85: the pinned note being written: an existing one by id, or a new one on a node.
   const [noteEditing, setNoteEditing] = useState<{ noteId: string } | { nodeId: string } | null>(null)
   const [inspectorWidth, setInspectorWidth] = useState(520)
@@ -953,9 +960,9 @@ function App() {
                   setBatchFolder(folder)
                 }
           }
-          onInspect={(path) => {
+          onInspect={(paths) => {
             setImportRequest(null)
-            setInspecting({ path })
+            inspect(paths.map((path) => ({ path })))
           }}
         />
       )}
@@ -968,16 +975,16 @@ function App() {
             if (batch) setRemoteBatch({ server, paths })
             else setImportRequest({ targetId: null, files: [], position: null, remote: { server, path: paths[0] } })
           }}
-          onInspect={(target) => {
+          onInspect={(targets) => {
             setRemoteFiles(null)
-            setInspecting(target)
+            inspect(targets)
           }}
         />
       )}
       {inspecting && (
         <InspectWindow
-          key={`${inspecting.server ?? ''}:${inspecting.path}`}
-          target={inspecting}
+          key={inspecting.id}
+          targets={inspecting.targets}
           settings={settings}
           canImport={Boolean(investigation)}
           onClose={() => setInspecting(null)}
@@ -1534,7 +1541,7 @@ function App() {
             remote={remote}
             onRemoteChanged={loadRemote}
             onImportFrom={setRemoteFiles}
-            onInspect={setInspecting}
+            onInspect={inspect}
             onCwd={followCwd}
           />
         </div>

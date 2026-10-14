@@ -103,8 +103,8 @@ export function SidePanel({
   onRemoteChanged: () => Promise<void> | void
   /** "Import from here" on a server's tab (D122e). */
   onImportFrom: (server: RemoteServer) => void
-  /** D123c: `inspect FILE` typed in a server's terminal. */
-  onInspect: (target: { server: string; path: string }) => void
+  /** D123c: `inspect FILE` typed in a server's terminal, with the files it named (D129). */
+  onInspect: (targets: { server: string; path: string }[]) => void
   /** A server's terminal reported its directory. */
   onCwd: (server: string, path: string | null) => void
 }) {
@@ -225,7 +225,7 @@ export function SidePanel({
             open={server.connected ? tab === server.id : tab === HPC && chosen === server.id}
             onChanged={onRemoteChanged}
             onImportHere={() => onImportFrom(server)}
-            onInspect={(path) => onInspect({ server: server.id, path })}
+            onInspect={(paths) => onInspect(paths.map((path) => ({ server: server.id, path })))}
             onCwd={(path) => onCwd(server.id, path)}
           />
         ))}

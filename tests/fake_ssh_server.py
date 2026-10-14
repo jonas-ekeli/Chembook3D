@@ -14,6 +14,7 @@ Run as a script for the UI tests: `python -m tests.fake_ssh_server --port 8767 -
 import argparse
 import asyncio
 import contextlib
+import fnmatch
 import os
 import posixpath
 import socket
@@ -224,6 +225,22 @@ class _FakeShell:
                 await writer.wait_closed()
         self._write(f"xclient: {reply.decode('utf-8', 'replace') or 'no answer'}\n")
 
+    def _glob(self, words: list[str]) -> list[str]:
+        """Each word with a wildcard as bash expands it in the current directory (sorted; kept
+        as typed when nothing matches)."""
+        found: list[str] = []
+        for word in words:
+            if not any(c in word for c in "*?["):
+                found.append(word)
+                continue
+            names = sorted(
+                p.name
+                for p in self._local(self.cwd).iterdir()
+                if fnmatch.fnmatchcase(p.name, word) and not p.name.startswith(".")
+            )
+            found.extend(names or [word])
+        return found
+
     async def _run(self, line: str) -> bool:
         words = line.split()
         if not words:
@@ -246,11 +263,13 @@ class _FakeShell:
             self._write("  ".join(names) + ("\n" if names else ""))
         elif command == "echo":
             self._write(" ".join(args) + "\n")
-        elif command == "inspect":  # as the keeper's RC defines it (D123c)
-            for name in args:
+        elif command == "inspect":  # as the keeper's RC defines it (D123c), with bash's globs
+            for name in self._glob(args):
                 target = posixpath.normpath(posixpath.join(self.cwd, name))
                 if self._local(target).is_file():
                     self.process.stdout.write(f"\x1b]1337;Inspect={target}\x07".encode())
+                elif self._local(target).is_dir():
+                    self._write(f"inspect: {name}: is a folder\n")
                 else:
                     self._write(f"inspect: {name}: no such file\n")
         else:
