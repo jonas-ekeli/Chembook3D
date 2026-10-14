@@ -14,6 +14,7 @@ import {
   type NameRequest,
 } from '../api'
 import { Modal } from './Modal'
+import { nameFilter } from '../util'
 import { Viewer3D } from './Viewer3D'
 
 function errorText(err: unknown): string {
@@ -30,20 +31,6 @@ const DESTINATIONS: Record<string, string> = {
   node: 'Imported',
   derived: 'Derived node',
   preview: 'Not imported',
-}
-
-/** The file browser's name filter (D78): plain text matches names containing it; with * (any
- * run of characters) or ? (one character) it must match the whole name, as in a Linux shell.
- * Case is ignored either way. */
-function nameFilter(text: string): (name: string) => boolean {
-  const needle = text.trim().toLowerCase()
-  if (!/[*?]/.test(needle)) return (name) => name.toLowerCase().includes(needle)
-  const pattern = needle
-    .split('')
-    .map((c) => (c === '*' ? '.*' : c === '?' ? '.' : c.replace(/[.+^${}()|[\]\\]/g, '\\$&')))
-    .join('')
-  const glob = new RegExp(`^${pattern}$`, 's')
-  return (name) => glob.test(name.toLowerCase())
 }
 
 /** Browse the local disk through the backend (a browser page cannot read paths itself), so

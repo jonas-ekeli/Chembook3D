@@ -2512,6 +2512,15 @@ table.scan-path-held input.drive-value {
   align-items: baseline;
   overflow-wrap: anywhere;
 }
+.remote-file-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+}
+.remote-file-filter input[type='search'] {
+  flex: 1 1 16rem;
+}
 .remote-file-scroll {
   max-height: 50vh;
   overflow: auto;
