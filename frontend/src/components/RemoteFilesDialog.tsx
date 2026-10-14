@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { api, ApiError, type RemoteEntry, type RemoteListing, type RemoteServer } from '../api'
 import { Modal } from './Modal'
+import { nameFilter } from '../util'
 
 // D122e: "Import from here" lists the files in the terminal's current directory on a server.
 // One chosen output opens the import dialog; several open the batch import (D97). The files
 // are copied down only then, into the investigation as any import is. The chosen files can
 // instead be opened in the Inspect window (D123c), which imports nothing, several as a list to
-// step through (D129).
+// step through (D129). The name filter is the file browser's (D78), but folders stay listed so
+// the user can still move between them.
 
 export type RemoteImport = { server: string; paths: string[]; batch: boolean }
 
@@ -50,6 +52,7 @@ export function RemoteFilesDialog({
   const [listing, setListing] = useState<RemoteListing | null>(null)
   const [path, setPath] = useState<string | undefined>(undefined) // undefined: the terminal's directory
   const [all, setAll] = useState(false)
+  const [filter, setFilter] = useState('')
   const [chosen, setChosen] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
 
@@ -60,6 +63,7 @@ export function RemoteFilesDialog({
         if (stale) return
         setListing(result)
         setChosen(new Set())
+        setFilter('')
         setError(null)
       },
       (err: unknown) => {
@@ -71,11 +75,17 @@ export function RemoteFilesDialog({
     }
   }, [server.id, path])
 
+  const matches = nameFilter(filter)
   const shown: RemoteEntry[] = listing
-    ? listing.entries.filter((e) => e.kind === 'directory' || all || e.output || chosen.has(e.name))
+    ? listing.entries.filter(
+        (e) => e.kind === 'directory' || chosen.has(e.name) || ((all || e.output) && matches(e.name)),
+      )
     : []
   const files = shown.filter((e) => e.kind === 'file')
-  const hidden = listing ? listing.entries.filter((e) => e.kind === 'file').length - files.length : 0
+  // Files the filter lets through that only "Show every file" would add.
+  const hidden = listing
+    ? listing.entries.filter((e) => e.kind === 'file' && matches(e.name) && !shown.includes(e)).length
+    : 0
   const toggle = (name: string) => {
     const next = new Set(chosen)
     if (next.has(name)) next.delete(name)
@@ -134,10 +144,26 @@ export function RemoteFilesDialog({
         {!listing && !error && <p className="muted">Reading the directory…</p>}
         {listing && (
           <>
-            <label className="check">
-              <input type="checkbox" checked={all} onChange={(event) => setAll(event.target.checked)} />
-              Show every file{hidden > 0 && !all ? ` (${hidden} more)` : ''}
-            </label>
+            <div className="remote-file-filter">
+              <input
+                type="search"
+                aria-label="Filter by name"
+                placeholder="Filter by name, e.g. .out or *SPQZ*.out"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                onKeyDown={(event) => {
+                  // Escape clears the filter first rather than closing the dialog.
+                  if (event.key === 'Escape' && filter) {
+                    event.stopPropagation()
+                    setFilter('')
+                  }
+                }}
+              />
+              <label className="check">
+                <input type="checkbox" checked={all} onChange={(event) => setAll(event.target.checked)} />
+                Show every file{hidden > 0 && !all ? ` (${hidden} more)` : ''}
+              </label>
+            </div>
             <div className="remote-file-scroll">
               <table className="remote-file-table" aria-label="Files">
                 <thead>
@@ -188,7 +214,7 @@ export function RemoteFilesDialog({
                     <tr>
                       <td />
                       <td colSpan={3} className="muted">
-                        No {all ? '' : 'output '}files here.
+                        No {all ? '' : 'output '}files {filter.trim() ? 'match the filter' : 'here'}.
                       </td>
                     </tr>
                   )}
