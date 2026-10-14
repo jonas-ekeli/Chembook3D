@@ -50,3 +50,17 @@ export function ranges(numbers: number[]): string {
   }
   return runs.join(', ')
 }
+
+/** The file browsers' name filter (D78), in the import dialog and in Import from here: plain
+ * text matches names containing it; with * (any run of characters) or ? (one character) it must
+ * match the whole name, as in a Linux shell. Case is ignored either way. */
+export function nameFilter(text: string): (name: string) => boolean {
+  const needle = text.trim().toLowerCase()
+  if (!/[*?]/.test(needle)) return (name) => name.toLowerCase().includes(needle)
+  const pattern = needle
+    .split('')
+    .map((c) => (c === '*' ? '.*' : c === '?' ? '.' : c.replace(/[.+^${}()|[\]\\]/g, '\\$&')))
+    .join('')
+  const glob = new RegExp(`^${pattern}$`, 's')
+  return (name) => glob.test(name.toLowerCase())
+}
