@@ -2622,6 +2622,12 @@ table.scan-path-held input.drive-value {
 .inspect-side {
   margin-top: 0;
 }
+.inspect-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.3rem 0;
+}
 @media (max-width: 900px) {
   .inspect-view {
     grid-template-columns: 1fr;
