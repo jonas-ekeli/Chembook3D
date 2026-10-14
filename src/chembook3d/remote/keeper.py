@@ -36,8 +36,9 @@ import asyncssh
 
 # 2: X11 forwarding (D123a); 3: the `inspect` command (D123c); 4: `read`, and `within` on `list`
 # and `download`, for Claude reading files (D124); 5: `write` and `writes`, Claude writing new
-# files once the user allows it (D126)
-PROTOCOL = 5
+# files once the user allows it (D126); 6: the files one `inspect` names go to the app as one
+# list (D129)
+PROTOCOL = 6
 KEEPER_FILE = "keeper.json"
 KNOWN_HOSTS = "known_hosts"
 LOG_FILE = "keeper.log"
@@ -68,14 +69,18 @@ RC = (
     "__chembook3d_cwd() { printf '\\033]1337;CurrentDir=%s\\007' \"$PWD\"; }; "
     'PROMPT_COMMAND="__chembook3d_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"; '
     "inspect() { "
-    '[ $# -gt 0 ] || { echo "usage: inspect FILE... (opens each file in Chembook3D)" >&2; '
-    "return 2; }; "
+    '[ $# -gt 0 ] || { echo "usage: inspect FILE... (opens the files in Chembook3D, '
+    'e.g. inspect *.log)" >&2; return 2; }; '
     'local f; for f in "$@"; do '
     "if [ -f \"$f\" ]; then printf '\\033]1337;Inspect=%s\\007' "
     '"$(cd "$(dirname -- "$f")" && pwd)/$(basename -- "$f")"; '
+    'elif [ -d "$f" ]; then echo "inspect: $f: is a folder" >&2; '
     'else echo "inspect: $f: no such file" >&2; fi; done; }'
 )
 REPORT_MARK = "\x1b]1337;"  # CurrentDir=<path> or Inspect=<path>, ended by BEL
+# D129: the files one `inspect` command names go to the app together when the prompt comes back,
+# or after this many seconds without a new one (a command run without a prompt after it)
+INSPECT_WAIT = 1.0
 FALLBACK_WINDOW = 5.0  # a tracked shell ending this soon with "not found" falls back (A69)
 MAX_LISTED = 2000  # entries of a directory listed for "Import from here"
 MAX_UPLOAD = 10 * 1024**2  # bytes of one file sent to a server; a structure is a few kB
@@ -186,6 +191,8 @@ class Shell:
         self.viewers: set[asyncio.Queue] = set()
         self.ended: str | None = None  # why it ended
         self._carry = ""
+        self._inspect: list[str] = []  # files the running command asked to inspect (D129)
+        self._inspect_timer: asyncio.TimerHandle | None = None
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
     def feed(self, data: bytes) -> None:
@@ -199,11 +206,30 @@ class Shell:
             self.kept -= len(self.chunks.popleft())
         self._send({"type": "output", "data": text})
         for key, value in reports:
-            if key == "CurrentDir" and value != self.cwd:
-                self.cwd = value
-                self._send({"type": "cwd", "path": value})
+            if key == "CurrentDir":
+                # The prompt is back: the command that named files to inspect has ended.
+                self._send_inspect()
+                if value != self.cwd:
+                    self.cwd = value
+                    self._send({"type": "cwd", "path": value})
             elif key == "Inspect" and value.startswith("/"):
-                self._send({"type": "inspect", "path": value})
+                self._inspect.append(value)
+        if self._inspect:
+            if self._inspect_timer is not None:
+                self._inspect_timer.cancel()
+            with contextlib.suppress(RuntimeError):  # no loop: the prompt sends them
+                loop = asyncio.get_running_loop()
+                self._inspect_timer = loop.call_later(INSPECT_WAIT, self._send_inspect)
+
+    def _send_inspect(self) -> None:
+        """Ask the app to inspect the files the last command named, as one list in order
+        (D129)."""
+        if self._inspect_timer is not None:
+            self._inspect_timer.cancel()
+            self._inspect_timer = None
+        if self._inspect:
+            paths, self._inspect = self._inspect, []
+            self._send({"type": "inspect", "paths": paths})
 
     def _track(self, text: str) -> list[tuple[str, str]]:
         """The reports in `text` (current directory, files to inspect) in order, joined to
@@ -244,6 +270,7 @@ class Shell:
         if self.ended is not None:
             return
         self.ended = message
+        self._send_inspect()
         self._send({"type": "exit", "message": message})
 
     def _send(self, message: dict) -> None:

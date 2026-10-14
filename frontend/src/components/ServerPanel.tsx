@@ -44,8 +44,9 @@ export function ServerPanel({
   onChanged: () => Promise<void> | void
   /** List the files in the shell's current directory to import some (D122e). */
   onImportHere: () => void
-  /** D123c: `inspect FILE` was typed in the terminal: open the file in the Inspect window. */
-  onInspect: (path: string) => void
+  /** D123c: `inspect FILE` was typed in the terminal: open the files it named in the Inspect
+   * window, as one list (D129). */
+  onInspect: (paths: string[]) => void
   /** The terminal's directory changed, for the rest of the app (Send to, D122f). */
   onCwd: (path: string | null) => void
 }) {
@@ -115,11 +116,12 @@ export function ServerPanel({
           | { type: 'output'; data: string }
           | { type: 'hello'; cwd: string | null }
           | { type: 'cwd'; path: string }
-          | { type: 'inspect'; path: string }
+          | { type: 'inspect'; paths?: string[]; path?: string }
           | { type: 'written'; path: string }
           | { type: 'exit'; message: string }
         if (message.type === 'output') term.write(message.data)
-        else if (message.type === 'inspect') onInspect(message.path)
+        // D129: a keeper from before sends one file at a time
+        else if (message.type === 'inspect') onInspect(message.paths ?? (message.path ? [message.path] : []))
         else if (message.type === 'written') void onChanged()
         else if (message.type === 'hello' || message.type === 'cwd') {
           const path = message.type === 'hello' ? message.cwd : message.path
@@ -395,7 +397,10 @@ export function ServerPanel({
             <span className="muted small">This shell does not report its current directory.</span>
           )}
           {server.inspect && (
-            <span className="muted small" title="Opens the file in the Inspect window, without importing it">
+            <span
+              className="muted small"
+              title="Opens the files in the Inspect window, without importing them; several (inspect *.log) are stepped through with Next"
+            >
               {' '}
               · type <code>inspect FILE</code> to look at a file here
             </span>

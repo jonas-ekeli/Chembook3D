@@ -2555,6 +2555,19 @@ table.scan-path-held input.drive-value {
   display: grid;
   gap: 0.5rem;
 }
+.inspect-matching {
+  justify-self: start;
+}
+/* D129: several files: Previous, the list and Next above the file shown */
+.inspect-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.inspect-files select {
+  max-width: 28rem;
+}
 .inspect-origin {
   margin: 0;
   overflow-wrap: anywhere;

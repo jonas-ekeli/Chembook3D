@@ -396,8 +396,20 @@ def test_bash_reports_its_directory_after_each_command(local, tmp_path):
             text, _ = _read_until(
                 ws,
                 lambda text, m: (
-                    {"type": "inspect", "path": f"{work}/TS 1.out"} in m
+                    {"type": "inspect", "paths": [f"{work}/TS 1.out"]} in m
                     and "inspect: missing.log: no such file" in text
+                ),
+            )
+            # D129: a wildcard's files go to the app as one list, in bash's order.
+            (work / "b.log").write_text("output\n")
+            (work / "a.log").write_text("output\n")
+            (work / "c.log").mkdir()
+            ws.send_json({"type": "input", "data": "inspect *.log\r"})
+            text, _ = _read_until(
+                ws,
+                lambda text, m: (
+                    {"type": "inspect", "paths": [f"{work}/a.log", f"{work}/b.log"]} in m
+                    and "inspect: c.log: is a folder" in text
                 ),
             )
             ws.send_json({"type": "input", "data": "inspect\r"})
@@ -483,15 +495,44 @@ def test_the_directory_report_split_over_pieces():
     shell.feed("\x1b]1337;CurrentDir=/a\x07x\x1b]1337;CurrentDir=/b ø\x07".encode())
     assert shell.cwd == "/b ø"
     assert shell.replay().startswith("out\x1b]1337")
-    # D123c: a file to inspect is passed on as it comes, with the directory in order.
+    # D123c, D129: the files one `inspect` names go on together when the prompt is back, before
+    # the directory.
     viewer: asyncio.Queue = asyncio.Queue()
     shell.viewers.add(viewer)
-    for piece in (b"\x1b]1337;Insp", b"ect=/w/a.out\x07\x1b]1337;CurrentDir=/w\x07$ "):
+    for piece in (
+        b"\x1b]1337;Inspect=/w/a.out\x07\x1b]1337;Insp",
+        b"ect=/w/b.out\x07\x1b]1337;CurrentDir=/w\x07$ ",
+    ):
         shell.feed(piece)
     messages = [viewer.get_nowait() for _ in range(viewer.qsize())]
     assert [m for m in messages if m["type"] != "output"] == [
-        {"type": "inspect", "path": "/w/a.out"},
+        {"type": "inspect", "paths": ["/w/a.out", "/w/b.out"]},
         {"type": "cwd", "path": "/w"},
+    ]
+
+
+def test_files_to_inspect_without_a_prompt_after_them_go_on_after_a_pause(monkeypatch):
+    # D129: a command that prints no prompt after it (a script) still opens its files.
+    monkeypatch.setattr(keeper, "INSPECT_WAIT", 0.05)
+
+    async def run() -> list[dict]:
+        shell = keeper.Shell(process=None, tracked=True)  # type: ignore[arg-type]
+        viewer: asyncio.Queue = asyncio.Queue()
+        shell.viewers.add(viewer)
+        shell.feed(b"\x1b]1337;Inspect=/w/a.out\x07")
+        await asyncio.sleep(0.01)
+        shell.feed(b"\x1b]1337;Inspect=/w/b.out\x07")
+        assert viewer.qsize() == 2  # only the output so far
+        await asyncio.sleep(0.2)
+        shell.feed(b"\x1b]1337;Inspect=/w/c.out\x07")
+        shell.end("closed")
+        return [m for m in (viewer.get_nowait() for _ in range(viewer.qsize()))]
+
+    messages = [m for m in asyncio.run(run()) if m["type"] != "output"]
+    assert messages == [
+        {"type": "inspect", "paths": ["/w/a.out", "/w/b.out"]},
+        {"type": "inspect", "paths": ["/w/c.out"]},
+        {"type": "exit", "message": "closed"},
     ]
 
 
@@ -675,7 +716,7 @@ def test_a_file_on_the_server_is_inspected_from_the_terminal(at_work, saga):
         _read_until(ws, lambda text, m: "$ " in text)
         ws.send_json({"type": "input", "data": f"inspect {TS}\r"})
         _, messages = _read_until(ws, lambda text, m: any(x["type"] == "inspect" for x in m))
-    path = next(m["path"] for m in messages if m["type"] == "inspect")
+    path = next(m["paths"] for m in messages if m["type"] == "inspect")[0]
     assert path == f"{WORK}/{TS}"
 
     before = _copies()

@@ -165,6 +165,11 @@ shows them), and animates the normal modes. For a job still running, **Refresh**
 30 s**) reads it again; **Import this file** goes on to the import. It also opens xyz files and
 xTB's `xtbopt.log`. Nothing is imported and nothing on Saga changes.
 
+To look at several jobs, type `inspect *.log` (any wildcard or several names), tick several files
+in **Import from here**, or type a filter such as `*.log` in the file browser and press **Inspect
+the N matching files**. The window then steps through them with **Previous file** and **Next
+file**, or a list to jump to one.
+
 **Ask Claude about files on Saga**: while you are logged in, the Claude panel can read the files
 in the directory the Saga terminal is in, and in the directories below it, without importing
 them: "did TS1 converge?", "why did the job in opt2 stop?", "how many imaginary frequencies has

@@ -44,8 +44,8 @@ function FileBrowser({
   onPick: (path: string) => void
   /** D97: import every output in the folder shown. */
   onPickFolder?: (path: string) => void
-  /** D123c: open a file in the Inspect window instead. */
-  onInspect?: (path: string) => void
+  /** D123c: open files in the Inspect window instead, several as a list (D129). */
+  onInspect?: (paths: string[]) => void
 }) {
   const [listing, setListing] = useState<FolderListing | null>(null)
   const [path, setPath] = useState('')
@@ -74,6 +74,8 @@ function FileBrowser({
   const needle = filter.trim()
   const matches = nameFilter(needle)
   const entries = listing?.entries.filter((entry) => matches(entry.name)) ?? []
+  // D129: the files a filter matches can be looked at one after another, as `inspect *.log` does.
+  const matched = needle ? entries.filter((entry) => entry.is_file) : []
 
   return (
     <div className="file-browser">
@@ -101,6 +103,15 @@ function FileBrowser({
           }
         }}
       />
+      {onInspect && matched.length > 1 && (
+        <button
+          className="small inspect-matching"
+          title="Open these files in the Inspect window, with Next and Previous to step through them"
+          onClick={() => onInspect(matched.map((entry) => entry.path))}
+        >
+          Inspect the {matched.length} matching files
+        </button>
+      )}
       {error && <p role="alert">{error}</p>}
       <ul className="folder-list" aria-label="Files">
         {entries.map((entry) => (
@@ -115,7 +126,7 @@ function FileBrowser({
                   <button
                     className="small"
                     title={`Look at ${entry.name} without importing it`}
-                    onClick={() => onInspect(entry.path)}
+                    onClick={() => onInspect([entry.path])}
                   >
                     Inspect
                   </button>
@@ -331,8 +342,8 @@ export function ImportDialog({
   onImported: (imported: { kind: 'node' | 'group'; id: string }, notice: string) => void
   /** D97: switch to importing a whole folder (offered when importing new nodes). */
   onImportFolder?: (folder: string) => void
-  /** D123c: open a file of the file browser in the Inspect window instead. */
-  onInspect?: (path: string) => void
+  /** D123c: open files of the file browser in the Inspect window instead (D129: several). */
+  onInspect?: (paths: string[]) => void
 }) {
   const [plan, setPlan] = useState<ImportPlan | null>(null)
   const [options, setOptions] = useState<ImportOptions>({
@@ -473,9 +484,9 @@ export function ImportDialog({
             onPick={fromPath}
             onInspect={
               onInspect &&
-              ((path) => {
+              ((paths) => {
                 if (token.current) void api.cancelImport(token.current)
-                onInspect(path)
+                onInspect(paths)
               })
             }
             onPickFolder={
