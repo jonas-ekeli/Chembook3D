@@ -23,7 +23,8 @@ import { Viewer3D } from './Viewer3D'
 // as the step movie does (D125, D101). Several files (`inspect *.log`, several chosen in "Import
 // from here", a name filter in the file browser) are stepped through with Previous and Next, one
 // read at a time; the window's choices (Every 30 s, converged points, speed) stay from file to
-// file (D129).
+// file (D129). "Copy XYZ" copies the structure shown, the one the player has reached, as an
+// xyz text with the file, step, structure and energy on its comment line (D130).
 
 const SPEEDS = [1, 2, 5, 10, 20, 30]
 const AUTO_REFRESH = 30_000 // ms (A70)
@@ -60,6 +61,20 @@ function baseName(path: string): string {
   return path.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || path
 }
 
+/** The comment line of a copied structure: where it comes from and its energy (D130). */
+function copiedComment(
+  file: string,
+  step: InspectStep,
+  frame: InspectStep['frames'][number],
+  n: number,
+): string {
+  const parts = [file, `step ${step.index}`, `structure ${n + 1} of ${step.frames.length}`]
+  if (frame.point !== null && frame.point !== undefined) parts.push(`scan point ${frame.point} of ${step.points}`)
+  if (frame.converged) parts.push('converged')
+  if (frame.energy !== null && frame.energy !== undefined) parts.push(`E = ${frame.energy} Eh`)
+  return parts.join(', ')
+}
+
 function frequency(value: number): string {
   return value < 0 ? `${Math.abs(value).toFixed(1)}i` : value.toFixed(1)
 }
@@ -92,6 +107,7 @@ export function InspectWindow({
   const [mode, setMode] = useState('')
   const [convergedOnly, setConvergedOnly] = useState(true)
   const [auto, setAuto] = useState(false)
+  const [copied, setCopied] = useState<string | null>(null)
   // The window's inspection, to close it on the server when the window goes.
   const opened = useRef<string | null>(null)
   const closing = useRef(false)
@@ -211,6 +227,25 @@ export function InspectWindow({
     setPlaying(false)
     setMode('')
   }
+  /** D130: the structure shown as xyz text on the clipboard; while a mode is animated, the
+   * structure the modes belong to. */
+  const copyXyz = async () => {
+    const chosen = shown[vibration ? count - 1 : at]
+    if (!step || !inspection || !chosen) return
+    const text = geometryToXyz(chosen.frame.geometry, copiedComment(inspection.name, step, chosen.frame, chosen.n))
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(`Copied structure ${chosen.n + 1}`)
+    } catch {
+      setCopied('The browser did not allow copying')
+    }
+  }
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(null), 2500)
+    return () => clearTimeout(timer)
+  }, [copied])
+
   const close = () => {
     closing.current = true
     if (opened.current) void api.closeInspection(opened.current)
@@ -414,6 +449,24 @@ export function InspectWindow({
                       </select>
                     </div>
                   )}
+                  <div className="inspect-copy">
+                    <button
+                      className="small"
+                      onClick={() => void copyXyz()}
+                      title={
+                        vibration
+                          ? 'Copy the coordinates of the structure at rest, as xyz text'
+                          : 'Copy the coordinates of the structure shown, as xyz text'
+                      }
+                    >
+                      Copy XYZ
+                    </button>
+                    {copied && (
+                      <span className="muted small" role="status">
+                        {copied}
+                      </span>
+                    )}
+                  </div>
                   {filterable && !vibration && (
                     <label className="check" title="One structure per scan point: the one its optimization converged on">
                       <input

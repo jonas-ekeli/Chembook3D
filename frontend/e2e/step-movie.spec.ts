@@ -122,6 +122,51 @@ test('the Inspect window shows a scan by its converged points too', async ({ pag
   await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
+test('the Inspect window copies the structure shown as xyz text', async ({ page }) => {
+  // D130, T-UI-33
+  await newInvestigation(page, 'Inspect copy')
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  const browse = page.getByRole('dialog', { name: 'Import calculation output' })
+  // wait for the first listing, so it cannot replace the folder typed below
+  await expect(browse.getByLabel('Folder path')).not.toHaveValue('')
+  await browse.getByLabel('Folder path').fill(join(FIXTURES, 'gaussian'))
+  await browse.getByRole('button', { name: 'Go' }).click()
+  await browse
+    .getByRole('listitem')
+    .filter({ hasText: 'dvb_scan_relaxed.log' })
+    .getByRole('button', { name: 'Inspect' })
+    .click()
+
+  const window = page.getByRole('dialog', { name: 'Inspect dvb_scan_relaxed.log' })
+  const shown = window.getByLabel('Structure shown')
+  await expect(shown).toContainText('Structure 61 of 61 · scan point 13 of 13 · converged')
+  // The Windows clipboard turns line ends into CRLF.
+  const clipboard = async () =>
+    (await page.evaluate(() => navigator.clipboard.readText())).split(/\r?\n/).filter((line) => line !== '')
+  await window.getByRole('button', { name: 'Copy XYZ' }).click()
+  await expect(window.getByRole('status')).toHaveText('Copied structure 61')
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT })
+  const last = await clipboard()
+  expect(last[0]).toBe('20')
+  expect(last).toHaveLength(22)
+  expect(last[1]).toMatch(
+    /^dvb_scan_relaxed\.log, step \d+, structure 61 of 61, scan point 13 of 13, converged, E = -382\.308266289 Eh$/,
+  )
+  expect(last[2]).toMatch(/^[A-Z][a-z]?\s+-?\d+\.\d{8}\s+-?\d+\.\d{8}\s+-?\d+\.\d{8}$/)
+
+  // The copy follows the player.
+  await window.getByRole('button', { name: 'Previous structure' }).click()
+  await expect(shown).toContainText('scan point 12 of 13 · converged')
+  const point12 = /Structure (\d+) of 61/.exec((await shown.textContent()) ?? '')![1]
+  await window.getByRole('button', { name: 'Copy XYZ' }).click()
+  await expect(window.getByRole('status')).toHaveText(`Copied structure ${point12}`)
+  const before = await clipboard()
+  expect(before[1]).toContain(`structure ${point12} of 61, scan point 12 of 13, converged`)
+  expect(before.slice(2)).not.toEqual(last.slice(2))
+  await window.getByRole('button', { name: 'Close' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
 test('an xTB scan plays, and "Use this structure" changes a path node in place', async ({ page }) => {
   // D112, T-UI-16
   test.slow()
