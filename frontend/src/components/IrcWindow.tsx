@@ -623,8 +623,9 @@ export function IrcWindow({
 
             {pathParts.length === 0 && (
               <p className="muted">
-                Import the IRC outputs to see the path. Forward and reverse are the program's names: forward follows the
-                imaginary mode as it printed it, so either may lead to the reactant.
+                Import the IRC outputs to see the path. Forward and reverse are the program's names (ORCA's backward is
+                reverse here): forward follows the imaginary mode as it printed it, so either may lead to the reactant. Pick
+                an ORCA output in its folder, so the trajectories ORCA wrote beside it come along.
               </p>
             )}
 

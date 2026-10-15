@@ -9,11 +9,23 @@ of the output, and the solvation model from the CPCM block it prints. An `opt fr
 becomes two steps (the optimization, then the frequency job on its final geometry), the way
 Gaussian runs a compound route. Only real (not translation or rotation) modes are kept as
 frequencies, imaginary ones negative as ORCA prints them.
+
+An IRC (D133) prints only its energies; ORCA writes the points to `<base>_IRC_F_trj.xyz` and
+`<base>_IRC_B_trj.xyz` beside the output, named in the output, which `parse` reads through
+`companion` when it is given one (the folder the file was picked in, or its stored copy's).
 """
 
 import re
+from collections.abc import Callable
 
-from chembook3d.parsers.common import Criterion, ParsedFile, ParsedStep, Route
+from chembook3d.parsers.common import (
+    Criterion,
+    IrcPoint,
+    IrcRun,
+    ParsedFile,
+    ParsedStep,
+    Route,
+)
 from chembook3d.xyz import Atom, element_of
 
 PROGRAM = "ORCA"
@@ -381,7 +393,138 @@ def _finish_thermo(step: ParsedStep) -> None:
         step.scf_energy = electronic
 
 
-def parse(text: str) -> ParsedFile:
+# ---------- IRC (D133) ----------
+
+IRC_HEADER = "Intrinsic Reaction Coordinate Calculation"
+_IRC_REQUESTED = re.compile(r"^Direction\s+\.\.\.\.\s+(.*?)\s*$")
+_IRC_MAX_ITER = re.compile(r"^Max\. no of cycles\s+MaxIter\s+\.\.\.\.\s+(\d+)")
+_IRC_STORED = re.compile(r"^Storing (forward|backward) trajectory in\s+\.\.\.\.\s+(\S+)")
+_IRC_BLOCK = re.compile(r"^\s*\*\s+(FORWARD|BACKWARD) IRC\s+\*\s*$")
+_IRC_ITERATION = re.compile(r"^\s*(\d+)\s+(" + _FLOAT + r")\s+" + _FLOAT + r"\s+" + _FLOAT)
+_IRC_TS_SUMMARY = re.compile(r"^\s*\d+\s+(" + _FLOAT + r")\s+.*<= TS\s*$")
+_IRC_SIDES = {"forward": "forward", "backward": "reverse"}
+_XYZ_ENERGY = re.compile(r"\bE\s+(" + _FLOAT + ")")
+
+# Reads a file ORCA wrote beside the output, by the name the output gives it; None if absent.
+Companion = Callable[[str], bytes | None]
+
+
+def _trajectory(text: str) -> list[tuple[list[Atom], float | None]]:
+    """The whole structures of an ORCA trajectory, each with the energy on its comment line."""
+    lines = text.lstrip("\ufeff").splitlines()
+    frames: list[tuple[list[Atom], float | None]] = []
+    i = 0
+    while i < len(lines):
+        header = lines[i].strip()
+        if not header:
+            i += 1
+            continue
+        if not header.isdigit() or i + 1 >= len(lines):
+            break
+        count = int(header)
+        match = _XYZ_ENERGY.search(lines[i + 1])
+        atoms = []
+        for line in lines[i + 2 : i + 2 + count]:
+            parts = line.split()
+            element = element_of(parts[0]) if len(parts) == 4 else None
+            if element is None:
+                break
+            try:
+                atoms.append(Atom(element, *(float(v) for v in parts[1:])))
+            except ValueError:
+                break
+        if len(atoms) != count:
+            break  # the file ends inside a structure
+        frames.append((atoms, float(match.group(1)) if match else None))
+        i += 2 + count
+    return frames
+
+
+def _read_irc(lines: list[str], step: ParsedStep, termination: str, companion: Companion | None):
+    """D133: an IRC's directions, endings and TS from the output, its points from the
+    trajectories beside it. The step's structures become the TS (the last structure before the
+    IRC) and then each direction's points, as Gaussian's IRC reader leaves them; a trajectory
+    that is not there leaves its direction without points, named in `IrcRun.missing`."""
+    header = next((n for n, line in enumerate(lines) if IRC_HEADER in line), None)
+    if header is None:
+        return
+    run = IrcRun(requested="both")
+    ts: list[Atom] = []
+    for n in range(header - 1, -1, -1):
+        if lines[n].strip() == "CARTESIAN COORDINATES (ANGSTROEM)":
+            ts, _ = _read_coordinates(lines, n)
+            break
+    ts_energy = next(
+        (
+            float(line.split()[4])
+            for line in reversed(lines[:header])
+            if line.startswith("FINAL SINGLE POINT ENERGY") and len(line.split()) > 4
+        ),
+        None,
+    )
+    files: dict[str, str] = {}
+    iterations: dict[int, int] = {}
+    path = 0
+    for line in lines[header:]:
+        if match := _IRC_REQUESTED.match(line):
+            value = match.group(1).lower()
+            if " and " not in value:
+                run.requested = next((v for k, v in _IRC_SIDES.items() if k in value), "both")
+        elif match := _IRC_MAX_ITER.match(line):
+            run.max_points = int(match.group(1))
+        elif match := _IRC_STORED.match(line):
+            files[_IRC_SIDES[match.group(1)]] = match.group(2)
+        elif match := _IRC_BLOCK.match(line):
+            path += 1
+            run.directions[path] = _IRC_SIDES[match.group(1).lower()]
+        elif path and (match := _IRC_ITERATION.match(line)):
+            iterations[path] = int(match.group(1)) + 1
+        elif "THE IRC HAS CONVERGED" in line and path:
+            run.endings.setdefault(path, "minimum")
+        elif match := _IRC_TS_SUMMARY.match(line):
+            ts_energy = ts_energy if ts_energy is not None else float(match.group(1))
+    if not run.directions:
+        if run.requested == "both":
+            run.directions = {1: "forward", 2: "reverse"}
+        else:
+            run.directions = {1: run.requested}
+    run.ts_energy = ts_energy
+
+    step.geometries, step.geometry_energies, step.geometry_points = [], [], []
+    step.geometry_criteria, step.converged_geometries = [], []
+
+    def add(atoms: list[Atom], energy: float | None) -> int:
+        step.geometries.append(atoms)
+        step.geometry_energies.append(energy)
+        step.geometry_points.append(None)
+        return len(step.geometries) - 1
+
+    if ts:
+        run.points.append(IrcPoint(1, 0, add(ts, ts_energy), ts_energy, 0.0))
+        step.node_geometry = 0  # the job's structure is the TS, as before the IRC was read
+    for path_number, direction in sorted(run.directions.items()):
+        if path_number not in run.endings and path_number in iterations:
+            limit = run.max_points and iterations[path_number] >= run.max_points
+            run.endings[path_number] = (
+                "max_points" if limit else "complete" if termination == "normal" else "stopped"
+            )
+        run.endings.setdefault(path_number, "stopped")
+        name = files.get(direction)
+        data = companion(name) if companion and name else None
+        if name is None or data is None:
+            run.missing.append(name or f"the {direction} trajectory")
+            continue
+        run.files[name] = data
+        frames = _trajectory(data.decode("utf-8", errors="replace"))
+        for number, (atoms, energy) in enumerate(frames, start=1):
+            if ts and [a.element for a in atoms] != [a.element for a in ts]:
+                break
+            run.points.append(IrcPoint(path_number, number, add(atoms, energy), energy, None))
+    step.converged_geometries = sorted({p.structure for p in run.points})
+    step.irc = run
+
+
+def parse(text: str, companion: Companion | None = None) -> ParsedFile:
     if not looks_like_orca(text):
         raise NotOrcaOutput("not an ORCA output file")
     lines = text.splitlines()
@@ -441,6 +584,8 @@ def parse(text: str) -> ParsedFile:
         _finish_thermo(step)
         # A step followed by another one finished; the last one ends with the file.
         step.termination = "normal" if n < len(chunks) else termination
+        if job_type == "other":
+            _read_irc(chunk, step, step.termination, companion)
         steps.append(step)
     for n, step in enumerate(steps):
         if n > 0:

@@ -62,6 +62,10 @@ class IrcRun:
     endings: dict[int, str] = field(default_factory=dict)
     ts_energy: float | None = None
     max_points: int | None = None
+    # D133: the files beside the output its points were read from (ORCA's trajectories, by
+    # name, with their contents to copy with the output), and those that were not there
+    files: dict[str, bytes] = field(default_factory=dict, repr=False)
+    missing: list[str] = field(default_factory=list)
 
 
 @dataclass

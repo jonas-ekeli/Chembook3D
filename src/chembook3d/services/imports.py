@@ -89,7 +89,7 @@ def read_file(text: str, name: str = "", folder: Path | None = None) -> ParsedFi
     elif gaussian.looks_like_gaussian(text):
         parsed = gaussian.parse(text)
     elif orca.looks_like_orca(text):
-        parsed = orca.parse(text)
+        parsed = orca.parse(text, beside(folder) if folder else None)
     elif xtb.looks_like_xtb(text):
         parsed = xtb.parse(text)
     elif crest.looks_like_ensemble(text):
@@ -110,6 +110,24 @@ def read_file(text: str, name: str = "", folder: Path | None = None) -> ParsedFi
     if not parsed.steps:
         raise ImportFailed(f"No job steps were found in {name}")
     return parsed
+
+
+def beside(folder: Path) -> Callable[[str], bytes | None]:
+    """D133: reads a file in `folder` by the bare name another file gives it (an ORCA IRC's
+    trajectories); a name with a folder in it, or a file too large, reads as absent."""
+
+    def read(name: str) -> bytes | None:
+        if not name or PurePath(name.replace("\\", "/")).name != name:
+            return None
+        path = folder / name
+        try:
+            if not path.is_file() or path.stat().st_size > SCAN_OUTPUT_SIZE:
+                return None
+            return path.read_bytes()
+        except OSError:
+            return None
+
+    return read
 
 
 # Files looked at for the xTB output beside an xtbscan.log (D112), and the largest read.
@@ -1023,14 +1041,7 @@ def _plan_irc(
 
     chosen = [s for s in steps if irc_part_of(s, part)]
     if not chosen and part == "path":
-        blockers.append(
-            "No IRC was found in this file"
-            + (
-                "; IRCs from ORCA cannot be read yet"
-                if staged.parsed.program == orca.PROGRAM
-                else ""
-            )
-        )
+        blockers.append("No IRC was found in this file")
     elif not chosen:
         blockers.append("No optimization or frequency job was found in this file")
     direction = options.irc_direction if part == "end" else None
@@ -1041,6 +1052,13 @@ def _plan_irc(
     tolerance = settings.duplicate_tolerance
     for step in chosen:
         run = step.irc
+        if run is not None and run.missing:
+            blockers.append(
+                f"{staged.parsed.program} wrote this IRC's points to "
+                + " and ".join(run.missing)
+                + ", which were not beside the file. Pick the output in the folder where "
+                f"{staged.parsed.program} wrote them, so they are read and copied with it."
+            )
         if run is not None:
             start = next((p for p in run.points if p.number == 0), None)
             rows = _rows(step.geometries[start.structure if start else 0])
@@ -1191,6 +1209,15 @@ def _commit_irc(
     source_id = new_id()
     stored = _copy_into(folder, staged, source_id, _stored_name(origin["name"]), dry_run)
     try:
+        steps = {s.index: s for s in staged.parsed.steps}
+        if not dry_run:
+            # D133: the files the IRC's points were read from go beside the copy, where reading
+            # the copy again finds them.
+            for step in steps.values():
+                for name, data in (step.irc.files if step.irc else {}).items():
+                    target = folder / FILES_DIR / source_id / name
+                    if not target.exists():
+                        target.write_bytes(data)
         source = SourceFile(
             id=source_id,
             stored_path=stored,
@@ -1201,7 +1228,6 @@ def _commit_irc(
             size=staged.size,
         )
         session.add(source)
-        steps = {s.index: s for s in staged.parsed.steps}
         calculation_ids = []
         for step_plan in plan_.steps:
             if step_plan.assignment != "node":
