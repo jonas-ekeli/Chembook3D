@@ -385,6 +385,82 @@ export type Steps = {
   trim: Trim | null
 }
 
+/** D131: an IRC direction as the program labels it; "forward" follows the imaginary mode as
+ * printed, whose sign is arbitrary. */
+export type IrcDirection = 'forward' | 'reverse'
+/** One point of a TS node's IRC path; `coordinate` is the app's mass-weighted distance along
+ * the path from the TS in amu½·bohr, negative on the reverse side. */
+export type IrcPoint = {
+  side: 'ts' | IrcDirection
+  number: number
+  coordinate: number
+  program_coordinate: number | null
+  energy: number | null
+  /** Hartree, to the TS point of the same file. */
+  relative: number | null
+  rows: GeometryRows
+  calculation_id: string
+  file: string
+}
+/** One imported file of a node's IRC. */
+export type IrcPart = {
+  source_file_id: string | null
+  file: string
+  part: 'path' | 'end'
+  direction: IrcDirection | 'both'
+  calculation_ids: string[]
+  types: string[]
+  program: string
+  level: string
+  termination: string
+  imported_at: string
+  /** False: a later IRC in the same direction started again from the TS and replaced it. */
+  used: boolean
+  note: string
+  /** How each direction ended: minimum, max_points, complete or stopped. */
+  endings: Partial<Record<IrcDirection, string>>
+  max_points: number | null
+  points: Partial<Record<IrcDirection, number>>
+}
+export type IrcValue = { value: number | null; relative: number | null; message: string | null }
+export type IrcEndPoint = {
+  direction: IrcDirection
+  optimization_id: string | null
+  frequency_id: string | null
+  level: string
+  converged: boolean | null
+  imaginary: number | null
+  /** Å: the optimization's first structure to the IRC's last point. */
+  start_rmsd: number | null
+  values: Record<'E' | 'G' | 'G_qh', IrcValue>
+}
+export type IrcSide = {
+  direction: IrcDirection
+  ending: string | null
+  max_points: number | null
+  points: number
+  last_relative: number | null
+  end_point: IrcEndPoint | null
+}
+export type Irc = {
+  node_id: string
+  label: string
+  is_ts: boolean
+  parts: IrcPart[]
+  points: IrcPoint[]
+  sides: IrcSide[]
+  ts_energy: number | null
+  ts_values: Record<string, Record<'E' | 'G' | 'G_qh', { value: number | null; message: string | null }>>
+  warnings: string[]
+}
+export type IrcSummary = {
+  is_ts: boolean
+  count: number
+  paths: Record<IrcDirection, number>
+  optimizations: Record<IrcDirection, number>
+  frequencies: Record<IrcDirection, number>
+}
+
 /** D123c: a file read for the Inspect window: on this computer (`server` null) or on a server. */
 export type InspectTarget = { path: string; server?: string | null }
 /** One job step of an inspected file; `job_type` "structures" for an xyz file. */
@@ -1118,7 +1194,7 @@ export type ImportPlan = {
   origin: { device: string; path: string; name: string }
   blockers: string[]
   /** 'ensemble' for a CREST conformer ensemble (FR-IMP-10), which has no job steps. */
-  kind: 'steps' | 'ensemble'
+  kind: 'steps' | 'ensemble' | 'irc'
   ensemble: EnsemblePlan | null
 }
 
@@ -1164,6 +1240,10 @@ export type ImportOptions = {
   method?: string | null
   charge?: number | null
   multiplicity?: number | null
+  /** D131: import the file as part of the target TS node's IRC: its path, or a job run on one
+   * of its end points ('forward' or 'reverse'). */
+  irc_part?: 'path' | 'end' | null
+  irc_direction?: IrcDirection | null
 }
 
 export type ImportResult = {
@@ -1817,6 +1897,10 @@ export const api = {
 
   modes: (calculationId: string) => request<Modes>('GET', `/calculations/${calculationId}/modes`),
   steps: (calculationId: string) => request<Steps>('GET', `/calculations/${calculationId}/steps`),
+  irc: (nodeId: string) => request<Irc>('GET', `/nodes/${nodeId}/irc`),
+  ircSummary: (nodeId: string) => request<IrcSummary>('GET', `/nodes/${nodeId}/irc/summary`),
+  removeIrcFile: (nodeId: string, sourceFileId: string) =>
+    request<void>('DELETE', `/nodes/${nodeId}/irc/files/${sourceFileId}`),
   useStep: (calculationId: string, frame: number) =>
     request<{ node: Node; derived: boolean }>('POST', `/calculations/${calculationId}/steps/${frame}/use`),
   trimSteps: (calculationId: string, body: { remove?: number[]; restore?: number[] }) =>

@@ -26,7 +26,7 @@ import re
 import shutil
 import tempfile
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePath
 from typing import Any
 
@@ -247,6 +247,11 @@ class ImportOptions:
     # D121: the edge a scan path's node was run on, and whether only its chip there shows it.
     path_edge_id: str | None = None
     on_edge_only: bool = False
+    # D131: an IRC part for the TS node `target_node_id`: "path" (the IRC itself; its file
+    # says which direction) or "end" (an optimization or frequency job on the end point of the
+    # path in `irc_direction`, "forward" or "reverse").
+    irc_part: str | None = None
+    irc_direction: str | None = None
     # CREST ensembles (FR-IMP-10): how many of the lowest conformers to keep, or exactly which
     # (file positions); the method that made the energies; charge and multiplicity (A16).
     conformer_count: int | None = None
@@ -315,8 +320,9 @@ class Plan:
     suggested: dict[str, Any]
     origin: dict[str, str]
     blockers: list[str]
-    kind: str = "steps"  # steps | ensemble
+    kind: str = "steps"  # steps | ensemble | irc
     ensemble: dict[str, Any] | None = None
+    irc: dict[str, Any] | None = None  # D131: the part and direction an IRC import adds
     # D100: the node's lower-level optimization this file continues from; the node's geometry
     # becomes the file's result and that optimization is kept as a pre-optimization.
     continues_from: dict[str, Any] | None = None
@@ -563,10 +569,63 @@ def continues(
     return continued_optimization(target, steps, resolved, chosen_rows, tolerance) is not None
 
 
+def _names(
+    session: Session,
+    written: list[ParsedStep],
+    resolved: dict[int, _Resolved],
+    store_names: bool,
+    blockers: list[str],
+) -> list[NameRequest]:
+    """Names for custom basis sets and dispersions, asked once per definition (FR-CALC-03,
+    D59); a missing or conflicting one is added to `blockers`."""
+    names: dict[str, NameRequest] = {}
+    for step in written:
+        for request in resolved[step.index].names:
+            names.setdefault(request.key, request)
+    for request in names.values():
+        if not request.name:
+            what = "basis set" if request.kind == "basis" else "dispersion"
+            blockers.append(f"Give the custom {what} a name")
+        elif not request.recognised:
+            try:
+                if request.kind == "basis":
+                    step = next(
+                        s
+                        for s in written
+                        if any(r.key == request.key for r in resolved[s.index].names)
+                    )
+                    definition = step.resolved_basis_definition or {}
+                    prints = gaussian.basis_fingerprints(definition)
+                    if store_names:
+                        levels.register_basis(session, request.name, definition, prints)
+                    else:
+                        levels.check_basis_name(session, request.name, prints)
+                else:
+                    route = next(
+                        s.route
+                        for s in written
+                        if any(r.key == request.key for r in resolved[s.index].names)
+                    )
+                    iops = gaussian.dispersion_iops(route.iops)
+                    if store_names:
+                        levels.register_dispersion(
+                            session, request.name, route.dispersion or "", iops
+                        )
+                    else:
+                        levels.check_dispersion_name(
+                            session, request.name, route.dispersion or "", iops
+                        )
+            except levels.NameConflict as exc:
+                blockers.append(str(exc))
+    return list(names.values())
+
+
 def plan(
     session: Session, staged: StagedFile, options: ImportOptions, store_names: bool = False
 ) -> Plan:
     settings = app_settings.load()
+    if options.irc_part is not None:
+        return _plan_irc(session, staged, options, settings, store_names)
     if isinstance(staged.parsed, crest.Ensemble):
         return _plan_ensemble(session, staged, staged.parsed, options, settings)
     steps = staged.parsed.steps
@@ -720,46 +779,7 @@ def plan(
     if not written and not blockers:
         blockers.append("Nothing would be imported: no step matches the node's geometry")
 
-    # Names for custom basis sets and dispersions, asked once per definition (FR-CALC-03, D59).
-    names: dict[str, NameRequest] = {}
-    for step in written:
-        for request in resolved[step.index].names:
-            names.setdefault(request.key, request)
-    for request in names.values():
-        if not request.name:
-            what = "basis set" if request.kind == "basis" else "dispersion"
-            blockers.append(f"Give the custom {what} a name")
-        elif not request.recognised:
-            try:
-                if request.kind == "basis":
-                    step = next(
-                        s
-                        for s in written
-                        if any(r.key == request.key for r in resolved[s.index].names)
-                    )
-                    definition = step.resolved_basis_definition or {}
-                    prints = gaussian.basis_fingerprints(definition)
-                    if store_names:
-                        levels.register_basis(session, request.name, definition, prints)
-                    else:
-                        levels.check_basis_name(session, request.name, prints)
-                else:
-                    route = next(
-                        s.route
-                        for s in written
-                        if any(r.key == request.key for r in resolved[s.index].names)
-                    )
-                    iops = gaussian.dispersion_iops(route.iops)
-                    if store_names:
-                        levels.register_dispersion(
-                            session, request.name, route.dispersion or "", iops
-                        )
-                    else:
-                        levels.check_dispersion_name(
-                            session, request.name, route.dispersion or "", iops
-                        )
-            except levels.NameConflict as exc:
-                blockers.append(str(exc))
+    names = _names(session, written, resolved, store_names, blockers)
 
     # D100: a single point or frequency job takes the level of the optimization that ended on
     # its geometry, among the node's own and those in this file before it.
@@ -896,13 +916,7 @@ def plan(
         "role": role,
         "status": status,
     }
-    origin = {
-        "device": options.origin_device
-        if options.origin_device is not None
-        else staged.origin_device or settings.last_device,
-        "path": options.origin_path if options.origin_path is not None else staged.origin_path,
-        "name": options.original_name or staged.original_name,
-    }
+    origin = _origin(staged, options, settings)
 
     return Plan(
         token=staged.token,
@@ -920,12 +934,296 @@ def plan(
         derived_offered=derived_offered,
         duplicates=duplicates,
         already_imported=_already_imported(session, staged.checksum),
-        names=list(names.values()),
+        names=names,
         warnings=warnings,
         suggested=suggested,
         origin=origin,
         blockers=blockers,
         continues_from=continues_from,
+    )
+
+
+# ---------- IRC parts of a TS node (D131) ----------
+
+IRC_DIRECTIONS = ("forward", "reverse")
+_ENDINGS = {
+    "max_points": "stopped at its maximum number of points{limit}, before reaching a minimum",
+    "stopped": "ends before the path does: the job did not finish",
+    "complete": "ended without reporting a minimum",
+}
+
+
+def _origin(staged: StagedFile, options: ImportOptions, settings: Any) -> dict[str, str]:
+    return {
+        "device": options.origin_device
+        if options.origin_device is not None
+        else staged.origin_device or settings.last_device,
+        "path": options.origin_path if options.origin_path is not None else staged.origin_path,
+        "name": options.original_name or staged.original_name,
+    }
+
+
+def irc_part_of(step: ParsedStep, part: str) -> str | None:
+    """The IRC part a file's step adds as `part` ("path" or "end"), or None if it adds none:
+    the IRC step itself, or an end point's optimization or frequency job."""
+    if part == "path":
+        return "path" if step.irc is not None else None
+    if step.job_type == CalculationType.OPTIMIZATION and step.final_geometry:
+        return "end_opt"
+    if step.job_type == CalculationType.FREQUENCY:
+        return "end_freq"
+    return None
+
+
+def _irc_basis(
+    target: Node, program: str, steps: list[ParsedStep], options: ImportOptions
+) -> tuple[ImportOptions, str | None]:
+    """D131, A76: an IRC or end-point job usually reads its basis set from the TS job's
+    checkpoint (ChkBasis), so a file naming none takes the basis set of the TS's own
+    optimization unless one was given (D104)."""
+    if (options.missing_basis or "").strip() or not any(basis_not_named(program, s) for s in steps):
+        return options, None
+    optimization = levels.node_geometry_optimization(target)
+    basis = optimization.level.basis if optimization and optimization.level else ""
+    if not basis:
+        return options, None
+    return replace(options, missing_basis=basis), (
+        f"The file reads its basis set from a checkpoint; it is taken as {basis}, the basis "
+        f"set of the optimization of '{target.label}'."
+    )
+
+
+def _plan_irc(
+    session: Session,
+    staged: StagedFile,
+    options: ImportOptions,
+    settings: Any,
+    store_names: bool,
+) -> Plan:
+    """D131: the preview of an IRC part added to a TS node. Nothing about the node changes: the
+    file's steps become IRC parts, which never give the node an energy or a geometry."""
+    part = options.irc_part
+    if part not in ("path", "end"):
+        raise ImportFailed(f"unknown IRC part '{part}'")
+    target = session.get(Node, options.target_node_id) if options.target_node_id else None
+    if target is None:
+        raise ImportFailed("An IRC is imported onto the TS node it was run from")
+    if isinstance(staged.parsed, crest.Ensemble):
+        raise ImportFailed("A conformer ensemble is not an IRC calculation")
+    if part == "end" and options.irc_direction not in IRC_DIRECTIONS:
+        raise ImportFailed("Say which end of the IRC this job was run on: forward or reverse")
+    steps = staged.parsed.steps
+    blockers: list[str] = []
+    warnings: list[dict[str, Any]] = []
+    options, basis_note = _irc_basis(target, staged.parsed.program, steps, options)
+    if basis_note:
+        warnings.append({"code": "IRC-BASIS", "message": basis_note})
+    if target.role != Role.TRANSITION_STATE:
+        blockers.append("IRC calculations go on a node whose role is transition state")
+
+    chosen = [s for s in steps if irc_part_of(s, part)]
+    if not chosen and part == "path":
+        blockers.append(
+            "No IRC was found in this file"
+            + (
+                "; IRCs from ORCA cannot be read yet"
+                if staged.parsed.program == orca.PROGRAM
+                else ""
+            )
+        )
+    elif not chosen:
+        blockers.append("No optimization or frequency job was found in this file")
+    direction = options.irc_direction if part == "end" else None
+    if part == "path" and chosen:
+        directions = {s.irc.requested for s in chosen}
+        direction = directions.pop() if len(directions) == 1 else "both"
+
+    tolerance = settings.duplicate_tolerance
+    for step in chosen:
+        run = step.irc
+        if run is not None:
+            start = next((p for p in run.points if p.number == 0), None)
+            rows = _rows(step.geometries[start.structure if start else 0])
+            distance = geometry.aligned_rmsd(rows, target.geometry) if target.geometry else None
+            if distance is not None and distance > tolerance:
+                warnings.append(
+                    {
+                        "code": "IRC-START",
+                        "message": (
+                            f"The IRC starts {distance:.3f} Å from the structure of "
+                            f"'{target.label}' (over {tolerance} Å): it was run from another "
+                            "structure, such as an earlier TS or one at another level."
+                        ),
+                    }
+                )
+            for path, ending in sorted(run.endings.items()):
+                if ending in _ENDINGS:
+                    limit = f" ({run.max_points})" if run.max_points else ""
+                    side = run.directions.get(path, run.requested)
+                    warnings.append(
+                        {
+                            "code": "IRC-END",
+                            "message": f"The {side} path "
+                            + _ENDINGS[ending].format(limit=limit)
+                            + ".",
+                        }
+                    )
+        if step.termination != "normal":
+            warnings.append(
+                {"code": "W-TERM", "message": f"Step {step.index} did not terminate normally."}
+            )
+        if step.optimization_converged is False:
+            warnings.append(
+                {
+                    "code": "W-OPT-INC",
+                    "message": f"The optimization in step {step.index} did not finish.",
+                }
+            )
+        if part == "end" and step.frequencies and step.imaginary_count:
+            warnings.append(
+                {
+                    "code": "IRC-IMAG",
+                    "message": (
+                        f"Step {step.index} has {step.imaginary_count} imaginary "
+                        "frequenc"
+                        + ("y" if step.imaginary_count == 1 else "ies")
+                        + ": the end point is not a minimum."
+                    ),
+                }
+            )
+        if (
+            target.charge is not None
+            and step.charge is not None
+            and (target.charge, target.multiplicity) != (step.charge, step.multiplicity)
+        ):
+            warnings.append(
+                {
+                    "code": "W-CHG",
+                    "message": (
+                        f"Step {step.index} has charge {step.charge} and multiplicity "
+                        f"{step.multiplicity}; the TS has {target.charge} and "
+                        f"{target.multiplicity}."
+                    ),
+                }
+            )
+
+    resolved = {s.index: _resolve_level(session, staged.parsed.program, s, options) for s in steps}
+    names = _names(session, chosen, resolved, store_names, blockers)
+    step_plans = []
+    for step in steps:
+        rows = _rows(step.final_geometry)
+        step_plans.append(
+            StepPlan(
+                index=step.index,
+                type=step.job_type,
+                title=step.title,
+                route=step.route.text if step.route else None,
+                level=resolved[step.index].fields,
+                level_label=_level_label(resolved[step.index].fields, step),
+                geometry_level_label=None,
+                termination=step.termination,
+                optimization_converged=step.optimization_converged,
+                energy=step.scf_energy,
+                charge=step.charge,
+                multiplicity=step.multiplicity,
+                atom_count=len(step.final_geometry or []),
+                geometry_count=len(step.geometries),
+                frequency_count=len(step.frequencies),
+                imaginary_count=step.imaginary_count if step.frequencies else None,
+                lowest_frequencies=step.frequencies[:6],
+                thermo={k: v for k, v in step.thermo.items() if not isinstance(v, list)},
+                rmsd_to_node=geometry.aligned_rmsd(rows, target.geometry)
+                if rows and target.geometry
+                else None,
+                assignment="node" if step in chosen else "preview",
+                missing=_still_missing(step, resolved[step.index]),
+                basis_given=resolved[step.index].basis_given,
+            )
+        )
+        if step in chosen and step_plans[-1].missing:
+            warnings.append(
+                {
+                    "code": "W-PARSE",
+                    "message": f"Step {step.index}: not read from the file: "
+                    + ", ".join(step_plans[-1].missing),
+                }
+            )
+    last = chosen[-1] if chosen else None
+    return Plan(
+        token=staged.token,
+        program=staged.parsed.program,
+        program_version=staged.parsed.version,
+        original_name=staged.original_name,
+        size=staged.size,
+        checksum=staged.checksum,
+        mode="onto",
+        target_node_id=target.id,
+        target_label=target.label,
+        chosen_step=last.index if last else None,
+        steps=step_plans,
+        xyz=xyz.format_xyz(last.final_geometry, comment=PurePath(staged.original_name).stem)
+        if last and last.final_geometry
+        else None,
+        derived_offered=False,
+        duplicates=[],
+        already_imported=_already_imported(session, staged.checksum),
+        names=names,
+        warnings=warnings,
+        suggested={"label": target.label, "role": target.role, "status": target.status},
+        origin=_origin(staged, options, settings),
+        blockers=blockers,
+        kind="irc",
+        irc={"part": part, "direction": direction},
+    )
+
+
+def _commit_irc(
+    session: Session,
+    folder: Path,
+    staged: StagedFile,
+    plan_: Plan,
+    options: ImportOptions,
+    dry_run: bool,
+) -> "CommitResult":
+    """D131: the file's IRC steps, or its end point's jobs, become IRC parts of the TS node."""
+    node = session.get(Node, plan_.target_node_id)
+    origin = plan_.origin
+    source_id = new_id()
+    stored = _copy_into(folder, staged, source_id, _stored_name(origin["name"]), dry_run)
+    try:
+        source = SourceFile(
+            id=source_id,
+            stored_path=stored,
+            original_name=origin["name"],
+            origin_device=origin["device"].strip(),
+            origin_path=origin["path"].strip(),
+            checksum=staged.checksum,
+            size=staged.size,
+        )
+        session.add(source)
+        steps = {s.index: s for s in staged.parsed.steps}
+        calculation_ids = []
+        for step_plan in plan_.steps:
+            if step_plan.assignment != "node":
+                continue
+            step = steps[step_plan.index]
+            part = irc_part_of(step, plan_.irc["part"])
+            direction = step.irc.requested if step.irc else options.irc_direction
+            calculation = _create_calculation(
+                session, node, step, step_plan, staged, source, None, (part, direction)
+            )
+            calculation_ids.append(calculation.id)
+        session.flush()
+    except BaseException:
+        shutil.rmtree(folder / FILES_DIR / source_id, ignore_errors=True)
+        raise
+    if not dry_run and staged.origin_device is None:
+        _remember_device(origin["device"])
+    return CommitResult(
+        node_id=node.id,
+        derived_node_id=None,
+        calculation_ids=calculation_ids,
+        source_file_id=source_id,
     )
 
 
@@ -1289,6 +1587,8 @@ def commit(
         raise ImportBlocked(plan_.blockers)
     if plan_.kind == "ensemble":
         return _commit_ensemble(session, folder, staged, plan_, options, dry_run)
+    if plan_.kind == "irc":
+        return _commit_irc(session, folder, staged, plan_, options, dry_run)
     fields = _node_fields(plan_, options)
     steps = {s.index: s for s in staged.parsed.steps}
     chosen = steps[plan_.chosen_step] if plan_.chosen_step is not None else None
@@ -1389,7 +1689,9 @@ def _create_calculation(
     staged: StagedFile,
     source: SourceFile,
     geometry_level: levels.LevelOfTheory | None,
+    irc: tuple[str | None, str | None] = (None, None),
 ) -> Calculation:
+    """`irc` is the IRC part and direction the calculation is on a TS node (D131)."""
     level = levels.get_or_create(session, step_plan.level) if step_plan.level else None
     route = step.route
     parsed_level = None
@@ -1428,6 +1730,8 @@ def _create_calculation(
         geometry=_rows(step.final_geometry),
         parse_warnings=list(step_plan.missing),
         source_file_id=source.id,
+        irc_part=irc[0],
+        irc_direction=irc[1],
     )
     session.add(calculation)
     session.flush()
@@ -1470,6 +1774,7 @@ def _create_calculation(
             ),
             "file": source.original_name,
             "step": step.index,
+            **({"irc_part": irc[0], "irc_direction": irc[1]} if irc[0] else {}),
         },
         source="import",
     )

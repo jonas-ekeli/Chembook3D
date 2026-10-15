@@ -315,6 +315,8 @@ class ImportOptionsIn(BaseModel):
     original_name: str | None = None
     pos_x: float | None = None
     pos_y: float | None = None
+    irc_part: str | None = None  # D131: "path" or "end", onto the TS node target_node_id
+    irc_direction: str | None = None
     conformer_count: int | None = None
     conformers: list[int] | None = None
     method: str | None = None
@@ -437,7 +439,7 @@ def _node_out(session: Session, node: Node) -> NodeOut:
         atom_count=len(atoms),
         xyz=node_service.to_xyz(node) if atoms else None,
         derived_from_id=node.derived_from_id,
-        calculation_count=node_service.calculation_count(session, node.id),
+        calculation_count=node_service.calculation_count(session, node.id, own=True),
         warnings=[WarningOut(**w.as_dict()) for w in warning_service.node_warnings(node)],
         step_id=node.step_id,
         branch_id=node.branch_id,

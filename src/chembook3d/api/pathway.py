@@ -704,7 +704,7 @@ def group_delete_preview(group_id: str, session: DbSession):
             GroupMemberBrief(
                 id=m.id,
                 label=m.label,
-                calculation_count=node_service.calculation_count(session, m.id),
+                calculation_count=node_service.calculation_count(session, m.id, own=True),
             )
             for m in preview["members"]
         ],

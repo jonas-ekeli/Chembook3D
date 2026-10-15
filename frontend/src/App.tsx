@@ -39,6 +39,7 @@ import { UndoImportDialog } from './components/UndoImportDialog'
 import { BatchImportDialog } from './components/BatchImportDialog'
 import { ImportDialog } from './components/ImportDialog'
 import { InspectWindow } from './components/InspectWindow'
+import { IrcWindow } from './components/IrcWindow'
 import { RemoteFilesDialog } from './components/RemoteFilesDialog'
 import { Modal } from './components/Modal'
 import { NodeInspector } from './components/NodeInspector'
@@ -203,6 +204,7 @@ function App() {
   // D123c: the files shown in the Inspect window. D129: several are one list, stepped through in
   // the window; a new list replaces it.
   const [inspecting, setInspecting] = useState<{ id: number; targets: InspectTarget[] } | null>(null)
+  const [ircNode, setIrcNode] = useState<string | null>(null) // D131: the node whose IRC window is open
   const inspectCount = useRef(0)
   const inspect = useCallback((targets: InspectTarget[]) => {
     if (targets.length === 0) return
@@ -981,6 +983,20 @@ function App() {
           }}
         />
       )}
+      {ircNode && investigation && canvas.nodes.some((n) => n.id === ircNode) && (
+        <IrcWindow
+          key={ircNode}
+          node={canvas.nodes.find((n) => n.id === ircNode)!}
+          nodes={[...canvas.nodes, ...canvas.species]}
+          settings={settings}
+          linked={investigation.linked}
+          onClose={() => setIrcNode(null)}
+          onChanged={(message) => {
+            setNotice(message)
+            reload()
+          }}
+        />
+      )}
       {inspecting && (
         <InspectWindow
           key={inspecting.id}
@@ -1183,6 +1199,7 @@ function App() {
         onEditNote={(noteId) => setNoteEditing(noteId ? { noteId } : { nodeId: selectedNode.id })}
         settings={settings}
         servers={remote?.enabled ? remote.servers.filter((s) => s.connected) : []}
+        onIrc={() => setIrcNode(selectedNode.id)}
       />
     )
   } else if (selectedGroup) {
