@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from chembook3d.api import downloads
 from chembook3d.api.claude import BUSY, POLICY, TOKEN_LIFETIME, _refusal, _size
 from chembook3d.api.routes import _investigation, _staging
+from chembook3d.parsers import orca
 from chembook3d.remote import client, keeper, servers
 from chembook3d.services import batch_import, imports
 from chembook3d.services import nodes as node_service
@@ -398,6 +399,30 @@ async def _copy_down(server: servers.Server, paths: list[str]) -> tuple[Path, li
     return folder, answer["files"]
 
 
+async def _with_trajectories(server: servers.Server, folder: Path, copied: list[dict]) -> None:
+    """D134: an ORCA IRC's points are in trajectories beside it; copy them down beside it too,
+    when they are there, so staging reads them as it does in a local folder."""
+    for item in copied:
+        local = Path(item["local"])
+        try:
+            text = local.read_bytes()[: imports.SCAN_OUTPUT_SIZE].decode("utf-8", "replace")
+        except OSError:
+            continue
+        if not orca.looks_like_orca(text):
+            continue
+        names = [n for n in orca.irc_trajectories(text) if posixpath.basename(n) == n]
+        wanted = [n for n in names if not (folder / n).exists()]
+        if wanted:
+            directory = posixpath.dirname(item["path"])
+            await _keeper(
+                "download",
+                timeout=keeper.COPY_WAIT,
+                server=server.id,
+                paths=[posixpath.join(directory, n) for n in wanted],
+                folder=str(folder),
+            )  # a trajectory that is not there stays missing; the import names it
+
+
 @router.post("/servers/{server_id}/import")
 async def import_file(server_id: str, body: RemoteImportIn, request: Request):
     """Copy one output down and stage it as the import dialog does (its preview), with the
@@ -410,6 +435,11 @@ async def import_file(server_id: str, body: RemoteImportIn, request: Request):
             422, "Import one file at a time here; several go through the batch import."
         )
     folder, copied = await _copy_down(server, body.paths)
+    try:
+        await _with_trajectories(server, folder, copied)
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
 
     def stage_and_plan():
         try:
@@ -440,6 +470,11 @@ async def batch_files(server_id: str, body: RemoteImportIn, request: Request):
     investigation = _investigation(request)
     server = _saved(server_id)
     folder, copied = await _copy_down(server, body.paths)
+    try:
+        await _with_trajectories(server, folder, copied)
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
     remote_dir = posixpath.dirname(copied[0]["path"]) if copied else ""
 
     def scan():

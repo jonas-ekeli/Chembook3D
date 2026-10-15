@@ -480,7 +480,7 @@ export function ImportDialog({
           {irc ? (
             <p>
               {irc.part === 'path'
-                ? 'Choose the Gaussian output of an IRC: forward, reverse or both ways in one job.'
+                ? 'Choose the Gaussian or ORCA output of an IRC: forward, reverse or both ways in one job. Pick an ORCA output here, in its folder, so the trajectories beside it come along.'
                 : `Choose the optimization or frequency job (or an opt freq job) run on the ${irc.direction} end point.`}
             </p>
           ) : (
@@ -560,6 +560,21 @@ export function ImportDialog({
               energyFactor={energyFactor}
               onChange={change}
             />
+          )}
+
+          {plan.irc_targets && plan.kind !== 'irc' && (
+            <section className="notice" aria-label="An IRC">
+              <p>
+                This is an IRC. It goes into the IRC of the transition state it starts from, not onto the canvas
+                {plan.irc_targets.length === 0 && ': no transition state here starts where it does. Open IRC… on its node to add it there'}
+                .
+              </p>
+              {plan.irc_targets.map((t) => (
+                <button key={t.node_id} className="primary" onClick={() => change({ irc_part: 'path', target_node_id: t.node_id })}>
+                  Add to the IRC of “{t.label || 'Untitled node'}” ({t.rmsd.toFixed(3)} Å)
+                </button>
+              ))}
+            </section>
           )}
 
           {!plan.ensemble && (

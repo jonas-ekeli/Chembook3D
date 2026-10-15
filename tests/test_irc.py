@@ -1,4 +1,4 @@
-"""IRC calculations of a TS node (D131, A76; D132, A77; D133, A78): T-IMP-25 … T-IMP-33.
+"""IRC calculations of a TS node (D131–D134, A76–A79): T-IMP-25 … T-IMP-34.
 
 The files are synthetic (tests/gaussian_text.py), modelled on real Gaussian 16 IRC outputs:
 the LQA integrator with the TS read from the checkpoint, the default integrator printing each
@@ -517,3 +517,48 @@ def test_import_an_orca_irc_with_its_trajectories(open_client, tmp_path):
     response = open_client.delete(f"/api/nodes/{ts}/irc/files/{part['source_file_id']}")
     assert response.status_code == 204
     assert copied_files(open_client) == []
+
+
+# ---------- T-IMP-34: an IRC file outside the IRC window (D134) ----------
+
+
+def test_an_irc_in_the_import_dialog_offers_its_ts(open_client):
+    # With no TS, it is refused and the dialog says where it goes.
+    plan = upload(open_client, "irc-forward.out", g.irc(points=4))
+    assert plan["irc_targets"] == [] and "open IRC… on its node" in plan["blockers"][-1]
+    ts = import_ts(open_client)
+    other = neighbour(open_client, "Elsewhere", g.irc_point("forward", 4))
+    response = open_client.patch(f"/api/nodes/{other}", json={"role": "transition_state"})
+    assert response.status_code == 200, response.text
+    plan = upload(open_client, "irc-forward.out", g.irc(points=4))
+    # Only the TS it starts from is offered, never the canvas.
+    assert [t["node_id"] for t in plan["irc_targets"]] == [ts]
+    assert plan["irc_targets"][0]["rmsd"] < 0.05
+    assert "not onto the canvas" in plan["blockers"][-1]
+    options = {"target_node_id": ts, "irc_part": "path"}
+    chosen = preview(open_client, plan, **options)
+    assert chosen["kind"] == "irc" and chosen["blockers"] == []
+    commit(open_client, chosen, **options)
+    assert sides_of(read(open_client, ts))["forward"]["points"] == 4
+
+
+def test_a_batch_import_puts_irc_files_into_their_ts(open_client, tmp_path):
+    for name in ("TS.out", "irc-forward.out", "irc-reverse.out"):
+        (tmp_path / name).write_text(g.IRC_FILES[name](), encoding="utf-8")
+    staged = open_client.post("/api/batch-imports", json={"folder": str(tmp_path)})
+    assert staged.status_code == 200, staged.text
+    plan = staged.json()
+    rows = {r["path"]: r for r in plan["rows"]}
+    # The TS is imported first; each IRC goes into its IRC, matched by where it starts.
+    assert rows["TS.out"]["order"] == 1 and rows["TS.out"]["target"]["kind"] == "new"
+    for name in ("irc-forward.out", "irc-reverse.out"):
+        assert rows[name]["kind"] == "irc" and rows[name]["match"] == "irc"
+        assert rows[name]["target"]["kind"] == "file" and rows[name]["blockers"] == []
+    result = open_client.post(f"/api/batch-imports/{plan['token']}/commit", json={})
+    assert result.status_code == 200, result.text
+    how = {f["file"]: f["how"] for f in result.json()["files"]}
+    assert how == {"TS.out": "new", "irc-forward.out": "irc", "irc-reverse.out": "irc"}
+    (ts,) = [n["id"] for n in open_client.get("/api/canvas").json()["nodes"]]
+    sides = sides_of(read(open_client, ts))
+    assert sides["forward"]["points"] == 6 and sides["reverse"]["points"] == 5
+    assert open_client.get(f"/api/nodes/{ts}/irc/summary").json()["count"] == 2

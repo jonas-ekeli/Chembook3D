@@ -409,6 +409,13 @@ _XYZ_ENERGY = re.compile(r"\bE\s+(" + _FLOAT + ")")
 Companion = Callable[[str], bytes | None]
 
 
+def irc_trajectories(text: str) -> list[str]:
+    """D134: the names of the trajectories an ORCA IRC output says it wrote beside itself."""
+    if IRC_HEADER not in text:
+        return []
+    return [m.group(2) for line in text.splitlines() if (m := _IRC_STORED.match(line))]
+
+
 def _trajectory(text: str) -> list[tuple[list[Atom], float | None]]:
     """The whole structures of an ORCA trajectory, each with the energy on its comment line."""
     lines = text.lstrip("\ufeff").splitlines()

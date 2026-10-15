@@ -1220,6 +1220,8 @@ export type ImportPlan = {
   /** 'ensemble' for a CREST conformer ensemble (FR-IMP-10), which has no job steps. */
   kind: 'steps' | 'ensemble' | 'irc'
   ensemble: EnsemblePlan | null
+  /** D134: an IRC file planned as an ordinary import: the TS nodes it starts from, nearest first. */
+  irc_targets?: { node_id: string; label: string; rmsd: number }[] | null
 }
 
 export type EnsembleConformer = {
@@ -1294,12 +1296,12 @@ export type BatchRow = {
   program: string
   version: string | null
   size: number
-  kind: 'steps' | 'ensemble'
+  kind: 'steps' | 'ensemble' | 'irc'
   included: boolean
   skipped: 'imported_before' | 'same_file' | null
   skipped_detail: string | null
   order: number | null
-  match: 'geometry' | 'first_geometry' | 'name' | 'name_close' | 'new' | 'chosen' | 'duplicate' | 'none'
+  match: 'geometry' | 'first_geometry' | 'name' | 'name_close' | 'new' | 'chosen' | 'duplicate' | 'none' | 'irc'
   target: BatchTarget | null
   mode: 'new' | 'planned' | 'onto' | null
   derived: boolean

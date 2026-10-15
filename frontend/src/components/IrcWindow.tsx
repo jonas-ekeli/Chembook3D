@@ -12,10 +12,12 @@ import {
   type IrcPoint,
   type IrcSide,
   type Node,
+  type RemoteServer,
   type Settings,
 } from '../api'
 import { ImportDialog } from './ImportDialog'
 import { Modal } from './Modal'
+import { RemoteFilesDialog } from './RemoteFilesDialog'
 import { Viewer3D } from './Viewer3D'
 
 // D131: a TS node's IRC, kept apart from the node: its path in each direction and the
@@ -293,6 +295,7 @@ export function IrcWindow({
   onClose,
   onChanged,
   onShowNode,
+  servers = [],
 }: {
   node: Node
   nodes: Node[]
@@ -304,10 +307,14 @@ export function IrcWindow({
   onChanged: (notice: string) => void
   /** Select a node on the canvas; the window closes. */
   onShowNode: (id: string) => void
+  /** D134: the servers logged in to, whose files can go into a slot. */
+  servers?: RemoteServer[]
 }) {
   const [irc, setIrc] = useState<Irc | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [importing, setImporting] = useState<{ part: 'path' | 'end'; direction: IrcDirection | null } | null>(null)
+  type Slot = { part: 'path' | 'end'; direction: IrcDirection | null }
+  const [importing, setImporting] = useState<(Slot & { remote?: { server: string; path: string } }) | null>(null)
+  const [browsing, setBrowsing] = useState<(Slot & { server: RemoteServer }) | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
   const [source, setSource] = useState<Source>({ kind: 'path' })
   // Every structure of one path file (the optimization steps between points included), by
@@ -424,10 +431,28 @@ export function IrcWindow({
     }
   }
 
+  const slotName = (slot: Slot) =>
+    `${slot.part === 'path' ? 'into' : `a job on the ${slot.direction} end point into`} the IRC of “${node.label || 'Untitled node'}”`
+
+  if (browsing) {
+    return (
+      <RemoteFilesDialog
+        server={browsing.server}
+        purpose={slotName(browsing)}
+        onClose={() => setBrowsing(null)}
+        onImport={({ server, paths }) => {
+          setBrowsing(null)
+          setImporting({ part: browsing.part, direction: browsing.direction, remote: { server, path: paths[0] } })
+        }}
+      />
+    )
+  }
+
   if (importing) {
     return (
       <ImportDialog
         file={null}
+        remote={importing.remote ?? null}
         irc={importing}
         target={node}
         nodes={nodes}
@@ -569,6 +594,17 @@ export function IrcWindow({
                     >
                       Import IRC…
                     </button>
+                    {servers.map((server) => (
+                      <button
+                        key={server.id}
+                        className="small"
+                        disabled={!irc.is_ts}
+                        onClick={() => setBrowsing({ part: 'path', direction: null, server })}
+                        title={`An IRC output in a directory on ${server.name}; an ORCA IRC's trajectories beside it come along`}
+                      >
+                        From {server.name}…
+                      </button>
+                    ))}
                     <h4>End point</h4>
                     <ul className="irc-files">{partsOf(d, 'end').map((p) => partRow(p, d))}</ul>
                     {end && (
@@ -605,6 +641,17 @@ export function IrcWindow({
                       >
                         Import end-point job…
                       </button>
+                      {servers.map((server) => (
+                        <button
+                          key={server.id}
+                          className="small"
+                          disabled={!irc.is_ts}
+                          onClick={() => setBrowsing({ part: 'end', direction: d, server })}
+                          title={`The end point's job in a directory on ${server.name}`}
+                        >
+                          From {server.name}…
+                        </button>
+                      ))}
                       {end?.optimization_id && !s?.same_as.length && (
                         <button
                           className="small"

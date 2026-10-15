@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from chembook3d.app import create_app
 from chembook3d.mcp_server import Bridge
 from chembook3d.mcp_tools import BY_NAME, PANEL_ALLOWED, READ_ONLY_TOOLS, TOOLS
+from chembook3d.parsers import orca
 from chembook3d.remote import client, keeper
 from tests.fake_ssh_server import CODE, PASSWORD, USER, FakeSaga, FakeXServer, free_display
 
@@ -706,6 +707,37 @@ def test_import_refusals(at_work, local):
     assert at_work.post("/api/remote/servers/saga/import", json=one).status_code == 403
     at_work.post("/api/remote/servers/saga/logout", headers=ORIGIN)
     assert at_work.get("/api/remote/servers/saga/files").status_code == 409
+
+
+# ---------- T-SSH-21 an IRC from the server (D134) ----------
+
+ORCA_IRC = Path(__file__).parent / "fixtures" / "orca" / "irc"
+IRC_NAMES = ("output.out", "orca_IRC_F_trj.xyz", "orca_IRC_B_trj.xyz")
+
+
+def test_an_orca_irc_comes_down_with_its_trajectories(at_work, saga):
+    work = saga.root / WORK.lstrip("/") / "irc"
+    work.mkdir()
+    for name in IRC_NAMES:
+        (work / name).write_bytes((ORCA_IRC / name).read_bytes())
+    text = (ORCA_IRC / "output.out").read_text(encoding="utf-8")
+    start = orca.parse(text).steps[0].geometries[0]
+    xyz = f"{len(start)}\n\n" + "\n".join(f"{a.element} {a.x} {a.y} {a.z}" for a in start)
+    body = {"label": "TS", "xyz": xyz, "role": "transition_state", "charge": 1, "multiplicity": 1}
+    ts = at_work.post("/api/nodes", json=body).json()["id"]
+
+    # Only the output is chosen; its trajectories come down with it.
+    one = {"paths": [f"{WORK}/irc/output.out"], "node_id": ts}
+    plan = at_work.post("/api/remote/servers/saga/import", json=one, headers=ORIGIN).json()
+    assert [t["node_id"] for t in plan["irc_targets"]] == [ts]
+    options = {"target_node_id": ts, "irc_part": "path"}
+    response = at_work.post(f"/api/imports/{plan['token']}/preview", json=options)
+    assert response.status_code == 200 and response.json()["blockers"] == []
+    response = at_work.post(f"/api/imports/{plan['token']}/commit", json=options)
+    assert response.status_code == 200, response.text
+    found = at_work.get(f"/api/nodes/{ts}/irc").json()
+    assert {s["direction"]: s["points"] for s in found["sides"]} == {"forward": 49, "reverse": 73}
+    assert found["parts"][0]["file"] == "output.out"
 
 
 # ---------- T-SSH-10 inspect a file on the server (D123c) ----------

@@ -112,3 +112,27 @@ test("a TS node's IRC is imported, inspected and removed in its own window", asy
   await expect(window).toHaveCount(0)
   await expect(inspector.getByRole('heading', { name: 'TS forward end' })).toBeVisible()
 })
+
+test('an IRC file in the ordinary import goes into the IRC of its TS', async ({ page }) => {
+  // D134, T-UI-36
+  test.slow()
+  await newInvestigation(page, 'IRC routing')
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  let dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Upload a file').setInputFiles(join(IRC, 'TS.out'))
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  const inspector = page.getByLabel('Node inspector')
+  await expect(inspector.getByRole('heading', { name: 'TS' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Upload a file').setInputFiles(join(IRC, 'irc-forward.out'))
+  const offer = dialog.getByLabel('An IRC')
+  await expect(offer).toContainText('not onto the canvas')
+  await expect(dialog.getByRole('button', { name: 'Import', exact: true })).toBeDisabled()
+  await offer.getByRole('button', { name: /Add to the IRC of “TS”/ }).click()
+  await expect(dialog.getByText('The node itself does not change')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(inspector.getByLabel('IRC', { exact: true })).toContainText('IRC: forward ✓')
+  await expect(inspector.getByText('2 calculations', { exact: true })).toBeVisible()
+})
