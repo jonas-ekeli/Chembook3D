@@ -1,4 +1,4 @@
-"""IRC calculations of a TS node (D131, A76).
+"""IRC calculations of a TS node (D131, A76; the connection check D132, A77).
 
 A TS node holds its IRC as calculations marked as IRC parts (`Calculation.irc_part`): the path
 in each direction ("path", from a file whose IRC follows one direction or both) and the jobs
@@ -20,6 +20,12 @@ step movie does (D101).
 - An end point's optimization and frequency job give E, G and G_qh relative to the TS node at
   the same composite level (EN-3); they never feed profiles, the energy table, energetic span
   or selectivity.
+- The connection check compares each end (its optimized structure, else the IRC's last point)
+  with the nodes on the TS's edges, on the reacting atoms (D118): an end connects a neighbour
+  whose bonds among those atoms are the same. It never changes an edge. The chart is drawn by
+  the edges: the side that reaches the node an incoming edge comes from goes on the left (Q39).
+- An optimized end point that is the same structure as a node (the import's duplicate check,
+  ID-7) says so; otherwise it can be made a node of its own by importing its files again.
 """
 
 from dataclasses import dataclass, field
@@ -29,13 +35,14 @@ from typing import Any
 import numpy as np
 from sqlalchemy.orm import Session
 
+from chembook3d import pathtools, thermochem
 from chembook3d import settings as app_settings
-from chembook3d import thermochem
 from chembook3d.models import Calculation, CalculationType, Node, Role
 from chembook3d.parsers.common import IrcRun, ParsedStep
+from chembook3d.services import atom_matching, geometry, imports, levels, trajectory, transitions
 from chembook3d.services import energies as energy_service
 from chembook3d.services import files as file_service
-from chembook3d.services import geometry, imports, levels, trajectory
+from chembook3d.services import groups as group_service
 from chembook3d.services.records import RecordError, get
 
 DIRECTIONS = ("reverse", "forward")  # the order the path is drawn in, left to right
@@ -90,6 +97,34 @@ class EndPoint:
 
 
 @dataclass
+class Neighbour:
+    """A node on one of the TS's edges, compared with an end of the IRC."""
+
+    node_id: str
+    label: str
+    edge: str  # "incoming" (its edge comes to the TS) or "outgoing"
+    rmsd: float | None  # Å over the reacting atoms after fitting; None: other atoms
+    rmsd_all: float | None  # Å over all atoms
+    same_bonds: bool  # the same bonds among the reacting atoms
+    note: str = ""
+
+
+@dataclass
+class Connection:
+    """D132: where an end of the IRC leads. `verdict` is "connects" (a neighbour with the same
+    bonds among the reacting atoms, the nearest such), "elsewhere" (no neighbour has them),
+    "no_neighbours" (the TS has no edges) or "unknown" (no structure to judge)."""
+
+    verdict: str
+    judged_on: str  # "optimized end point" or "last IRC point"
+    node_id: str | None = None  # the neighbour it connects, or the nearest one
+    label: str = ""
+    rmsd: float | None = None
+    atoms: int = 0  # the reacting atoms it is judged on; 0: all
+    neighbours: list[Neighbour] = field(default_factory=list)
+
+
+@dataclass
 class Side:
     direction: str
     ending: str | None
@@ -97,6 +132,9 @@ class Side:
     points: int  # after the TS
     last_relative: float | None  # hartree, the last point to the TS
     end_point: EndPoint | None
+    connection: Connection | None = None
+    # Nodes the optimized end point is the same structure as (ID-7's tolerance), nearest first.
+    same_as: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -110,6 +148,7 @@ class Irc:
     ts_energy: float | None
     ts_values: dict[str, Any]  # energy type -> the TS node's value at an end point's level
     warnings: list[str]
+    left: str = "reverse"  # the direction drawn on the left (Q39); its distances are negative
 
 
 def _read_step(folder: Path, calculation: Calculation) -> tuple[ParsedStep, str] | None:
@@ -187,7 +226,8 @@ def _runs(step: ParsedStep, calculation: Calculation, file: str) -> dict[str, _R
     return found
 
 
-def read(session: Session, folder: Path, node_id: str) -> Irc:
+def read(session: Session, folder: Path, node_id: str, structures: bool = True) -> Irc:
+    """The node's IRC; without `structures` the points carry no coordinates (Claude's read)."""
     node = get(session, Node, node_id, "Node")
     settings = app_settings.load()
     tolerance = settings.duplicate_tolerance
@@ -376,6 +416,16 @@ def read(session: Session, folder: Path, node_id: str) -> Irc:
             key = energy_service.LevelKey(level_id, level_id)
             ts_values[level_id] = {t: _value(node_energies.value(key, t)) for t in ENERGY_TYPES}
 
+    _check_connections(session, node, sides, last_rows, settings.duplicate_tolerance)
+    left = _left_side(sides)
+    if left == "forward":
+        points = list(reversed(points))
+        for point in points:
+            point.coordinate = -point.coordinate
+        sides.reverse()
+    if not structures:
+        for point in points:
+            point.rows = []
     return Irc(
         node_id=node.id,
         label=node.label,
@@ -386,7 +436,188 @@ def read(session: Session, folder: Path, node_id: str) -> Irc:
         ts_energy=ts_energy,
         ts_values=ts_values,
         warnings=warnings,
+        left=left,
     )
+
+
+def _neighbours(session: Session, node: Node) -> list[tuple[Node, str]]:
+    """The nodes on the TS's edges (and on its group's), each with whether its edge comes in;
+    a group end stands for each of its members."""
+    ends = [node.id] + ([node.group_id] if node.group_id else [])
+    found: dict[str, tuple[Node, str]] = {}
+    for edge in transitions.touching(session, ends):
+        incoming = edge.target_id in ends
+        other = edge.source_id if incoming else edge.target_id
+        if other in ends:
+            continue
+        other_node = session.get(Node, other)
+        members = [other_node] if other_node else group_service.members(session, other)
+        for member in members:
+            if member.id != node.id and member.geometry:
+                found.setdefault(member.id, (member, "incoming" if incoming else "outgoing"))
+    return list(found.values())
+
+
+def _in_order(rows: list[list[Any]], other: list[list[Any]]) -> list[list[Any]] | None:
+    """`other` in `rows`'s atom order: as it is when the elements line up, else matched by
+    their bonds (D113); None when the atoms differ."""
+    if geometry.elements(rows) == geometry.elements(other):
+        return other
+    if sorted(geometry.elements(rows)) != sorted(geometry.elements(other)):
+        return None
+    try:
+        found = atom_matching.match(rows, other)
+    except RecordError:
+        return None
+    return atom_matching.renumbered(rows, other, found.mapping)
+
+
+def _subset(rows: list[list[Any]], atoms: list[int]) -> list[list[Any]]:
+    return [rows[a - 1] for a in atoms] if atoms else rows
+
+
+def _bonds_among(rows: list[list[Any]], atoms: list[int]) -> set[tuple[int, int]]:
+    keep = set(atoms) if atoms else set(range(1, len(rows) + 1))
+    return {pair for pair in pathtools.bonds(rows) if set(pair) <= keep}
+
+
+def _check_connections(
+    session: Session,
+    node: Node,
+    sides: list[Side],
+    last_rows: dict[str, list[list[Any]]],
+    tolerance: float,
+) -> None:
+    """Each end against the TS's neighbours, on the atoms that react between the two ends (or
+    between the TS and the one end there is), D118's reacting atoms."""
+    ends: dict[str, tuple[list[list[Any]], str]] = {}
+    for side in sides:
+        optimization = (
+            session.get(Calculation, side.end_point.optimization_id)
+            if side.end_point and side.end_point.optimization_id
+            else None
+        )
+        if optimization is not None and optimization.geometry:
+            ends[side.direction] = (optimization.geometry, "optimized end point")
+            side.same_as = imports._duplicates(
+                session,
+                optimization.geometry,
+                node.charge,
+                node.multiplicity,
+                {node.id},
+                tolerance,
+            )
+        elif side.direction in last_rows:
+            ends[side.direction] = (last_rows[side.direction], "last IRC point")
+    reference = node.geometry
+    found = [rows for rows, _ in ends.values()]
+    atoms: list[int] = []
+    if len(found) == 2 and len(found[0]) == len(found[1]):
+        atoms = pathtools.active_atoms(found[0], found[1])
+    elif found and reference and len(found[0]) == len(reference):
+        atoms = pathtools.active_atoms(reference, found[0])
+    neighbours = _neighbours(session, node)
+    for side in sides:
+        if side.direction not in ends:
+            continue
+        rows, judged_on = ends[side.direction]
+        compared = []
+        for other, edge in neighbours:
+            ordered = _in_order(rows, other.geometry or [])
+            if ordered is None:
+                compared.append(
+                    Neighbour(other.id, other.label, edge, None, None, False, "other atoms")
+                )
+                continue
+            compared.append(
+                Neighbour(
+                    other.id,
+                    other.label,
+                    edge,
+                    geometry.aligned_rmsd(_subset(rows, atoms), _subset(ordered, atoms)),
+                    geometry.aligned_rmsd(rows, ordered),
+                    _bonds_among(rows, atoms) == _bonds_among(ordered, atoms),
+                )
+            )
+        compared.sort(key=lambda n: (n.rmsd is None, n.rmsd or 0.0))
+        same = [n for n in compared if n.same_bonds]
+        best = (same or [n for n in compared if n.rmsd is not None] or [None])[0]
+        verdict = "connects" if same else "elsewhere" if compared else "no_neighbours"
+        side.connection = Connection(
+            verdict=verdict,
+            judged_on=judged_on,
+            node_id=best.node_id if best else None,
+            label=best.label if best else "",
+            rmsd=best.rmsd if best else None,
+            atoms=len(atoms),
+            neighbours=compared,
+        )
+
+
+def _left_side(sides: list[Side]) -> str:
+    """Q39: the side reaching the node an incoming edge comes from is drawn on the left; one
+    reaching an outgoing edge's node on the right; reverse on the left otherwise."""
+    for side in sides:
+        connection = side.connection
+        if connection is None or connection.verdict != "connects":
+            continue
+        edge = next(n.edge for n in connection.neighbours if n.node_id == connection.node_id)
+        if (edge == "incoming") == (side.direction == "forward"):
+            return "forward"
+        return "reverse"
+    return "reverse"
+
+
+def make_node(
+    session: Session, folder: Path, staging: imports.Staging, node_id: str, direction: str
+) -> str:
+    """Q38: an optimized end point becomes a node of its own: its optimization's file, and the
+    frequency job's when it is another file, imported again as a new node beside the TS. The
+    IRC keeps its parts; the new node is an ordinary import, undone like one (D102)."""
+    node = get(session, Node, node_id, "Node")
+    found = [c for c in node.irc_calculations if c.irc_direction == direction]
+    optimizations = [c for c in found if c.type == CalculationType.OPTIMIZATION]
+    if not optimizations:
+        raise RecordError(f"The {direction} end point has no optimization to make a node from")
+    optimization = optimizations[-1]
+    frequencies = [
+        c
+        for c in found
+        if c.type == CalculationType.FREQUENCY
+        and geometry.matches(c.geometry, optimization.geometry, 0.001)
+    ]
+    sources = [optimization.source_file]
+    if frequencies and frequencies[-1].source_file_id != optimization.source_file_id:
+        sources.append(frequencies[-1].source_file)
+    sign = 1 if direction == "forward" else -1
+    basis = (optimization.parsed_level or {}).get("basis_given")
+    new_id: str | None = None
+    for source in sources:
+        if source is None:
+            raise RecordError("The end point's file was not imported, so it cannot be read again")
+        data = file_service.absolute_path(folder, source).read_bytes()
+        staged = staging.add(
+            data, source.original_name, source.origin_path, device=source.origin_device or None
+        )
+        options = imports.ImportOptions(
+            target_node_id=new_id,
+            duplicate_action="new",
+            label=f"{node.label or 'TS'} {direction} end" if new_id is None else None,
+            pos_x=node.pos_x + sign * END_NODE_OFFSET[0] if new_id is None else None,
+            pos_y=node.pos_y + END_NODE_OFFSET[1] if new_id is None else None,
+            branch_id=node.branch_id if new_id is None else None,
+            missing_basis=basis,
+        )
+        try:
+            result = imports.commit(session, folder, staged, options)
+        finally:
+            staging.discard(staged.token)
+        new_id = new_id or result.derived_node_id or result.node_id
+    assert new_id is not None
+    return new_id
+
+
+END_NODE_OFFSET = (320.0, 180.0)  # where a node made from an end point goes, from the TS
 
 
 def _placed(

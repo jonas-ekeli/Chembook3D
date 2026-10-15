@@ -354,6 +354,20 @@ TOOLS: list[ToolSpec] = [
         help={"pairs": "Pairs fixed by hand, [start atom, end atom], 1-based."},
     ),
     T(
+        "get_irc",
+        "read",
+        "GET",
+        "/api/nodes/{node_id}/irc",
+        "A TS node's IRC (D131, D132), which is never one of its own calculations: the files of "
+        "each direction (forward and reverse are the program's labels) with how each ended, the "
+        "points' energies relative to the TS and their mass-weighted distance along the path, "
+        "each end's connection check against the nodes on the TS's edges (verdict 'connects' "
+        "with the node and the RMSD over the reacting atoms, or 'elsewhere' with the nearest), "
+        "nodes an optimized end point is the same structure as, and the end points' E, G and "
+        "G_qh relative to the TS. Use it to answer whether a TS connects two intermediates.",
+        help={"structures": "Also give every point's coordinates (large; usually not needed)."},
+    ),
+    T(
         "plan_scan_path",
         "read",
         "POST",

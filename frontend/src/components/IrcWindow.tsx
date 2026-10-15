@@ -6,6 +6,7 @@ import {
   geometryToXyz,
   type GeometryRows,
   type Irc,
+  type IrcConnection,
   type IrcDirection,
   type IrcPart,
   type IrcPoint,
@@ -24,11 +25,79 @@ import { Viewer3D } from './Viewer3D'
 // energies are each file's own, relative to its TS point. The end points' energies are
 // relative to the TS node at their level and never feed profiles or tables (A76).
 
-const DIRECTIONS: IrcDirection[] = ['reverse', 'forward'] // left to right
 const SPEEDS = [2, 5, 10, 20]
 const TYPES = ['E', 'G', 'G_qh'] as const
 
 const SIDE_NAMES: Record<IrcDirection, string> = { reverse: 'Reverse', forward: 'Forward' }
+
+/** The directions left to right (Q39): the server puts the one leading to the TS's incoming
+ * edge on the left, and orders the points to match. */
+function order(left: IrcDirection): IrcDirection[] {
+  return left === 'forward' ? ['forward', 'reverse'] : ['reverse', 'forward']
+}
+
+function angstrom(value: number | null): string {
+  return value === null ? 'n/a' : `${value.toFixed(2)} Å`
+}
+
+/** D132: where an end of the IRC leads among the nodes on the TS's edges. */
+function ConnectionLine({
+  connection,
+  onShowNode,
+}: {
+  connection: IrcConnection
+  onShowNode: (id: string) => void
+}) {
+  const over = connection.atoms ? `over the ${connection.atoms} reacting atoms` : 'over all atoms'
+  const link = (id: string | null, label: string) =>
+    id ? (
+      <button className="link" onClick={() => onShowNode(id)} title="Show this node on the canvas">
+        {label || 'Untitled node'}
+      </button>
+    ) : (
+      label
+    )
+  const details = connection.neighbours.map((n) => (
+    <li key={n.node_id}>
+      {link(n.node_id, n.label)} ({n.edge === 'incoming' ? 'before the TS' : 'after the TS'}):{' '}
+      {n.note || (
+        <>
+          {n.same_bonds ? 'same bonds' : 'other bonds'}, {angstrom(n.rmsd)} {over}, {angstrom(n.rmsd_all)} over all
+        </>
+      )}
+    </li>
+  ))
+  return (
+    <div className={`irc-connection ${connection.verdict}`} aria-label="Where it leads">
+      {connection.verdict === 'connects' && (
+        <p className="small">
+          ✓ Reaches {link(connection.node_id, connection.label)}: the same bonds among the reacting atoms,{' '}
+          {angstrom(connection.rmsd)} {over}. Judged on the {connection.judged_on}.
+        </p>
+      )}
+      {connection.verdict === 'elsewhere' && (
+        <p className="small warning">
+          Reaches none of the TS's neighbours: no node on its edges has these bonds among the reacting atoms
+          {connection.node_id && (
+            <>
+              ; the nearest is {link(connection.node_id, connection.label)} ({angstrom(connection.rmsd)})
+            </>
+          )}
+          . Judged on the {connection.judged_on}.
+        </p>
+      )}
+      {connection.verdict === 'no_neighbours' && (
+        <p className="small muted">The TS has no edges, so there is nothing to check where this end leads.</p>
+      )}
+      {details.length > 0 && (
+        <details className="small">
+          <summary>Each neighbour</summary>
+          <ul>{details}</ul>
+        </details>
+      )}
+    </div>
+  )
+}
 
 function errorText(err: unknown): string {
   if (err instanceof ApiError && err.blockers) return err.blockers.join('; ')
@@ -79,12 +148,14 @@ type EndMark = { direction: IrcDirection; x: number; y: number; from: IrcPoint; 
  * IRC ends are marked; an optimized end point is a separate mark beyond its end. */
 function IrcChart({
   points,
+  left: leftDirection,
   ends,
   at,
   settings,
   onPick,
 }: {
   points: IrcPoint[]
+  left: IrcDirection
   ends: { direction: IrcDirection; relative: number; title: string }[]
   at: number
   settings: Settings | null
@@ -104,12 +175,14 @@ function IrcChart({
   const lowX = Math.min(...xs)
   const highX = Math.max(...xs)
   const spanX = highX - lowX || 1
+  const directions = order(leftDirection)
   const marks: EndMark[] = []
   for (const end of ends) {
     const side = points.filter((p) => p.side === end.direction)
-    const last = end.direction === 'reverse' ? side[0] : side[side.length - 1]
+    const onLeft = end.direction === leftDirection
+    const last = onLeft ? side[0] : side[side.length - 1]
     if (!last) continue
-    const sign = end.direction === 'reverse' ? -1 : 1
+    const sign = onLeft ? -1 : 1
     marks.push({ direction: end.direction, x: last.coordinate + sign * 0.08 * spanX, y: end.relative * factor, from: last, title: end.title })
   }
   const allX = [...xs, ...marks.map((m) => m.x)]
@@ -124,9 +197,9 @@ function IrcChart({
   const line = known.map((p) => `${x(p.coordinate).toFixed(1)},${y(p.relative! * factor).toFixed(1)}`).join(' ')
   const shown = points[at]
   const tsIndex = points.findIndex((p) => p.side === 'ts')
-  const sideEnds = DIRECTIONS.map((d) => {
+  const sideEnds = directions.map((d) => {
     const side = points.map((p, i) => ({ p, i })).filter(({ p }) => p.side === d)
-    return d === 'reverse' ? side[0] : side[side.length - 1]
+    return d === leftDirection ? side[0] : side[side.length - 1]
   }).filter((e): e is { p: IrcPoint; i: number } => Boolean(e) && e!.p.relative !== null)
 
   const pick = (event: MouseEvent<SVGSVGElement>) => {
@@ -163,7 +236,7 @@ function IrcChart({
       <line className="axis" x1={left} x2={width - right} y1={height - bottom} y2={height - bottom} />
       <line className="axis" x1={left} x2={left} y1={top} y2={height - bottom} />
       <text className="axis-title" x={(left + width - right) / 2} y={height - 6} textAnchor="middle">
-        Distance along the path / amu½·bohr ({SIDE_NAMES.reverse.toLowerCase()} ← TS → {SIDE_NAMES.forward.toLowerCase()})
+        Distance along the path / amu½·bohr ({SIDE_NAMES[directions[0]].toLowerCase()} ← TS → {SIDE_NAMES[directions[1]].toLowerCase()})
       </text>
       <text className="axis-title" transform={`translate(14 ${(top + height - bottom) / 2}) rotate(-90)`} textAnchor="middle">
         ΔE / {unit}
@@ -219,6 +292,7 @@ export function IrcWindow({
   linked,
   onClose,
   onChanged,
+  onShowNode,
 }: {
   node: Node
   nodes: Node[]
@@ -228,6 +302,8 @@ export function IrcWindow({
   onClose: () => void
   /** Something was imported or removed: the history and the node panel's line change. */
   onChanged: (notice: string) => void
+  /** Select a node on the canvas; the window closes. */
+  onShowNode: (id: string) => void
 }) {
   const [irc, setIrc] = useState<Irc | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -243,6 +319,7 @@ export function IrcWindow({
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(5)
   const [copied, setCopied] = useState<string | null>(null)
+  const [making, setMaking] = useState<IrcDirection | null>(null)
 
   const load = useCallback(() => {
     api.irc(node.id).then(
@@ -317,6 +394,21 @@ export function IrcWindow({
     )
   }
 
+  const makeNode = (d: IrcDirection) => {
+    setMaking(d)
+    api.makeIrcNode(node.id, d).then(
+      () => {
+        setMaking(null)
+        load()
+        onChanged(`Made the ${d} end point a node.`)
+      },
+      (err: unknown) => {
+        setMaking(null)
+        setError(errorText(err))
+      },
+    )
+  }
+
   const copyXyz = async () => {
     const rows = frames[at]
     if (!rows) return
@@ -353,7 +445,8 @@ export function IrcWindow({
     )
   }
 
-  const ends = DIRECTIONS.flatMap((d) => {
+  const directions = order(irc?.left ?? 'reverse')
+  const ends = directions.flatMap((d) => {
     const end = side(d)?.end_point
     const relative = end?.values.E.relative
     return end && relative !== null && relative !== undefined
@@ -451,7 +544,7 @@ export function IrcWindow({
         {irc && (
           <>
             <div className="irc-slots">
-              {DIRECTIONS.map((d) => {
+              {directions.map((d) => {
                 const s = side(d)
                 const end = s?.end_point
                 return (
@@ -465,6 +558,7 @@ export function IrcWindow({
                         </span>
                       )}
                     </h3>
+                    {s?.connection && <ConnectionLine connection={s.connection} onShowNode={onShowNode} />}
                     <h4>IRC path</h4>
                     <ul className="irc-files">{partsOf(d, 'path').map((p) => partRow(p, d))}</ul>
                     <button
@@ -493,14 +587,35 @@ export function IrcWindow({
                         .
                       </p>
                     )}
-                    <button
-                      className="small"
-                      disabled={!irc.is_ts}
-                      onClick={() => setImporting({ part: 'end', direction: d })}
-                      title="The optimization, frequency job or opt freq job run from this end of the IRC"
-                    >
-                      Import end-point job…
-                    </button>
+                    {s?.same_as.map((same) => (
+                      <p key={same.node_id} className="small">
+                        Same structure as{' '}
+                        <button className="link" onClick={() => onShowNode(same.node_id)} title="Show this node on the canvas">
+                          {same.label || 'Untitled node'}
+                        </button>{' '}
+                        ({same.rmsd.toFixed(3)} Å).
+                      </p>
+                    ))}
+                    <div className="row">
+                      <button
+                        className="small"
+                        disabled={!irc.is_ts}
+                        onClick={() => setImporting({ part: 'end', direction: d })}
+                        title="The optimization, frequency job or opt freq job run from this end of the IRC"
+                      >
+                        Import end-point job…
+                      </button>
+                      {end?.optimization_id && !s?.same_as.length && (
+                        <button
+                          className="small"
+                          disabled={making !== null}
+                          onClick={() => makeNode(d)}
+                          title="Import the end point's files again as a node of its own beside the TS; the IRC keeps them too"
+                        >
+                          {making === d ? 'Making the node…' : 'Make it a node'}
+                        </button>
+                      )}
+                    </div>
                   </section>
                 )
               })}
@@ -516,6 +631,7 @@ export function IrcWindow({
             {points.length > 0 && (
               <IrcChart
                 points={points}
+                left={irc.left}
                 ends={ends}
                 at={source.kind === 'path' ? at : -1}
                 settings={settings}
@@ -643,7 +759,7 @@ export function IrcWindow({
                         <td>{pathParts[0]?.level}</td>
                       </tr>
                     )}
-                    {DIRECTIONS.map((d) => {
+                    {directions.map((d) => {
                       const s = side(d)
                       if (!s) return null
                       return [

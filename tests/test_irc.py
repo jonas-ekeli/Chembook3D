@@ -1,4 +1,4 @@
-"""IRC calculations of a TS node (D131, A76): T-IMP-25 … T-IMP-29.
+"""IRC calculations of a TS node (D131, A76; D132, A77): T-IMP-25 … T-IMP-31.
 
 The files are synthetic (tests/gaussian_text.py), modelled on real Gaussian 16 IRC outputs:
 the LQA integrator with the TS read from the checkpoint, the default integrator printing each
@@ -12,6 +12,7 @@ from chembook3d.parsers import gaussian
 from chembook3d.services import irc as irc_service
 from tests import gaussian_text as g
 from tests.test_import import calculations, commit, copied_files, node, preview, upload
+from tests.test_pre_optimization import xyz
 
 TS_ENERGY = -52.44
 
@@ -33,7 +34,7 @@ def add(client, ts: str, name: str, text: str, part: str = "path", direction=Non
 
 
 def read(client, ts: str) -> dict:
-    response = client.get(f"/api/nodes/{ts}/irc")
+    response = client.get(f"/api/nodes/{ts}/irc", params={"structures": True})
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -315,3 +316,112 @@ def test_remove_a_file_is_the_undo_of_its_import(open_client):
     # The TS's own file is not part of its IRC.
     own = calculations(open_client, ts)[0]["source_file"]["id"]
     assert open_client.delete(f"/api/nodes/{ts}/irc/files/{own}").status_code == 422
+
+
+# ---------- T-IMP-30: where each end leads ----------
+
+
+def neighbour(client, label: str, atoms) -> str:
+    response = client.post("/api/nodes", json={"label": label, "xyz": xyz(atoms)})
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+def edge(client, source: str, target: str) -> None:
+    response = client.post("/api/transitions", json={"source_id": source, "target_id": target})
+    assert response.status_code == 201, response.text
+
+
+def sides_of(found: dict) -> dict[str, dict]:
+    return {s["direction"]: s for s in found["sides"]}
+
+
+def test_each_end_is_checked_against_the_ts_neighbours(open_client):
+    # The forward end has lost its C–H bonds, the reverse end its C–I bond.
+    ts = import_ts(open_client)
+    reactant = neighbour(open_client, "Int-1", g.irc_point("reverse", 5))
+    product = neighbour(open_client, "Int-2", g.irc_point("forward", 5))
+    edge(open_client, reactant, ts)
+    edge(open_client, ts, product)
+    add(open_client, ts, "forward.out", g.irc(points=4))
+    add(open_client, ts, "reverse.out", g.irc(("reverse",), points=4))
+    found = read(open_client, ts)
+    sides = sides_of(found)
+    forward = sides["forward"]["connection"]
+    assert forward["verdict"] == "connects" and forward["node_id"] == product
+    assert forward["judged_on"] == "last IRC point" and forward["atoms"] == 5
+    assert forward["rmsd"] < 0.15
+    assert {n["label"]: n["same_bonds"] for n in forward["neighbours"]} == {
+        "Int-2": True,
+        "Int-1": False,
+    }
+    assert sides["reverse"]["connection"]["node_id"] == reactant
+    # The reactant's edge comes in, and the reverse side reaches it: drawn on the left.
+    assert found["left"] == "reverse" and [s["direction"] for s in found["sides"]][0] == "reverse"
+
+    # With the edges the other way round, the forward side is drawn on the left.
+    other = import_ts(open_client, again=True)
+    edge(open_client, product, other)
+    edge(open_client, other, reactant)
+    add(open_client, other, "forward2.out", g.irc(points=4))
+    add(open_client, other, "reverse2.out", g.irc(("reverse",), points=4))
+    found = read(open_client, other)
+    assert found["left"] == "forward"
+    assert [s["direction"] for s in found["sides"]] == ["forward", "reverse"]
+    assert found["points"][0]["side"] == "forward" and found["points"][0]["coordinate"] < 0
+    assert found["points"][-1]["side"] == "reverse" and found["points"][-1]["coordinate"] > 0
+
+
+def test_an_end_that_reaches_something_else(open_client):
+    ts = import_ts(open_client)
+    reactant = neighbour(open_client, "Int-1", g.irc_point("reverse", 5))
+    edge(open_client, reactant, ts)
+    add(open_client, ts, "forward.out", g.irc(points=4))
+    forward = sides_of(read(open_client, ts))["forward"]["connection"]
+    # Without the other end, the reacting atoms are those of the bonds the TS has and the end
+    # has not.
+    assert forward["verdict"] == "elsewhere" and forward["node_id"] == reactant
+    assert forward["label"] == "Int-1"
+
+    lonely = import_ts(open_client, again=True)
+    add(open_client, lonely, "forward2.out", g.irc(points=4))
+    assert sides_of(read(open_client, lonely))["forward"]["connection"]["verdict"] == (
+        "no_neighbours"
+    )
+    # Claude's read leaves the coordinates out unless asked.
+    brief = open_client.get(f"/api/nodes/{lonely}/irc").json()
+    assert all(p["rows"] == [] for p in brief["points"])
+
+
+# ---------- T-IMP-31: Same as … and Make it a node ----------
+
+
+def test_an_optimized_end_point_is_the_same_as_a_node(open_client):
+    ts = import_ts(open_client)
+    product = neighbour(open_client, "Int-2", g.irc_point("forward", 5))
+    edge(open_client, ts, product)
+    add(open_client, ts, "forward.out", g.irc(points=4))
+    add(open_client, ts, "end.out", g.end_point_opt_freq("forward", 4, -52.46), "end", "forward")
+    forward = sides_of(read(open_client, ts))["forward"]
+    assert forward["connection"]["judged_on"] == "optimized end point"
+    assert forward["connection"]["rmsd"] == pytest.approx(0, abs=1e-6)
+    assert [s["node_id"] for s in forward["same_as"]] == [product]
+
+
+def test_make_an_end_point_a_node(open_client):
+    ts = import_ts(open_client)
+    add(open_client, ts, "reverse.out", g.irc(("reverse",), points=3))
+    add(open_client, ts, "end.out", g.end_point_opt_freq("reverse", 3, -52.45), "end", "reverse")
+    assert sides_of(read(open_client, ts))["reverse"]["same_as"] == []
+    response = open_client.post(f"/api/nodes/{ts}/irc/reverse/node")
+    assert response.status_code == 200, response.text
+    made = response.json()["node_id"]
+    assert node(open_client, made)["label"] == "TS reverse end"
+    assert [c["type"] for c in calculations(open_client, made)] == ["optimization", "frequency"]
+    # The IRC keeps its parts, and its end point is now the same as the new node.
+    reverse = sides_of(read(open_client, ts))["reverse"]
+    assert reverse["end_point"]["optimization_id"] is not None
+    assert [s["node_id"] for s in reverse["same_as"]] == [made]
+    # Without an optimization there is nothing to make a node from.
+    response = open_client.post(f"/api/nodes/{ts}/irc/forward/node")
+    assert response.status_code == 422
