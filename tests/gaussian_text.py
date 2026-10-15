@@ -268,6 +268,138 @@ def checkpoint_ts(dz: float) -> str:
     )
 
 
+def current_structure(atoms) -> list[str]:
+    """The table Gaussian's default IRC integrator prints for each corrected point (D131)."""
+    lines = [
+        "                    CURRENT STRUCTURE",
+        "                Cartesian Coordinates (Ang):                ",
+        DASHES,
+        " Center     Atomic                     Coordinates (Angstroms)",
+        " Number     Number                        X           Y           Z",
+        DASHES,
+    ]
+    for n, (_, number, x, y, z) in enumerate(atoms, start=1):
+        lines.append(f" {n:6d} {number:10d} {x:19.6f} {y:11.6f} {z:11.6f}")
+    lines.append(DASHES)
+    return lines
+
+
+def irc_point(direction: str, number: int, start: float = 0.0):
+    """Methyl iodide with its carbon moved along z: 0.15 Å per point, up in the forward
+    direction, down in the reverse; the TS (point 0) moved by `start`."""
+    sign = 1 if direction == "forward" else -1
+    return moved(METHYL_IODIDE, start + sign * 0.15 * number)
+
+
+def irc_energy(number: int, ts_energy: float) -> float:
+    return ts_energy - 0.0004 * number * number
+
+
+def irc(
+    directions=("forward",),
+    points=4,
+    *,
+    style="lqa",
+    checkpoint=True,
+    ts_energy=-52.44,
+    ending="minimum",
+    start=0.0,
+    first=1,
+    max_points=10,
+) -> str:
+    """A Gaussian IRC in the layout Gaussian 16 prints (D131), modelled on real outputs.
+
+    `directions` is one direction (`IRC=(Forward)` or `(Reverse)`) or both, run as one job
+    whose paths are numbered 1 and 2. With `style` "lqa" a point's structure is the last input
+    orientation before its "Point Number" line; with "hpc" (the default integrator) it is the
+    CURRENT STRUCTURE printed after that line, while the input orientation before it is the
+    predictor step. With `checkpoint` the TS is only the structure read from the checkpoint
+    (Geom=Check), in another frame; otherwise it is printed as point 0. `ending` is "minimum",
+    "max_points" or "stopped" (the file ends during the last path). `first` numbers the first
+    point, as a restarted IRC continues from a later point."""
+    both = len(directions) == 2
+    which = "" if both else f"{directions[0].capitalize()},"
+    integrator = "LQA," if style == "lqa" else ""
+    route = (
+        "#P PBEPBE/ChkBasis Geom=Check Guess=Read EmpiricalDispersion=GD3BJ "
+        f"IRC=(RCFC,{which}{integrator}MaxPoints={max_points},StepSize=10)"
+    )
+    if not checkpoint:
+        route = route.replace(" Geom=Check", "")
+    ts = irc_point(directions[0], 0, start)
+    body: list[str] = []
+    if checkpoint:
+        body += [' Structure from the checkpoint file:  "ts.chk"', " Charge =  0 Multiplicity = 1"]
+        # Another frame, as a checkpoint's structure is: everything shifted along x.
+        body += [f"  {el}{x + 3.0:30.12f}{y:20.12f}{z:20.12f}" for el, _, x, y, z in ts]
+        body.append(" ")
+    lines = [f" Maximum points per path      =  {max_points}"]
+    if checkpoint:
+        lines.append(f"   Energy From Chk =  {ts_energy:.7f}")
+    else:
+        lines += orientation(ts)
+        lines.append(f" SCF Done:  E(RPBE-PBE) =  {ts_energy:.8f}     A.U. after   10 cycles")
+    lines.append(" Point Number:   0          Path Number:   1")
+    for path, direction in enumerate(directions, start=1):
+        upper = direction.upper()
+        for number in range(first, first + points):
+            atoms = irc_point(direction, number, start)
+            energy = irc_energy(number, ts_energy)
+            lines.append(f" Point Number {number:2d} in {upper} path direction.")
+            if style == "hpc":
+                lines += orientation(moved(atoms, 0.02))  # the predictor step
+                lines.append(
+                    f" SCF Done:  E(RPBE-PBE) =  {energy + 0.0001:.8f}     A.U. after 9 cycles"
+                )
+                lines.append(f"   Corrected End Point Energy =  {energy:.6f}")
+                lines.append(f" Point Number: {number:3d}          Path Number: {path:3d}")
+                lines += current_structure(atoms)
+            else:
+                lines += orientation(atoms)
+                lines.append(f" SCF Done:  E(RPBE-PBE) =  {energy:.8f}     A.U. after 9 cycles")
+                lines.append(f" Point Number: {number:3d}          Path Number: {path:3d}")
+            lines.append(f"   NET REACTION COORDINATE UP TO THIS POINT =  {0.1 * number:10.5f}")
+        last = path == len(directions)
+        if ending == "stopped" and last:
+            return output(
+                step(route, [], ts_energy, title="IRC", body=body + lines, terminate=False)
+            )
+        if ending == "max_points":
+            lines.append(" Maximum number of steps reached.")
+        else:
+            lines.append(" PES minimum detected on this side of the pathway.")
+        lines.append(f" Calculation of {upper} path complete.")
+    lines += [
+        " Reaction path calculation complete.",
+        f" Energies reported relative to the TS energy of {ts_energy:16.6f}",
+    ]
+    return output(step(route, [], ts_energy, title="IRC", body=body + lines))
+
+
+def end_point_opt_freq(direction: str, number: int, energy: float, imaginary: bool = False) -> str:
+    """The optimization and frequency job of an IRC end point (D131): from the IRC's last point
+    on to a structure 0.15 Å further."""
+    first = irc_point(direction, number)
+    last = irc_point(direction, number + 1)
+    pbe = "#P PBEPBE/ChkBasis Geom=Check Guess=Read EmpiricalDispersion=GD3BJ"
+    frequencies = [60.0, 180.0, 540.0, 880.0, 1250.0, 1420.0, 2950.0, 3050.0, 3100.0]
+    if imaginary:
+        frequencies[0] = -60.0
+    return output(
+        step(
+            f"{pbe} Opt", [first, last], energy, title="End point", converged=True, terminate=False
+        ),
+        step(
+            f"{pbe.replace('Geom=Check', 'Geom=AllCheck')} Freq",
+            [last],
+            energy,
+            title="Freq",
+            frequencies=frequencies,
+            internal=True,
+        ),
+    )
+
+
 CHECKPOINT_FILES = {
     "TS_a_chk.out": lambda: checkpoint_ts(0.4),
     "TS_b_chk.out": lambda: checkpoint_ts(0.8),
@@ -281,9 +413,19 @@ CUSTOM_FILES = {
 }
 
 
+# D131: a TS with its IRC both ways (the reverse by the default integrator) and the job on
+# the forward end point.
+IRC_FILES = {
+    "TS.out": lambda: checkpoint_ts(-0.01),
+    "irc-forward.out": lambda: irc(points=6, ending="max_points"),
+    "irc-reverse.out": lambda: irc(("reverse",), points=5, style="hpc"),
+    "end-forward.out": lambda: end_point_opt_freq("forward", 6, -52.46),
+}
+
+
 if __name__ == "__main__":
-    # `python -m tests.gaussian_text [--checkpoint] <folder>`
-    files = CHECKPOINT_FILES if sys.argv[1] == "--checkpoint" else CUSTOM_FILES
+    # `python -m tests.gaussian_text [--checkpoint | --irc] <folder>`
+    files = {"--checkpoint": CHECKPOINT_FILES, "--irc": IRC_FILES}.get(sys.argv[1], CUSTOM_FILES)
     folder = Path(sys.argv[-1])
     folder.mkdir(parents=True, exist_ok=True)
     for name, make in files.items():

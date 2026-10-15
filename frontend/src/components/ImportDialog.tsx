@@ -10,6 +10,7 @@ import {
   type FolderListing,
   type ImportOptions,
   type ImportPlan,
+  type IrcDirection,
   type Node,
   type NameRequest,
 } from '../api'
@@ -316,6 +317,7 @@ export function ImportDialog({
   linked = false,
   remote = null,
   inspection = null,
+  irc = null,
   onClose,
   onImported,
   onImportFolder,
@@ -326,6 +328,8 @@ export function ImportDialog({
   remote?: { server: string; path: string } | null
   /** D123c: the file of an Inspect window, staged from the copy it read. */
   inspection?: { id: string; name: string } | null
+  /** D131: the file goes into the target TS node's IRC: its path, or a job on one end point. */
+  irc?: { part: 'path' | 'end'; direction: IrcDirection | null } | null
   target: Node | null
   nodes: Node[]
   /** Start with "free species" ticked (D69). */
@@ -351,6 +355,8 @@ export function ImportDialog({
     kind: asSpecies ? 'species' : null,
     pos_x: position?.x ?? null,
     pos_y: position?.y ?? null,
+    irc_part: irc?.part ?? null,
+    irc_direction: irc?.direction ?? null,
   })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -359,6 +365,11 @@ export function ImportDialog({
 
   const staged = (result: ImportPlan) => {
     token.current = result.token
+    if (irc && result.kind !== 'irc') {
+      // D131: staging plans an ordinary import; the IRC's own preview replaces it at once.
+      api.previewImport(result.token, options).then(staged, (err: unknown) => setError(errorText(err)))
+      return
+    }
     setPlan(result)
     setError(null)
   }
@@ -373,6 +384,8 @@ export function ImportDialog({
         ? api.remoteImport(remote.server, remote.path, target?.id)
         : api.uploadImport(file!, file!.name, target?.id)
     staging.then(staged, (err: unknown) => setError(errorText(err))).finally(() => setBusy(false))
+    // Staged once, with the options the dialog opened with (D131's IRC part among them).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file, remote, inspection, target])
 
   const fromPath = (path: string) => {
@@ -416,6 +429,10 @@ export function ImportDialog({
           )
           return
         }
+        if (plan.kind === 'irc') {
+          onImported({ kind: 'node', id: result.node_id! }, `Added ${plan.original_name} to the IRC.`)
+          return
+        }
         const parts = [`Imported ${result.calculation_ids.length} calculation(s) from ${plan.original_name}.`]
         if (result.derived_node_id) parts.push('A derived node was created for the new geometry.')
         onImported({ kind: 'node', id: result.derived_node_id ?? result.node_id! }, parts.join(' '))
@@ -428,7 +445,12 @@ export function ImportDialog({
   }
 
   const species = options.kind === 'species'
-  const title = target
+  const forIrc = plan?.kind === 'irc'
+  const ircWhat =
+    irc?.part === 'end' ? `a job on the ${irc.direction} end point` : 'an IRC path'
+  const title = irc
+    ? `Add ${ircWhat} to the IRC of “${target?.label || 'Untitled node'}”`
+    : target
     ? `Import onto “${target.label || 'Untitled node'}”`
     : asSpecies
       ? 'Import a free species'
@@ -455,10 +477,18 @@ export function ImportDialog({
       {!plan && remote && busy && <p className="muted">Copying {remote.path} …</p>}
       {!plan && !file && !remote && !inspection && (
         <>
-          <p>
-            Choose a Gaussian, ORCA or xTB output file, an xTB scan (xtbscan.log or path.xyz) or a CREST conformer
-            ensemble (.xyz).
-          </p>
+          {irc ? (
+            <p>
+              {irc.part === 'path'
+                ? 'Choose the Gaussian output of an IRC: forward, reverse or both ways in one job.'
+                : `Choose the optimization or frequency job (or an opt freq job) run on the ${irc.direction} end point.`}
+            </p>
+          ) : (
+            <p>
+              Choose a Gaussian, ORCA or xTB output file, an xTB scan (xtbscan.log or path.xyz) or a CREST conformer
+              ensemble (.xyz).
+            </p>
+          )}
           <label className="button">
             Upload a file…
             <input
@@ -539,7 +569,10 @@ export function ImportDialog({
                   (species ? 'Creates a new free species (not drawn on the canvas).' : 'Creates a new node.')}
                 {plan.mode === 'planned' &&
                   `Replaces the guess geometry of “${plan.target_label || 'Untitled node'}”; the old coordinates stay in its history.`}
-                {plan.mode === 'onto' && `Adds calculations to “${plan.target_label || 'Untitled node'}”.`}
+                {plan.mode === 'onto' &&
+                  (forIrc
+                    ? `Adds ${ircWhat} to the IRC of “${plan.target_label || 'Untitled node'}”. The node itself does not change: its geometry, energies and card stay as they are.`
+                    : `Adds calculations to “${plan.target_label || 'Untitled node'}”.`)}
               </p>
 
               {plan.duplicates.length > 0 && (
@@ -571,7 +604,7 @@ export function ImportDialog({
               <table className="steps" aria-label="Job steps">
                 <thead>
                   <tr>
-                    <th>Geometry</th>
+                    {!forIrc && <th>Geometry</th>}
                     <th>Step</th>
                     <th>Type</th>
                     <th>Level of theory</th>
@@ -583,6 +616,7 @@ export function ImportDialog({
                 <tbody>
                   {plan.steps.map((step) => (
                     <tr key={step.index} className={step.assignment === 'preview' ? 'muted' : ''}>
+                      {!forIrc && (
                       <td>
                         <input
                           type="radio"
@@ -593,6 +627,7 @@ export function ImportDialog({
                           onChange={() => change({ step: step.index })}
                         />
                       </td>
+                      )}
                       <td>{step.index}</td>
                       <td>
                         {CALCULATION_TYPES[step.type] ?? step.type}
@@ -604,15 +639,17 @@ export function ImportDialog({
                       </td>
                       <td className="mono">{step.energy?.toFixed(8) ?? '—'}</td>
                       <td>{step.termination === 'normal' ? 'Normal' : <span className="badge warn">Abnormal</span>}</td>
-                      <td>{DESTINATIONS[step.assignment]}</td>
+                      <td>{forIrc && step.assignment === 'node' ? 'Added to the IRC' : DESTINATIONS[step.assignment]}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <p className="muted small">
-                The node geometry is the last geometry of the chosen step (by default the last step).
-                Steps are imported when their geometry matches that node; the others are only shown here.
-              </p>
+              {!forIrc && (
+                <p className="muted small">
+                  The node geometry is the last geometry of the chosen step (by default the last step).
+                  Steps are imported when their geometry matches that node; the others are only shown here.
+                </p>
+              )}
 
               {plan.derived_offered && (
                 <label className="check">

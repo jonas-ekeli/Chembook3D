@@ -136,8 +136,18 @@ class Node(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
+    # D131: a TS's IRC parts are calculations of the node too, kept apart so they never give
+    # the node an energy, a geometry or a calculation to match: `calculations` leaves them out.
     calculations: Mapped[list["Calculation"]] = relationship(
-        back_populates="node", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="node",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        primaryjoin="and_(Node.id == Calculation.node_id, Calculation.irc_part.is_(None))",
+    )
+    irc_calculations: Mapped[list["Calculation"]] = relationship(
+        primaryjoin="and_(Node.id == Calculation.node_id, Calculation.irc_part.is_not(None))",
+        viewonly=True,
+        order_by="Calculation.created_at",
     )
 
 
@@ -249,6 +259,11 @@ class Calculation(Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     # D117: the scan points (1-based) a scan path leaves out; its file is never changed.
     removed_points: Mapped[list[Any]] = mapped_column(default=list)
+    # D131: an IRC part of a TS node ("path", "end_opt" or "end_freq"), never one of the node's
+    # own calculations, and its direction: the path's as the file states it ("forward",
+    # "reverse" or "both"), or the end of the path an end point's job was run from.
+    irc_part: Mapped[str | None] = mapped_column(String(16), default=None)
+    irc_direction: Mapped[str | None] = mapped_column(String(16), default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     node: Mapped[Node] = relationship(back_populates="calculations")

@@ -579,7 +579,13 @@ def run(
                 if target is not None:
                     match = "geometry"
                 if target is None and final is not None:
-                    calculated = set(session.scalars(select(Calculation.node_id).distinct()))
+                    calculated = set(
+                        session.scalars(
+                            select(Calculation.node_id)
+                            .where(Calculation.irc_part.is_(None))
+                            .distinct()
+                        )
+                    )
                     planned = [n for n in nodes if n.id not in calculated]
                     target = _closest(planned, _first_geometry(staged), final, tolerance)
                     if target is None:

@@ -16,7 +16,7 @@ import json
 import re
 from typing import Any
 
-from chembook3d.parsers.common import Criterion, ParsedFile, ParsedStep, Route
+from chembook3d.parsers.common import Criterion, IrcPoint, IrcRun, ParsedFile, ParsedStep, Route
 from chembook3d.xyz import ELEMENTS, Atom
 
 PROGRAM = "Gaussian"
@@ -135,6 +135,8 @@ def parse_route(text: str) -> Route:
         route.job_type = "frequency"
     elif OTHER_JOB_KEYWORDS & keywords.keys():
         route.job_type = "other"
+        if "IRC" in keywords:
+            route.irc = keywords["IRC"]
     else:
         route.job_type = "single_point"
 
@@ -187,6 +189,16 @@ _CRITERION_RE = re.compile(r"^ (Maximum|RMS)\s+(Force|Displacement)\s+(\S+)\s+(\
 _PREDICTED_RE = re.compile(r"^ Predicted change in Energy=\s*(\S+)")
 _UNITS = {"Force": "Eh/bohr", "Displacement": "bohr"}
 _SCAN_POINT_RE = re.compile(r"^ Step number\s+\d+ out of a maximum of\s+\d+ on scan point\s+(\d+)")
+# D131: an IRC's points, directions, coordinates and endings.
+_IRC_POINT_RE = re.compile(r"^ Point Number:\s+(\d+)\s+Path Number:\s+(\d+)")
+_IRC_DIRECTION_RE = re.compile(r"^ Point Number\s+\d+ in (FORWARD|REVERSE) path direction")
+_IRC_COORDINATE_RE = re.compile(r"^\s+NET REACTION COORDINATE UP TO THIS POINT =\s+(\S+)")
+_IRC_CORRECTED_RE = re.compile(r"^\s+Corrected End Point Energy =\s+(\S+)")
+_IRC_TS_ENERGY_RE = re.compile(
+    r"^(?: Energies reported relative to the TS energy of|\s+Energy From Chk =)\s+(\S+)"
+)
+_IRC_MAX_POINTS_RE = re.compile(r"^ Maximum points per path\s+=\s+(\d+)")
+_IRC_PATH_DONE_RE = re.compile(r"^ Calculation of (FORWARD|REVERSE) path complete\.")
 
 
 def _is_dashes(line: str) -> bool:
@@ -304,6 +316,166 @@ def basis_fingerprints(definition: dict[str, str]) -> dict[str, str]:
     return {el: hashlib.sha256(text.encode()).hexdigest()[:16] for el, text in definition.items()}
 
 
+def _read_current_structure(lines: list[str], start: int) -> list[Atom]:
+    """The "CURRENT STRUCTURE" table an IRC prints for each point it has corrected (D131), its
+    title at lines[start]: center, atomic number and x, y, z in Å."""
+    i, dashes = start + 1, 0
+    while i < len(lines) and i < start + 8 and dashes < 2:
+        dashes += _is_dashes(lines[i])
+        i += 1
+    atoms = []
+    while i < len(lines) and not _is_dashes(lines[i]):
+        parts = lines[i].split()
+        try:
+            number = int(parts[1])
+            if number > 0:
+                atoms.append(Atom(ELEMENTS[number - 1], *(float(v) for v in parts[-3:])))
+        except (ValueError, IndexError):
+            return []
+        i += 1
+    return atoms if i < len(lines) else []
+
+
+def _read_checkpoint_structure(lines: list[str], start: int) -> list[Atom]:
+    """The structure a Geom=Check job read from its checkpoint (`Structure from the checkpoint
+    file` at lines[start]), as element and x, y, z in Å; elements may carry a nuclear charge
+    or other note, as in `Cl(GFac=0.82)`."""
+    atoms: list[Atom] = []
+    for line in lines[start + 1 : start + 4000]:
+        parts = line.split()
+        if len(parts) == 4:
+            symbol = parts[0].split("(")[0]
+            element = symbol[:1].upper() + symbol[1:].lower()
+            try:
+                coordinates = [float(v) for v in parts[1:]]
+            except ValueError:
+                coordinates = []
+            if element in ELEMENTS and coordinates:
+                atoms.append(Atom(element, *coordinates))
+                continue
+        if atoms:
+            break
+    return atoms
+
+
+class _IrcReader:
+    """D131: reads an IRC job step's points as `_parse_step` meets their lines. A point's
+    structure is the "CURRENT STRUCTURE" printed after it (the corrected point of Gaussian's
+    default integrator), else the last structure read (LQA and other predictor-only steps). The
+    TS (point 0) of a job reading its geometry from a checkpoint is printed only as the structure
+    read from it, which `finish` puts first."""
+
+    def __init__(self, route: Route):
+        options = route.irc or []
+        requested = "both"
+        if "FORWARD" in options:
+            requested = "forward"
+        elif "REVERSE" in options:
+            requested = "reverse"
+        self.run = IrcRun(requested=requested)
+        self.direction: str | None = None
+        self.path = 1
+        self.corrected: float | None = None
+        self.checkpoint: list[Atom] = []
+        # (path, number) -> [structure index per orientation (None: the checkpoint's), coordinate]
+        self.points: dict[tuple[int, int], list[Any]] = {}
+        self.last: tuple[int, int] | None = None
+
+    def read(
+        self,
+        lines: list[str],
+        i: int,
+        orientations: dict[str, list[list[Atom]]],
+        energies: dict[str, list[float | None]],
+        points: dict[str, list[int | None]],
+        criteria: dict[str, list[list[Criterion]]],
+    ) -> bool:
+        """Reads lines[i] if it is one of the IRC's (a structure it adds lengthens every
+        per-structure list). Returns whether the line was the IRC's."""
+        line = lines[i]
+        if (match := _IRC_POINT_RE.match(line)) is not None:
+            number, path = int(match.group(1)), int(match.group(2))
+            self.path = path
+            if number > 0 and self.direction:
+                self.run.directions[path] = self.direction
+            atoms: list[Atom] = []
+            if i + 1 < len(lines) and lines[i + 1].strip() == "CURRENT STRUCTURE":
+                atoms = _read_current_structure(lines, i + 1)
+            if atoms:
+                for name in [n for n in _ORIENTATIONS if orientations[n]] or [_ORIENTATIONS[0]]:
+                    orientations[name].append(atoms)
+                    energies[name].append(self.corrected)
+                    points[name].append(None)
+                    criteria[name].append([])
+            last = {n: len(orientations[n]) - 1 for n in _ORIENTATIONS if orientations[n]}
+            structure: dict[str, int] | None = last or None  # None: the checkpoint's TS
+            self.corrected = None
+            self.points[(path, number)] = [structure, None]
+            self.last = (path, number)
+        elif (match := _IRC_DIRECTION_RE.match(line)) is not None:
+            self.direction = match.group(1).lower()
+        elif (match := _IRC_COORDINATE_RE.match(line)) is not None:
+            if self.last is not None:
+                with contextlib.suppress(ValueError):
+                    self.points[self.last][1] = float(match.group(1))
+        elif (match := _IRC_CORRECTED_RE.match(line)) is not None:
+            with contextlib.suppress(ValueError):
+                self.corrected = float(match.group(1))
+        elif (match := _IRC_TS_ENERGY_RE.match(line)) is not None:
+            with contextlib.suppress(ValueError):
+                self.run.ts_energy = float(match.group(1))
+        elif (match := _IRC_MAX_POINTS_RE.match(line)) is not None:
+            self.run.max_points = int(match.group(1))
+        elif line.startswith(" Maximum number of steps reached."):
+            self.run.endings.setdefault(self.path, "max_points")
+        elif line.startswith(" PES minimum detected"):
+            self.run.endings.setdefault(self.path, "minimum")
+        elif (match := _IRC_PATH_DONE_RE.match(line)) is not None:
+            self.run.endings.setdefault(self.path, "complete")
+            if self.run.requested == "both" and self.path == 1:
+                self.direction = None  # the next path's first point names its own
+        elif line.startswith(" Structure from the checkpoint file"):
+            self.checkpoint = _read_checkpoint_structure(lines, i)
+        else:
+            return False
+        return True
+
+    def finish(self, step: ParsedStep, name: str | None) -> None:
+        """Points the chosen orientation's structures (`name`) and marks them converged."""
+        run = self.run
+        if run.requested != "both":
+            run.directions.setdefault(1, run.requested)
+        elif not run.directions:
+            run.directions[1] = "forward"
+        uses_checkpoint = any(s is None for s, _ in self.points.values())
+        if uses_checkpoint and self.checkpoint:
+            # The TS goes first; every structure after it moves up one.
+            step.geometries.insert(0, self.checkpoint)
+            step.geometry_energies.insert(0, run.ts_energy)
+            step.geometry_points.insert(0, None)
+            step.converged_geometries = [n + 1 for n in step.converged_geometries]
+            if step.geometry_criteria:
+                step.geometry_criteria.insert(0, [])
+        shift = 1 if uses_checkpoint and self.checkpoint else 0
+        for (path, number), (structure, coordinate) in sorted(self.points.items()):
+            if structure is None:
+                if not shift:
+                    continue
+                index = 0
+            elif name is None or name not in structure:
+                continue
+            else:
+                index = structure[name] + shift
+            energy = step.geometry_energies[index] if index < len(step.geometry_energies) else None
+            if number == 0 and run.ts_energy is None:
+                run.ts_energy = energy
+            run.points.append(IrcPoint(path, number, index, energy, coordinate))
+        for path in {p.path for p in run.points if p.number > 0} | set(run.directions):
+            run.endings.setdefault(path, "stopped")
+        step.converged_geometries = sorted({p.structure for p in run.points})
+        step.irc = run
+
+
 def _parse_step(lines: list[str], index: int) -> ParsedStep:
     step = ParsedStep(index=index)
     route_text, step.title = _read_route_and_title(lines)
@@ -319,10 +491,13 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
     basis: dict[int, str] = {}
     ecp: dict[int, str] = {}
     frequencies: list[float] = []
+    irc = _IrcReader(step.route) if step.route and step.route.irc is not None else None
     i = 0
     while i < len(lines):
         line = lines[i]
-        if step.charge is None and (match := _CHARGE_RE.match(line)):
+        if irc is not None and irc.read(lines, i, orientations, energies, points, criteria):
+            pass
+        elif step.charge is None and (match := _CHARGE_RE.match(line)):
             step.charge, step.multiplicity = int(match.group(1)), int(match.group(2))
         elif line.strip() in _ORIENTATIONS:
             atoms, i = _read_orientation(lines, i)
@@ -417,8 +592,10 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
         i += 1
 
     step.frequencies = frequencies
+    chosen = None
     for name in _ORIENTATIONS:
         if orientations[name]:
+            chosen = name
             step.geometries = orientations[name]
             step.geometry_energies = energies[name]
             step.geometry_points = points[name]
@@ -426,6 +603,8 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
             if any(criteria[name]):
                 step.geometry_criteria = criteria[name]
             break
+    if irc is not None:
+        irc.finish(step, chosen)
     if step.scan == "rigid":  # every structure of a rigid scan is one of its points
         step.geometry_points = list(range(1, len(step.geometries) + 1))
         step.converged_geometries = list(range(len(step.geometries)))

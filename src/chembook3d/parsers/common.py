@@ -21,6 +21,7 @@ class Route:
     iops: dict[str, str] = field(default_factory=dict)
     solvation_model: str | None = None
     solvent: str | None = None
+    irc: list[str] | None = None  # D131: an IRC job's options as written (upper case)
 
 
 @dataclass
@@ -34,6 +35,33 @@ class Criterion:
     threshold: float | None
     converged: bool | None
     unit: str = ""
+
+
+@dataclass
+class IrcPoint:
+    """D131: one point of an IRC as the program reported it."""
+
+    path: int  # 1, or 2 for the second direction of a job that runs both ways
+    number: int  # 0 is the TS the IRC starts from
+    structure: int  # its index in ParsedStep.geometries
+    energy: float | None  # hartree
+    coordinate: float | None  # the program's own reaction coordinate from the TS, as printed
+
+
+@dataclass
+class IrcRun:
+    """D131: what an IRC job step did: the direction it was asked to follow ("forward",
+    "reverse" or "both"), the direction of each path it printed, its points and how each path
+    ended: "minimum" (the program found one), "max_points" (it stopped at its maximum number
+    of points), "complete" (it ended for another reason it printed) or "stopped" (the file
+    ends before the path does: an error, or a job still running)."""
+
+    requested: str
+    directions: dict[int, str] = field(default_factory=dict)
+    points: list[IrcPoint] = field(default_factory=list)
+    endings: dict[int, str] = field(default_factory=dict)
+    ts_energy: float | None = None
+    max_points: int | None = None
 
 
 @dataclass
@@ -59,6 +87,7 @@ class ParsedStep:
     # structure (0-based) its node takes when that is not the last one: the path's top.
     geometry_stages: list[int | None] = field(default_factory=list)
     node_geometry: int | None = None
+    irc: IrcRun | None = None  # D131: an IRC step's points and directions
     scf_energy: float | None = None
     optimization_converged: bool | None = None  # None when the step is not an optimization
     termination: str = "abnormal"  # normal | abnormal (05 §3.1: missing means abnormal)

@@ -55,8 +55,12 @@ def atoms_of(node: Node) -> list[xyz.Atom]:
     return [xyz.Atom(e, x, y, z) for e, x, y, z in (node.geometry or [])]
 
 
-def calculation_count(session: Session, node_id: str) -> int:
+def calculation_count(session: Session, node_id: str, own: bool = False) -> int:
+    """Every calculation on the node, its IRC parts (D131) included: they are deleted with it and
+    belong to its geometry. With `own`, only the node's own calculations, as its panel lists."""
     query = select(func.count()).select_from(Calculation).where(Calculation.node_id == node_id)
+    if own:
+        query = query.where(Calculation.irc_part.is_(None))
     return session.scalar(query) or 0
 
 

@@ -18,6 +18,7 @@ from chembook3d.api.energies import router as energy_router
 from chembook3d.api.import_undo import router as undo_router
 from chembook3d.api.inspect import inspections
 from chembook3d.api.inspect import router as inspect_router
+from chembook3d.api.irc import router as irc_router
 from chembook3d.api.jobs import router as job_router
 from chembook3d.api.lifetime import SHUTDOWN_PUSH_TIMEOUT, Lifetime, watch
 from chembook3d.api.lifetime import router as lifetime_router
@@ -135,6 +136,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(server_files_router)  # D124
     app.include_router(job_router)
     app.include_router(scan_path_router)  # D114
+    app.include_router(irc_router)  # D131
     app.include_router(view_state_router)  # D105
     app.include_router(live_router)
     app.include_router(lifetime_router)  # D107

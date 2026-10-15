@@ -2643,3 +2643,98 @@ table.scan-path-held input.drive-value {
 .file-row > .small {
   margin: 0 0.3rem;
 }
+
+/* D131: a TS node's IRC window */
+.irc-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.25rem 0 0.5rem;
+}
+.irc-slots {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.irc-slot {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+}
+.irc-slot h3 {
+  margin: 0 0 0.25rem;
+}
+.irc-slot h4 {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.9rem;
+}
+.irc-files {
+  list-style: none;
+  margin: 0 0 0.35rem;
+  padding: 0;
+}
+.irc-files li {
+  border-top: 1px solid var(--border);
+  padding: 0.3rem 0;
+  overflow-wrap: anywhere;
+}
+.irc-files .row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.2rem;
+}
+.irc-chart {
+  width: 100%;
+  max-height: 260px;
+  cursor: crosshair;
+  margin-bottom: 0.5rem;
+}
+.irc-chart .grid {
+  stroke: var(--border);
+}
+.irc-chart .axis {
+  stroke: var(--muted);
+}
+.irc-chart .tick,
+.irc-chart .axis-title {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.irc-chart .irc-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.irc-chart .irc-dash {
+  stroke: var(--muted);
+  stroke-dasharray: 4 3;
+}
+.irc-chart .irc-end-point rect {
+  fill: var(--panel);
+  stroke: var(--text);
+  stroke-width: 1.5;
+}
+.irc-chart .irc-end {
+  fill: var(--panel);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.irc-chart .irc-ts circle {
+  fill: var(--danger);
+}
+.irc-chart .irc-shown {
+  fill: var(--text);
+}
+.irc-energies td,
+.irc-energies th {
+  padding: 0.15rem 0.5rem;
+  text-align: left;
+}
+@media (max-width: 760px) {
+  .irc-slots {
+    grid-template-columns: 1fr;
+  }
+}

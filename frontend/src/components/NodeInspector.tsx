@@ -8,6 +8,7 @@ import {
   type Canvas,
   type GeometryRows,
   type HistoryEntry,
+  type IrcSummary,
   type Node,
   type NodeDeletePreview,
   type NodeFields,
@@ -107,6 +108,14 @@ function Tags({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) =
   )
 }
 
+/** D131: "IRC: forward ✓, reverse ✓, end points 1 of 2". */
+function ircLine(irc: IrcSummary): string {
+  if (irc.count === 0) return 'IRC: none yet'
+  const directions = (['forward', 'reverse'] as const).map((d) => `${d} ${irc.paths[d] ? '✓' : '–'}`)
+  const ends = (['forward', 'reverse'] as const).filter((d) => irc.optimizations[d] > 0).length
+  return `IRC: ${directions.join(', ')}, end points ${ends} of 2`
+}
+
 export function NodeInspector({
   node,
   canvas,
@@ -125,6 +134,7 @@ export function NodeInspector({
   onEditNote,
   settings,
   servers = [],
+  onIrc,
 }: {
   node: Node
   canvas: Canvas
@@ -146,6 +156,8 @@ export function NodeInspector({
   settings: Settings | null
   /** Servers logged in to, for "Send to <server>" (D122f). */
   servers?: RemoteServer[]
+  /** D131: open the node's IRC window. */
+  onIrc?: () => void
 }) {
   const nodes = [...canvas.nodes, ...canvas.species]
   // D69: a free species has no step, branch, group or edges; transitions list it instead.
@@ -166,6 +178,12 @@ export function NodeInspector({
   useEffect(() => {
     api.history(node.id).then(setHistory, (err: unknown) => setError(String(err)))
   }, [node.id, refreshKey])
+
+  // D131: a TS node's IRC, which never changes the node itself, is one line here.
+  const [irc, setIrc] = useState<IrcSummary | null>(null)
+  useEffect(() => {
+    if (!isSpecies) api.ircSummary(node.id).then(setIrc, () => setIrc(null))
+  }, [node.id, node.role, isSpecies, refreshKey])
 
   const update = (fields: NodeFields) => {
     api.updateNode(node.id, fields).then(
@@ -328,6 +346,14 @@ export function NodeInspector({
           </span>
         )}
       </div>
+      {irc && !isSpecies && (irc.is_ts || irc.count > 0) && onIrc && (
+        <div className="irc-line row" aria-label="IRC">
+          <span className="small">{ircLine(irc)}</span>
+          <button className="small" onClick={onIrc} title="The IRC's files, path and end points, in a window of their own">
+            IRC…
+          </button>
+        </div>
+      )}
 
       <div className="inspector-grid">
         <div className="column">
