@@ -96,7 +96,8 @@ class Steps:
 def _read(path: str, modified: int, size: int) -> ParsedFile | None:
     """The parsed file; the cache key changes when the copy does (it never should)."""
     text = Path(path).read_bytes().decode("utf-8", errors="replace")
-    parsed = imports.read_file(text, Path(path).name)
+    # The folder of the copy, for the files copied beside it (an ORCA IRC's trajectories, D133).
+    parsed = imports.read_file(text, Path(path).name, Path(path).parent)
     return parsed if isinstance(parsed, ParsedFile) else None
 
 

@@ -1,14 +1,17 @@
-"""IRC calculations of a TS node (D131, A76; D132, A77): T-IMP-25 … T-IMP-31.
+"""IRC calculations of a TS node (D131, A76; D132, A77; D133, A78): T-IMP-25 … T-IMP-33.
 
 The files are synthetic (tests/gaussian_text.py), modelled on real Gaussian 16 IRC outputs:
 the LQA integrator with the TS read from the checkpoint, the default integrator printing each
-corrected point as CURRENT STRUCTURE, one job running both ways, restarts and end-point jobs."""
+corrected point as CURRENT STRUCTURE, one job running both ways, restarts and end-point jobs.
+ORCA's is a public sample with its trajectories (tests/fixtures/orca/irc)."""
+
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from chembook3d.models import Calculation, SourceFile
-from chembook3d.parsers import gaussian
+from chembook3d.parsers import gaussian, orca
 from chembook3d.services import irc as irc_service
 from tests import gaussian_text as g
 from tests.test_import import calculations, commit, copied_files, node, preview, upload
@@ -425,3 +428,92 @@ def test_make_an_end_point_a_node(open_client):
     # Without an optimization there is nothing to make a node from.
     response = open_client.post(f"/api/nodes/{ts}/irc/forward/node")
     assert response.status_code == 422
+
+
+# ---------- T-IMP-32, T-IMP-33: ORCA (D133) ----------
+
+ORCA_IRC = Path(__file__).parent / "fixtures" / "orca" / "irc"
+
+
+def beside_fixture(name: str) -> bytes | None:
+    path = ORCA_IRC / name
+    return path.read_bytes() if path.is_file() else None
+
+
+def test_orca_irc_points_come_from_its_trajectories():
+    text = (ORCA_IRC / "output.out").read_text(encoding="utf-8")
+    (step,) = orca.parse(text, beside_fixture).steps
+    run = step.irc
+    assert run.requested == "both" and run.directions == {1: "forward", 2: "reverse"}
+    assert run.endings == {1: "minimum", 2: "minimum"} and run.max_points == 2000
+    assert run.ts_energy == pytest.approx(-1967.122119666255)
+    assert sorted(run.files) == ["orca_IRC_B_trj.xyz", "orca_IRC_F_trj.xyz"] and not run.missing
+    forward = [p for p in run.points if p.path == 1]
+    reverse = [p for p in run.points if p.path == 2]
+    assert [p.number for p in forward][:3] == [0, 1, 2] and len(forward) == 1 + 49
+    assert len(reverse) == 73 and reverse[-1].energy == pytest.approx(-1967.185827246172)
+    # The TS is the structure the job started from, then each direction's points in order.
+    assert run.points[0].structure == 0 and len(step.geometries) == 1 + 49 + 73
+    assert all(p.coordinate is None for p in run.points[1:])
+    assert step.route.method == "B3LYP" and step.route.basis == "DEF2-TZVP"
+
+    # Without the files beside it, the IRC names them and has no points.
+    (alone,) = orca.parse(text).steps
+    assert alone.irc.missing == ["orca_IRC_F_trj.xyz", "orca_IRC_B_trj.xyz"]
+    assert [p.number for p in alone.irc.points] == [0]
+
+
+def test_import_an_orca_irc_with_its_trajectories(open_client, tmp_path):
+    first = orca.parse((ORCA_IRC / "output.out").read_text(encoding="utf-8")).steps[0]
+    atoms = [(a.element, 0, a.x, a.y, a.z) for a in first.geometries[0]]
+    made = open_client.post(
+        "/api/nodes",
+        json={
+            "label": "TS",
+            "xyz": xyz(atoms),
+            "role": "transition_state",
+            "charge": 1,
+            "multiplicity": 1,
+        },
+    )
+    assert made.status_code == 201, made.text
+    ts = made.json()["id"]
+    options = {"target_node_id": ts, "irc_part": "path"}
+
+    # Uploaded, the trajectories are not there: the import says where they are.
+    plan = preview(
+        open_client,
+        upload(open_client, "output.out", (ORCA_IRC / "output.out").read_text(), ts),
+        **options,
+    )
+    assert plan["blockers"] and "orca_IRC_F_trj.xyz and orca_IRC_B_trj.xyz" in plan["blockers"][0]
+
+    # Picked in the folder ORCA wrote them to, they are read and copied with it.
+    for name in ("output.out", "orca_IRC_F_trj.xyz", "orca_IRC_B_trj.xyz"):
+        (tmp_path / name).write_bytes((ORCA_IRC / name).read_bytes())
+    staged = open_client.post("/api/imports/from-path", json={"path": str(tmp_path / "output.out")})
+    assert staged.status_code == 200, staged.text
+    plan = preview(open_client, staged.json(), **options)
+    assert plan["blockers"] == [] and plan["irc"] == {"part": "path", "direction": "both"}
+    commit(open_client, plan, **options)
+    for name in ("orca_IRC_F_trj.xyz", "orca_IRC_B_trj.xyz"):
+        (tmp_path / name).unlink()  # the copies are read from now on
+    names = sorted(p.name for p in copied_files(open_client))
+    assert names == ["orca_IRC_B_trj.xyz", "orca_IRC_F_trj.xyz", "output.out"]
+
+    found = read(open_client, ts)
+    sides = sides_of(found)
+    assert sides["forward"]["points"] == 49 and sides["reverse"]["points"] == 73
+    assert sides["forward"]["ending"] == sides["reverse"]["ending"] == "minimum"
+    assert sides["reverse"]["last_relative"] == pytest.approx(
+        -1967.185827246172 + 1967.122119666255
+    )
+    coordinates = [p["coordinate"] for p in found["points"]]
+    assert coordinates == sorted(coordinates) and found["warnings"] == []
+    (part,) = found["parts"]
+    assert part["program"] == "ORCA" and part["direction"] == "both"
+
+    # Taking the file off removes its copies, the trajectories with them.
+    response = open_client.delete(f"/api/nodes/{ts}/irc/files/{part['source_file_id']}")
+    assert response.status_code == 204
+    assert copied_files(open_client) == []
