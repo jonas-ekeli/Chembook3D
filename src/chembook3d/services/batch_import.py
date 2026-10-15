@@ -284,12 +284,14 @@ class RowPlan:
     program: str
     version: str | None
     size: int
-    kind: str  # steps | ensemble
+    kind: str  # steps | ensemble | irc (D134)
     included: bool
     skipped: str | None  # imported_before | same_file
     skipped_detail: str | None
     order: int | None  # position in the import order
-    match: str  # geometry | first_geometry | name | name_close | new | chosen | none
+    # geometry | first_geometry | name | name_close | new | chosen | none | irc (D134: the TS
+    # an IRC starts from)
+    match: str
     target: dict[str, Any] | None  # {kind: node | file | new | group, node_id, file_id, label}
     mode: str | None  # new | planned | onto (imports.Plan.mode)
     derived: bool
@@ -437,12 +439,20 @@ def _skipped(session: Session, batch: Batch) -> dict[str, tuple[str, str]]:
     return found
 
 
+def _is_irc(staged: imports.StagedFile) -> bool:
+    return not isinstance(staged.parsed, crest.Ensemble) and any(
+        s.irc is not None for s in staged.parsed.steps
+    )
+
+
 def _order(batch: Batch) -> list[BatchFile]:
     """Files with an optimization first, so the files that create or finish nodes come before
-    the files that attach to them (D97); then by path."""
+    the files that attach to them (D97), IRCs last, after the TSs they go to (D134); then by
+    path."""
     return sorted(
         batch.files,
         key=lambda f: (
+            _is_irc(f.staged),
             0 if _has_optimization(f.staged) else 1,
             isinstance(f.staged.parsed, crest.Ensemble),
             f.relative.lower(),
@@ -546,6 +556,7 @@ def run(
             position += 1
             staged = item.staged
             is_ensemble = isinstance(staged.parsed, crest.Ensemble)
+            is_irc = _is_irc(staged)
             final = None if is_ensemble else _final(staged)
             final_rows = imports._rows(final.final_geometry) if final else None
             blockers: list[str] = []
@@ -556,6 +567,27 @@ def run(
 
             if is_ensemble:
                 match = "new"
+            elif is_irc:
+                # D134: an IRC goes into the IRC of the TS it starts from, or of the one chosen.
+                if target_text.startswith("node:"):
+                    target = session.get(Node, target_text[5:])
+                    match = "chosen"
+                    if target is None:
+                        blockers.append("The node chosen for it no longer exists")
+                elif target_text == "auto":
+                    found = imports.irc_targets(
+                        session, staged.parsed, settings.duplicate_tolerance
+                    )
+                    target = session.get(Node, found[0]["node_id"]) if found else None
+                    match = "irc" if target is not None else "none"
+                    if target is None:
+                        blockers.append(
+                            "It is an IRC, and no transition state starts where it does: "
+                            "choose its TS, or untick it"
+                        )
+                else:
+                    match = "none"
+                    blockers.append("An IRC goes into the IRC of its TS: choose the TS")
             elif target_text == "new":
                 match = "chosen"
             elif target_text.startswith("node:"):
@@ -640,6 +672,7 @@ def run(
                 origin_device=device,
                 pos_x=pos[0],
                 pos_y=pos[1],
+                irc_part="path" if is_irc else None,
             )
             plan_: imports.Plan | None = None
             if not blockers:
@@ -697,6 +730,8 @@ def run(
                         "file": item.relative,
                         "how": "group"
                         if group
+                        else "irc"
+                        if plan_.kind == "irc"
                         else "derived"
                         if result.derived_node_id
                         else plan_.mode,
@@ -735,7 +770,7 @@ def run(
                 program=staged.parsed.program,
                 version=getattr(staged.parsed, "version", None),
                 size=staged.size,
-                kind="ensemble" if is_ensemble else "steps",
+                kind="ensemble" if is_ensemble else "irc" if is_irc else "steps",
                 included=True,
                 skipped=skipped.get(item.id, (None, None))[0],
                 skipped_detail=skipped.get(item.id, (None, None))[1],

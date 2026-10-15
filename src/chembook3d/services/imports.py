@@ -341,6 +341,8 @@ class Plan:
     kind: str = "steps"  # steps | ensemble | irc
     ensemble: dict[str, Any] | None = None
     irc: dict[str, Any] | None = None  # D131: the part and direction an IRC import adds
+    # D134: an IRC file planned as an ordinary import: the TS nodes it starts from
+    irc_targets: list[dict[str, Any]] | None = None
     # D100: the node's lower-level optimization this file continues from; the node's geometry
     # becomes the file's result and that optimization is kept as a pre-optimization.
     continues_from: dict[str, Any] | None = None
@@ -646,6 +648,49 @@ def plan(
         return _plan_irc(session, staged, options, settings, store_names)
     if isinstance(staged.parsed, crest.Ensemble):
         return _plan_ensemble(session, staged, staged.parsed, options, settings)
+    found = _plan_steps(session, staged, options, settings, store_names)
+    if any(s.irc is not None for s in staged.parsed.steps):
+        # D134: an IRC goes into the IRC of the TS it starts from, never onto the canvas.
+        found.irc_targets = irc_targets(session, staged.parsed, settings.duplicate_tolerance)
+        found.blockers.append(
+            "This file is an IRC: it goes into the IRC of the transition state it starts from"
+            + (
+                ", not onto the canvas"
+                if found.irc_targets
+                else f". No transition state here starts where it does (within "
+                f"{settings.duplicate_tolerance} Å); open IRC… on its node to add it there"
+            )
+        )
+    return found
+
+
+def irc_targets(session: Session, parsed: ParsedFile, tolerance: float) -> list[dict[str, Any]]:
+    """D134: the transition states an IRC file starts from (its TS point within the duplicate
+    tolerance of their structure after fitting), nearest first."""
+    starts = []
+    for step in parsed.steps:
+        start = next((p for p in step.irc.points if p.number == 0), None) if step.irc else None
+        if start is not None:
+            starts.append(_rows(step.geometries[start.structure]))
+    found = []
+    for node in node_service.list_nodes(session):
+        if node.role != Role.TRANSITION_STATE or not node.geometry:
+            continue
+        distances = [
+            d for s in starts if (d := geometry.aligned_rmsd(s, node.geometry)) is not None
+        ]
+        if distances and min(distances) <= tolerance:
+            found.append({"node_id": node.id, "label": node.label, "rmsd": min(distances)})
+    return sorted(found, key=lambda t: t["rmsd"])
+
+
+def _plan_steps(
+    session: Session,
+    staged: StagedFile,
+    options: ImportOptions,
+    settings: Any,
+    store_names: bool,
+) -> Plan:
     steps = staged.parsed.steps
     blockers: list[str] = []
     warnings: list[dict[str, Any]] = []

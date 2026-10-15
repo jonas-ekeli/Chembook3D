@@ -40,14 +40,17 @@ function parent(directory: string): string {
 
 export function RemoteFilesDialog({
   server,
+  purpose,
   onClose,
   onImport,
   onInspect,
 }: {
   server: RemoteServer
+  /** D134: one file picked for this purpose (e.g. "into the IRC of “TS-2”"): Import only. */
+  purpose?: string
   onClose: () => void
   onImport: (request: RemoteImport) => void
-  onInspect: (targets: { server: string; path: string }[]) => void
+  onInspect?: (targets: { server: string; path: string }[]) => void
 }) {
   const [listing, setListing] = useState<RemoteListing | null>(null)
   const [path, setPath] = useState<string | undefined>(undefined) // undefined: the terminal's directory
@@ -96,26 +99,30 @@ export function RemoteFilesDialog({
 
   return (
     <Modal
-      title={`Import from ${server.name}`}
+      title={`Import from ${server.name}${purpose ? ` ${purpose}` : ''}`}
       onClose={onClose}
       wide
       actions={
         <>
           <button onClick={onClose}>Cancel</button>
-          <button
-            disabled={paths.length === 0}
-            onClick={() => onInspect(paths.map((path) => ({ server: server.id, path })))}
-            title="Look at the files (steps, structures, convergence, modes) without importing them, one after another"
-          >
-            Inspect{paths.length > 1 ? ` (${paths.length})` : ''}
-          </button>
-          <button
-            disabled={paths.length === 0}
-            onClick={() => onImport({ server: server.id, paths, batch: true })}
-            title="Match each file to a node by its structure or name, as a folder import does"
-          >
-            Batch import{paths.length > 0 ? ` (${paths.length})` : ''}
-          </button>
+          {onInspect && (
+            <button
+              disabled={paths.length === 0}
+              onClick={() => onInspect(paths.map((path) => ({ server: server.id, path })))}
+              title="Look at the files (steps, structures, convergence, modes) without importing them, one after another"
+            >
+              Inspect{paths.length > 1 ? ` (${paths.length})` : ''}
+            </button>
+          )}
+          {!purpose && (
+            <button
+              disabled={paths.length === 0}
+              onClick={() => onImport({ server: server.id, paths, batch: true })}
+              title="Match each file to a node by its structure or name, as a folder import does"
+            >
+              Batch import{paths.length > 0 ? ` (${paths.length})` : ''}
+            </button>
+          )}
           <button
             className="primary"
             disabled={paths.length !== 1}

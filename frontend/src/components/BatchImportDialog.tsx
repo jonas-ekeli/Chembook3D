@@ -29,6 +29,7 @@ const MATCHES: Record<BatchRow['match'], string> = {
   chosen: 'your choice',
   duplicate: 'possible duplicate, attached',
   none: 'needs your choice',
+  irc: 'starts from it',
 }
 
 function where(row: BatchRow): string {
@@ -37,6 +38,7 @@ function where(row: BatchRow): string {
   const name = target.kind === 'file' ? `the node from ${target.file}` : `“${target.label || 'Untitled node'}”`
   if (target.kind === 'group') return `New group “${target.label}”`
   if (target.kind === 'new') return `New node “${target.label}”`
+  if (row.kind === 'irc') return `Into the IRC of ${name}` // D134
   if (row.mode === 'planned') return `Finishes ${name}`
   return `Adds to ${name}${row.derived ? ', with a derived node for its other geometry' : ''}`
 }
@@ -197,11 +199,13 @@ export function BatchImportDialog({
       (result) => {
         token.current = null
         const made = result.files.filter((f) => f.how === 'new' || f.how === 'group' || f.how === 'derived').length
+        const ircs = result.files.filter((f) => f.how === 'irc').length
         const files = `${result.imported} file${result.imported === 1 ? '' : 's'}`
         onImported(
           result,
           `Imported ${files} from ${plan.folder}: ${made} new node${made === 1 ? '' : 's'} or group${made === 1 ? '' : 's'}, ` +
-            `${result.imported - made} added to existing nodes.`,
+            `${result.imported - made - ircs} added to existing nodes` +
+            (ircs ? `, ${ircs} IRC${ircs === 1 ? '' : 's'} added to their TS.` : '.'),
         )
       },
       (err: unknown) => {
@@ -383,6 +387,22 @@ export function BatchImportDialog({
                                     {MATCHES[row.match]}
                                   </span>
                                 </div>
+                                {row.kind === 'irc' && (
+                                  <select
+                                    aria-label={`Where ${row.path} goes`}
+                                    value={choice?.target ?? 'auto'}
+                                    onChange={(event) => choose(row, { target: event.target.value })}
+                                  >
+                                    <option value="auto">The TS it starts from</option>
+                                    {byLabel
+                                      .filter((n) => n.role === 'transition_state')
+                                      .map((n) => (
+                                        <option key={n.id} value={`node:${n.id}`}>
+                                          {n.label || 'Untitled node'}
+                                        </option>
+                                      ))}
+                                  </select>
+                                )}
                                 {row.kind === 'steps' && (
                                   <select
                                     aria-label={`Where ${row.path} goes`}

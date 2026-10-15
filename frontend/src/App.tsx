@@ -999,6 +999,7 @@ function App() {
             setIrcNode(null)
             selectNode(id, true)
           }}
+          servers={remote?.servers.filter((s) => s.connected) ?? []}
         />
       )}
       {inspecting && (
