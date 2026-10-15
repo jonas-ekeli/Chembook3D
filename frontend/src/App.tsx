@@ -995,6 +995,10 @@ function App() {
             setNotice(message)
             reload()
           }}
+          onShowNode={(id) => {
+            setIrcNode(null)
+            selectNode(id, true)
+          }}
         />
       )}
       {inspecting && (

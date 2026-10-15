@@ -441,6 +441,28 @@ export type IrcSide = {
   points: number
   last_relative: number | null
   end_point: IrcEndPoint | null
+  connection: IrcConnection | null
+  same_as: { node_id: string; label: string; rmsd: number }[]
+}
+/** A node on an edge touching the TS, compared with one end of its IRC (D132). */
+export type IrcNeighbour = {
+  node_id: string
+  label: string
+  edge: string // 'incoming' or 'outgoing'
+  rmsd: number | null
+  rmsd_all: number | null
+  same_bonds: boolean
+  note: string
+}
+export type IrcConnection = {
+  verdict: string // 'connects', 'elsewhere' or 'no_neighbours'
+  /** 'optimized end point' or 'last IRC point': the structure compared. */
+  judged_on: string
+  node_id: string | null
+  label: string
+  rmsd: number | null
+  atoms: number
+  neighbours: IrcNeighbour[]
 }
 export type Irc = {
   node_id: string
@@ -452,6 +474,8 @@ export type Irc = {
   ts_energy: number | null
   ts_values: Record<string, Record<'E' | 'G' | 'G_qh', { value: number | null; message: string | null }>>
   warnings: string[]
+  /** The direction drawn on the left: the one leading to the TS's incoming edge (Q39). */
+  left: IrcDirection
 }
 export type IrcSummary = {
   is_ts: boolean
@@ -1897,7 +1921,9 @@ export const api = {
 
   modes: (calculationId: string) => request<Modes>('GET', `/calculations/${calculationId}/modes`),
   steps: (calculationId: string) => request<Steps>('GET', `/calculations/${calculationId}/steps`),
-  irc: (nodeId: string) => request<Irc>('GET', `/nodes/${nodeId}/irc`),
+  irc: (nodeId: string) => request<Irc>('GET', `/nodes/${nodeId}/irc?structures=true`),
+  makeIrcNode: (nodeId: string, direction: IrcDirection) =>
+    request<{ node_id: string }>('POST', `/nodes/${nodeId}/irc/${direction}/node`),
   ircSummary: (nodeId: string) => request<IrcSummary>('GET', `/nodes/${nodeId}/irc/summary`),
   removeIrcFile: (nodeId: string, sourceFileId: string) =>
     request<void>('DELETE', `/nodes/${nodeId}/irc/files/${sourceFileId}`),

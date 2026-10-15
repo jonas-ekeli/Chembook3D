@@ -10,8 +10,8 @@ from pydantic import BaseModel
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
-from chembook3d.api.routes import DbSession, _investigation
-from chembook3d.services import import_undo, irc
+from chembook3d.api.routes import DbSession, _investigation, _staging
+from chembook3d.services import import_undo, imports, irc
 
 router = APIRouter(prefix="/api")
 
@@ -57,6 +57,32 @@ class EndPointOut(BaseModel):
     values: dict[str, Any]
 
 
+class NeighbourOut(BaseModel):
+    node_id: str
+    label: str
+    edge: str
+    rmsd: float | None
+    rmsd_all: float | None
+    same_bonds: bool
+    note: str
+
+
+class ConnectionOut(BaseModel):
+    verdict: str
+    judged_on: str
+    node_id: str | None
+    label: str
+    rmsd: float | None
+    atoms: int
+    neighbours: list[NeighbourOut]
+
+
+class SameAsOut(BaseModel):
+    node_id: str
+    label: str
+    rmsd: float
+
+
 class SideOut(BaseModel):
     direction: str
     ending: str | None
@@ -64,6 +90,8 @@ class SideOut(BaseModel):
     points: int
     last_relative: float | None
     end_point: EndPointOut | None
+    connection: ConnectionOut | None
+    same_as: list[SameAsOut]
 
 
 class IrcOut(BaseModel):
@@ -76,6 +104,7 @@ class IrcOut(BaseModel):
     ts_energy: float | None
     ts_values: dict[str, Any]
     warnings: list[str]
+    left: str
 
 
 class IrcSummaryOut(BaseModel):
@@ -87,16 +116,37 @@ class IrcSummaryOut(BaseModel):
 
 
 @router.get("/nodes/{node_id}/irc", response_model=IrcOut)
-def get_irc(node_id: str, request: Request, session: DbSession):
-    """The node's IRC: its files, the path through the TS with every point's structure and
-    energy, how each direction ended and its end point's energies relative to the TS."""
-    return asdict(irc.read(session, _investigation(request).folder, node_id))
+def get_irc(node_id: str, request: Request, session: DbSession, structures: bool = False):
+    """The node's IRC: its files, the path through the TS with every point's energy (and,
+    with `structures`, its coordinates), how each direction ended, where each end leads among
+    the TS's neighbours, and the end points' energies relative to the TS."""
+    folder = _investigation(request).folder
+    return asdict(irc.read(session, folder, node_id, structures=structures))
 
 
 @router.get("/nodes/{node_id}/irc/summary", response_model=IrcSummaryOut)
 def get_irc_summary(node_id: str, session: DbSession):
     """What the node's IRC holds, without reading its files."""
     return irc.summary(session, node_id)
+
+
+class MadeNodeOut(BaseModel):
+    node_id: str
+
+
+@router.post("/nodes/{node_id}/irc/{direction}/node", response_model=MadeNodeOut)
+def make_end_point_node(node_id: str, direction: str, request: Request, session: DbSession):
+    """Q38: make the optimized end point a node of its own, imported again from its files."""
+    if direction not in irc.DIRECTIONS:
+        raise HTTPException(422, "direction is forward or reverse")
+    folder = _investigation(request).folder
+    try:
+        made = irc.make_node(session, folder, _staging(request), node_id, direction)
+    except imports.ImportBlocked as exc:
+        raise HTTPException(409, {"blockers": exc.blockers, "message": str(exc)}) from exc
+    except imports.ImportFailed as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return MadeNodeOut(node_id=made)
 
 
 @router.delete("/nodes/{node_id}/irc/files/{source_file_id}", status_code=204)

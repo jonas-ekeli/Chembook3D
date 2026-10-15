@@ -88,4 +88,27 @@ test("a TS node's IRC is imported, inspected and removed in its own window", asy
   // The node is as it was: its own calculations only, and one line about its IRC.
   await expect(inspector.getByLabel('IRC', { exact: true })).toContainText('IRC: forward ✓, reverse –, end points 1 of 2')
   await expect(inspector.getByText('2 calculations', { exact: true })).toBeVisible()
+
+  // D132, T-UI-35: the forward end point made a node of its own, then found as the same structure.
+  await inspector.getByRole('button', { name: 'IRC…' }).click()
+  await expect(forward.getByLabel('Where it leads')).toContainText('The TS has no edges')
+  await forward.getByRole('button', { name: 'Make it a node' }).click()
+  await expect(forward.getByText(/Same structure as/)).toBeVisible()
+  await expect(forward.getByRole('button', { name: 'Make it a node' })).toHaveCount(0)
+
+  // With an edge from that node into the TS, the forward end reaches it and is drawn on the left.
+  const nodes = (await (await page.request.get('/api/nodes')).json()) as { id: string; label: string }[]
+  const id = (label: string) => nodes.find((n) => n.label === label)!.id
+  const made = await page.request.post('/api/transitions', {
+    data: { source_id: id('TS forward end'), target_id: id('TS') },
+  })
+  expect(made.ok()).toBeTruthy()
+  await window.getByRole('button', { name: 'Close' }).click()
+  await inspector.getByRole('button', { name: 'IRC…' }).click()
+  await expect(forward.getByLabel('Where it leads')).toContainText('Reaches TS forward end')
+  await expect(window.locator('.irc-slot').first()).toHaveAttribute('aria-label', 'Forward direction')
+  await expect(window.getByRole('img', { name: 'IRC energy along the path' })).toContainText('forward ← TS → reverse')
+  await forward.getByLabel('Where it leads').getByRole('button', { name: 'TS forward end' }).first().click()
+  await expect(window).toHaveCount(0)
+  await expect(inspector.getByRole('heading', { name: 'TS forward end' })).toBeVisible()
 })
