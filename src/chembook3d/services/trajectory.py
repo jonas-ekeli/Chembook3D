@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from chembook3d import pathtools
 from chembook3d.models import Calculation, CalculationType, Node
-from chembook3d.parsers import xtb
+from chembook3d.parsers import joined, xtb
 from chembook3d.parsers.common import Criterion, ParsedFile, ParsedStep
 from chembook3d.services import files as file_service
 from chembook3d.services import geometry, history, imports
@@ -218,12 +218,18 @@ def trim_of(frames: list[Frame], removed: list[int], shown_rows: list[Any] | Non
 
 
 def is_scan_path(calculation: Calculation) -> bool:
-    """D112: a relaxed scan read from an xTB `xtbscan.log` or `path.xyz`."""
-    return (
-        calculation.program == xtb.PROGRAM
-        and calculation.type == CalculationType.OTHER
-        and calculation.route.startswith(xtb.SCAN_ROUTE)
+    """D112: a relaxed scan read from an xTB `xtbscan.log` or `path.xyz`, or (D137) a scan
+    joined in the scan editor, at the level of its pieces."""
+    return calculation.type == CalculationType.OTHER and (
+        (calculation.program == xtb.PROGRAM and calculation.route.startswith(xtb.SCAN_ROUTE))
+        or is_joined_scan(calculation)
     )
+
+
+def is_joined_scan(calculation: Calculation) -> bool:
+    """D137: a scan joined in the scan editor. Its energies are the path's own and never
+    reach profiles, the energy table, energetic span or selectivity."""
+    return calculation.type == CalculationType.OTHER and calculation.route.startswith(joined.ROUTE)
 
 
 def changes_in_place(node: Node) -> bool:

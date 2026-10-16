@@ -206,3 +206,50 @@ test('a finer scan replaces the coarse points, and scans are compared at one coo
   await expect(again.getByLabel('Frame', { exact: true })).toHaveAttribute('max', '3')
   await again.getByRole('button', { name: 'Close' }).click()
 })
+
+test('a joined scan is imported and shown on an edge, naming its program', async ({ page }) => {
+  // D137, T-UI-39
+  test.slow()
+  await newInvestigation(page, 'Joined scan on edge')
+  const ids: string[] = []
+  for (const [label, x, y] of [
+    ['Start', 0, 0],
+    ['End', 700, 0],
+  ] as const) {
+    const response = await page.request.post('/api/nodes', { data: { label, pos_x: x, pos_y: y } })
+    expect(response.ok()).toBe(true)
+    ids.push((await response.json()).id)
+  }
+  expect((await page.request.post('/api/transitions', { data: { source_id: ids[0], target_id: ids[1] } })).ok()).toBe(true)
+  await page.reload()
+  await expect(page.locator('.react-flow__node')).toHaveCount(2)
+
+  await page.getByRole('button', { name: 'Scan editor' }).click()
+  const editor = page.getByRole('dialog', { name: 'Scan editor' })
+  await editor.getByRole('button', { name: 'Add files…' }).click()
+  await expect(editor.getByLabel('Folder path')).not.toHaveValue('')
+  await editor.getByLabel('Folder path').fill(join(FIXTURES, 'gaussian'))
+  await editor.getByRole('button', { name: 'Go' }).click()
+  await editor.getByRole('button', { name: /dvb_scan_relaxed\.log/ }).click()
+  const piece = editor.getByLabel('Piece 1')
+  await piece.getByLabel('Last point').fill('7')
+  await piece.getByLabel('Last point').press('Enter')
+  await expect(editor.getByLabel('Frame', { exact: true })).toHaveAttribute('max', '6')
+
+  // Imported onto the edge: the import dialog opens over the editor, which comes back after.
+  await editor.getByLabel('Show the imported path on').selectOption({ label: 'On the edge Start → End' })
+  await editor.getByRole('button', { name: 'Import…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Import calculation output' })
+  await expect(dialog).toContainText('dvb_scan_relaxed_joined.xyz')
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  const chip = page.locator('.edge-label .scan-path-chip')
+  await expect(chip).toHaveText(/^Gaussian path · top \+\d+\.\d+ (kcal\/mol|kJ\/mol)$/)
+  await expect(page.getByRole('dialog', { name: 'Scan editor' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Scan editor' }).getByLabel('Frame', { exact: true })).toHaveAttribute(
+    'max',
+    '6',
+  )
+  await page.getByRole('dialog', { name: 'Scan editor' }).getByRole('button', { name: 'Close' }).click()
+  // On the edge only: its box is off the canvas.
+  await expect(page.locator('.react-flow__node')).toHaveCount(2)
+})

@@ -59,8 +59,11 @@ export function ScanPathsSection({
     <section aria-label="Scan paths">
       <h3>Scan paths</h3>
       <p className="muted">
-        GFN2-xTB paths run on this edge. Each top is measured from that path’s first kept point; it is not this edge’s
-        barrier and never enters ΔX or profiles.
+        {paths.every((p) => (p.program || 'xTB') === 'xTB')
+          ? 'GFN2-xTB paths run on this edge.'
+          : 'Scan paths run on this edge (xTB, or joined in the scan editor at their own level).'}{' '}
+        Each top is measured from that path’s first kept point; it is not this edge’s barrier and never enters ΔX or
+        profiles.
       </p>
       <ul className="plain scan-path-rows">
         {paths.map((p) => {

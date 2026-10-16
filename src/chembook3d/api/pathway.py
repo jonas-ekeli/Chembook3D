@@ -119,6 +119,7 @@ class PathOnEdgeOut(BaseModel):
     active_rmsd: float | None  # Å, the end over the reacting atoms (D118)
     end_rmsd: float | None  # Å, over all atoms
     on_edge: bool  # its box is off the canvas; the chip stands for it
+    program: str  # D137: "xTB", or a joined scan's program
 
 
 class TransitionOut(BaseModel):

@@ -334,6 +334,7 @@ export function ImportDialog({
   remote = null,
   inspection = null,
   irc = null,
+  pathEdge = null,
   onClose,
   onImported,
   onImportFolder,
@@ -347,6 +348,8 @@ export function ImportDialog({
   inspection?: { id: string; name: string } | null
   /** D131: the file goes into the target TS node's IRC: its path, or a job on one end point. */
   irc?: { part: 'path' | 'end'; direction: IrcDirection | null } | null
+  /** D137: the imported scan path is shown on this edge only (D121). */
+  pathEdge?: string | null
   target: Node | null
   nodes: Node[]
   /** Start with "free species" ticked (D69). */
@@ -376,6 +379,7 @@ export function ImportDialog({
     pos_y: position?.y ?? null,
     irc_part: irc?.part ?? null,
     irc_direction: irc?.direction ?? null,
+    ...(pathEdge ? { path_edge_id: pathEdge, on_edge_only: true } : {}),
   })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)

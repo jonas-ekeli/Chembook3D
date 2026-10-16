@@ -29,6 +29,7 @@ from scipy.optimize import linear_sum_assignment
 from chembook3d import pathtools, settings, units
 from chembook3d.models import LevelOfTheory
 from chembook3d.parsers import gaussian
+from chembook3d.parsers import joined as joined_file
 from chembook3d.parsers.common import ParsedFile, ParsedStep
 from chembook3d.services import atom_matching, geometry, imports, irc, levels, trajectory
 from chembook3d.services.records import RecordError
@@ -42,7 +43,7 @@ STEP_KCAL = 3.0  # kcal/mol: an energy step larger than this ...
 STEP_RATIO = 3.0  # ... and this many times the steps beside it is marked
 EVEN = 0.05  # a coordinate found from the structures changes by steps this even (relative)
 TIE = 1e-4  # spreads this close count as equally even
-HEADER = "chembook3d joined scan 1"
+HEADER = joined_file.HEADER
 KCAL = units.HARTREE_IN["kcal/mol"]
 UNITS = {2: "Å", 3: "°", 4: "°"}
 
@@ -83,6 +84,7 @@ class Scan:
     joined: bool = False  # a joined scan saved by the editor, read back
     restarted: bool = False  # the file runs the scan again after it; only the first run is read
     renumbered: str = ""  # whose atom order the points were put in (D113), when they were
+    basis_prints: dict[str, str] = field(default_factory=dict)  # a GEN basis set's (D137)
 
     @property
     def unit(self) -> str:
@@ -262,6 +264,13 @@ def values_of(points: list[Rows], atoms: list[int]) -> list[float]:
 # ---------- levels ----------
 
 
+def _basis_prints(step: ParsedStep) -> dict[str, str]:
+    """D137: a GEN basis set's fingerprints, saved so an import can name it."""
+    if step.resolved_basis_definition:
+        return gaussian.basis_fingerprints(step.resolved_basis_definition)
+    return dict(step.basis_fingerprints)
+
+
 def _level(program: str, step: ParsedStep) -> tuple[dict[str, Any], str, bool]:
     """What two pieces must share (Q42): the program, method, basis set (when the file names
     it), dispersion with any IOps that re-parametrize it, implicit solvent, charge and
@@ -409,6 +418,7 @@ def scans_of(parsed: ParsedFile, name: str, path: str, file_key: str) -> list[Sc
                 level=level,
                 level_label=label,
                 basis_named=named,
+                basis_prints=_basis_prints(step),
                 charge=step.charge,
                 multiplicity=step.multiplicity,
                 atoms=atoms,
@@ -423,44 +433,27 @@ def scans_of(parsed: ParsedFile, name: str, path: str, file_key: str) -> list[Sc
 
 
 def is_joined_scan(text: str) -> bool:
-    lines = text.lstrip("﻿").splitlines()
-    return len(lines) > 1 and lines[1].startswith(HEADER)
-
-
-def _comment_fields(comment: str) -> dict[str, str]:
-    out = {}
-    for part in comment.split(" | "):
-        key, sep, value = part.partition(": ")
-        if sep:
-            out[key.strip()] = value.strip()
-    return out
+    return joined_file.looks_like_joined(text)
 
 
 def read_joined(text: str, name: str, path: str, file_key: str) -> list[Scan]:
     """A joined scan saved by the editor, back as one scan whose points keep their sources."""
-    from chembook3d.services import inspection
-
-    frames, _ = inspection._xyz_frames(text)
+    frames = joined_file.frames(text)
     if len(frames) < 2:
         raise ScanEditorError(f"{name} holds fewer than two structures.")
-    head = _comment_fields(frames[0][0])
     try:
-        level = json.loads(head.get("level fields", "{}"))
-        atoms = [int(a) for a in head.get("coordinate", "").split()]
-    except ValueError as exc:
-        raise ScanEditorError(f"{name}: its first comment line cannot be read.") from exc
+        head = joined_file.head(frames[0][0])
+    except joined_file.NotJoinedScan as exc:
+        raise ScanEditorError(f"{name}: {exc}.") from exc
     points = []
     for n, (comment, atom_list) in enumerate(frames, start=1):
-        fields = _comment_fields(comment)
-        energy = xtb_float(fields.get("energy"))
+        fields = joined_file.comment_fields(comment)
+        energy = joined_file.number(fields.get("energy"))
         rows = [[a.element, a.x, a.y, a.z] for a in atom_list]
         points.append(Point(rows, energy, 0.0, n, n, fields.get("from", "")))
-    if not 2 <= len(atoms) <= 4:
-        atoms = find_coordinate([p.rows for p in points]) or [1, 2]
+    atoms = head.atoms or find_coordinate([p.rows for p in points]) or [1, 2]
     for p, v in zip(points, values_of([p.rows for p in points], atoms), strict=True):
         p.value = v
-    charge = level.get("charge")
-    multiplicity = level.get("multiplicity")
     return [
         Scan(
             key=f"{file_key}:1",
@@ -468,28 +461,20 @@ def read_joined(text: str, name: str, path: str, file_key: str) -> list[Scan]:
             path=path,
             step=1,
             steps=1,
-            program=head.get("program", level.get("program", "")),
-            version=head.get("version") or None,
-            level=level,
-            level_label=head.get("level", ""),
-            basis_named=bool(head.get("basis named", "yes") == "yes"),
-            charge=charge,
-            multiplicity=multiplicity,
+            program=head.program,
+            version=head.version,
+            level=head.level,
+            level_label=head.label,
+            basis_named=head.basis_named,
+            charge=head.charge,
+            multiplicity=head.multiplicity,
             atoms=atoms,
             found_by="file",
             points=points,
             joined=True,
+            basis_prints=head.basis_prints,
         )
     ]
-
-
-def xtb_float(value: str | None) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value.split()[0])
-    except (ValueError, IndexError):
-        return None
 
 
 # ---------- placing scans on the path ----------
@@ -1268,6 +1253,11 @@ def file_text(joined: Joined, first: Scan) -> str:
         f"level: {joined.level_label}",
         f"level fields: {json.dumps(level, sort_keys=True)}",
         f"basis named: {'yes' if first.basis_named else 'no'}",
+        *(
+            [f"basis fingerprints: {json.dumps(first.basis_prints, sort_keys=True)}"]
+            if first.basis_prints
+            else []
+        ),
         f"charge: {first.charge if first.charge is not None else ''}",
         f"multiplicity: {first.multiplicity if first.multiplicity is not None else ''}",
         f"coordinate: {' '.join(str(a) for a in joined.atoms)}",

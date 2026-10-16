@@ -558,7 +558,9 @@ export function TransitionPanel({
       {paths.length > 0 && (
         <section aria-label="Scan paths">
           <h3>Scan paths</h3>
-          <p className="muted">GFN2-xTB paths run on this edge; each top is from its own first point, not this edge’s barrier.</p>
+          <p className="muted">
+            Scan paths run on this edge; each top is from its own first point, at its own level, not this edge’s barrier.
+          </p>
           <ul className="plain scan-path-rows">
             {paths.map((p) => (
               <li key={p.node_id}>
