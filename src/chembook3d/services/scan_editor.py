@@ -38,6 +38,7 @@ JUMP = pathtools.GOOD_JUMP  # Å (D116): a larger fitted RMSD between neighbours
 STEP_KCAL = 3.0  # kcal/mol: an energy step larger than this ...
 STEP_RATIO = 3.0  # ... and this many times the steps beside it is marked
 EVEN = 0.05  # a coordinate found from the structures changes by steps this even (relative)
+TIE = 1e-4  # spreads this close count as equally even
 HEADER = "chembook3d joined scan 1"
 KCAL = units.HARTREE_IN["kcal/mol"]
 UNITS = {2: "Å", 3: "°", 4: "°"}
@@ -228,8 +229,19 @@ def find_coordinate(points: list[Rows]) -> list[int] | None:
         if len(atoms) == 4:
             values = _unwrapped(values)
         spread = _evenness(values, 0.5)
-        if spread is not None and (best is None or spread < best[0]):
-            best = (spread, [a + 1 for a in atoms])
+        numbered = [a + 1 for a in atoms]
+        # Equally even coordinates (two atoms on one side of a symmetric bond): the lower
+        # numbers, whatever rounding the machine does.
+        if spread is not None and (
+            best is None
+            or spread < best[0] - TIE
+            or (
+                abs(spread - best[0]) <= TIE
+                and len(numbered) == len(best[1])
+                and numbered < best[1]
+            )
+        ):
+            best = (spread, numbered)
     if best is None or best[0] > EVEN:
         return None
     return best[1]

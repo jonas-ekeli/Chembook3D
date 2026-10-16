@@ -110,6 +110,7 @@ test('a scan opens in the scan editor from Inspect and from the step movie', asy
   await expect(browse.getByLabel('Folder path')).not.toHaveValue('')
   await browse.getByLabel('Folder path').fill(join(FIXTURES, 'gaussian'))
   await browse.getByRole('button', { name: 'Go' }).click()
+  await expect(browse.getByRole('listitem').filter({ hasText: 'dvb_scan_unrelaxed.log' })).toBeVisible()
   // A name filter offers its files to the scan editor.
   await browse.getByLabel('Filter by name').fill('dvb_scan_relaxed')
   await expect(browse.getByRole('button', { name: 'Scan editor (1)' })).toBeVisible()

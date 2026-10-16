@@ -56,12 +56,16 @@ export function FileBrowser({
   const [filter, setFilter] = useState('')
   const [error, setError] = useState<string | null>(null)
 
+  // The folder listed, so a filter typed while the same folder is listed again is kept.
+  const listed = useRef<string | null>(null)
+
   const go = useCallback((target?: string) => {
     api.folders(target, true).then(
       (result) => {
         setListing(result)
         setPath(result.path)
-        setFilter('')
+        if (listed.current !== result.path) setFilter('')
+        listed.current = result.path
         setError(null)
       },
       (err: unknown) => setError(errorText(err)),
