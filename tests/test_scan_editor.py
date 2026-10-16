@@ -345,3 +345,172 @@ def test_an_imported_scan_opens_from_its_stored_copy(page, tmp_path):
     # Closing the editor leaves the investigation's copy alone.
     page.delete(f"/api/scan-editor/{response.json()['id']}", headers=ORIGIN)
     assert page.get(f"/api/calculations/{calculation['id']}/steps").status_code == 200
+
+
+# ---------- refining, crossing, comparing, matching (D136) ----------
+
+
+def _coarse_and_finer(relaxed):
+    coarse = _part(relaxed, "coarse:1", [0, 2, 4, 6, 8], "coarse.log")
+    finer = _part(relaxed, "finer:1", [2, 3, 4], "finer.log")
+    return {s.key: s for s in (coarse, finer)}
+
+
+def test_a_finer_scan_is_offered_and_replaces_the_coarse_points(relaxed):
+    scans = _coarse_and_finer(relaxed)
+    pieces = [editor.Piece("coarse:1", 0, 4)]
+    joined = editor.join(scans, pieces)
+    [offer] = joined.offers
+    assert offer.scan == "finer:1" and (offer.points, offer.replaced) == (3, 2)
+    assert offer.text == "Use the 3 finer points of finer.log between 240.0 and 300.0 °"
+    pieces, note = editor.replace(scans, pieces, "finer:1")
+    # The coarse points at 240° and 300° are the finer scan's ends: each is kept once.
+    assert pieces == [
+        editor.Piece("coarse:1", 0, 1),
+        editor.Piece("finer:1", 0, 2),
+        editor.Piece("coarse:1", 2, 4),
+    ]
+    assert note == "3 points of finer.log replace 0 of the path's between 240.0 and 300.0 °."
+    joined = editor.join(scans, pieces)
+    assert [round(f.x) for f in joined.frames] == [180, 240, 270, 300, 360, 420]
+    assert all(j.shared and j.ok for j in joined.joins) and not joined.offers
+
+
+def test_a_finer_scan_replaces_only_the_stretch_chosen(relaxed):
+    coarse = _part(relaxed, "coarse:1", [0, 2, 4, 6, 8], "coarse.log")
+    finer = _part(relaxed, "finer:1", [8, 7, 6, 5, 4, 3, 2], "finer.log")  # run the other way
+    scans = {s.key: s for s in (coarse, finer)}
+    pieces = [editor.Piece("coarse:1", 4, 0)]  # the path runs down from 420°
+    pieces, _ = editor.replace(scans, pieces, "finer:1", (1, 2))  # 360° to 300°
+    joined = editor.join(scans, pieces)
+    values = [round(f.x) for f in joined.frames]
+    assert values == [420, 360, 330, 300, 240, 180]
+    # 360° and 300° are shared, each kept once from the piece before it.
+    assert [f.scan for f in joined.frames] == ["coarse:1"] * 2 + ["finer:1"] * 2 + ["coarse:1"] * 2
+    with pytest.raises(editor.ScanEditorError, match="fewer than two points"):
+        editor.replace(scans, [editor.Piece("coarse:1", 4, 0)], "finer:1", (0, 0))
+
+
+def _branches(relaxed):
+    """Two branches over the same points whose energies cross between points 3 and 4: a is
+    lower before, b after."""
+    a = _part(relaxed, "a:1", [0, 1, 2, 3, 4, 5, 6], "forward.log")
+    b = _part(relaxed, "b:1", [6, 5, 4, 3, 2, 1, 0], "reverse.log")
+    for point in b.points:
+        point.energy += (point.value - 285.0) / 30 / editor.KCAL  # +1 kcal/mol per point past 285°
+        point.energy -= 2 * (point.value - 285.0) / 30 / editor.KCAL
+    return {s.key: s for s in (a, b)}
+
+
+def test_branches_that_cross_are_found_and_joined_at_the_crossing(relaxed):
+    scans = _branches(relaxed)
+    [crossing] = editor.crossings(scans)
+    assert (crossing.a, crossing.b) == ("a:1", "b:1")
+    assert crossing.x == pytest.approx(285.0, abs=0.5)
+    assert crossing.text.startswith("forward.log and reverse.log cross at 285.0 °")
+    pieces, note = editor.cut_at_crossing(scans, [], crossing)
+    assert pieces == [editor.Piece("a:1", 0, 3), editor.Piece("b:1", 2, 0)]
+    joined = editor.join(scans, pieces)
+    assert [round(f.x) for f in joined.frames] == [180, 210, 240, 270, 300, 330, 360]
+    assert note.startswith("Joined at the crossing: forward.log and reverse.log")
+    # The path running down keeps running down.
+    pieces, _ = editor.cut_at_crossing(scans, [editor.Piece("a:1", 6, 0)], crossing)
+    assert pieces == [editor.Piece("b:1", 0, 2), editor.Piece("a:1", 3, 0)]
+    # Branches at other levels do not cross.
+    other = copy.deepcopy(scans["b:1"])
+    other.level = {**other.level, "method": "PBE0"}
+    assert editor.crossings({"a:1": scans["a:1"], "b:1": other}) == []
+
+
+def test_points_are_compared_after_fitting(relaxed):
+    scans = _branches(relaxed)
+    shown = editor.compare(scans, [("a:1", 3), ("b:1", 3), ("a:1", 0)])
+    assert [c["rmsd"] for c in shown[:2]] == pytest.approx([0, 0], abs=1e-6)
+    assert shown[2]["rmsd"] > 0.1
+    with pytest.raises(editor.ScanEditorError):
+        editor.compare(scans, [("a:1", 30)])
+
+
+def test_a_scan_numbered_another_way_is_matched(relaxed):
+    other = _part(relaxed, "o:1", [3, 4, 5, 6], "renumbered.log")
+    count = len(other.points[0].rows)
+    for point in other.points:
+        point.rows = list(reversed(point.rows))
+    other.atoms = [count + 1 - a for a in other.atoms]
+    first = _part(relaxed, "a:1", [0, 1, 2, 3], "a.log")
+    scans = {s.key: s for s in (first, other)}
+    pieces = [editor.Piece("a:1", 0, 3), editor.Piece("o:1", 0, 3)]
+    joined = editor.join(scans, pieces)
+    assert joined.mismatch == "o:1" and "match its atoms" in joined.blocked
+    note = editor.match_atoms(scans, "o:1", "a:1")
+    assert note.startswith("renumbered.log renumbered to the atom order of a.log")
+    # The molecule is symmetric, so its atoms may be matched to their mirror partners; the
+    # coordinate goes with them and keeps its values.
+    assert [r[0] for r in other.points[0].rows] == [r[0] for r in relaxed.points[0].rows]
+    values = editor.values_of([p.rows for p in other.points], other.atoms)
+    assert [v % 360 for v in values] == pytest.approx(
+        [relaxed.points[k].value % 360 for k in (3, 4, 5, 6)], abs=0.01
+    )
+    joined = editor.join(scans, pieces)
+    assert joined.blocked is None and len(joined.frames) == 7
+    assert all(j.ok for j in joined.joins)
+
+
+def test_a_full_turn_is_marked_closed(relaxed):
+    joined = editor.join({relaxed.key: relaxed}, [editor.Piece(relaxed.key, 0, 12)])
+    assert [m.kind for m in joined.marks if m.kind == "closed"] == ["closed"]
+    joined = editor.join({relaxed.key: relaxed}, [editor.Piece(relaxed.key, 0, 6)])
+    assert "closed" not in [m.kind for m in joined.marks]
+
+
+def test_a_scan_run_again_in_the_same_step_is_read_once(relaxed, monkeypatch):
+    # A copy of a running job's output (…_CONV.out) can hold the scan a second time.
+    real = editor.trajectory.frames_of
+
+    def twice(step):
+        frames = real(step)
+        return frames + [dataclasses.replace(f) for f in frames[:5]]
+
+    monkeypatch.setattr(editor.trajectory, "frames_of", twice)
+    [scan] = _scans(RELAXED)
+    assert scan.restarted and len(scan.points) == 13
+    assert scan.points[-1].rows == relaxed.points[-1].rows
+
+
+def test_the_editor_offers_replaces_crosses_compares_and_matches(page, tmp_path, relaxed):
+    scans = _coarse_and_finer(relaxed) | _branches(relaxed)
+    for key, scan in scans.items():
+        joined = editor.join(scans, [editor.Piece(key, 0, len(scan.points) - 1)])
+        (tmp_path / f"{key.split(':')[0]}.xyz").write_text(joined.text)
+    targets = [{"path": str(tmp_path / f"{k}.xyz")} for k in ("coarse", "finer", "a", "b")]
+    shown = page.post("/api/scan-editor", json={"targets": targets}, headers=ORIGIN).json()
+    keys = {s["file"].split(".")[0]: s["key"] for s in shown["scans"]}
+    assert shown["problems"] == []
+    assert (keys["a"], keys["b"]) in [(c["a"], c["b"]) for c in shown["crossings"]]
+    crossing = next(c for c in shown["crossings"] if (c["a"], c["b"]) == (keys["a"], keys["b"]))
+    url = f"/api/scan-editor/{shown['id']}"
+
+    path = page.post(
+        f"{url}/path", json={"pieces": [], "add": keys["coarse"]}, headers=ORIGIN
+    ).json()
+    # The branches step 30° too, so they are offered beside the finer scan.
+    assert {o["scan"] for o in path["offers"]} == {keys["finer"], keys["a"], keys["b"]}
+    path = page.post(
+        f"{url}/path", json={"pieces": path["pieces"], "replace": keys["finer"]}, headers=ORIGIN
+    ).json()
+    assert len(path["frames"]) == 6 and path["notes"][0].startswith("3 points of finer.xyz")
+
+    path = page.post(f"{url}/path", json={"pieces": [], "crossing": crossing}, headers=ORIGIN)
+    assert path.status_code == 200, path.text
+    assert len(path.json()["frames"]) == 7
+
+    compared = page.post(
+        f"{url}/compare",
+        json={"points": [{"scan": keys["a"], "index": 3}, {"scan": keys["b"], "index": 3}]},
+        headers=ORIGIN,
+    ).json()
+    assert compared[1]["rmsd"] == pytest.approx(0, abs=1e-5)
+
+    matched = page.post(f"{url}/scans/{keys['b']}/match", json={"to": keys["a"]}, headers=ORIGIN)
+    assert matched.status_code == 200, matched.text
+    assert matched.json()["note"].startswith("b.xyz renumbered to the atom order of a.xyz")

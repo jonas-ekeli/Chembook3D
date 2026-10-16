@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -139,4 +139,70 @@ test('a scan opens in the scan editor from Inspect and from the step movie', asy
   await expect(fromMovie.getByLabel('Frame', { exact: true })).toHaveAttribute('max', '12')
   await fromMovie.getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
+test('a finer scan replaces the coarse points, and scans are compared at one coordinate', async ({ page }) => {
+  // D136, T-UI-38
+  test.slow()
+  await newInvestigation(page, 'Finer scan')
+  await page.getByRole('button', { name: 'Scan editor' }).click()
+  const editor = page.getByRole('dialog', { name: 'Scan editor' })
+  await editor.getByRole('button', { name: 'Add files…' }).click()
+  await expect(editor.getByLabel('Folder path')).not.toHaveValue('')
+  await editor.getByLabel('Folder path').fill(join(FIXTURES, 'gaussian'))
+  await editor.getByRole('button', { name: 'Go' }).click()
+  await editor.getByRole('button', { name: /dvb_scan_relaxed\.log/ }).click()
+  const piece = editor.getByLabel('Piece 1')
+  await piece.getByLabel('Last point').fill('7')
+  await piece.getByLabel('Last point').press('Enter')
+  await expect(editor.getByLabel('Frame', { exact: true })).toHaveAttribute('max', '6')
+
+  // The seven points, 180° to 360°, saved; and every other one of them as a coarse scan.
+  const folder = join(E2E_DIR, 'finer')
+  mkdirSync(folder, { recursive: true })
+  const downloading = page.waitForEvent('download')
+  await editor.getByRole('button', { name: 'Save as…' }).click()
+  const fine = join(folder, 'fine.xyz')
+  await (await downloading).saveAs(fine)
+  const lines = readFileSync(fine, 'utf-8').split(/\r?\n/)
+  const blocks: string[][] = []
+  for (let i = 0; i < lines.length && lines[i].trim(); ) {
+    const n = Number(lines[i])
+    blocks.push(lines.slice(i, i + n + 2))
+    i += n + 2
+  }
+  expect(blocks).toHaveLength(7)
+  writeFileSync(join(folder, 'coarse.xyz'), [0, 2, 4, 6].flatMap((k) => blocks[k]).join('\n') + '\n')
+  await editor.getByRole('button', { name: 'Close' }).click()
+
+  await page.getByRole('button', { name: 'Scan editor' }).click()
+  const again = page.getByRole('dialog', { name: 'Scan editor' })
+  await again.getByRole('button', { name: 'Add files…' }).click()
+  await expect(again.getByLabel('Folder path')).not.toHaveValue('')
+  await again.getByLabel('Folder path').fill(folder)
+  await again.getByRole('button', { name: 'Go' }).click()
+  await expect(again.getByRole('listitem').filter({ hasText: 'coarse.xyz' })).toBeVisible()
+  await again.getByRole('button', { name: /coarse\.xyz/ }).click()
+  await expect(again.getByLabel('Frame', { exact: true })).toHaveAttribute('max', '3')
+  await again.getByRole('button', { name: 'Add files…' }).click()
+  await again.getByRole('button', { name: /fine\.xyz/ }).click()
+
+  // The finer scan runs over the same stretch, so it is offered rather than joined on.
+  const offer = again.getByRole('button', { name: 'Use the 7 finer points of fine.xyz between 180.0 and 360.0 °' })
+  await offer.click()
+  await expect(again.getByLabel('Frame', { exact: true })).toHaveAttribute('max', '6')
+  await expect(again.getByText('7 points of fine.xyz replace 2 of the path')).toBeVisible()
+
+  // At 240° both scans have a point: the same structure.
+  await again.getByLabel('Frame', { exact: true }).fill('2')
+  await again.getByRole('button', { name: 'Compare scans here' }).click()
+  const compared = again.getByRole('list', { name: 'Compared points' })
+  await expect(compared).toContainText('fine.xyz, point 3 (the frame shown)')
+  await expect(compared).toContainText('coarse.xyz, point 2 · 0.00 Å apart')
+  await again.getByRole('button', { name: 'Stop comparing' }).click()
+  await expect(compared).toHaveCount(0)
+
+  await again.getByRole('button', { name: 'Undo' }).click()
+  await expect(again.getByLabel('Frame', { exact: true })).toHaveAttribute('max', '3')
+  await again.getByRole('button', { name: 'Close' }).click()
 })
