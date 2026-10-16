@@ -91,10 +91,34 @@ class PieceIO(BaseModel):
     last: int
 
 
+class CrossingIO(BaseModel):
+    a: str  # the branch lower before the crossing
+    b: str  # the branch lower after it
+    x: float
+    rmsd: float | None = None
+    text: str = ""
+
+
 class PathIn(BaseModel):
     pieces: list[PieceIO]
     add: str | None = None  # a scan to put on the path where it meets it
     chain: list[str] | None = None  # scans to join on by themselves where they meet it
+    replace: str | None = None  # a finer scan to put in place of the path's points it covers
+    between: list[int] | None = None  # ... only within these two frames of the path
+    crossing: CrossingIO | None = None  # two branches to join where they cross
+
+
+class PointRef(BaseModel):
+    scan: str
+    index: int
+
+
+class CompareIn(BaseModel):
+    points: list[PointRef]
+
+
+class MatchIn(BaseModel):
+    to: str  # the scan whose atom order to take
 
 
 class PointOut(BaseModel):
@@ -126,6 +150,8 @@ class ScanOut(BaseModel):
     left_out: int
     ended: bool
     joined: bool
+    restarted: bool
+    renumbered: str
     points: list[PointOut]
 
 
@@ -139,6 +165,8 @@ class EditorOut(BaseModel):
     scans: list[ScanOut]
     added: list[str]  # the scans the files just added hold
     problems: list[FileProblemOut]
+    crossings: list[CrossingIO]  # branches of one coordinate whose energies cross
+    note: str | None = None  # what matching atoms did
 
 
 class FrameOut(BaseModel):
@@ -170,6 +198,24 @@ class JoinOut(BaseModel):
     ok: bool
 
 
+class OfferOut(BaseModel):
+    scan: str
+    points: int
+    replaced: int
+    low: float
+    high: float
+    text: str
+
+
+class ComparedOut(BaseModel):
+    scan: str
+    index: int
+    geometry: list[list[Any]]
+    energy: float | None
+    value: float
+    rmsd: float | None  # Å to the first point, fitted, never mirrored
+
+
 class JoinedOut(BaseModel):
     pieces: list[PieceIO]
     notes: list[str]  # what adding or chaining did
@@ -185,6 +231,8 @@ class JoinedOut(BaseModel):
     level: str
     level_notes: list[str]
     blocked: str | None
+    mismatch: str | None
+    offers: list[OfferOut]
     text: str
 
 
@@ -213,6 +261,8 @@ def _scan_out(scan: editor.Scan, server_name: str | None) -> ScanOut:
         left_out=scan.left_out,
         ended=scan.ended,
         joined=scan.joined,
+        restarted=scan.restarted,
+        renumbered=scan.renumbered,
         points=[
             PointOut(
                 geometry=_round(p.rows),
@@ -327,13 +377,17 @@ async def _add_files(
     return added, problems
 
 
-def _editor_out(item: _Editor, added: list[str], problems: list[FileProblemOut]) -> EditorOut:
+def _editor_out(
+    item: _Editor, added: list[str], problems: list[FileProblemOut], note: str | None = None
+) -> EditorOut:
     names = {key: _server_name(f) for key, f in item.files.items()}
     return EditorOut(
         id=item.id,
         scans=[_scan_out(s, names.get(s.key.split(":")[0])) for s in item.scans.values()],
         added=added,
         problems=problems,
+        crossings=[CrossingIO(**c.__dict__) for c in editor.crossings(item.scans)],
+        note=note,
     )
 
 
@@ -392,6 +446,20 @@ def joined_path(editor_id: str, body: PathIn, request: Request) -> JoinedOut:
             keys = [k for k in body.chain if k in item.scans]
             pieces, chained = editor.chain(item.scans, keys, pieces)
             notes += chained
+        if body.replace is not None:
+            if body.replace not in item.scans:
+                raise editor.ScanEditorError("That scan is no longer in the editor.")
+            between = tuple(body.between) if body.between and len(body.between) == 2 else None
+            pieces, note = editor.replace(item.scans, pieces, body.replace, between)
+            notes.append(note)
+        if body.crossing is not None:
+            if body.crossing.a not in item.scans or body.crossing.b not in item.scans:
+                raise editor.ScanEditorError(
+                    "A branch of that crossing is no longer in the editor."
+                )
+            crossing = editor.Crossing(**body.crossing.model_dump())
+            pieces, note = editor.cut_at_crossing(item.scans, pieces, crossing)
+            notes.append(note)
         joined = editor.join(item.scans, pieces)
     except editor.ScanEditorError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -423,8 +491,36 @@ def joined_path(editor_id: str, body: PathIn, request: Request) -> JoinedOut:
         level=joined.level_label,
         level_notes=joined.notes,
         blocked=joined.blocked,
+        mismatch=joined.mismatch,
+        offers=[OfferOut(**o.__dict__) for o in joined.offers],
         text=joined.text,
     )
+
+
+@router.post("/{editor_id}/compare")
+def compare_points(editor_id: str, body: CompareIn, request: Request) -> list[ComparedOut]:
+    """Points of several scans fitted onto the first, to see how alike they are."""
+    _check(request)
+    item = _found(request, editor_id)
+    try:
+        found = editor.compare(item.scans, [(p.scan, p.index) for p in body.points])
+    except editor.ScanEditorError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return [ComparedOut(**{**c, "geometry": _round(c["geometry"])}) for c in found]
+
+
+@router.post("/{editor_id}/scans/{scan_key}/match")
+def match_scan(editor_id: str, scan_key: str, body: MatchIn, request: Request) -> EditorOut:
+    """A scan whose atoms are numbered in another order renumbered to another scan's (D113)."""
+    _check(request)
+    item = _found(request, editor_id)
+    if scan_key not in item.scans or body.to not in item.scans:
+        raise HTTPException(404, "That scan is no longer in the editor.")
+    try:
+        note = editor.match_atoms(item.scans, scan_key, body.to)
+    except editor.ScanEditorError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _editor_out(item, [], [], note)
 
 
 @router.delete("/{editor_id}", status_code=204)

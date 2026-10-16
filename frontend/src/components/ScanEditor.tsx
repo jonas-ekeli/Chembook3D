@@ -4,8 +4,10 @@ import {
   ApiError,
   formatDelta,
   geometryToXyz,
+  type ComparedPoint,
   type EditorScan,
   type JoinedPath,
+  type JoinRequest,
   type ScanEditorState,
   type ScanEditorTarget,
   type ScanPiece,
@@ -26,6 +28,11 @@ import { Viewer3D } from './Viewer3D'
 // backend joins the pieces again after every change, with the checks at each join (A80), and
 // Save writes the joined path as an xyz file with its level and energies. Nothing is written
 // anywhere until Save.
+//
+// D136: a finer scan inside the path's range is offered in place of the coarser points it
+// covers (or of a stretch chosen on the energy chart); two branches whose energies cross can be
+// joined at the crossing, the lower on each side; the scans' points at the coordinate shown can
+// be compared, fitted onto one another; a scan numbered another way can have its atoms matched.
 
 const COLOURS = [
   '#1f77b4',
@@ -82,6 +89,25 @@ function swapped(pieces: ScanPiece[], a: number, b: number): ScanPiece[] {
 /** A scan's point shown instead of the path's frame, after a click on the chart. */
 type Preview = { scan: string; index: number }
 
+/** D136: the scans' points compared at the frame `at`. */
+type Comparison = { at: number; points: ComparedPoint[] }
+
+/** The scan's point at coordinate `x` (whole turns apart count the same), if it has one. */
+function near(scan: EditorScan, x: number): number | null {
+  const turn = scan.atoms.length === 4 ? 360 : 0
+  let found: number | null = null
+  let closest = scan.unit === 'Å' ? 0.005 : 0.5
+  for (let i = 0; i < scan.points.length; i++) {
+    let d = Math.abs(scan.points[i].value - x)
+    if (turn) d = Math.min(d % turn, turn - (d % turn))
+    if (d <= closest) {
+      found = i
+      closest = d
+    }
+  }
+  return found
+}
+
 export function ScanEditor({
   targets,
   settings,
@@ -106,6 +132,8 @@ export function ScanEditor({
   const [zero, setZero] = useState(0)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
+  const [stretch, setStretch] = useState<[number, number] | null>(null)
+  const [compared, setCompared] = useState<Comparison | null>(null)
   const opened = useRef<string | null>(null)
 
   const pieces = useMemo(() => path?.pieces ?? [], [path])
@@ -119,16 +147,14 @@ export function ScanEditor({
   /** The path after a change, joined again by the backend; the pieces `before` it go on the
    * undo list. */
   const join = useCallback(
-    async (
-      id: string,
-      body: { pieces: ScanPiece[]; add?: string | null; chain?: string[] | null },
-      before: ScanPiece[] | null,
-    ) => {
+    async (id: string, body: JoinRequest, before: ScanPiece[] | null) => {
       setBusy(true)
       try {
         const joined = await api.joinScans(id, body)
         setPath(joined)
         setNotes(joined.notes)
+        setStretch(null)
+        setCompared(null)
         setError(null)
         setIndex((i) => Math.min(i, Math.max(joined.frames.length - 1, 0)))
         setZero((z) => (z < joined.frames.length ? z : 0))
@@ -173,7 +199,7 @@ export function ScanEditor({
   }, [targets, join])
 
   const change = useCallback(
-    (next: ScanPiece[], extra: { add?: string; chain?: string[] } = {}) => {
+    (next: ScanPiece[], extra: Omit<JoinRequest, 'pieces'> = {}) => {
       if (!editor) return
       setPreview(null)
       void join(editor.id, { pieces: next, ...extra }, pieces)
@@ -264,6 +290,7 @@ export function ScanEditor({
   const show = (i: number) => {
     setPlaying(false)
     setPreview(null)
+    setCompared(null)
     setIndex(i)
   }
   const move = (by: number) => show((at + by + count) % count)
@@ -300,6 +327,39 @@ export function ScanEditor({
     const timer = setTimeout(() => setCopied(null), 2500)
     return () => clearTimeout(timer)
   }, [copied])
+
+  /** D113: the scan numbered another way renumbered to the first piece's atom order. */
+  const matchAtoms = async (key: string) => {
+    if (!editor || !pieces[0]) return
+    setBusy(true)
+    try {
+      const found = await api.matchEditorScan(editor.id, key, pieces[0].scan)
+      setEditor(found)
+      await join(found.id, { pieces }, null)
+      if (found.note) setNotes([found.note])
+    } catch (err) {
+      setError(errorText(err))
+      setBusy(false)
+    }
+  }
+
+  /** Every scan's point at the coordinate shown, fitted onto the path's frame. */
+  const compare = async () => {
+    if (!editor || !frame || !path || path.axis !== 'coordinate') return
+    const points = [{ scan: frame.scan, index: frame.index }]
+    for (const scan of scans) {
+      if (scan.key === frame.scan || !sameAtoms(scan.atoms, path.atoms)) continue
+      const i = near(scan, frame.x)
+      if (i !== null) points.push({ scan: scan.key, index: i })
+    }
+    try {
+      setCompared({ at, points: await api.compareScanPoints(editor.id, points) })
+      setPlaying(false)
+      setPreview(null)
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
 
   const save = () => {
     if (!path || path.frames.length === 0) return
@@ -377,8 +437,9 @@ export function ScanEditor({
                     </button>
                   )}
                 </div>
-                {adding && (
-                  <div className="scan-add">
+                {/* Kept while hidden, so it opens again in the folder last used. */}
+                {editor && (
+                  <div className="scan-add" hidden={!adding}>
                     <FileBrowser
                       onPick={(p) => void addFiles([p])}
                       matching={{
@@ -427,6 +488,17 @@ export function ScanEditor({
                         {!scan.ended && (
                           <div className="small warning">The job did not end normally (still running?)</div>
                         )}
+                        {scan.restarted && (
+                          <div
+                            className="small warning"
+                            title="The file holds the scan a second time (a copy of a running job, or a job read in twice); the second run is left out"
+                          >
+                            The scan starts again later in the file; only its first run is read
+                          </div>
+                        )}
+                        {scan.renumbered && (
+                          <div className="small muted">Atoms renumbered to match {scan.renumbered}</div>
+                        )}
                       </div>
                       <div className="scan-actions">
                         <button
@@ -449,6 +521,26 @@ export function ScanEditor({
                     </li>
                   ))}
                 </ul>
+                {editor.crossings.length > 0 && (
+                  <div className="scan-crossings" aria-label="Branches that cross">
+                    <h4 className="small">Branches that cross</h4>
+                    <ul className="small">
+                      {editor.crossings.map((c) => (
+                        <li key={`${c.a}|${c.b}`}>
+                          {c.text}{' '}
+                          <button
+                            className="small"
+                            disabled={busy}
+                            onClick={() => change(pieces, { crossing: c })}
+                            title="Join the lower branch on each side of the crossing into one path, in place of these scans' pieces; nothing is drawn in between"
+                          >
+                            Join at the crossing
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </section>
               <ScanChart
                 scans={scans}
@@ -586,9 +678,44 @@ export function ScanEditor({
                   {note}
                 </p>
               ))}
+              {path && path.offers.length > 0 && (
+                <ul className="scan-offers small" aria-label="Finer scans">
+                  {path.offers.map((o) => (
+                    <li key={o.scan}>
+                      <button
+                        className="small"
+                        disabled={busy}
+                        onClick={() => change(pieces, { replace: o.scan, between: stretch })}
+                        title={
+                          stretch
+                            ? 'Put its points in place of the frames chosen on the energy chart'
+                            : `Put its points in place of the ${o.replaced} coarser ones they cover`
+                        }
+                      >
+                        {o.text}
+                        {stretch ? `, in frames ${stretch[0] + 1}–${stretch[1] + 1}` : ''}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
 
-            {path?.blocked && <p role="alert">{path.blocked}</p>}
+            {path?.blocked && (
+              <p role="alert">
+                {path.blocked}{' '}
+                {path.mismatch && (
+                  <button
+                    className="small"
+                    disabled={busy}
+                    onClick={() => void matchAtoms(path.mismatch!)}
+                    title="Renumber that scan's atoms to the first piece's order, matched where the two meet (as Match atoms does for an edge)"
+                  >
+                    Match its atoms
+                  </button>
+                )}
+              </p>
+            )}
             {path?.level_notes.map((note) => (
               <p key={note} className="muted small">
                 {note}
@@ -598,10 +725,15 @@ export function ScanEditor({
             {(count > 0 || previewPoint) && (
               <div className="inspect-view">
                 <Viewer3D
-                  models={[
-                    { xyz: previewPoint ? geometryToXyz(previewPoint.geometry, 'point') : xyzFrames[count - 1] },
-                  ]}
-                  trajectory={previewPoint || count === 0 ? null : { frames: xyzFrames, index: at }}
+                  models={
+                    compared
+                      ? compared.points.map((c) => ({
+                          xyz: geometryToXyz(c.geometry, 'point'),
+                          colour: colour(c.scan),
+                        }))
+                      : [{ xyz: previewPoint ? geometryToXyz(previewPoint.geometry, 'point') : xyzFrames[count - 1] }]
+                  }
+                  trajectory={previewPoint || compared || count === 0 ? null : { frames: xyzFrames, index: at }}
                 />
                 <div className="inspect-side step-movie">
                   {count > 1 && (
@@ -674,6 +806,16 @@ export function ScanEditor({
                     <button className="small" onClick={() => void copyXyz()} title="Copy the structure shown as xyz text">
                       Copy XYZ
                     </button>
+                    {!previewPoint && path?.axis === 'coordinate' && count > 0 && (
+                      <button
+                        className="small"
+                        onClick={() => (compared ? setCompared(null) : void compare())}
+                        aria-pressed={Boolean(compared)}
+                        title="Overlay every scan's point at this coordinate, fitted onto the frame shown"
+                      >
+                        {compared ? 'Stop comparing' : 'Compare scans here'}
+                      </button>
+                    )}
                     {!previewPoint && count > 0 && (
                       <button
                         className="small"
@@ -690,6 +832,32 @@ export function ScanEditor({
                       </span>
                     )}
                   </div>
+                  {compared && (
+                    <ul className="scan-compared small" aria-label="Compared points">
+                      {compared.points.map((c, k) => {
+                        const scan = byKey.get(c.scan)
+                        const point = scan?.points[c.index]
+                        const base = compared.points[0]?.energy ?? null
+                        return (
+                          <li key={`${c.scan}:${c.index}`}>
+                            <span className="scan-swatch" style={{ background: colour(c.scan) }} />
+                            {scan ? scanName(scan) : c.scan}, point {point?.number ?? c.index + 1}
+                            {k === 0 ? ' (the frame shown)' : ''}
+                            {k > 0 && c.rmsd !== null && ` · ${c.rmsd.toFixed(2)} Å apart`}
+                            {k > 0 && c.energy !== null && base !== null && (
+                              <span className="mono">
+                                {' '}
+                                · ΔE {formatDelta(c.energy - base, settings)} {unit}
+                              </span>
+                            )}
+                          </li>
+                        )
+                      })}
+                      {compared.points.length === 1 && (
+                        <li className="muted">No other scan has a point at this coordinate.</li>
+                      )}
+                    </ul>
+                  )}
                   {top !== null && topEnergy != null && firstEnergy !== null && (
                     <p className="small" aria-label="Top of the path">
                       Top at frame {top + 1}:{' '}
@@ -710,9 +878,24 @@ export function ScanEditor({
                       last={zeroEnergy}
                       unit={unit}
                       settings={settings}
-                      selected={null}
+                      selected={stretch}
                       onPick={show}
+                      onSelect={(a, b) => setStretch(a === b ? null : [Math.min(a, b), Math.max(a, b)])}
                     />
+                  )}
+                  {count > 1 && path && path.offers.length > 0 && (
+                    <p className="muted small">
+                      {stretch ? (
+                        <>
+                          Frames {stretch[0] + 1}–{stretch[1] + 1} chosen for a finer scan.{' '}
+                          <button className="link small" onClick={() => setStretch(null)}>
+                            Clear
+                          </button>
+                        </>
+                      ) : (
+                        'Drag across the energy chart to replace only that stretch with a finer scan.'
+                      )}
+                    </p>
                   )}
                   {path && path.marks.length > 0 && (
                     <ul className="scan-marks small" aria-label="Joins and checks">

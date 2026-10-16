@@ -557,14 +557,42 @@ export type EditorScan = {
   left_out: number
   ended: boolean
   joined: boolean
+  /** D136: the file runs the scan again after it; only its first run is read. */
+  restarted: boolean
+  /** D136: whose atom order its points were put in, when they were. */
+  renumbered: string
   points: ScanPoint[]
 }
+/** D136: two branches of one coordinate whose energies cross; `a` is lower before `x`. */
+export type ScanCrossing = { a: string; b: string; x: number; rmsd: number | null; text: string }
 export type ScanEditorState = {
   id: string
   scans: EditorScan[]
   /** The scans the files just added hold. */
   added: string[]
   problems: { path: string; problem: string }[]
+  crossings: ScanCrossing[]
+  /** What matching atoms did. */
+  note?: string | null
+}
+/** D136: a finer scan that fits inside the path. */
+export type ScanOffer = { scan: string; points: number; replaced: number; low: number; high: number; text: string }
+/** D136: a scan's point fitted onto the first compared. */
+export type ComparedPoint = {
+  scan: string
+  index: number
+  geometry: GeometryRows
+  energy: number | null
+  value: number
+  rmsd: number | null
+}
+export type JoinRequest = {
+  pieces: ScanPiece[]
+  add?: string | null
+  chain?: string[] | null
+  replace?: string | null
+  between?: [number, number] | null
+  crossing?: ScanCrossing | null
 }
 /** A run of one scan's points, from `first` to `last` (reversed when `last` is before it). */
 export type ScanPiece = { scan: string; first: number; last: number }
@@ -581,7 +609,7 @@ export type JoinedFrame = {
 }
 export type JoinMark = {
   at: number
-  kind: 'join' | 'shared' | 'energies' | 'jump' | 'step' | 'back'
+  kind: 'join' | 'shared' | 'energies' | 'jump' | 'step' | 'back' | 'closed'
   text: string
   warning: boolean
 }
@@ -611,6 +639,9 @@ export type JoinedPath = {
   level_notes: string[]
   /** Why these pieces cannot be joined (another level, other atoms). */
   blocked: string | null
+  /** The scan whose atoms are numbered in another order, to be matched. */
+  mismatch: string | null
+  offers: ScanOffer[]
   /** The file Save writes. */
   text: string
 }
@@ -1788,8 +1819,16 @@ export const api = {
     request<ScanEditorState>('POST', `/scan-editor/${encodeURIComponent(id)}/files`, { targets }),
   removeEditorScan: (id: string, key: string) =>
     request<void>('DELETE', `/scan-editor/${encodeURIComponent(id)}/scans/${encodeURIComponent(key)}`),
-  joinScans: (id: string, body: { pieces: ScanPiece[]; add?: string | null; chain?: string[] | null }) =>
+  joinScans: (id: string, body: JoinRequest) =>
     request<JoinedPath>('POST', `/scan-editor/${encodeURIComponent(id)}/path`, body),
+  compareScanPoints: (id: string, points: { scan: string; index: number }[]) =>
+    request<ComparedPoint[]>('POST', `/scan-editor/${encodeURIComponent(id)}/compare`, { points }),
+  matchEditorScan: (id: string, key: string, to: string) =>
+    request<ScanEditorState>(
+      'POST',
+      `/scan-editor/${encodeURIComponent(id)}/scans/${encodeURIComponent(key)}/match`,
+      { to },
+    ),
   closeScanEditor: (id: string) => request<void>('DELETE', `/scan-editor/${encodeURIComponent(id)}`),
   /** A one-time token for a server's terminal WebSocket. */
   remoteTerminal: (server: string) => request<{ token: string }>('POST', '/remote/terminals', { server }),

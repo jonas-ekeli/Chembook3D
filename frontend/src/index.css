@@ -2729,7 +2729,7 @@ table.scan-path-held input.drive-value {
   margin: 0.3rem 0;
   padding: 0;
 }
-.scan-strip li {
+.scan-strip ol > li {
   border: 1px solid var(--border);
   border-left-width: 6px;
   border-radius: var(--radius);
@@ -2760,6 +2760,33 @@ table.scan-path-held input.drive-value {
 }
 .scan-marks li.warning {
   color: #93370d;
+}
+.scan-offers,
+.scan-crossings ul,
+.scan-compared {
+  list-style: none;
+  margin: 0.3rem 0;
+  padding: 0;
+}
+.scan-offers li,
+.scan-crossings li {
+  margin: 0.15rem 0;
+}
+.scan-crossings h4 {
+  margin: 0.4rem 0 0;
+}
+.scan-list .scan-crossings li {
+  display: block;
+  border: none;
+  padding: 0.1rem 0;
+}
+.scan-compared li {
+  display: flex;
+  gap: 0.3rem;
+  align-items: baseline;
+}
+.scan-compared .scan-swatch {
+  margin-top: 0;
 }
 @media (max-width: 900px) {
   .scan-editor-top {
