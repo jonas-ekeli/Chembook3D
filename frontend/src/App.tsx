@@ -1010,6 +1010,10 @@ function App() {
             setRemoteFiles(null)
             inspect(targets)
           }}
+          onScanEditor={(targets) => {
+            setRemoteFiles(null)
+            openScanEditor(targets)
+          }}
         />
       )}
       {ircNode && investigation && canvas.nodes.some((n) => n.id === ircNode) && (
@@ -1041,6 +1045,7 @@ function App() {
               ? canvas.transitions.map((t) => ({ id: t.id, name: `${endLabel(canvas, t.source_id)} → ${endLabel(canvas, t.target_id)}` }))
               : null
           }
+          servers={remote?.servers.filter((s) => s.connected) ?? []}
           hidden={Boolean(importRequest)}
           onImport={(file, edge) => setImportRequest({ targetId: null, files: [file], position: null, pathEdge: edge })}
           onClose={() => setScanEditing(null)}
@@ -1624,6 +1629,7 @@ function App() {
             onRemoteChanged={loadRemote}
             onImportFrom={setRemoteFiles}
             onInspect={inspect}
+            onScanEditor={openScanEditor}
             onCwd={followCwd}
           />
         </div>

@@ -1238,3 +1238,93 @@ def test_claudes_write_tool_needs_only_the_apps_go_ahead_and_nothing_deletes(at_
 
     anyio.run(run)
     assert (saga.root / WORK.lstrip("/") / "a.gjf").read_text(encoding="utf-8") == "x\n"
+
+
+# ---------- T-SSH-22 the scan editor on the server (D138) ----------
+
+SCAN = "dvb_scan_relaxed.log"
+
+
+def test_scans_reports_go_to_the_app_apart_from_inspect():
+    shell = keeper.Shell(process=None, tracked=True)  # type: ignore[arg-type]
+    viewer: asyncio.Queue = asyncio.Queue()
+    shell.viewers.add(viewer)
+    shell.feed(
+        b"\x1b]1337;Scans=/w/a.log\x07\x1b]1337;Inspect=/w/x.out\x07\x1b]1337;Sca"
+        b"ns=/w/b.log\x07\x1b]1337;CurrentDir=/w\x07$ "
+    )
+    messages = [viewer.get_nowait() for _ in range(viewer.qsize())]
+    assert [m for m in messages if m["type"] != "output"] == [
+        {"type": "scans", "paths": ["/w/a.log", "/w/b.log"]},
+        {"type": "inspect", "paths": ["/w/x.out"]},
+        {"type": "cwd", "path": "/w"},
+    ]
+    assert "scans() {" in keeper.RC and keeper.PROTOCOL == 7
+
+
+def _editor_on(at_work, path: str) -> dict:
+    body = {"targets": [{"server": "saga", "path": path}]}
+    response = at_work.post("/api/scan-editor", json=body, headers=ORIGIN)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_a_running_scan_on_the_server_is_refreshed_with_its_path(at_work, saga):
+    with _terminal(at_work) as ws:
+        _read_until(ws, lambda text, m: "$ " in text)
+        ws.send_json({"type": "input", "data": "scans *.log missing.log\r"})
+        _, messages = _read_until(ws, lambda text, m: any(x["type"] == "scans" for x in m))
+    assert next(m["paths"] for m in messages if m["type"] == "scans") == [
+        f"{WORK}/{TS}",
+        f"{WORK}/{TS_SP}",
+    ]
+
+    remote = saga.root / WORK.lstrip("/") / SCAN
+    full = (FIXTURES / SCAN).read_text(encoding="utf-8")
+    lines = full.splitlines(keepends=True)
+    remote.write_text("".join(lines[: len(lines) // 2]), encoding="utf-8")  # still running
+    before = _copies()
+    opened = _editor_on(at_work, f"{WORK}/{SCAN}")
+    [scan] = opened["scans"]
+    assert scan["server_name"] == "Saga" and scan["path"] == f"saga:{WORK}/{SCAN}"
+    assert len(scan["points"]) == 6 and not scan["ended"]
+    assert len(_copies() - before) == 1
+
+    remote.write_text(full, encoding="utf-8")
+    # The path from the scan's start to its last point, and a piece of it reversed in front.
+    pieces = [{"scan": scan["key"], "first": 5, "last": 0}]
+    url = f"/api/scan-editor/{opened['id']}/refresh"
+    again = at_work.post(url, json={"pieces": pieces}, headers=ORIGIN).json()
+    [fresh] = again["scans"]
+    assert fresh["key"] == scan["key"] and len(fresh["points"]) == 13 and fresh["ended"]
+    # The path's end at the scan's last point follows it to the new last point.
+    assert again["pieces"] == [{"scan": scan["key"], "first": 12, "last": 0}]
+    middle = [{"scan": scan["key"], "first": 1, "last": 3}]
+    kept = at_work.post(url, json={"pieces": middle}, headers=ORIGIN).json()
+    assert kept["pieces"] == middle  # pieces inside the scan keep their points
+    assert len(_copies() - before) == 1  # the new copy in place of the old
+    at_work.delete(f"/api/scan-editor/{opened['id']}", headers=ORIGIN)
+    assert _copies() == before
+    assert remote.read_text(encoding="utf-8") == full  # nothing changed on the server
+
+
+def test_a_joined_scan_is_saved_to_the_server_never_over_a_file(at_work, saga):
+    (saga.root / WORK.lstrip("/") / SCAN).write_bytes((FIXTURES / SCAN).read_bytes())
+    opened = _editor_on(at_work, f"{WORK}/{SCAN}")
+    [scan] = opened["scans"]
+    pieces = {"pieces": [{"scan": scan["key"], "first": 0, "last": 6}]}
+    path = at_work.post(f"/api/scan-editor/{opened['id']}/path", json=pieces, headers=ORIGIN)
+    text = path.json()["text"]
+    url = f"/api/scan-editor/{opened['id']}/save-to-server"
+    body = {"server": "saga", "name": "dvb_joined.xyz", "text": text}
+    first = at_work.post(url, json=body, headers=ORIGIN).json()
+    assert first == {"path": f"{WORK}/dvb_joined.xyz", "renamed": False}
+    second = at_work.post(url, json={**body, "text": text + "\n"}, headers=ORIGIN).json()
+    assert second == {"path": f"{WORK}/dvb_joined_v2.xyz", "renamed": True}
+    work = saga.root / WORK.lstrip("/")
+    assert (work / "dvb_joined.xyz").read_text(encoding="utf-8") == text
+    assert (work / "dvb_joined_v2.xyz").read_text(encoding="utf-8") == text + "\n"
+
+    response = at_work.post(url, json={**body, "text": "3\nwater\n"}, headers=ORIGIN)
+    assert response.status_code == 422
+    assert at_work.post(url, json=body).status_code == 403  # the app's own page only

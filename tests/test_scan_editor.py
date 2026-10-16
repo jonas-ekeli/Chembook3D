@@ -514,3 +514,21 @@ def test_the_editor_offers_replaces_crosses_compares_and_matches(page, tmp_path,
     matched = page.post(f"{url}/scans/{keys['b']}/match", json={"to": keys["a"]}, headers=ORIGIN)
     assert matched.status_code == 200, matched.text
     assert matched.json()["note"].startswith("b.xyz renumbered to the atom order of a.xyz")
+
+
+def test_a_scan_read_again_keeps_its_atom_order_and_its_pieces_follow_their_points():
+    # D138: Refresh reads the file again; a renumbered scan keeps the order it was given.
+    [old] = _scans(RELAXED)
+    rows = [list(r) for r in old.points[0].rows]
+    mapping = list(reversed(range(len(rows))))
+    atoms = list(old.atoms)
+    editor.renumber(old, mapping)
+    assert old.points[0].rows[0] == rows[-1] and old.order == mapping
+    assert old.atoms == [len(rows) + 1 - a for a in atoms]
+    [fresh] = _scans(RELAXED)
+    fresh.points = fresh.points[:10]  # a point gone: its pieces go to the nearest one
+    again = editor.refreshed(old, fresh)
+    assert again.points[0].rows == old.points[0].rows and again.atoms == old.atoms
+    pieces = [editor.Piece(old.key, 12, 11), editor.Piece(old.key, 2, 0)]
+    moved = editor.carry({old.key: old}, {old.key: again}, pieces)
+    assert [(p.first, p.last) for p in moved] == [(9, 9), (2, 0)]

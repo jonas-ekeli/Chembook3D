@@ -263,15 +263,16 @@ class _FakeShell:
             self._write("  ".join(names) + ("\n" if names else ""))
         elif command == "echo":
             self._write(" ".join(args) + "\n")
-        elif command == "inspect":  # as the keeper's RC defines it (D123c), with bash's globs
+        elif command in ("inspect", "scans"):  # as the keeper's RC has them (D123c, D138)
+            report = "Inspect" if command == "inspect" else "Scans"
             for name in self._glob(args):
                 target = posixpath.normpath(posixpath.join(self.cwd, name))
                 if self._local(target).is_file():
-                    self.process.stdout.write(f"\x1b]1337;Inspect={target}\x07".encode())
+                    self.process.stdout.write(f"\x1b]1337;{report}={target}\x07".encode())
                 elif self._local(target).is_dir():
-                    self._write(f"inspect: {name}: is a folder\n")
+                    self._write(f"{command}: {name}: is a folder\n")
                 else:
-                    self._write(f"inspect: {name}: no such file\n")
+                    self._write(f"{command}: {name}: no such file\n")
         else:
             self._write(f"{command}: command not found\n")
         return True
