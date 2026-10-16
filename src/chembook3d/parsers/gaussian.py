@@ -188,6 +188,12 @@ _ORIENTATIONS = ("Input orientation:", "Z-Matrix orientation:", "Standard orient
 _CRITERION_RE = re.compile(r"^ (Maximum|RMS)\s+(Force|Displacement)\s+(\S+)\s+(\S+)\s+(YES|NO)\s*$")
 _PREDICTED_RE = re.compile(r"^ Predicted change in Energy=\s*(\S+)")
 _UNITS = {"Force": "Eh/bohr", "Displacement": "bohr"}
+# D135: the coordinate a scan drives, from the initial parameter table Gaussian prints
+# (`! R5    R(2,3)    2.5262    Scan    !`), else from a ModRedundant line in the echoed input
+# (`B 2 3 S 10 0.0250`, the letter optional). A Z-matrix variable scanned (`D7 -180. Scan`)
+# names no atoms; the scan editor then finds the coordinate from the structures.
+_SCAN_PARAMETER_RE = re.compile(r"^ ! \S+\s+[RAD]\(([\d,]+)\)\s+\S+\s+Scan\s+!")
+_SCAN_LINE_RE = re.compile(r"^ (?:[BAD]\s+)?((?:\d+\s+){2,4})S\s+\d+\s+-?[\d.]+\s*$", re.IGNORECASE)
 _SCAN_POINT_RE = re.compile(r"^ Step number\s+\d+ out of a maximum of\s+\d+ on scan point\s+(\d+)")
 # D131: an IRC's points, directions, coordinates and endings.
 _IRC_POINT_RE = re.compile(r"^ Point Number:\s+(\d+)\s+Path Number:\s+(\d+)")
@@ -492,6 +498,8 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
     ecp: dict[int, str] = {}
     frequencies: list[float] = []
     irc = _IrcReader(step.route) if step.route and step.route.irc is not None else None
+    scanned_table: list[list[int]] = []
+    scanned_input: list[list[int]] = []
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -546,6 +554,14 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
                 for name in _ORIENTATIONS:
                     if criteria[name]:
                         criteria[name][-1].append(found)
+        elif (match := _SCAN_PARAMETER_RE.match(line)) is not None:
+            atoms = [int(a) for a in match.group(1).split(",")]
+            if atoms not in scanned_table:
+                scanned_table.append(atoms)
+        elif (match := _SCAN_LINE_RE.match(line)) is not None:
+            atoms = [int(a) for a in match.group(1).split()]
+            if atoms not in scanned_input:
+                scanned_input.append(atoms)
         elif (match := _SCAN_POINT_RE.match(line)) is not None:
             step.scan = "relaxed"
             for name in _ORIENTATIONS:
@@ -608,6 +624,8 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
     if step.scan == "rigid":  # every structure of a rigid scan is one of its points
         step.geometry_points = list(range(1, len(step.geometries) + 1))
         step.converged_geometries = list(range(len(step.geometries)))
+    if step.scan:
+        step.scan_coordinates = scanned_table or scanned_input
     if step.job_type in ("optimization", "ts_optimization") and not step.optimization_converged:
         step.optimization_converged = False
     elif step.job_type not in ("optimization", "ts_optimization"):

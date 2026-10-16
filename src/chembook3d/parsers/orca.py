@@ -612,10 +612,30 @@ def parse(text: str, companion: Companion | None = None) -> ParsedFile:
             step.optimization_converged = None
         if step.route is not None:
             step.resolved_basis = step.route.basis
+        if step.scan:
+            step.scan_coordinates = _scan_coordinates(echoed)
         step.missing = _missing_fields(step)
         if later_jobs is not None:
             step.missing.append("jobs after the first ($new_job)")
     return ParsedFile(program=PROGRAM, version=version, steps=steps)
+
+
+def _scan_coordinates(echoed: list[str]) -> list[list[int]]:
+    """D135: the coordinates a `%geom Scan` block drives (`B 0 1 = 1.0, 2.0, 11`, or a list
+    `B 0 1 [1.0 1.5 2.0]`), with ORCA's atoms from 0 counted from 1."""
+    found: list[list[int]] = []
+    inside = False
+    for line in echoed:
+        if re.match(r"^(%geom\s+)?scan\b", line):
+            inside = True
+            continue
+        if inside and re.match(r"^end\b", line):
+            break
+        if inside and (match := re.match(r"^([bad])\s+((?:\d+\s+){2,4})[=\[]", line)):
+            atoms = [int(a) + 1 for a in match.group(2).split()]
+            if len(atoms) == {"b": 2, "a": 3, "d": 4}[match.group(1)]:
+                found.append(atoms)
+    return found
 
 
 def _charge_from_input(echoed: list[str]) -> tuple[int | None, int | None]:

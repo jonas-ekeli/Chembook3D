@@ -28,6 +28,8 @@ from chembook3d.api.notes import router as note_router
 from chembook3d.api.pathway import router as pathway_router
 from chembook3d.api.remote import router as remote_router
 from chembook3d.api.routes import close_and_push, router
+from chembook3d.api.scan_editor import router as scan_editor_router
+from chembook3d.api.scan_editor import scan_editors
 from chembook3d.api.scan_paths import router as scan_path_router
 from chembook3d.api.selectivity import router as selectivity_router
 from chembook3d.api.server_files import copies as server_copies
@@ -88,6 +90,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.cloud_jobs.close_all()  # and `claude --cloud` launchers; sessions go on (D93)
     app.state.staging.clear()  # previewed but not imported files (FR-IMP-05)
     inspections(app).close_all()  # copies of server files in Inspect windows (D123c)
+    scan_editors(app).close_all()  # and in scan editors (D135)
     server_copies(app).close_all()  # and those Claude read (D124)
     if app.state.investigation is not None:  # release the lock file on shutdown (P22)
         # A linked investigation is also pushed, with a short time limit (FR-SYNC-05);
@@ -133,6 +136,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(claude_router)
     app.include_router(remote_router)  # D122
     app.include_router(inspect_router)  # D123c
+    app.include_router(scan_editor_router)  # D135
     app.include_router(server_files_router)  # D124
     app.include_router(job_router)
     app.include_router(scan_path_router)  # D114

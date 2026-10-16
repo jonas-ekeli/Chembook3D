@@ -53,6 +53,7 @@ NOT_OFFERED = re.compile(
     r"|claude(/.*)?"  # the Claude panel (D92): Claude never starts terminals
     r"|remote(/.*)?"  # D122: logging in to a server is for the app's own page only
     r"|inspections(/.*)?"  # D123c: the Inspect window, the page's own like the server's
+    r"|scan-editor(/.*)?"  # D135: the scan editor window, the page's own as Inspect
     r"|nodes/[^/]+/irc/(summary|files/[^/]+|[^/]+/node)"  # D131: the IRC window's own
     r"|presence(/.*)?|shutdown)$"  # D107: tabs coming and going, and the Shut down button
 )

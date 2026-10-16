@@ -523,6 +523,98 @@ export type Inspection = {
   steps: InspectStep[]
 }
 
+/** D135: a file for the scan editor: on this computer, on a logged-in server, or an imported
+ * scan's stored copy (`calculation`). */
+export type ScanEditorTarget = { path?: string; server?: string | null; calculation?: string | null }
+export type ScanPoint = {
+  geometry: GeometryRows
+  energy: number | null
+  /** The scanned coordinate on this structure (Å or degrees). */
+  value: number
+  number: number
+  structure: number
+  /** A joined scan read back: where the point came from. */
+  source: string
+}
+export type EditorScan = {
+  key: string
+  file: string
+  path: string
+  server_name: string | null
+  step: number
+  steps: number
+  program: string
+  version: string | null
+  level: string
+  basis_named: boolean
+  charge: number | null
+  multiplicity: number | null
+  atoms: number[]
+  coordinate: string
+  unit: string
+  /** "file" when the file names the coordinate, "structures" when it was found from them. */
+  found_by: 'file' | 'structures'
+  left_out: number
+  ended: boolean
+  joined: boolean
+  points: ScanPoint[]
+}
+export type ScanEditorState = {
+  id: string
+  scans: EditorScan[]
+  /** The scans the files just added hold. */
+  added: string[]
+  problems: { path: string; problem: string }[]
+}
+/** A run of one scan's points, from `first` to `last` (reversed when `last` is before it). */
+export type ScanPiece = { scan: string; first: number; last: number }
+export type JoinedFrame = {
+  geometry: GeometryRows
+  energy: number | null
+  x: number
+  piece: number
+  scan: string
+  index: number
+  number: number
+  structure: number
+  source: string
+}
+export type JoinMark = {
+  at: number
+  kind: 'join' | 'shared' | 'energies' | 'jump' | 'step' | 'back'
+  text: string
+  warning: boolean
+}
+export type JoinedPath = {
+  pieces: ScanPiece[]
+  /** What adding or chaining scans did. */
+  notes: string[]
+  frames: JoinedFrame[]
+  axis: 'coordinate' | 'path'
+  atoms: number[]
+  unit: string
+  label: string
+  joins: {
+    after: number
+    at: number
+    shared: boolean
+    rmsd: number | null
+    rmsd_active: number | null
+    energy_difference: number | null
+    ok: boolean
+  }[]
+  marks: JoinMark[]
+  top: number | null
+  /** kcal/mol, the top above the first frame. */
+  barrier: number | null
+  level: string
+  level_notes: string[]
+  /** Why these pieces cannot be joined (another level, other atoms). */
+  blocked: string | null
+  /** The file Save writes. */
+  text: string
+}
+
 /** D80: all atoms (when they correspond), chosen atoms, or the stored coordinates. */
 export type OverlayAlign = 'all' | 'atoms' | 'none'
 
@@ -1690,6 +1782,15 @@ export const api = {
   /** Stage the inspected file (the copy made last) for the import dialog's preview. */
   importInspected: (id: string, nodeId?: string | null) =>
     request<ImportPlan>('POST', `/inspections/${encodeURIComponent(id)}/import`, { node_id: nodeId ?? null }),
+  /** D135: the scan editor: files read without importing them, joined into one path. */
+  openScanEditor: (targets: ScanEditorTarget[]) => request<ScanEditorState>('POST', '/scan-editor', { targets }),
+  addScanFiles: (id: string, targets: ScanEditorTarget[]) =>
+    request<ScanEditorState>('POST', `/scan-editor/${encodeURIComponent(id)}/files`, { targets }),
+  removeEditorScan: (id: string, key: string) =>
+    request<void>('DELETE', `/scan-editor/${encodeURIComponent(id)}/scans/${encodeURIComponent(key)}`),
+  joinScans: (id: string, body: { pieces: ScanPiece[]; add?: string | null; chain?: string[] | null }) =>
+    request<JoinedPath>('POST', `/scan-editor/${encodeURIComponent(id)}/path`, body),
+  closeScanEditor: (id: string) => request<void>('DELETE', `/scan-editor/${encodeURIComponent(id)}`),
   /** A one-time token for a server's terminal WebSocket. */
   remoteTerminal: (server: string) => request<{ token: string }>('POST', '/remote/terminals', { server }),
   claudeStatus: () => request<ClaudeStatus>('GET', '/claude'),
