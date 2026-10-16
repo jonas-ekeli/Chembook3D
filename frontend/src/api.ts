@@ -583,6 +583,8 @@ export type ScanEditorState = {
   crossings: ScanCrossing[]
   /** What matching atoms did. */
   note?: string | null
+  /** D138: after a refresh, the path's pieces moved onto the points read again. */
+  pieces?: ScanPiece[] | null
 }
 /** D136: a finer scan that fits inside the path. */
 export type ScanOffer = { scan: string; points: number; replaced: number; low: number; high: number; text: string }
@@ -1722,7 +1724,7 @@ export type RemoteServer = {
   /** The display the running shell forwards to, and whether an X server answers there. */
   shell_x11: string | null
   x11_ready: boolean | null
-  /** D123c: the shell has the `inspect FILE` command. */
+  /** D123c: the shell has the `inspect FILE` command (and `scans FILE`, D138). */
   inspect: boolean
   /** D126: the user lets Claude write new files in the current directory in this login. */
   claude_writes: boolean
@@ -1841,6 +1843,16 @@ export const api = {
       `/scan-editor/${encodeURIComponent(id)}/scans/${encodeURIComponent(key)}/match`,
       { to },
     ),
+  /** D138: every file read again (a server's copied again), the pieces carried onto it. */
+  refreshScanEditor: (id: string, pieces: ScanPiece[]) =>
+    request<ScanEditorState>('POST', `/scan-editor/${encodeURIComponent(id)}/refresh`, { pieces }),
+  /** D138: the joined scan written into the server terminal's directory, never over a file. */
+  saveScanToServer: (id: string, server: string, name: string, text: string) =>
+    request<{ path: string; renamed: boolean }>('POST', `/scan-editor/${encodeURIComponent(id)}/save-to-server`, {
+      server,
+      name,
+      text,
+    }),
   closeScanEditor: (id: string) => request<void>('DELETE', `/scan-editor/${encodeURIComponent(id)}`),
   /** A one-time token for a server's terminal WebSocket. */
   remoteTerminal: (server: string) => request<{ token: string }>('POST', '/remote/terminals', { server }),

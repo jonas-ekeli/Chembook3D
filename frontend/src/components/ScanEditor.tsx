@@ -8,6 +8,7 @@ import {
   type EditorScan,
   type JoinedPath,
   type JoinRequest,
+  type RemoteServer,
   type ScanEditorState,
   type ScanEditorTarget,
   type ScanPiece,
@@ -15,6 +16,7 @@ import {
 } from '../api'
 import { download, fileName, hartree } from '../util'
 import { FileBrowser } from './ImportDialog'
+import { RemoteFilesDialog } from './RemoteFilesDialog'
 import { Modal } from './Modal'
 import { EnergyChart } from './StepMovie'
 import { Viewer3D } from './Viewer3D'
@@ -112,6 +114,7 @@ export function ScanEditor({
   targets,
   settings,
   edges = null,
+  servers = [],
   hidden = false,
   onImport,
   onClose,
@@ -121,6 +124,8 @@ export function ScanEditor({
   settings: Settings | null
   /** D137: the open investigation's edges, to show an imported path on; null with none open. */
   edges?: { id: string; name: string }[] | null
+  /** D138: the logged-in servers, to add files from and save to. */
+  servers?: RemoteServer[]
   /** Kept with its path while the import dialog is open over it. */
   hidden?: boolean
   onImport?: (file: File, edge: string | null) => void
@@ -143,6 +148,8 @@ export function ScanEditor({
   const [stretch, setStretch] = useState<[number, number] | null>(null)
   const [compared, setCompared] = useState<Comparison | null>(null)
   const [edge, setEdge] = useState('')
+  const [fromServer, setFromServer] = useState<RemoteServer | null>(null)
+  const [saved, setSaved] = useState<string | null>(null)
   const opened = useRef<string | null>(null)
 
   const pieces = useMemo(() => path?.pieces ?? [], [path])
@@ -251,18 +258,33 @@ export function ScanEditor({
   }, [back, forward, hidden])
 
   /** More files: their scans are listed and those that meet the path are joined on. */
-  const addFiles = async (paths: string[]) => {
+  const addFiles = async (paths: string[]) => addTargets(paths.map((p) => ({ path: p })))
+  const addTargets = async (more: ScanEditorTarget[]) => {
     if (!editor) return
     setBusy(true)
     try {
-      const found = await api.addScanFiles(
-        editor.id,
-        paths.map((p) => ({ path: p })),
-      )
+      const found = await api.addScanFiles(editor.id, more)
       setEditor(found)
       setError(null)
       if (found.problems.length === 0) setAdding(false)
       if (found.added.length > 0) await join(found.id, { pieces, chain: found.added }, pieces)
+      else setBusy(false)
+    } catch (err) {
+      setError(errorText(err))
+      setBusy(false)
+    }
+  }
+
+  /** D138: every file read again (a server's copied again), for scans still running; the
+   * path keeps its pieces, an end at a scan's last point following it to its new one. */
+  const refresh = async () => {
+    if (!editor) return
+    setBusy(true)
+    try {
+      const found = await api.refreshScanEditor(editor.id, pieces)
+      setEditor(found)
+      setError(null)
+      if (pieces.length > 0) await join(found.id, { pieces: found.pieces ?? pieces }, null)
       else setBusy(false)
     } catch (err) {
       setError(errorText(err))
@@ -384,6 +406,19 @@ export function ScanEditor({
     setTimeout(() => URL.revokeObjectURL(url), 10_000)
   }
 
+  /** D138: the joined path written into the server terminal's directory, under the next free
+   * name when one is taken; nothing there is replaced. */
+  const saveToServer = async (server: RemoteServer) => {
+    if (!editor || !path) return
+    try {
+      const done = await api.saveScanToServer(editor.id, server.id, savedName(), path.text)
+      setSaved(`Saved to ${server.name} as ${done.path}${done.renamed ? ' (that name was taken)' : ''}`)
+      setError(null)
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
+
   /** D137: the joined path imported as a scan path node, on an edge if one is chosen. */
   const importPath = () => {
     if (!path || !onImport) return
@@ -425,6 +460,18 @@ export function ScanEditor({
           >
             Save as…
           </button>
+          {servers
+            .filter((s) => s.cwd)
+            .map((s) => (
+              <button
+                key={s.id}
+                onClick={() => void saveToServer(s)}
+                disabled={!canSave}
+                title={`Save the joined path into ${s.name}'s current directory ${s.cwd}; a file already there is never replaced (the next free name, _v2)`}
+              >
+                Save to {s.name}
+              </button>
+            ))}
           {edges && onImport && (
             <>
               <select
@@ -457,6 +504,17 @@ export function ScanEditor({
     >
       <div className="scan-editor" aria-label="Scan editor">
         {error && <p role="alert">{error}</p>}
+        {saved && <p className="muted small">{saved}</p>}
+        {fromServer && (
+          <RemoteFilesDialog
+            server={fromServer}
+            onClose={() => setFromServer(null)}
+            onAdd={(found) => {
+              setFromServer(null)
+              void addTargets(found)
+            }}
+          />
+        )}
         {!editor && busy && <p className="muted">Reading the files…</p>}
         {editor && (
           <>
@@ -472,6 +530,27 @@ export function ScanEditor({
                   <button className="small" onClick={() => setAdding(!adding)} aria-expanded={adding}>
                     Add files…
                   </button>
+                  {servers.map((s) => (
+                    <button
+                      key={s.id}
+                      className="small"
+                      disabled={busy}
+                      onClick={() => setFromServer(s)}
+                      title={`Pick scans in ${s.name}'s current directory; they are copied down, nothing changes there`}
+                    >
+                      Add from {s.name}…
+                    </button>
+                  ))}
+                  {scans.length > 0 && (
+                    <button
+                      className="small"
+                      disabled={busy}
+                      onClick={() => void refresh()}
+                      title="Read every file again (a server's copied again), for scans still running; the path keeps its pieces"
+                    >
+                      Refresh
+                    </button>
+                  )}
                   {unused.length > 1 && (
                     <button
                       className="small"

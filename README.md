@@ -170,6 +170,13 @@ in **Import from here**, or type a filter such as `*.log` in the file browser an
 the N matching files**. The window then steps through them with **Previous file** and **Next
 file**, or a list to jump to one.
 
+**Join scans** in the scan editor: type `scans MCB_1_scan.log MCB_1_scan2.log` (or `scans *scan*.log`)
+in the terminal, or tick the files in **Import from here** and press **Scan editor**. In the
+editor, **Add from Saga…** adds more files from the terminal's directory, **Refresh** reads a scan
+still running again and the path follows it, and **Save to Saga** writes the joined path into the
+terminal's directory, never over a file there (a name taken becomes `_v2`). After pulling this
+change, log out of Saga and in again.
+
 **Ask Claude about files on Saga**: while you are logged in, the Claude panel can read the files
 in the directory the Saga terminal is in, and in the directories below it, without importing
 them: "did TS1 converge?", "why did the job in opt2 stop?", "how many imaginary frequencies has

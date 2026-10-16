@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from chembook3d.api.inspect import _fetch, _Open
-from chembook3d.api.remote import _check, _saved
+from chembook3d.api.remote import _check, _keeper, _saved
 from chembook3d.api.routes import _investigation
 from chembook3d.models import Calculation, new_id
 from chembook3d.parsers import crest
@@ -38,6 +38,7 @@ class _Editor:
     id: str
     files: dict[str, _Open] = field(default_factory=dict)
     scans: dict[str, editor.Scan] = field(default_factory=dict)
+    stored: set[str] = field(default_factory=set)  # files that are an imported calculation's copy
     opened: float = field(default_factory=time.monotonic)
 
     def discard(self) -> None:
@@ -167,6 +168,22 @@ class EditorOut(BaseModel):
     problems: list[FileProblemOut]
     crossings: list[CrossingIO]  # branches of one coordinate whose energies cross
     note: str | None = None  # what matching atoms did
+    pieces: list[PieceIO] | None = None  # after a refresh: the path's pieces on the new points
+
+
+class RefreshIn(BaseModel):
+    pieces: list[PieceIO] = []
+
+
+class SaveIn(BaseModel):
+    server: str
+    name: str
+    text: str
+
+
+class SavedOut(BaseModel):
+    path: str  # where it was written on the server
+    renamed: bool  # a file of that name was there, so it took the next free name
 
 
 class FrameOut(BaseModel):
@@ -371,6 +388,8 @@ async def _add_files(
             problems.append(FileProblemOut(path=target.path or name or "", problem=str(exc)))
             continue
         item.files[opened.id] = opened
+        if target.calculation is not None:
+            item.stored.add(opened.id)
         for scan in found:
             item.scans[scan.key] = scan
             added.append(scan.key)
@@ -521,6 +540,71 @@ def match_scan(editor_id: str, scan_key: str, body: MatchIn, request: Request) -
     except editor.ScanEditorError as exc:
         raise HTTPException(422, str(exc)) from exc
     return _editor_out(item, [], [], note)
+
+
+@router.post("/{editor_id}/refresh")
+async def refresh_scans(editor_id: str, body: RefreshIn, request: Request) -> EditorOut:
+    """Every file read again (a server's copied again), for scans still running (D138). The
+    scans keep their keys and atom order, and the path's pieces come back moved onto the new
+    points."""
+    _check(request)
+    item = _found(request, editor_id)
+    old = dict(item.scans)
+    problems: list[FileProblemOut] = []
+    for file_key, opened in list(item.files.items()):
+        mine = [s for s in old.values() if s.key.split(":")[0] == file_key]
+        if file_key in item.stored or not mine:
+            continue
+        name, shown = mine[0].file, mine[0].path
+        try:
+            if opened.server_id is not None:
+                await _fetch(opened)
+            found = await asyncio.to_thread(_read_scans, opened, file_key, name, shown)
+        except HTTPException as exc:
+            problems.append(FileProblemOut(path=shown, problem=str(exc.detail)))
+            continue
+        except editor.ScanEditorError as exc:
+            problems.append(FileProblemOut(path=shown, problem=str(exc)))
+            continue
+        fresh = {s.key: s for s in found}
+        for scan in mine:
+            if scan.key in fresh:
+                item.scans[scan.key] = editor.refreshed(scan, fresh[scan.key])
+            else:
+                problems.append(
+                    FileProblemOut(
+                        path=shown,
+                        problem=f"Step {scan.step} of {name} is no longer read as a scan; "
+                        "it is kept as it was.",
+                    )
+                )
+    pieces = [editor.Piece(p.scan, p.first, p.last) for p in body.pieces]
+    moved = editor.carry(old, item.scans, pieces)
+    out = _editor_out(item, [], problems)
+    out.pieces = [PieceIO(scan=p.scan, first=p.first, last=p.last) for p in moved]
+    return out
+
+
+@router.post("/{editor_id}/save-to-server")
+async def save_to_server(editor_id: str, body: SaveIn, request: Request) -> SavedOut:
+    """The joined scan written into the server terminal's current directory, never over a
+    file there: a name taken gives the next free one, name_v2.xyz (D138, as D126)."""
+    _check(request)
+    _found(request, editor_id)
+    _saved(body.server)
+    if not editor.is_joined_scan(body.text):
+        raise HTTPException(422, "Only a joined scan from this editor is saved to a server.")
+    answer = await _keeper(
+        "upload", server=body.server, name=body.name, text=body.text, replace=False, free=True
+    )
+    if not answer.get("sent"):
+        # A keeper from before D138 does not take the next free name.
+        raise HTTPException(
+            409,
+            f"A file named {body.name} is there already. Log out of the server and in again "
+            "so the connection can save under the next free name.",
+        )
+    return SavedOut(path=answer["path"], renamed=bool(answer.get("exists")))
 
 
 @router.delete("/{editor_id}", status_code=204)

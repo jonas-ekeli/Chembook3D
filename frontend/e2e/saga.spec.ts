@@ -402,3 +402,82 @@ test('inspect several jobs at once and step through them', async ({ page }) => {
   await panel.getByRole('button', { name: 'Log out' }).click()
   await expect(panel).toContainText('Not logged in')
 })
+
+test('join scans from the Saga terminal, refresh a running one and save it to Saga', async ({ page }) => {
+  // D138, T-UI-40: `scans FILE` opens the scan editor; Refresh reads a running scan again and the
+  // path follows it; "Add from Saga…" adds more; Save to Saga never replaces a file there; and
+  // "Import from here" opens the chosen files in the editor too.
+  const scans = join(WORK, 'scans')
+  mkdirSync(scans, { recursive: true })
+  const full = readFileSync(join(FIXTURES, 'gaussian', 'dvb_scan_relaxed.log'), 'utf-8')
+  const lines = full.split('\n')
+  const running = join(scans, 'scanA.log')
+  writeFileSync(running, lines.slice(0, Math.floor(lines.length / 2)).join('\n'))
+  copyFileSync(join(FIXTURES, 'orca', 'dvb_scan_unrelaxed.out'), join(scans, 'scanB.out'))
+  await newInvestigation(page, 'Saga scan editor')
+  await page.getByRole('button', { name: 'HPC', exact: true }).click()
+  const panel = page.locator('aside.claude-panel')
+  await panel.getByRole('button', { name: 'Log in' }).click()
+  const login = panel.getByRole('group', { name: 'Log in to Saga' })
+  await login.getByLabel('Password:').fill('correct horse')
+  await login.getByRole('button', { name: 'Send' }).click()
+  await login.getByLabel('Verification code:').fill('123456')
+  await login.getByRole('button', { name: 'Send' }).click()
+  const terminal = panel.getByTestId('server-terminal')
+  await expect(terminal).toContainText('Welcome to the fake Saga.')
+  await expect(panel.getByTestId('server-cwd')).toContainText('scans FILE…')
+  await terminal.click()
+  await page.keyboard.type('cd /cluster/work/ru-caac/scans')
+  await page.keyboard.press('Enter')
+  await expect(panel.getByTestId('server-cwd')).toContainText('/cluster/work/ru-caac/scans')
+  await page.keyboard.type('scans scanA.log')
+  await page.keyboard.press('Enter')
+
+  const editor = page.getByRole('dialog', { name: 'Scan editor' })
+  const list = editor.getByRole('list', { name: 'Scans in the editor' })
+  await expect(list).toContainText('scanA.log')
+  await expect(list.getByTitle('saga:/cluster/work/ru-caac/scans/scanA.log')).toBeVisible()
+  const slider = editor.getByLabel('Frame', { exact: true })
+  await expect(slider).toHaveAttribute('max', '5') // six points so far
+
+  // The scan runs on: Refresh reads it again and the path's end follows it.
+  writeFileSync(running, full)
+  await editor.getByRole('button', { name: 'Refresh' }).click()
+  await expect(slider).toHaveAttribute('max', '12')
+  await expect(list).toContainText('13 points')
+
+  // More from the server's directory
+  await editor.getByRole('button', { name: 'Add from Saga…' }).click()
+  const add = page.getByRole('dialog', { name: 'Add scans from Saga' })
+  await add.getByLabel('scanB.out').check()
+  await add.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(add).toHaveCount(0)
+  await expect(list).toContainText('scanB.out')
+  await expect(slider).toHaveAttribute('max', '12') // another level: listed, not joined
+
+  // Saved into the terminal's directory, never over a file there
+  await editor.getByRole('button', { name: 'Save to Saga' }).click()
+  await expect(editor).toContainText('Saved to Saga as /cluster/work/ru-caac/scans/scanA_joined.xyz')
+  await editor.getByRole('button', { name: 'Save to Saga' }).click()
+  await expect(editor).toContainText(
+    'Saved to Saga as /cluster/work/ru-caac/scans/scanA_joined_v2.xyz (that name was taken)',
+  )
+  const saved = readFileSync(join(scans, 'scanA_joined.xyz'), 'utf-8')
+  expect(saved.split('\n')[1]).toContain('chembook3d joined scan 1')
+  expect(readFileSync(join(scans, 'scanA_joined_v2.xyz'), 'utf-8')).toBe(saved)
+  await editor.getByRole('button', { name: 'Close' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  // "Import from here" opens the chosen files in the editor.
+  await panel.getByRole('button', { name: 'Import from here' }).click()
+  const remote = page.getByRole('dialog', { name: 'Import from Saga' })
+  await remote.getByLabel('scanA.log').check()
+  await remote.getByRole('button', { name: 'Scan editor', exact: true }).click()
+  await expect(list).toContainText('scanA.log')
+  await expect(slider).toHaveAttribute('max', '12')
+  await editor.getByRole('button', { name: 'Close' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  await panel.getByRole('button', { name: 'Log out' }).click()
+  await expect(panel).toContainText('Not logged in')
+})

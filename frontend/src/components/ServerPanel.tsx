@@ -33,6 +33,7 @@ export function ServerPanel({
   onChanged,
   onImportHere,
   onInspect,
+  onScans,
   onCwd,
 }: {
   server: RemoteServer
@@ -47,6 +48,8 @@ export function ServerPanel({
   /** D123c: `inspect FILE` was typed in the terminal: open the files it named in the Inspect
    * window, as one list (D129). */
   onInspect: (paths: string[]) => void
+  /** D138: `scans FILE` was typed: open the files it named in the scan editor. */
+  onScans: (paths: string[]) => void
   /** The terminal's directory changed, for the rest of the app (Send to, D122f). */
   onCwd: (path: string | null) => void
 }) {
@@ -117,11 +120,13 @@ export function ServerPanel({
           | { type: 'hello'; cwd: string | null }
           | { type: 'cwd'; path: string }
           | { type: 'inspect'; paths?: string[]; path?: string }
+          | { type: 'scans'; paths: string[] }
           | { type: 'written'; path: string }
           | { type: 'exit'; message: string }
         if (message.type === 'output') term.write(message.data)
         // D129: a keeper from before sends one file at a time
         else if (message.type === 'inspect') onInspect(message.paths ?? (message.path ? [message.path] : []))
+        else if (message.type === 'scans') onScans(message.paths)
         else if (message.type === 'written') void onChanged()
         else if (message.type === 'hello' || message.type === 'cwd') {
           const path = message.type === 'hello' ? message.cwd : message.path
@@ -399,10 +404,10 @@ export function ServerPanel({
           {server.inspect && (
             <span
               className="muted small"
-              title="Opens the files in the Inspect window, without importing them; several (inspect *.log) are stepped through with Next"
+              title="inspect opens the files in the Inspect window, without importing them; several (inspect *.log) are stepped through with Next. scans opens them in the scan editor to join into one path (scans *scan*.log)"
             >
               {' '}
-              · type <code>inspect FILE</code> to look at a file here
+              · type <code>inspect FILE</code> to look at a file here, <code>scans FILE…</code> to join scans
             </span>
           )}
         </div>

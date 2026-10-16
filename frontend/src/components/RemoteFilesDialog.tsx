@@ -7,7 +7,8 @@ import { nameFilter } from '../util'
 // One chosen output opens the import dialog; several open the batch import (D97). The files
 // are copied down only then, into the investigation as any import is. The chosen files can
 // instead be opened in the Inspect window (D123c), which imports nothing, several as a list to
-// step through (D129). The name filter is the file browser's (D78), but folders stay listed so
+// step through (D129), or in the scan editor (D138), which adds files to it the same way. The
+// name filter is the file browser's (D78), but folders stay listed so
 // the user can still move between them.
 
 export type RemoteImport = { server: string; paths: string[]; batch: boolean }
@@ -44,13 +45,19 @@ export function RemoteFilesDialog({
   onClose,
   onImport,
   onInspect,
+  onScanEditor,
+  onAdd,
 }: {
   server: RemoteServer
   /** D134: one file picked for this purpose (e.g. "into the IRC of “TS-2”"): Import only. */
   purpose?: string
   onClose: () => void
-  onImport: (request: RemoteImport) => void
+  onImport?: (request: RemoteImport) => void
   onInspect?: (targets: { server: string; path: string }[]) => void
+  /** D138: open the chosen files in the scan editor. */
+  onScanEditor?: (targets: { server: string; path: string }[]) => void
+  /** D138: the scan editor's "Add from <server>…": the chosen files go to it, nothing else. */
+  onAdd?: (targets: { server: string; path: string }[]) => void
 }) {
   const [listing, setListing] = useState<RemoteListing | null>(null)
   const [path, setPath] = useState<string | undefined>(undefined) // undefined: the terminal's directory
@@ -96,41 +103,67 @@ export function RemoteFilesDialog({
     setChosen(next)
   }
   const paths = listing ? [...chosen].sort().map((name) => join(listing.path, name)) : []
+  const targets = paths.map((path) => ({ server: server.id, path }))
 
   return (
     <Modal
-      title={`Import from ${server.name}${purpose ? ` ${purpose}` : ''}`}
+      title={onAdd ? `Add scans from ${server.name}` : `Import from ${server.name}${purpose ? ` ${purpose}` : ''}`}
       onClose={onClose}
       wide
       actions={
-        <>
-          <button onClick={onClose}>Cancel</button>
-          {onInspect && (
+        onAdd ? (
+          <>
+            <button onClick={onClose}>Cancel</button>
             <button
+              className="primary"
               disabled={paths.length === 0}
-              onClick={() => onInspect(paths.map((path) => ({ server: server.id, path })))}
-              title="Look at the files (steps, structures, convergence, modes) without importing them, one after another"
+              onClick={() => onAdd(targets)}
+              title="Copy the files down into the scan editor; those that meet the path are joined on"
             >
-              Inspect{paths.length > 1 ? ` (${paths.length})` : ''}
+              Add{paths.length > 1 ? ` (${paths.length})` : ''}
             </button>
-          )}
-          {!purpose && (
-            <button
-              disabled={paths.length === 0}
-              onClick={() => onImport({ server: server.id, paths, batch: true })}
-              title="Match each file to a node by its structure or name, as a folder import does"
-            >
-              Batch import{paths.length > 0 ? ` (${paths.length})` : ''}
-            </button>
-          )}
-          <button
-            className="primary"
-            disabled={paths.length !== 1}
-            onClick={() => onImport({ server: server.id, paths, batch: false })}
-          >
-            Import
-          </button>
-        </>
+          </>
+        ) : (
+          <>
+            <button onClick={onClose}>Cancel</button>
+            {onScanEditor && (
+              <button
+                disabled={paths.length === 0}
+                onClick={() => onScanEditor(targets)}
+                title="Open the scans in the scan editor to join, reverse and cut them into one path, without importing them"
+              >
+                Scan editor{paths.length > 1 ? ` (${paths.length})` : ''}
+              </button>
+            )}
+            {onInspect && (
+              <button
+                disabled={paths.length === 0}
+                onClick={() => onInspect(targets)}
+                title="Look at the files (steps, structures, convergence, modes) without importing them, one after another"
+              >
+                Inspect{paths.length > 1 ? ` (${paths.length})` : ''}
+              </button>
+            )}
+            {!purpose && onImport && (
+              <button
+                disabled={paths.length === 0}
+                onClick={() => onImport({ server: server.id, paths, batch: true })}
+                title="Match each file to a node by its structure or name, as a folder import does"
+              >
+                Batch import{paths.length > 0 ? ` (${paths.length})` : ''}
+              </button>
+            )}
+            {onImport && (
+              <button
+                className="primary"
+                disabled={paths.length !== 1}
+                onClick={() => onImport({ server: server.id, paths, batch: false })}
+              >
+                Import
+              </button>
+            )}
+          </>
+        )
       }
     >
       <div className="remote-files" aria-label="Files on the server">
@@ -230,8 +263,8 @@ export function RemoteFilesDialog({
             </div>
             <p className="muted small">
               One file opens the import dialog, or the Inspect window to look at it first; several go through the batch
-              import, which matches each to a node, or can be looked at one after another in the Inspect window. Files are copied into the investigation; nothing changes on{' '}
-              {server.name}.
+              import, which matches each to a node, or can be looked at one after another in the Inspect window. Files
+              are copied into the investigation; nothing changes on {server.name}.
             </p>
           </>
         )}

@@ -37,8 +37,9 @@ import asyncssh
 # 2: X11 forwarding (D123a); 3: the `inspect` command (D123c); 4: `read`, and `within` on `list`
 # and `download`, for Claude reading files (D124); 5: `write` and `writes`, Claude writing new
 # files once the user allows it (D126); 6: the files one `inspect` names go to the app as one
-# list (D129)
-PROTOCOL = 6
+# list (D129); 7: the `scans` command opening the scan editor, and `upload` taking the next free
+# name instead of replacing (D138)
+PROTOCOL = 7
 KEEPER_FILE = "keeper.json"
 KNOWN_HOSTS = "known_hosts"
 LOG_FILE = "keeper.log"
@@ -60,7 +61,8 @@ WATCH_EVERY = 5
 # files), plus a prompt hook reporting the current directory after each command with an OSC
 # 1337 CurrentDir sequence, which terminals that do not know it ignore, and an `inspect FILE`
 # command asking the app to open files in its Inspect window with an OSC 1337 Inspect sequence
-# (D123c). One line without "!", so a login shell other than bash (tcsh) passes it on unchanged.
+# (D123c), and a `scans FILE` command opening them in the scan editor with a Scans sequence
+# (D138). One line without "!", so a login shell other than bash (tcsh) passes it on unchanged.
 RC = (
     "[ -r /etc/profile ] && . /etc/profile; "
     "if [ -r ~/.bash_profile ]; then . ~/.bash_profile; "
@@ -75,11 +77,21 @@ RC = (
     "if [ -f \"$f\" ]; then printf '\\033]1337;Inspect=%s\\007' "
     '"$(cd "$(dirname -- "$f")" && pwd)/$(basename -- "$f")"; '
     'elif [ -d "$f" ]; then echo "inspect: $f: is a folder" >&2; '
-    'else echo "inspect: $f: no such file" >&2; fi; done; }'
+    'else echo "inspect: $f: no such file" >&2; fi; done; }; '
+    "scans() { "
+    '[ $# -gt 0 ] || { echo "usage: scans FILE... (opens the scans in the Chembook3D scan '
+    'editor, e.g. scans *scan*.log)" >&2; return 2; }; '
+    'local f; for f in "$@"; do '
+    "if [ -f \"$f\" ]; then printf '\\033]1337;Scans=%s\\007' "
+    '"$(cd "$(dirname -- "$f")" && pwd)/$(basename -- "$f")"; '
+    'elif [ -d "$f" ]; then echo "scans: $f: is a folder" >&2; '
+    'else echo "scans: $f: no such file" >&2; fi; done; }'
 )
-REPORT_MARK = "\x1b]1337;"  # CurrentDir=<path> or Inspect=<path>, ended by BEL
-# D129: the files one `inspect` command names go to the app together when the prompt comes back,
-# or after this many seconds without a new one (a command run without a prompt after it)
+ASKED = {"Inspect": "inspect", "Scans": "scans"}  # a report naming a file, and its message
+REPORT_MARK = "\x1b]1337;"  # CurrentDir=<path>, Inspect=<path> or Scans=<path>, ended by BEL
+# D129: the files one `inspect` (or `scans`, D138) command names go to the app together when the
+# prompt comes back, or after this many seconds without a new one (a command run without a
+# prompt after it)
 INSPECT_WAIT = 1.0
 FALLBACK_WINDOW = 5.0  # a tracked shell ending this soon with "not found" falls back (A69)
 MAX_LISTED = 2000  # entries of a directory listed for "Import from here"
@@ -191,7 +203,8 @@ class Shell:
         self.viewers: set[asyncio.Queue] = set()
         self.ended: str | None = None  # why it ended
         self._carry = ""
-        self._inspect: list[str] = []  # files the running command asked to inspect (D129)
+        # files the running command asked to inspect (D129) or open as scans (D138), in order
+        self._asked: dict[str, list[str]] = {}
         self._inspect_timer: asyncio.TimerHandle | None = None
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
@@ -212,9 +225,9 @@ class Shell:
                 if value != self.cwd:
                     self.cwd = value
                     self._send({"type": "cwd", "path": value})
-            elif key == "Inspect" and value.startswith("/"):
-                self._inspect.append(value)
-        if self._inspect:
+            elif key in ASKED and value.startswith("/"):
+                self._asked.setdefault(ASKED[key], []).append(value)
+        if self._asked:
             if self._inspect_timer is not None:
                 self._inspect_timer.cancel()
             with contextlib.suppress(RuntimeError):  # no loop: the prompt sends them
@@ -223,13 +236,13 @@ class Shell:
 
     def _send_inspect(self) -> None:
         """Ask the app to inspect the files the last command named, as one list in order
-        (D129)."""
+        (D129), or to open them in the scan editor (D138)."""
         if self._inspect_timer is not None:
             self._inspect_timer.cancel()
             self._inspect_timer = None
-        if self._inspect:
-            paths, self._inspect = self._inspect, []
-            self._send({"type": "inspect", "paths": paths})
+        asked, self._asked = self._asked, {}
+        for kind, paths in asked.items():
+            self._send({"type": kind, "paths": paths})
 
     def _track(self, text: str) -> list[tuple[str, str]]:
         """The reports in `text` (current directory, files to inspect) in order, joined to
@@ -781,7 +794,11 @@ class Keeper:
                     return await self._list(session, msg.get("path"), inside)
                 if op == "upload":
                     return await self._upload(
-                        session, msg.get("name"), msg.get("text"), msg.get("replace") is True
+                        session,
+                        msg.get("name"),
+                        msg.get("text"),
+                        msg.get("replace") is True,
+                        msg.get("free") is True,
                     )
                 if op == "read":
                     return await self._read(
@@ -912,9 +929,12 @@ class Keeper:
             "data": base64.b64encode(data).decode("ascii"),
         }
 
-    async def _upload(self, session: Session, name: object, text: object, replace: bool) -> dict:
+    async def _upload(
+        self, session: Session, name: object, text: object, replace: bool, free: bool = False
+    ) -> dict:
         """Write a small text file into the shell's current directory (D122f). A file already
-        there is replaced only when the app says so, after asking; nothing is ever deleted."""
+        there is replaced only when the app says so, after asking; with `free` the file takes
+        the next free name instead (`_free`, D138); nothing is ever deleted."""
         if not isinstance(name, str) or not SEND_NAME.match(name) or name in (".", ".."):
             return {"ok": False, "error": "Not a file name the app can write."}
         if not isinstance(text, str) or len(text) > MAX_UPLOAD:
@@ -929,6 +949,8 @@ class Keeper:
             there = None
         if there is not None and there.type == asyncssh.FILEXFER_TYPE_DIRECTORY:
             return {"ok": False, "error": f"{path} is a directory."}
+        if there is not None and free:
+            return await self._upload_free(session, sftp, path, text)
         if there is not None and not replace:
             return {"ok": True, "path": path, "sent": False, "exists": True}
         try:
@@ -941,6 +963,26 @@ class Keeper:
             raise
         session.used = time.monotonic()
         return {"ok": True, "path": path, "sent": True, "exists": there is not None}
+
+    async def _upload_free(
+        self, session: Session, sftp: asyncssh.SFTPClient, path: str, text: str
+    ) -> dict:
+        """D138: `text` written under the first free copy name of `path` (name_v2.ext, ...),
+        by exclusive create, so a file that appears meanwhile is never replaced."""
+        for _ in range(5):
+            target = await _free(sftp, path)
+            if target is None:
+                return {"ok": False, "error": f"No free name like {posixpath.basename(path)}."}
+            try:
+                async with sftp.open(target, "xb") as handle:
+                    await handle.write(text.encode("utf-8"))
+            except (asyncssh.SFTPFailure, asyncssh.SFTPFileAlreadyExists):
+                if await _taken(sftp, target):
+                    continue  # taken since the check: try the next one
+                raise
+            session.used = time.monotonic()
+            return {"ok": True, "path": target, "sent": True, "exists": True}
+        return {"ok": False, "error": f"No free name like {posixpath.basename(path)}."}
 
     async def _write(self, session: Session, path: object, text: object, based_on: object) -> dict:
         """D126: a new text file for Claude in the shell's current directory or below, with any

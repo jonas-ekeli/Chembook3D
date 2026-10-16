@@ -94,6 +94,7 @@ export function SidePanel({
   onRemoteChanged,
   onImportFrom,
   onInspect,
+  onScanEditor,
   onCwd,
 }: {
   /** The tab shown, or null when the panel is hidden. */
@@ -105,6 +106,8 @@ export function SidePanel({
   onImportFrom: (server: RemoteServer) => void
   /** D123c: `inspect FILE` typed in a server's terminal, with the files it named (D129). */
   onInspect: (targets: { server: string; path: string }[]) => void
+  /** D138: `scans FILE` in a server's terminal. */
+  onScanEditor: (targets: { server: string; path: string }[]) => void
   /** A server's terminal reported its directory. */
   onCwd: (server: string, path: string | null) => void
 }) {
@@ -226,6 +229,7 @@ export function SidePanel({
             onChanged={onRemoteChanged}
             onImportHere={() => onImportFrom(server)}
             onInspect={(paths) => onInspect(paths.map((path) => ({ server: server.id, path })))}
+            onScans={(paths) => onScanEditor(paths.map((path) => ({ server: server.id, path })))}
             onCwd={(path) => onCwd(server.id, path)}
           />
         ))}

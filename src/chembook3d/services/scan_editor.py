@@ -84,6 +84,7 @@ class Scan:
     joined: bool = False  # a joined scan saved by the editor, read back
     restarted: bool = False  # the file runs the scan again after it; only the first run is read
     renumbered: str = ""  # whose atom order the points were put in (D113), when they were
+    order: list[int] | None = None  # ... the file's atom for each atom, kept for a refresh
     basis_prints: dict[str, str] = field(default_factory=dict)  # a GEN basis set's (D137)
 
     @property
@@ -1222,11 +1223,7 @@ def match_atoms(scans: dict[str, Scan], key: str, to: str) -> str:
                     found = dataclasses.replace(
                         found, mapping=mapping, rmsd=rmsd, formed=[], broken=[], doubts=[]
                     )
-    mapping = found.mapping  # mapping[i]: the scan's atom for the reference's atom i
-    for point in scan.points:
-        point.rows = [point.rows[j] for j in mapping]
-    new_number = {j + 1: i + 1 for i, j in enumerate(mapping)}
-    scan.atoms = [new_number[a] for a in scan.atoms]
+    renumber(scan, found.mapping)  # mapping[i]: the scan's atom for the reference's atom i
     scan.renumbered = _name(reference)
     note = (
         f"{_name(scan)} renumbered to the atom order of {_name(reference)} "
@@ -1235,6 +1232,52 @@ def match_atoms(scans: dict[str, Scan], key: str, to: str) -> str:
     if found.doubts:
         note += " Check it: " + " ".join(found.doubts)
     return note
+
+
+def renumber(scan: Scan, mapping: list[int]) -> None:
+    """The scan's atoms put in another order: atom i becomes its atom mapping[i] (from 0)."""
+    for point in scan.points:
+        point.rows = [point.rows[j] for j in mapping]
+    new_number = {j + 1: i + 1 for i, j in enumerate(mapping)}
+    scan.atoms = [new_number[a] for a in scan.atoms]
+    scan.order = [scan.order[j] for j in mapping] if scan.order else list(mapping)
+
+
+# ---------- a file read again (D138) ----------
+
+
+def refreshed(old: Scan, fresh: Scan) -> Scan:
+    """`fresh`, the scan read again from its file, put in the atom order `old` was given."""
+    if old.order and len(old.order) == len(fresh.points[0].rows):
+        renumber(fresh, old.order)
+        fresh.renumbered = old.renumbered
+    return fresh
+
+
+def carry(old: dict[str, Scan], new: dict[str, Scan], pieces: list[Piece]) -> list[Piece]:
+    """The path's pieces moved onto the scans read again (D138): each index follows its scan
+    point (the nearest point when that one is gone), and an end of the path at the last point
+    of a scan still running follows it to its new last point."""
+
+    def moved(key: str, index: int) -> int:
+        before, after = old[key].points, new[key].points
+        number = before[min(index, len(before) - 1)].number
+        return min(range(len(after)), key=lambda i: (abs(after[i].number - number), i))
+
+    out: list[Piece] = []
+    for n, piece in enumerate(pieces):
+        if piece.scan not in new or piece.scan not in old:
+            out.append(piece)
+            continue
+        end = len(old[piece.scan].points) - 1
+        last_new = len(new[piece.scan].points) - 1
+        first, last = moved(piece.scan, piece.first), moved(piece.scan, piece.last)
+        if n == 0 and piece.first == end and piece.reversed:
+            first = last_new
+        if n == len(pieces) - 1 and piece.last == end and not piece.reversed:
+            last = last_new
+        out.append(Piece(piece.scan, first, last))
+    return out
 
 
 # ---------- the saved file ----------
