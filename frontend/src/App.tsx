@@ -87,6 +87,16 @@ type ImportRequest = {
   remote?: { server: string; path: string }
   /** D123c: the file read in the Inspect window, staged from its copy. */
   inspection?: { id: string; name: string }
+  /** D137: a joined scan from the scan editor, shown on this edge only. */
+  pathEdge?: string | null
+}
+
+/** An edge's end as the scan editor lists it: the node's label, or the group's. */
+function endLabel(canvas: Canvas, id: string): string {
+  const node = canvas.nodes.find((n) => n.id === id)
+  if (node) return node.label || 'Untitled node'
+  const group = canvas.groups.find((g) => g.id === id)
+  return group ? group.label || 'Group' : '?'
 }
 
 type InspectorSelection = Selection | { kind: 'branch'; id: string }
@@ -943,10 +953,11 @@ function App() {
       )}
       {importRequest && investigation && (
         <ImportDialog
-          key={`${importRequest.targetId}-${importRequest.files.length}-${importRequest.files[0]?.name ?? ''}-${importRequest.remote?.path ?? ''}-${importRequest.inspection?.id ?? ''}`}
+          key={`${importRequest.targetId}-${importRequest.files.length}-${importRequest.files[0]?.name ?? ''}-${importRequest.remote?.path ?? ''}-${importRequest.inspection?.id ?? ''}-${importRequest.pathEdge ?? ''}`}
           file={importRequest.files[0] ?? null}
           remote={importRequest.remote ?? null}
           inspection={importRequest.inspection ?? null}
+          pathEdge={importRequest.pathEdge ?? null}
           target={[...canvas.nodes, ...canvas.species].find((n) => n.id === importRequest.targetId) ?? null}
           nodes={[...canvas.nodes, ...canvas.species]}
           asSpecies={importRequest.species ?? false}
@@ -1025,6 +1036,13 @@ function App() {
           key={scanEditing.id}
           targets={scanEditing.targets}
           settings={settings}
+          edges={
+            investigation
+              ? canvas.transitions.map((t) => ({ id: t.id, name: `${endLabel(canvas, t.source_id)} → ${endLabel(canvas, t.target_id)}` }))
+              : null
+          }
+          hidden={Boolean(importRequest)}
+          onImport={(file, edge) => setImportRequest({ targetId: null, files: [file], position: null, pathEdge: edge })}
           onClose={() => setScanEditing(null)}
         />
       )}

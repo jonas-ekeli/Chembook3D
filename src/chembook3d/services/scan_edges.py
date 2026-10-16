@@ -19,12 +19,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from chembook3d import cloud_jobs
 from chembook3d.models import Calculation, CalculationType, GroupNode, Node, NodeKind, Transition
-from chembook3d.parsers import xtb
+from chembook3d.parsers import joined, xtb
 from chembook3d.services import history, trajectory
 from chembook3d.services.records import RecordError
 
@@ -44,9 +44,12 @@ def has_scan_path(session: Session, node_id: str) -> bool:
         select(Calculation.id)
         .where(
             Calculation.node_id == node_id,
-            Calculation.program == xtb.PROGRAM,
             Calculation.type == CalculationType.OTHER,
-            Calculation.route.startswith(xtb.SCAN_ROUTE, autoescape=True),
+            or_(
+                (Calculation.program == xtb.PROGRAM)
+                & Calculation.route.startswith(xtb.SCAN_ROUTE, autoescape=True),
+                Calculation.route.startswith(joined.ROUTE, autoescape=True),
+            ),
         )
         .limit(1)
     )
@@ -188,6 +191,7 @@ class PathOnEdge:
     active_rmsd: float | None  # Å, the end's RMSD over the reacting atoms (D118)
     end_rmsd: float | None  # Å, over all atoms
     on_edge: bool  # its box is off the canvas
+    program: str = xtb.PROGRAM  # D137: a joined scan's is its pieces' (Gaussian, ORCA)
 
 
 def _job_results(folder: Path) -> dict[str, dict[str, Any]]:
@@ -236,6 +240,7 @@ def describe(session: Session, folder: Path | None, node: Node, path: dict[str, 
         active_rmsd=_number(path.get("active_end_rmsd")),
         end_rmsd=_number(path.get("end_rmsd")),
         on_edge=on_edge(session, node),
+        program=calculation.program if calculation is not None else xtb.PROGRAM,
     )
 
 

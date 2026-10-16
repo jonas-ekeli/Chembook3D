@@ -191,6 +191,8 @@ export type PathOnEdge = {
   end_rmsd: number | null
   /** Its box is off the canvas; the chip stands for it. */
   on_edge: boolean
+  /** D137: "xTB", or the program of a scan joined in the scan editor. */
+  program: string
 }
 
 /** D121: a path that did not reach its end: the session's gate missed, or it said so. */
@@ -205,17 +207,24 @@ export function pathTop(p: PathOnEdge, settings: Settings | null): string {
 }
 
 /** D121: the chip an edge shows for its scan paths: "xTB path · top +12.4 kcal/mol", or for
- * several "xTB paths (2) · lowest top +9.8 kcal/mol". */
+ * several "xTB paths (2) · lowest top +9.8 kcal/mol"; a joined scan names its program (D137),
+ * and paths of several programs are "Scan paths (2)". */
 export function pathChip(paths: PathOnEdge[], settings: Settings | null): { text: string; title: string; missed: boolean } {
   const tops = paths.filter((p) => p.top !== null)
   const lowest = tops.length ? tops.reduce((a, b) => ((b.top as number) < (a.top as number) ? b : a)) : null
   const top = lowest ? pathTop(lowest, settings) : 'top n/a'
-  const text = paths.length === 1 ? `xTB path · ${top}` : `xTB paths (${paths.length}) · lowest ${top}`
+  const programs = [...new Set(paths.map((p) => p.program || 'xTB'))]
+  const name = programs.length === 1 ? `${programs[0]} path` : 'Scan path'
+  const text = paths.length === 1 ? `${name} · ${top}` : `${name}s (${paths.length}) · lowest ${top}`
   const lines = paths.map(
     (p) =>
       `${p.label || 'Untitled path'}: ${pathTop(p, settings)}${pathMissed(p) ? ', did not reach end' : ''}${p.on_edge ? ' (shown on this edge only)' : ''}`,
   )
-  lines.push('GFN2-xTB scan path, measured from its first kept point; not the edge’s barrier. Click to open.')
+  lines.push(
+    programs.every((p) => p === 'xTB')
+      ? 'GFN2-xTB scan path, measured from its first kept point; not the edge’s barrier. Click to open.'
+      : 'Scan path, measured from its first kept point at its own level; not the edge’s barrier. Click to open.',
+  )
   return { text, title: lines.join('\n'), missed: paths.some(pathMissed) }
 }
 
@@ -1393,6 +1402,9 @@ export type ImportOptions = {
    * of its end points ('forward' or 'reverse'). */
   irc_part?: 'path' | 'end' | null
   irc_direction?: IrcDirection | null
+  /** D137: a scan path (a joined scan) shown on this edge, its box on the canvas or not. */
+  path_edge_id?: string | null
+  on_edge_only?: boolean
 }
 
 export type ImportResult = {

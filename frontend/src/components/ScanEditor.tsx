@@ -111,11 +111,19 @@ function near(scan: EditorScan, x: number): number | null {
 export function ScanEditor({
   targets,
   settings,
+  edges = null,
+  hidden = false,
+  onImport,
   onClose,
 }: {
   /** The files to open with; more are added in the window. */
   targets: ScanEditorTarget[]
   settings: Settings | null
+  /** D137: the open investigation's edges, to show an imported path on; null with none open. */
+  edges?: { id: string; name: string }[] | null
+  /** Kept with its path while the import dialog is open over it. */
+  hidden?: boolean
+  onImport?: (file: File, edge: string | null) => void
   onClose: () => void
 }) {
   const [editor, setEditor] = useState<ScanEditorState | null>(null)
@@ -134,6 +142,7 @@ export function ScanEditor({
   const [copied, setCopied] = useState<string | null>(null)
   const [stretch, setStretch] = useState<[number, number] | null>(null)
   const [compared, setCompared] = useState<Comparison | null>(null)
+  const [edge, setEdge] = useState('')
   const opened = useRef<string | null>(null)
 
   const pieces = useMemo(() => path?.pieces ?? [], [path])
@@ -224,6 +233,7 @@ export function ScanEditor({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (hidden) return
       const target = event.target as HTMLElement | null
       if (target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return
       if (!(event.ctrlKey || event.metaKey)) return
@@ -238,7 +248,7 @@ export function ScanEditor({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [back, forward])
+  }, [back, forward, hidden])
 
   /** More files: their scans are listed and those that meet the path are joined on. */
   const addFiles = async (paths: string[]) => {
@@ -361,13 +371,23 @@ export function ScanEditor({
     }
   }
 
-  const save = () => {
-    if (!path || path.frames.length === 0) return
+  const savedName = () => {
     const first = byKey.get(pieces[0]?.scan ?? '')
     const stem = (first?.file ?? 'scan').replace(/\.[^.]+$/, '')
+    return fileName(`${stem}_joined.xyz`, 'joined_scan.xyz')
+  }
+
+  const save = () => {
+    if (!path || path.frames.length === 0) return
     const url = URL.createObjectURL(new Blob([path.text], { type: 'chemical/x-xyz' }))
-    download(url, fileName(`${stem}_joined.xyz`, 'joined_scan.xyz'))
+    download(url, savedName())
     setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  }
+
+  /** D137: the joined path imported as a scan path node, on an edge if one is chosen. */
+  const importPath = () => {
+    if (!path || !onImport) return
+    onImport(new File([path.text], savedName(), { type: 'chemical/x-xyz' }), edge || null)
   }
 
   const close = () => {
@@ -382,7 +402,9 @@ export function ScanEditor({
   const top = path?.top ?? null
   const topEnergy = top !== null ? frames[top]?.energy : null
   const firstEnergy = frames[0]?.energy ?? null
+  const canSave = Boolean(path && path.frames.length >= 2 && !path.blocked)
 
+  if (hidden) return null
   return (
     <Modal
       title="Scan editor"
@@ -398,11 +420,35 @@ export function ScanEditor({
           </button>
           <button
             onClick={save}
-            disabled={!path || path.frames.length < 2 || Boolean(path.blocked)}
+            disabled={!canSave}
             title="Save the joined path as an xyz file with its level, energies and where each structure came from"
           >
             Save as…
           </button>
+          {edges && onImport && (
+            <>
+              <select
+                aria-label="Show the imported path on"
+                value={edge}
+                onChange={(event) => setEdge(event.target.value)}
+                title="An edge to show the imported path on as a chip, its box off the canvas (D121)"
+              >
+                <option value="">As a node on the canvas</option>
+                {edges.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    On the edge {e.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={importPath}
+                disabled={!canSave}
+                title="Import the joined path into the investigation as a scan path node at its own level; its energies stay on its own chart and never enter profiles, the energy table or analyses"
+              >
+                Import…
+              </button>
+            </>
+          )}
           <button className="primary" onClick={close}>
             Close
           </button>

@@ -36,6 +36,7 @@ from chembook3d.models import (
     LevelOfTheory,
     Node,
     SourceFile,
+    Transition,
 )
 from chembook3d.services import (
     basis_sets,
@@ -316,6 +317,8 @@ class ImportOptionsIn(BaseModel):
     pos_x: float | None = None
     pos_y: float | None = None
     irc_part: str | None = None  # D131: "path" or "end", onto the TS node target_node_id
+    path_edge_id: str | None = None  # D137: a scan path shown on this edge (D121)
+    on_edge_only: bool = False
     irc_direction: str | None = None
     conformer_count: int | None = None
     conformers: list[int] | None = None
@@ -973,6 +976,8 @@ def preview_import(token: str, body: ImportOptionsIn, request: Request, session:
 @router.post("/imports/{token}/commit", response_model=ImportCommitOut)
 def commit_import(token: str, body: ImportOptionsIn, request: Request, session: DbSession):
     staged = _staged(request, token)
+    if body.path_edge_id is not None and session.get(Transition, body.path_edge_id) is None:
+        raise HTTPException(422, "The edge to show this path on no longer exists")
     try:
         result = imports.commit(session, _investigation(request).folder, staged, _options(body))
     except imports.ImportBlocked as exc:

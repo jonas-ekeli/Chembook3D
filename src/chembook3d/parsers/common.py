@@ -109,6 +109,8 @@ class ParsedStep:
     # Filled in by carrying the basis forward (CHKBASIS reads it from the checkpoint).
     resolved_basis: str | None = None
     resolved_basis_definition: dict[str, str] | None = None
+    # D137: a joined scan's GEN basis set, known only by its fingerprints {element: hash}.
+    basis_fingerprints: dict[str, str] = field(default_factory=dict)
 
     @property
     def job_type(self) -> str:

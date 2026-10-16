@@ -31,6 +31,7 @@ from chembook3d.models import (
     LevelOfTheory,
     Node,
 )
+from chembook3d.parsers import joined
 from chembook3d.services import levels
 from chembook3d.services.records import RecordError
 
@@ -148,6 +149,10 @@ class NodeEnergies:
         geometry = levels.node_geometry_level(node, tolerance)
         self.by_key: dict[LevelKey, list[Calculation]] = {}
         for calculation in sorted(node.calculations, key=_order):
+            if calculation.type == CalculationType.OTHER and calculation.route.startswith(
+                joined.ROUTE
+            ):
+                continue  # D137: a joined scan's energies stay on its own chart
             key = calculation_key(calculation, geometry.id if geometry else None, tolerance)
             if key is not None and calculation.result is not None:
                 self.by_key.setdefault(key, []).append(calculation)

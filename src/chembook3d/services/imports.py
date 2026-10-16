@@ -48,7 +48,7 @@ from chembook3d.models import (
     Status,
     new_id,
 )
-from chembook3d.parsers import crest, gaussian, orca, xtb
+from chembook3d.parsers import crest, gaussian, joined, orca, xtb
 from chembook3d.parsers.common import ParsedFile, ParsedStep
 from chembook3d.services import geometry, history, levels
 from chembook3d.services import groups as group_service
@@ -79,7 +79,14 @@ def read_file(text: str, name: str = "", folder: Path | None = None) -> ParsedFi
     """Recognise the program from the content, not the file name. `folder` is where the file
     was chosen, for an xTB scan's output beside it (D112)."""
     parsed: ParsedFile | crest.Ensemble
-    if xtb.looks_like_structures(text):
+    if joined.looks_like_joined(text):
+        try:
+            parsed = joined.parse(text, name)
+        except joined.NotJoinedScan as exc:
+            raise ImportFailed(
+                f"{name or 'The file'} is not a readable joined scan: {exc}"
+            ) from exc
+    elif xtb.looks_like_structures(text):
         try:
             parsed = xtb.parse_structures(text, name, scan_outputs(folder) if folder else [])
         except xtb.OptimizationLog as exc:
@@ -424,6 +431,14 @@ def _resolve_level(
         )
         basis = name or ""
         stand_ins["basis"] = name or f"?{key}"
+    elif basis in ("GEN", "GENECP") and step.basis_fingerprints:
+        # D137: a joined scan names its basis set by the fingerprints of its definition, which
+        # an import of one of its own files registered.
+        known = levels.find_basis(session, step.basis_fingerprints)
+        basis = known.name if known else ""
+        stand_ins["basis"] = (
+            known.name if known else f"?{levels.definition_key(step.basis_fingerprints)}"
+        )
     dispersion = route.dispersion or ""
     iops = gaussian.dispersion_iops(route.iops)
     if iops:
@@ -843,6 +858,14 @@ def _plan_steps(
         blockers.append("Nothing would be imported: no step matches the node's geometry")
 
     names = _names(session, written, resolved, store_names, blockers)
+    for step in written:
+        fields = resolved[step.index].fields
+        if step.basis_fingerprints and fields is not None and not fields["basis"]:
+            # D137: the definition is not in the file, so it cannot be named here.
+            blockers.append(
+                "The custom basis set of this joined scan is not known in this investigation: "
+                "import one of the scan's own output files first, which names it"
+            )
 
     # D100: a single point or frequency job takes the level of the optimization that ended on
     # its geometry, among the node's own and those in this file before it.
