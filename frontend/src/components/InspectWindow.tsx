@@ -85,6 +85,7 @@ export function InspectWindow({
   canImport,
   onClose,
   onImport,
+  onScanEditor,
 }: {
   /** The files to look at, in order; the first is shown first (D129). */
   targets: InspectTarget[]
@@ -94,6 +95,8 @@ export function InspectWindow({
   onClose: () => void
   /** Go on to the import dialog with this inspection's copy. */
   onImport: (inspection: Inspection) => void
+  /** D135: open the file shown in the scan editor. */
+  onScanEditor?: (target: InspectTarget) => void
 }) {
   const [file, setFile] = useState(0)
   const target = targets[Math.min(file, targets.length - 1)]
@@ -461,6 +464,15 @@ export function InspectWindow({
                     >
                       Copy XYZ
                     </button>
+                    {onScanEditor && step.scan && (
+                      <button
+                        className="small"
+                        onClick={() => onScanEditor(target)}
+                        title="Put this scan together with others into one path (D135)"
+                      >
+                        Open in Scan editor
+                      </button>
+                    )}
                     {copied && (
                       <span className="muted small" role="status">
                         {copied}

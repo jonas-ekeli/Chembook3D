@@ -192,15 +192,16 @@ def _lines_kept(text: str, cut: int) -> str:
     return "".join(lines[: max(len(lines) - cut, 0)])
 
 
-def read(text: str, name: str = "", folder: Path | None = None) -> Inspection:
-    """`folder` is where the file is, for the xTB output beside an xTB log (D112, D123c)."""
+def parse_text(
+    text: str, name: str = "", folder: Path | None = None
+) -> tuple[ParsedFile | crest.Ensemble, list[str]]:
+    """The file parsed as the import reads it, a cut-off end left out when the parsers fail on
+    it, with a warning saying so. Also read by the scan editor (D135)."""
     warnings: list[str] = []
     try:
         parsed = _parse(text, name, folder)
-    except imports.ImportFailed as exc:
-        if text.lstrip("﻿").split("\n", 1)[0].strip().isdigit():
-            return _structures(text, name)
-        raise InspectFailed(str(exc)) from exc
+    except imports.ImportFailed:
+        raise
     except Exception:  # a cut the parser did not expect: read less of it
         for cut in CUT_BACK:
             try:
@@ -214,6 +215,17 @@ def read(text: str, name: str = "", folder: Path | None = None) -> Inspection:
             break
         else:
             raise InspectFailed(f"{name or 'The file'} could not be read.") from None
+    return parsed, warnings
+
+
+def read(text: str, name: str = "", folder: Path | None = None) -> Inspection:
+    """`folder` is where the file is, for the xTB output beside an xTB log (D112, D123c)."""
+    try:
+        parsed, warnings = parse_text(text, name, folder)
+    except imports.ImportFailed as exc:
+        if text.lstrip("﻿").split("\n", 1)[0].strip().isdigit():
+            return _structures(text, name)
+        raise InspectFailed(str(exc)) from exc
     if isinstance(parsed, crest.Ensemble):
         return _structures(text, name)
     steps = [_step(step) for step in parsed.steps]
@@ -226,7 +238,8 @@ def read(text: str, name: str = "", folder: Path | None = None) -> Inspection:
     )
 
 
-def read_path(path: Path, name: str | None = None) -> Inspection:
+def read_text_of(path: Path) -> str:
+    """A file's text, refused when too large (MAX_SIZE) or not text."""
     try:
         size = path.stat().st_size
     except OSError as exc:
@@ -239,4 +252,8 @@ def read_path(path: Path, name: str | None = None) -> Inspection:
         raise InspectFailed(f"Cannot read {path}") from exc
     if b"\x00" in data[:20000]:
         raise InspectFailed(f"{path.name} is not a text file.")
-    return read(data.decode("utf-8", errors="replace"), name or path.name, path.parent)
+    return data.decode("utf-8", errors="replace")
+
+
+def read_path(path: Path, name: str | None = None) -> Inspection:
+    return read(read_text_of(path), name or path.name, path.parent)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import {
   api,
   CALCULATION_TYPES,
@@ -12,6 +12,7 @@ import {
   type Steps,
   type Trim,
 } from '../api'
+import { OpenScanEditor } from '../scanEditor'
 import { hartree, ranges } from '../util'
 
 export type Movie = { frames: string[]; index: number }
@@ -65,6 +66,7 @@ export function StepMovie({
 }) {
   const [calcs, setCalcs] = useState<Calculation[]>([])
   const [calcId, setCalcId] = useState('')
+  const openScanEditor = useContext(OpenScanEditor)
   const [steps, setSteps] = useState<Steps | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [convergedOnly, setConvergedOnly] = useState(true)
@@ -372,6 +374,18 @@ export function StepMovie({
               </>
             )}
             <span className="muted small">{steps.in_place ? 'changes this node' : 'makes a derived node'}</span>
+            {openScanEditor && steps.scan && (
+              <>
+                {' '}
+                <button
+                  className="small"
+                  onClick={() => openScanEditor([{ calculation: calcId }])}
+                  title="Put this scan together with others into one path; nothing here is changed (D135)"
+                >
+                  Open in Scan editor
+                </button>
+              </>
+            )}
           </div>
           {trim && (
             <TrimPanel

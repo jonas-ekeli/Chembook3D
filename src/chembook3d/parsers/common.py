@@ -87,6 +87,9 @@ class ParsedStep:
     # it (an empty list where it printed none). Empty when no structure has any.
     geometry_criteria: list[list[Criterion]] = field(default_factory=list)
     scan: str | None = None  # "relaxed" (an optimization per point) or "rigid"
+    # D135: the coordinates a scan drives, as the file names them (atoms from 1: two for a
+    # distance, three for an angle, four for a dihedral); empty when the file does not say.
+    scan_coordinates: list[list[int]] = field(default_factory=list)
     # D112: an xTB scan path's stage per structure (empty when the file names none), and the
     # structure (0-based) its node takes when that is not the last one: the path's top.
     geometry_stages: list[int | None] = field(default_factory=list)

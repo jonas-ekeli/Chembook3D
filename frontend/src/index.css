@@ -2644,6 +2644,129 @@ table.scan-path-held input.drive-value {
   margin: 0 0.3rem;
 }
 
+/* D135: the scan editor */
+.scan-editor {
+  display: grid;
+  gap: 0.6rem;
+}
+.scan-editor h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.scan-editor .warning {
+  margin: 0;
+  color: #93370d;
+}
+.scan-editor-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+.scan-list-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+.scan-add {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+.scan-add .folder-list {
+  max-height: 28vh;
+}
+.scan-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 34vh;
+  overflow: auto;
+}
+.scan-list li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  padding: 0.3rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.scan-list li.on-path {
+  background: var(--accent-soft);
+}
+.scan-swatch {
+  flex: none;
+  width: 0.8rem;
+  height: 0.8rem;
+  margin-top: 0.2rem;
+  border-radius: 2px;
+}
+.scan-about {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.scan-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+.scan-chart svg {
+  width: 100%;
+  height: auto;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.scan-chart p {
+  margin: 0.2rem 0 0;
+}
+.scan-strip ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0.3rem 0;
+  padding: 0;
+}
+.scan-strip li {
+  border: 1px solid var(--border);
+  border-left-width: 6px;
+  border-radius: var(--radius);
+  padding: 0.3rem 0.4rem;
+  min-width: 12rem;
+}
+.piece-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.piece-range input {
+  width: 3.6rem;
+}
+.piece-actions {
+  display: flex;
+  gap: 0.2rem;
+  margin-top: 0.2rem;
+}
+.scan-strip p {
+  margin: 0.1rem 0;
+}
+.scan-marks {
+  list-style: none;
+  margin: 0.3rem 0;
+  padding: 0;
+  max-height: 16vh;
+  overflow: auto;
+}
+.scan-marks li.warning {
+  color: #93370d;
+}
+@media (max-width: 900px) {
+  .scan-editor-top {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* D131: a TS node's IRC window */
 .irc-line {
   display: flex;

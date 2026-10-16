@@ -37,28 +37,35 @@ const DESTINATIONS: Record<string, string> = {
 /** Browse the local disk through the backend (a browser page cannot read paths itself), so
  * the file's own path is kept as its origin path (FR-FILE-02). It starts in the folder a file
  * was last picked from, and the filter shows only names containing its text (D78). */
-function FileBrowser({
+export function FileBrowser({
   onPick,
   onPickFolder,
   onInspect,
+  matching,
 }: {
   onPick: (path: string) => void
   /** D97: import every output in the folder shown. */
   onPickFolder?: (path: string) => void
   /** D123c: open files in the Inspect window instead, several as a list (D129). */
   onInspect?: (paths: string[]) => void
+  /** D135: something else done with the files a name filter matches (the scan editor). */
+  matching?: { label: (count: number) => string; title: string; onPick: (paths: string[]) => void }
 }) {
   const [listing, setListing] = useState<FolderListing | null>(null)
   const [path, setPath] = useState('')
   const [filter, setFilter] = useState('')
   const [error, setError] = useState<string | null>(null)
 
+  // The folder listed, so a filter typed while the same folder is listed again is kept.
+  const listed = useRef<string | null>(null)
+
   const go = useCallback((target?: string) => {
     api.folders(target, true).then(
       (result) => {
         setListing(result)
         setPath(result.path)
-        setFilter('')
+        if (listed.current !== result.path) setFilter('')
+        listed.current = result.path
         setError(null)
       },
       (err: unknown) => setError(errorText(err)),
@@ -111,6 +118,15 @@ function FileBrowser({
           onClick={() => onInspect(matched.map((entry) => entry.path))}
         >
           Inspect the {matched.length} matching files
+        </button>
+      )}
+      {matching && matched.length > 0 && (
+        <button
+          className="small inspect-matching"
+          title={matching.title}
+          onClick={() => matching.onPick(matched.map((entry) => entry.path))}
+        >
+          {matching.label(matched.length)}
         </button>
       )}
       {error && <p role="alert">{error}</p>}
@@ -322,6 +338,7 @@ export function ImportDialog({
   onImported,
   onImportFolder,
   onInspect,
+  onScanEditor,
 }: {
   file: File | null
   /** D122e: an output on an SSH server, copied down and staged instead of a file here. */
@@ -348,6 +365,8 @@ export function ImportDialog({
   onImportFolder?: (folder: string) => void
   /** D123c: open files of the file browser in the Inspect window instead (D129: several). */
   onInspect?: (paths: string[]) => void
+  /** D135: open the files a name filter matches in the scan editor. */
+  onScanEditor?: (paths: string[]) => void
 }) {
   const [plan, setPlan] = useState<ImportPlan | null>(null)
   const [options, setOptions] = useState<ImportOptions>({
@@ -525,6 +544,16 @@ export function ImportDialog({
                 if (token.current) void api.cancelImport(token.current)
                 onImportFolder(folder)
               })
+            }
+            matching={
+              onScanEditor && {
+                label: (n) => `Scan editor (${n})`,
+                title: 'Open these files in the scan editor, to put their scans together into one path',
+                onPick: (paths) => {
+                  if (token.current) void api.cancelImport(token.current)
+                  onScanEditor(paths)
+                },
+              }
             }
           />
         </>

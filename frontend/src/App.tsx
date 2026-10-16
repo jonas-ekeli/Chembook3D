@@ -17,6 +17,7 @@ import {
   type Node,
   type NoteLayout,
   type InspectTarget,
+  type ScanEditorTarget,
   type RemoteServer,
   type RemoteStatus,
   type Settings,
@@ -39,6 +40,8 @@ import { UndoImportDialog } from './components/UndoImportDialog'
 import { BatchImportDialog } from './components/BatchImportDialog'
 import { ImportDialog } from './components/ImportDialog'
 import { InspectWindow } from './components/InspectWindow'
+import { ScanEditor } from './components/ScanEditor'
+import { OpenScanEditor } from './scanEditor'
 import { IrcWindow } from './components/IrcWindow'
 import { RemoteFilesDialog } from './components/RemoteFilesDialog'
 import { Modal } from './components/Modal'
@@ -132,19 +135,24 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-/** The display settings every 3D view, card and steric map reads. */
+/** The display settings every 3D view, card and steric map reads, and what opens the scan
+ * editor from inside a panel (D135). */
 function Displays({
   hydrogens,
   sterics,
+  scanEditor,
   children,
 }: {
   hydrogens: HydrogenMode
   sterics: { colours: StericColours; setColours: (colours: StericColours) => void }
+  scanEditor: (targets: ScanEditorTarget[]) => void
   children: ReactNode
 }) {
   return (
     <HydrogenDisplay value={hydrogens}>
-      <StericColourSetting value={sterics}>{children}</StericColourSetting>
+      <StericColourSetting value={sterics}>
+        <OpenScanEditor.Provider value={scanEditor}>{children}</OpenScanEditor.Provider>
+      </StericColourSetting>
     </HydrogenDisplay>
   )
 }
@@ -210,6 +218,12 @@ function App() {
     if (targets.length === 0) return
     inspectCount.current += 1
     setInspecting({ id: inspectCount.current, targets })
+  }, [])
+  // D135: the files the scan editor opened with; a new list opens a new editor.
+  const [scanEditing, setScanEditing] = useState<{ id: number; targets: ScanEditorTarget[] } | null>(null)
+  const openScanEditor = useCallback((targets: ScanEditorTarget[]) => {
+    inspectCount.current += 1
+    setScanEditing({ id: inspectCount.current, targets })
   }, [])
   // D85: the pinned note being written: an existing one by id, or a new one on a node.
   const [noteEditing, setNoteEditing] = useState<{ noteId: string } | { nodeId: string } | null>(null)
@@ -966,6 +980,10 @@ function App() {
             setImportRequest(null)
             inspect(paths.map((path) => ({ path })))
           }}
+          onScanEditor={(paths) => {
+            setImportRequest(null)
+            openScanEditor(paths.map((path) => ({ path })))
+          }}
         />
       )}
       {remoteFiles && investigation && (
@@ -1002,6 +1020,14 @@ function App() {
           servers={remote?.servers.filter((s) => s.connected) ?? []}
         />
       )}
+      {scanEditing && (
+        <ScanEditor
+          key={scanEditing.id}
+          targets={scanEditing.targets}
+          settings={settings}
+          onClose={() => setScanEditing(null)}
+        />
+      )}
       {inspecting && (
         <InspectWindow
           key={inspecting.id}
@@ -1009,6 +1035,10 @@ function App() {
           settings={settings}
           canImport={Boolean(investigation)}
           onClose={() => setInspecting(null)}
+          onScanEditor={(target) => {
+            setInspecting(null)
+            openScanEditor([target])
+          }}
           onImport={(found) => {
             setInspecting(null)
             setImportRequest({
@@ -1064,6 +1094,12 @@ function App() {
           </button>
           <button onClick={() => setPicker('open')}>Open investigation…</button>
           <button onClick={() => setCloning('address')}>Open from GitHub…</button>
+          <button
+            onClick={() => openScanEditor([])}
+            title="Put several scans together into one path, without an investigation (D135)"
+          >
+            Scan editor
+          </button>
           <span className="spacer" />
           <ShutDownButton />
         </div>
@@ -1276,7 +1312,7 @@ function App() {
   }
 
   return (
-    <Displays hydrogens={settings?.hydrogens ?? 'all'} sterics={stericColours}>
+    <Displays hydrogens={settings?.hydrogens ?? 'all'} sterics={stericColours} scanEditor={openScanEditor}>
       <div className="app">
         <header className="topbar">
           <strong className="brand">Chembook3D</strong>
@@ -1390,6 +1426,12 @@ function App() {
               {hpcLabel(remote.servers)}
             </button>
           )}
+          <button
+            onClick={() => openScanEditor([])}
+            title="Put several scans together into one path, without importing them (D135)"
+          >
+            Scan editor
+          </button>
           <button onClick={() => setShowJobs(true)} title="Calculations handed to Claude Code cloud sessions (D93, D115)">
             Cloud jobs
           </button>
