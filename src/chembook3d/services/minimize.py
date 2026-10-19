@@ -35,6 +35,9 @@ METAL_BOND = 500.0  # kcal/mol/Å², restraint constants
 METAL_ANGLE = 100.0  # kcal/mol/rad²
 METAL_TORSION = 20.0
 HOLD_DISTANCE = 1e4
+CLEAR = {"H": 2.6}  # Å an unbonded atom is kept from a metal with `clear`; 3.0 for the others
+CLEAR_HEAVY = 3.0
+CLEAR_FORCE = 100.0  # kcal/mol/Å²
 HOLD_ANGLE = 1e3
 STEPS = 2000
 ROUNDS = 5  # STEPS each, until converged
@@ -199,6 +202,15 @@ def _hold_metals(ff, structure: Structure, graph: list[set[int]], metals: list[i
                     )
 
 
+def _clear_metals(ff, structure: Structure, graph: list[set[int]], metals: list[int]) -> None:
+    for m in metals:
+        near = graph[m] | {x for lig in graph[m] for x in graph[lig]}
+        for i, element in enumerate(structure.elements):
+            if i != m and i not in near:
+                low = CLEAR.get(element, CLEAR_HEAVY)
+                ff.UFFAddDistanceConstraint(m, i, False, low, 1e3, CLEAR_FORCE)
+
+
 def _holds(ff, structure: Structure, frozen: set[int]) -> None:
     for hold in structure.holds:
         atoms = hold.atoms
@@ -215,9 +227,11 @@ def _holds(ff, structure: Structure, frozen: set[int]) -> None:
             ff.UFFAddTorsionConstraint(*atoms, False, value, value, HOLD_ANGLE)
 
 
-def minimize(structure: Structure, everything: bool = False) -> Minimized:
+def minimize(structure: Structure, everything: bool = False, clear: bool = False) -> Minimized:
     """Minimize the changed atoms and those within NEAR bonds of them (or every atom), keeping
-    frozen atoms where they are and held coordinates at their values."""
+    frozen atoms where they are and held coordinates at their values. With `clear` (a structure
+    just made from a drawing, D142f), atoms not bonded to a metal or to its ligand atoms are
+    pushed off it, as UFF has no metal to push them."""
     count = len(structure.rows)
     if count < 2:
         raise BuildError("There is nothing to minimize")
@@ -245,6 +259,8 @@ def minimize(structure: Structure, everything: bool = False) -> Minimized:
         raise BuildError("UFF could not be set up for this structure")
     ff.Initialize()
     _hold_metals(ff, structure, graph, metals)
+    if clear:
+        _clear_metals(ff, structure, graph, metals)
     _holds(ff, structure, frozen)
     for i in range(count):
         if i not in free:

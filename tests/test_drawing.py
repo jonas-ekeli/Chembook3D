@@ -1,10 +1,11 @@
-"""The Ketcher drawer's Convert to 3D (D142, A87; T-BLD-15…18). Ketcher hands over a MOL file;
+"""The Ketcher drawer's Convert to 3D (D142, A87; T-BLD-15…18, 23). Ketcher hands over a MOL file;
 these are written by RDKit in the same V2000 form, with Ketcher's `M  APO` attachment points."""
 
 import numpy as np
 import pytest
 from rdkit import Chem
-from rdkit.Chem import AllChem
+from rdkit.Chem import AllChem, rdDepictor
+from rdkit.Geometry import Point2D
 
 from chembook3d.services import builder, smiles
 from chembook3d.services.builder import BuildError, Structure
@@ -71,6 +72,75 @@ def test_drawn_metal_bonds_start_at_the_radii_sum():
     for i in bonded:
         expected = builder._bond_length("Ru", s.rows[i][0])
         assert builder.measure(s.coords, [ru, i]) == pytest.approx(expected, abs=0.1)
+
+
+def drawn_at(text: str, places: dict[int, tuple[float, float]]) -> str:
+    """A drawing with some atoms (0-based) put where Ketcher's user drew them."""
+    mol = Chem.MolFromSmiles(text)
+    rdDepictor.Compute2DCoords(mol, coordMap={i: Point2D(*p) for i, p in places.items()})
+    return Chem.MolToV3KMolBlock(mol)
+
+
+@pytest.mark.parametrize(
+    ("text", "places", "trans", "cis"),
+    [
+        # trans-[PdCl2(NH3)2] drawn with the chlorides left and right
+        (
+            "Cl[Pd](Cl)(<-N)<-N",
+            {1: (0, 0), 0: (-1.5, 0), 2: (1.5, 0), 3: (0, 1.5), 4: (0, -1.5)},
+            [(0, 1, 2), (3, 1, 4)],
+            [(0, 1, 3)],
+        ),
+        # cis, each chloride opposite an NH3
+        (
+            "Cl[Pd](Cl)(<-N)<-N",
+            {1: (0, 0), 0: (-1.5, 0), 2: (0, 1.5), 3: (1.5, 0), 4: (0, -1.5)},
+            [(0, 1, 3), (2, 1, 4)],
+            [(0, 1, 2), (3, 1, 4)],
+        ),
+        # a Grubbs I-like Ru: chlorides left and right, phosphines above and below
+        (
+            "Cl[Ru](Cl)(=Cc1ccccc1)(<-P(C)(C)C)<-P(C)(C)C",
+            {1: (0, 0), 0: (-1.5, 0), 2: (1.5, 0), 3: (-0.9, -1.2), 10: (0, 1.5), 14: (0, -1.5)},
+            [(0, 1, 2), (10, 1, 14)],
+            [(0, 1, 3), (3, 1, 10)],
+        ),
+        # a CAAC Hoveyda precatalyst, the ether chelating: chlorides left and right, the CAAC
+        # above and the ether oxygen below it
+        (
+            "CC1(C)CC(C)(C)N(c2c(C(C)C)cccc2C(C)C)C1=[Ru]1(Cl)(Cl)=Cc2ccccc2O1C(C)C",
+            {
+                21: (0, 0),
+                22: (-1.5, 0),
+                23: (1.5, 0),
+                20: (0, 1.5),
+                31: (0.3, -1.5),
+                24: (-1, -1.1),
+            },
+            [(22, 21, 23), (20, 21, 31)],
+            [(20, 21, 22), (24, 21, 22)],
+        ),
+    ],
+)
+def test_drawn_metal_keeps_trans_ligands(text, places, trans, cis):
+    # T-BLD-23 (D142f): ligands drawn on opposite sides of a metal come out trans, the others
+    # cis, and the 3D view finds the bonds that were drawn, no more (no Cl–Cl, nothing extra on
+    # the metal).
+    block = drawn_at(text, places)
+    built = smiles.from_molfile(block)
+    s = Structure(built.rows)
+    for angle in trans:
+        assert builder.measure(s.coords, list(angle)) > 160
+    for angle in cis:
+        assert 75 < builder.measure(s.coords, list(angle)) < 110
+    drawing = Chem.MolFromMolBlock(block)
+    heavy = drawing.GetNumAtoms()
+    graph = builder.neighbours(s)
+    found = {(i, j) for i in range(heavy) for j in graph[i] if i < j < heavy}
+    drawn_bonds = {
+        tuple(sorted((b.GetBeginAtomIdx(), b.GetEndAtomIdx()))) for b in drawing.GetBonds()
+    }
+    assert found == drawn_bonds
 
 
 def test_drawn_fragment_with_attachment_point():
