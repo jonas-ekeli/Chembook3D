@@ -11,6 +11,8 @@ opening files with other programs, app settings and the read-only export. Calcul
 cloud sessions (D93) commit and push only their own job folder. Files on a logged-in SSH server
 are read in the terminal's current directory and below (D124), and new files written there once
 the user allows it in the app (D126); logging in, deleting and running are not offered.
+Structures are built and changed with the Edit structure window's tools as steps (D144), and saved
+with set_coordinates.
 """
 
 from dataclasses import dataclass, field
@@ -352,6 +354,32 @@ TOOLS: list[ToolSpec] = [
         "the end's atom, the bonds that form or break, the fitted RMSD, why the match may be "
         "doubtful, and the end renumbered in the start's order. Changes nothing.",
         help={"pairs": "Pairs fixed by hand, [start atom, end atom], 1-based."},
+    ),
+    T(
+        "build_structure",
+        "read",
+        "POST",
+        "/api/builder/run",
+        "Build or change a structure with the app's Edit structure tools (D144), as a list of "
+        "steps run in order on a node's coordinates, XYZ text, or nothing (a SMILES or a lone "
+        "atom first): set a distance, angle or dihedral, turn about a bond, add or remove a "
+        "bond, change an element, delete, add atoms, fragments, built-in molecules or a SMILES, "
+        "add hydrogens, freeze atoms and hold coordinates, and Minimize (RDKit UFF that keeps "
+        "metals such as Ru in their shape). Atoms are numbered from 1, as in the answer's XYZ. "
+        "Changes nothing: check the answer (its messages, metals, close contacts, electrons), "
+        "then save its xyz with set_coordinates, which makes a derived node when the node has "
+        "calculations. Use this rather than writing new coordinates yourself. To go on from an "
+        "answer, pass its xyz, added_bonds, removed_bonds, changed and holds back.",
+    ),
+    T(
+        "check_structure",
+        "read",
+        "POST",
+        "/api/builder/check",
+        "Check a node's structure or XYZ text (D144): formula, atom count, whether the electron "
+        "count fits the multiplicity, the distances, angles and dihedrals asked for, each "
+        "metal's bonded atoms with distances, and atoms more than two bonds apart closer than "
+        "their covalent radii allow (clashes). Atoms are numbered from 1. Changes nothing.",
     ),
     T(
         "get_irc",
