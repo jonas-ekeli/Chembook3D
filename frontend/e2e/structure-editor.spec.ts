@@ -186,3 +186,43 @@ test('hold, freeze and minimize', async ({ page }) => {
   expect(Math.hypot(...atoms[0].map((v, k) => v - atoms[1][k]))).toBeCloseTo(1.6, 1)
   expect(atoms[2]).toEqual([-0.363, 1.028, 0])
 })
+
+// T-UI-43, D141: a node without coordinates built from SMILES, a SMILES fragment, a lone atom
+// and its hydrogens.
+test('build a structure from nothing and from SMILES', async ({ page }) => {
+  test.slow() // software WebGL is slow on the Windows runners
+  await newInvestigation(page, 'SMILES test')
+  const made = await page.request.post('/api/nodes', { data: { label: 'new', pos_x: 100, pos_y: 100 } })
+  expect(made.ok()).toBeTruthy()
+  await page.reload()
+  await canvasNode(page, 'new').click()
+  await page.getByRole('button', { name: 'Edit in 3D…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Edit structure: “new”' })
+  const summary = dialog.getByLabel('Structure summary')
+  await expect(summary).toHaveText('No atoms · 0 atoms')
+
+  await dialog.getByLabel('SMILES', { exact: true }).fill('CCO')
+  await dialog.getByRole('button', { name: 'Add SMILES' }).click()
+  await expect(summary).toHaveText('C2H6O · 9 atoms')
+  await expect(dialog.getByTestId('viewer3d').locator('canvas')).toBeVisible()
+
+  await pick(dialog, '4')
+  await dialog.getByLabel('Fragment', { exact: true }).selectOption('*')
+  await dialog.getByLabel('Fragment SMILES').fill('*c1ccccc1')
+  await dialog.getByRole('button', { name: 'Replace', exact: true }).click()
+  await expect(dialog.getByLabel('Last change')).toHaveText('H 4 replaced by *c1ccccc1')
+  await expect(summary).toHaveText('C8H10O · 19 atoms')
+
+  await dialog.getByRole('button', { name: 'Clear' }).click()
+  await dialog.getByLabel('Lone atom').fill('N')
+  await dialog.getByRole('button', { name: 'Add atom', exact: true }).click()
+  await expect(dialog.getByLabel('Last change')).toHaveText('Added N as atom 20')
+  await pick(dialog, '20')
+  await dialog.getByRole('button', { name: 'Add hydrogens' }).click()
+  await expect(dialog.getByLabel('Last change')).toHaveText('Added 3 H to atom 20')
+  await expect(summary).toHaveText('C8H13NO · 23 atoms')
+
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect((await nodes(page)).find((n) => n.label === 'new')?.formula).toBe('C8H13NO')
+})
