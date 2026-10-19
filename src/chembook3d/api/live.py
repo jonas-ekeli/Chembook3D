@@ -68,6 +68,7 @@ QUIET = re.compile(
     r"|note-images|source-files/[^/]+/open|claude(/.*)?|remote(/.*)?|presence(/.*)?|shutdown"
     r"|inspections(/.*)?"  # D123c: reading a file, and staging it for the import preview
     r"|scan-editor(/.*)?"  # D135: scans put together without importing anything
+    r"|builder(/.*)?"  # D139: the Edit structure window's tools, nothing stored
     r"|server-files(/.*)?"  # D124, D126: files on a server, not the notebook
     r"|jobs|jobs/(?![^/]+/import-path$).*"  # importing a scan path changes the notebook
     r")$"

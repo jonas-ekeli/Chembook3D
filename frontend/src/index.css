@@ -2903,3 +2903,72 @@ table.scan-path-held input.drive-value {
     grid-template-columns: 1fr;
   }
 }
+
+/* D139: the Edit structure window. */
+.structure-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr);
+  gap: 0.75rem;
+}
+.structure-editor-view .viewer {
+  height: min(60vh, 560px);
+}
+.structure-editor-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.structure-editor-tools .row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+.structure-editor-section {
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.structure-editor-tools input.number {
+  width: 6rem;
+}
+.structure-editor-tools input.element {
+  width: 3.5rem;
+}
+.structure-editor .sides {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.structure-editor .sides legend {
+  padding: 0;
+}
+.structure-editor .sides label {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.35rem;
+}
+.structure-editor .sides input {
+  width: auto;
+  margin: 0;
+}
+.structure-editor .warning {
+  margin: 0;
+  color: #93370d;
+}
+.structure-editor ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+@media (max-width: 760px) {
+  .structure-editor {
+    grid-template-columns: 1fr;
+  }
+}

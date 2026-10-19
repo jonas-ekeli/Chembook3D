@@ -43,6 +43,7 @@ import { InspectWindow } from './components/InspectWindow'
 import { ScanEditor } from './components/ScanEditor'
 import { OpenScanEditor } from './scanEditor'
 import { IrcWindow } from './components/IrcWindow'
+import { StructureEditor } from './components/StructureEditor'
 import { RemoteFilesDialog } from './components/RemoteFilesDialog'
 import { Modal } from './components/Modal'
 import { NodeInspector } from './components/NodeInspector'
@@ -223,6 +224,7 @@ function App() {
   // the window; a new list replaces it.
   const [inspecting, setInspecting] = useState<{ id: number; targets: InspectTarget[] } | null>(null)
   const [ircNode, setIrcNode] = useState<string | null>(null) // D131: the node whose IRC window is open
+  const [editingNode, setEditingNode] = useState<string | null>(null) // D139: the Edit structure window's node
   const inspectCount = useRef(0)
   const inspect = useCallback((targets: InspectTarget[]) => {
     if (targets.length === 0) return
@@ -1035,6 +1037,22 @@ function App() {
           servers={remote?.servers.filter((s) => s.connected) ?? []}
         />
       )}
+      {editingNode && investigation && [...canvas.nodes, ...canvas.species].some((n) => n.id === editingNode) && (
+        <StructureEditor
+          key={editingNode}
+          node={[...canvas.nodes, ...canvas.species].find((n) => n.id === editingNode)!}
+          nodes={[...canvas.nodes, ...canvas.species]}
+          onClose={() => setEditingNode(null)}
+          onSaved={(saved, derived) => {
+            const original = [...canvas.nodes, ...canvas.species].find((n) => n.id === editingNode)
+            setEditingNode(null)
+            changed(
+              saved,
+              derived ? `Saved as a new node derived from “${original?.label || 'Untitled node'}”.` : 'Structure saved.',
+            )
+          }}
+        />
+      )}
       {scanEditing && (
         <ScanEditor
           key={scanEditing.id}
@@ -1264,6 +1282,7 @@ function App() {
         settings={settings}
         servers={remote?.enabled ? remote.servers.filter((s) => s.connected) : []}
         onIrc={() => setIrcNode(selectedNode.id)}
+        onEditStructure={() => setEditingNode(selectedNode.id)}
       />
     )
   } else if (selectedGroup) {

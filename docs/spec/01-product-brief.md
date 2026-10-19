@@ -81,7 +81,7 @@ In scope:
 |---|---|
 | X1 | No launching, queueing or monitoring of calculations on this computer. Calculations Claude sets up may be handed to the user's Claude Code cloud sessions (D93). |
 | X2 | No multi-user collaboration. Syncing one person's investigations between their own computers through a private Git repository is in scope (D71). |
-| X3 | No geometry editing in the 3D viewer (text editing of coordinates is in scope). |
+| X3 | No geometry editing in the 3D viewer (text editing of coordinates is in scope, and so is the separate Edit structure window, D139). |
 | X4 | No internet hosting, login or access control. |
 | X5 | The app never chooses a pathway, representative or branch on the user's behalf from energies. |
 | X6 | The app does not claim scientific correctness. Parsing and validation warnings report what the files say, not whether the chemistry is right. |

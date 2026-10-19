@@ -49,7 +49,10 @@ function hideHydrogens(model: import('3dmol').GLModel, xyz: string, mode: Hydrog
  * texts with the same atoms), showing the one at `index`; measuring follows that structure.
  * `below` is drawn under the view, inside the pop-out with it (the movie's controls).
  *
- * `marks` (D113) labels atoms and draws dashed lines between them, as the atom match does. */
+ * `marks` (D113) labels atoms and draws dashed lines between them, as the atom match does.
+ *
+ * With `keepView` (D139, the structure editor), a changed structure keeps the user's view and
+ * turning instead of being zoomed to and turned to its default orientation. */
 export function Viewer3D({
   models,
   vibration = null,
@@ -61,6 +64,7 @@ export function Viewer3D({
   trajectory = null,
   below,
   marks,
+  keepView = false,
 }: {
   models: ViewerModel[]
   vibration?: { xyz: string; amplitude?: number } | null
@@ -72,6 +76,7 @@ export function Viewer3D({
   trajectory?: { frames: string[]; index: number } | null
   below?: ReactNode
   marks?: AtomMarks
+  keepView?: boolean
 }) {
   const hydrogens = useContext(HydrogenDisplay)
   const host = useRef<HTMLDivElement>(null)
@@ -95,7 +100,7 @@ export function Viewer3D({
   const empty = models.length === 0
   // The orientation to show: applied when the structure or the saved orientation changes,
   // not when a vibration starts or stops, so the user's own turning is kept then.
-  const orientation = rotation ? rotation.join(',') : `default:${models[0]?.xyz ?? ''}`
+  const orientation = rotation ? rotation.join(',') : keepView ? 'default' : `default:${models[0]?.xyz ?? ''}`
   const applied = useRef<string | null>(null)
 
   // Models: rebuilt only when the structures or the vibration change.
@@ -111,7 +116,8 @@ export function Viewer3D({
         const v = viewer.current
         // Showing or hiding a structure, or starting or stopping a movie of it (D101), keeps
         // the user's view; new structures are zoomed to.
-        const kept = !vibration && built.current === structures ? v.getView() : null
+        const kept =
+          !vibration && (built.current === structures || (keepView && built.current !== null)) ? v.getView() : null
         built.current = vibration ? null : structures
         click.current = (atom: { serial?: number; index?: number }) => {
           const index = atom.serial ?? atom.index
