@@ -169,6 +169,8 @@ class NodeIn(BaseModel):
 
 class GeometryIn(BaseModel):
     xyz: str
+    # D139: save as a new node derived from this one even when it has no calculations.
+    new_node: bool = False
 
 
 class GeometryOut(BaseModel):
@@ -758,7 +760,7 @@ def update_node(node_id: str, body: NodeIn, session: DbSession):
 def set_geometry(node_id: str, body: GeometryIn, session: DbSession):
     _get_node(session, node_id)
     try:
-        result = node_service.set_geometry(session, node_id, body.xyz)
+        result = node_service.set_geometry(session, node_id, body.xyz, new_node=body.new_node)
     except xyz.XyzParseError as exc:
         raise _xyz_error(exc) from exc
     except node_service.NodeError as exc:

@@ -215,15 +215,20 @@ class GeometryResult:
     derived: bool  # True when a new node was created (ID-5)
 
 
-def set_geometry(session: Session, node_id: str, xyz_text: str) -> GeometryResult:
+def set_geometry(
+    session: Session, node_id: str, xyz_text: str, new_node: bool = False
+) -> GeometryResult:
     """Save edited coordinates. Invalid text raises xyz.XyzParseError and changes nothing.
-    Empty text removes the coordinates of a node with no calculations (D90)."""
+    Empty text removes the coordinates of a node with no calculations (D90). With `new_node`
+    (D139), the coordinates always become a new node derived from this one."""
     node = get(session, node_id)
     if not xyz_text.strip():
+        if new_node:
+            raise NodeError("A new node needs coordinates")
         return GeometryResult(clear_geometry(session, node), derived=False)
     geometry = _geometry_from_atoms(xyz.parse_xyz(xyz_text))
 
-    if calculation_count(session, node.id) == 0:  # ID-4: edit in place
+    if not new_node and calculation_count(session, node.id) == 0:  # ID-4: edit in place
         if node.geometry != geometry:
             history.record(session, "node", node.id, "update", "geometry", node.geometry, geometry)
             node.geometry = geometry

@@ -135,6 +135,7 @@ export function NodeInspector({
   settings,
   servers = [],
   onIrc,
+  onEditStructure,
 }: {
   node: Node
   canvas: Canvas
@@ -158,6 +159,8 @@ export function NodeInspector({
   servers?: RemoteServer[]
   /** D131: open the node's IRC window. */
   onIrc?: () => void
+  /** D139: open the Edit structure window. */
+  onEditStructure?: () => void
 }) {
   const nodes = [...canvas.nodes, ...canvas.species]
   // D69: a free species has no step, branch, group or edges; transitions list it instead.
@@ -476,6 +479,7 @@ export function NodeInspector({
             key={node.xyz ?? ''}
             node={node}
             servers={servers}
+            onEdit={onEditStructure}
             onSaved={(saved, derived) =>
               onChanged(saved, derived ? `Saved as a new node derived from “${name(node)}”.` : undefined)
             }

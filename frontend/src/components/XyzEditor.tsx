@@ -7,15 +7,19 @@ import { Modal } from './Modal'
  * Saving empty text removes the coordinates, only while there are no calculations (D90).
  * Copy and Save .xyz give the stored coordinates (FR-3D-06). Remount with a new key when the
  * stored coordinates change. "Send to <server>" writes the same file into the directory a
- * logged-in server's terminal is in, asking before it replaces one (D122f). */
+ * logged-in server's terminal is in, asking before it replaces one (D122f). "Edit in 3D…" opens
+ * the Edit structure window (D139). */
 export function XyzEditor({
   node,
   servers = [],
+  onEdit,
   onSaved,
 }: {
   node: Node
   /** Servers logged in to, each with a terminal (D122). */
   servers?: RemoteServer[]
+  /** D139: open the Edit structure window. */
+  onEdit?: () => void
   onSaved: (node: Node, derived: boolean) => void
 }) {
   const stored = node.xyz ?? ''
@@ -70,6 +74,11 @@ export function XyzEditor({
       <div className="section-head">
         <h3>Coordinates (xyz, Å)</h3>
         <div className="buttons">
+          {onEdit && (
+            <button onClick={onEdit} title="Change the structure atom by atom in a 3D window">
+              Edit in 3D…
+            </button>
+          )}
           <button onClick={copy} disabled={!node.xyz}>
             Copy
           </button>

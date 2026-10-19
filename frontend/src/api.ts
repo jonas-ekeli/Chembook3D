@@ -1914,8 +1914,14 @@ export const api = {
   createNode: (fields: NodeFields & { kind?: NodeKind; xyz?: string; pos_x?: number; pos_y?: number }) =>
     request<Node>('POST', '/nodes', fields),
   updateNode: (id: string, fields: NodeFields) => request<Node>('PATCH', `/nodes/${id}`, fields),
-  setGeometry: (id: string, xyz: string) =>
-    request<{ node: Node; derived: boolean }>('PUT', `/nodes/${id}/geometry`, { xyz }),
+  /** D139: `newNode` saves as a new node derived from this one even without calculations. */
+  setGeometry: (id: string, xyz: string, newNode = false) =>
+    request<{ node: Node; derived: boolean }>('PUT', `/nodes/${id}/geometry`, newNode ? { xyz, new_node: true } : { xyz }),
+  builderParts: () => request<BuilderParts>('GET', '/builder/parts'),
+  builderDescribe: (structure: BuilderStructure, picks: number[], charge: number | null, multiplicity: number | null) =>
+    request<BuilderDescription>('POST', '/builder/describe', { ...structure, picks, charge, multiplicity }),
+  builderEdit: (structure: BuilderStructure, picks: number[], tool: BuilderTool, options: BuilderOptions = {}) =>
+    request<BuilderEdited>('POST', '/builder/edit', { ...structure, picks, tool, ...options }),
   deletePreview: (id: string) => request<NodeDeletePreview>('GET', `/nodes/${id}/delete-preview`),
   deleteNode: (id: string) => request<unknown>('DELETE', `/nodes/${id}`),
   xyzDownloadUrl: (id: string) => `/api/nodes/${id}/xyz`,
@@ -2209,6 +2215,55 @@ export function energyTypeName(
   if (temperature === undefined) return molar ? 'G_qh (1 M)' : 'G_qh'
   return `G_qh (${temperature} K, ${cutoff} cm⁻¹${molar ? ', 1 M' : ''})`
 }
+
+/** D139: the structure the Edit structure window holds: its atoms and the bonds the user added
+ * or removed (atom pairs from 0), which decide which atoms move together. */
+export type BuilderStructure = {
+  rows: GeometryRows
+  added: [number, number][]
+  removed: [number, number][]
+}
+
+export type BuilderTool =
+  | 'distance'
+  | 'angle'
+  | 'dihedral'
+  | 'rotate'
+  | 'bond'
+  | 'element'
+  | 'delete'
+  | 'add_atom'
+  | 'fragment'
+  | 'molecule'
+
+export type BuilderOptions = {
+  value?: number
+  /** The end atom whose side moves; left out: the smaller side. */
+  move?: number | null
+  element?: string
+  name?: string
+  atoms?: GeometryRows
+  what?: string
+  present?: boolean
+  with_hydrogens?: boolean
+}
+
+export type BuilderParts = { fragments: string[]; molecules: string[] }
+
+export type BuilderDescription = {
+  formula: string
+  atom_count: number
+  kind: 'distance' | 'angle' | 'dihedral' | null
+  value: number | null
+  bonded: boolean | null
+  /** Each end's side: how many atoms move with it, and whether it is the whole side (false:
+   * the sides are joined, so only the end atom and the atoms bonded to it alone move). */
+  sides: { atom: number; count: number; whole: boolean }[]
+  default_side: number | null
+  electrons_note: string | null
+}
+
+export type BuilderEdited = BuilderStructure & { picks: number[]; message: string }
 
 /** Geometry as stored in history entries: [[element, x, y, z], ...]. */
 export type GeometryRows = [string, number, number, number][]

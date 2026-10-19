@@ -12,6 +12,7 @@ from starlette.types import Scope
 
 from chembook3d import __version__, cloud_jobs
 from chembook3d.api.batch_imports import router as batch_router
+from chembook3d.api.builder import router as builder_router
 from chembook3d.api.claude import Panel
 from chembook3d.api.claude import router as claude_router
 from chembook3d.api.energies import router as energy_router
@@ -137,6 +138,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(remote_router)  # D122
     app.include_router(inspect_router)  # D123c
     app.include_router(scan_editor_router)  # D135
+    app.include_router(builder_router)  # D139
     app.include_router(server_files_router)  # D124
     app.include_router(job_router)
     app.include_router(scan_path_router)  # D114
