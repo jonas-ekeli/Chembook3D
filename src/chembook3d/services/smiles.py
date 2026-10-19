@@ -101,8 +101,7 @@ def _built(mol: Chem.Mol, dummies: list[int]) -> Built:
         params.useRandomCoords = True
         if rdDistGeom.EmbedMolecule(mol, params) != 0:
             raise BuildError(
-                "RDKit could not make 3D coordinates for this; build it in parts and bond them "
-                "here"
+                "RDKit could not make 3D coordinates for this; build it in parts and bond them here"
             )
     if rdForceFieldHelpers.MMFFHasAllMoleculeParams(mol):
         rdForceFieldHelpers.MMFFOptimizeMolecule(mol, maxIters=STEPS)
