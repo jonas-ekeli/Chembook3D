@@ -137,3 +137,52 @@ test('edit a structure in 3D, undo, add a node beside it and save', async ({ pag
   await expect(page.getByRole('dialog')).toHaveCount(0)
   expect((await nodes(page)).find((n) => n.label === 'ethane')?.formula).toBe('C3H10O')
 })
+
+// T-UI-42, D140: freeze an atom, hold a distance, change the held value and minimize.
+test('hold, freeze and minimize', async ({ page }) => {
+  test.slow() // software WebGL is slow on the Windows runners
+  await newInvestigation(page, 'Minimize test')
+  const made = await page.request.post('/api/nodes', {
+    data: { label: 'ethane', xyz: ETHANE, charge: 0, multiplicity: 1, pos_x: 100, pos_y: 100 },
+  })
+  expect(made.ok()).toBeTruthy()
+  await page.reload()
+  await canvasNode(page, 'ethane').click()
+  await page.getByRole('button', { name: 'Edit in 3D…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Edit structure: “ethane”' })
+  await expect(dialog.getByTestId('viewer3d').locator('canvas')).toBeVisible()
+  const moves = dialog.getByRole('group', { name: 'What Minimize moves' })
+  await expect(moves.getByLabel('Everything')).toBeChecked()
+
+  // A hydrogen frozen; the C–C distance stretched, then held at 1.6 Å in the list.
+  await pick(dialog, '3')
+  await dialog.getByRole('button', { name: 'Freeze', exact: true }).click()
+  const held = dialog.getByRole('list', { name: 'Held' })
+  await expect(held).toContainText('H3 frozen')
+  await pick(dialog, '1 2')
+  await dialog.getByLabel('New distance').fill('1.75')
+  await dialog.getByRole('button', { name: 'Hold', exact: true }).click()
+  await expect(dialog.getByLabel('Last change')).toHaveText('Distance 1–2 held at 1.750 Å')
+  await dialog.getByLabel('New distance').fill('1.75')
+  await dialog.getByRole('button', { name: 'Set', exact: true }).click()
+  await expect(dialog.getByLabel('Picked', { exact: true })).toHaveText('C1–C2: 1.750 Å')
+  await expect(moves.getByText('The 4 changed atoms and two bonds round them')).toBeChecked()
+  await held.getByLabel('Held distance C1–C2').fill('1.6')
+  await held.getByLabel('Held distance C1–C2').press('Enter')
+  await expect(dialog.getByLabel('Last change')).toHaveText('Distance 1–2 held at 1.600 Å')
+
+  await dialog.getByRole('button', { name: 'Minimize', exact: true }).click()
+  await expect(dialog.getByLabel('Last change')).toContainText('Minimized 7 atoms with UFF')
+  await expect(dialog.getByLabel('Picked', { exact: true })).toHaveText(/^C1–C2: 1\.(59|60|61)\d Å$/)
+  await dialog.getByRole('button', { name: 'Undo' }).click()
+  await expect(dialog.getByLabel('Picked', { exact: true })).toHaveText('C1–C2: 1.750 Å')
+  await dialog.getByRole('button', { name: 'Redo' }).click()
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+
+  const saved = (await nodes(page)).find((n) => n.label === 'ethane')!
+  const xyz = ((await (await page.request.get(`/api/nodes/${saved.id}`)).json()) as { xyz: string }).xyz
+  const atoms = xyz.trim().split('\n').slice(2).map((line) => line.trim().split(/\s+/).slice(1).map(Number))
+  expect(Math.hypot(...atoms[0].map((v, k) => v - atoms[1][k]))).toBeCloseTo(1.6, 1)
+  expect(atoms[2]).toEqual([-0.363, 1.028, 0])
+})

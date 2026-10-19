@@ -1,7 +1,8 @@
-"""HTTP API of the "Edit structure" window (D139). The window keeps the structure being edited
-and its undo history; each tool here takes that structure and gives back the changed one, so
-nothing is stored until the window saves through `PUT /api/nodes/{id}/geometry`. Page only
-(not MCP tools) and quiet for the change counter. All rules are in `services/builder.py`."""
+"""HTTP API of the "Edit structure" window (D139) and its Minimize (D140). The window keeps the
+structure being edited and its undo history; each tool here takes that structure and gives back
+the changed one, so nothing is stored until the window saves through
+`PUT /api/nodes/{id}/geometry`. Page only (not MCP tools) and quiet for the change counter. All
+rules are in `services/builder.py` and `services/minimize.py`."""
 
 import math
 from typing import Any, Literal
@@ -10,17 +11,24 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from chembook3d import xyz
-from chembook3d.services import builder
+from chembook3d.services import builder, minimize
 
 router = APIRouter(prefix="/api/builder")
 
 MAX_ATOMS = 5000
 
 
+class HoldIO(BaseModel):
+    atoms: list[int]  # 0-based; one atom is frozen, 2 to 4 hold a distance, angle or dihedral
+    value: float | None = None
+
+
 class StructureIn(BaseModel):
     rows: list[list[Any]] = Field(default_factory=list)  # [[element, x, y, z], ...]
     added: list[tuple[int, int]] = Field(default_factory=list)
     removed: list[tuple[int, int]] = Field(default_factory=list)
+    changed: list[int] = Field(default_factory=list)  # D140: atoms changed in the window
+    holds: list[HoldIO] = Field(default_factory=list)  # D140: what Minimize keeps
     picks: list[int] = Field(default_factory=list)  # 0-based
 
 
@@ -58,6 +66,11 @@ class EditIn(StructureIn):
         "add_atom",
         "fragment",
         "molecule",
+        "freeze",
+        "unfreeze",
+        "hold",
+        "release",
+        "minimize",
     ]
     value: float | None = None  # distance (Å), angle, dihedral or turn (degrees)
     move: int | None = None  # the end atom whose side moves; None: the default side
@@ -67,12 +80,18 @@ class EditIn(StructureIn):
     what: str | None = None  # how the message names those atoms
     present: bool = True  # bond: add (True) or remove
     with_hydrogens: bool = False  # delete: also the H atoms bonded only to the picked ones
+    index: int | None = None  # release: which hold
+    everything: bool = (
+        False  # minimize: every atom, not only the changed ones and their surroundings
+    )
 
 
 class EditOut(BaseModel):
     rows: list[list[Any]]
     added: list[tuple[int, int]]
     removed: list[tuple[int, int]]
+    changed: list[int]
+    holds: list[HoldIO]
     picks: list[int]
     message: str
 
@@ -104,9 +123,25 @@ def _structure(body: StructureIn) -> builder.Structure:
     for pair in [*body.added, *body.removed]:
         if not all(0 <= i < count for i in pair) or pair[0] == pair[1]:
             raise HTTPException(422, "A changed bond names an atom that is not there")
-    if any(not 0 <= i < count for i in body.picks):
-        raise HTTPException(422, "A picked atom is not there")
-    return builder.Structure(rows, [tuple(p) for p in body.added], [tuple(p) for p in body.removed])
+    if any(not 0 <= i < count for i in [*body.picks, *body.changed]):
+        raise HTTPException(422, "A picked or changed atom is not there")
+    holds = []
+    for hold in body.holds:
+        atoms = hold.atoms
+        if not 1 <= len(atoms) <= 4 or len(set(atoms)) != len(atoms):
+            raise HTTPException(422, "A hold names 1 to 4 different atoms")
+        if any(not 0 <= i < count for i in atoms):
+            raise HTTPException(422, "A hold names an atom that is not there")
+        if len(atoms) > 1 and (hold.value is None or not math.isfinite(hold.value)):
+            raise HTTPException(422, "A held distance, angle or dihedral needs its value")
+        holds.append(builder.Hold(list(atoms), hold.value if len(atoms) > 1 else None))
+    return builder.Structure(
+        rows,
+        [tuple(p) for p in body.added],
+        [tuple(p) for p in body.removed],
+        sorted(set(body.changed)),
+        holds,
+    )
 
 
 @router.get("/parts", response_model=PartsOut)
@@ -166,6 +201,17 @@ def edit(body: EditIn):
             done = builder.delete(structure, picks, body.with_hydrogens)
         elif body.tool == "add_atom":
             done = builder.add_atom(structure, picks, body.element or "H")
+        elif body.tool in ("freeze", "unfreeze"):
+            done = builder.freeze(structure, picks, body.tool == "freeze")
+        elif body.tool == "hold":
+            value = body.value
+            if value is not None and not math.isfinite(value):
+                raise HTTPException(422, "Give a value")
+            done = builder.hold(structure, picks, value)
+        elif body.tool == "release":
+            done = builder.release(structure, -1 if body.index is None else body.index)
+        elif body.tool == "minimize":
+            done = minimize.run(structure, body.everything)
         elif body.tool == "fragment":
             done = builder.replace_with_fragment(structure, picks, body.name or "")
         else:
@@ -183,6 +229,8 @@ def edit(body: EditIn):
         rows=result.rows,
         added=result.added,
         removed=result.removed,
+        changed=result.changed,
+        holds=[HoldIO(atoms=h.atoms, value=h.value) for h in result.holds],
         picks=done.picks,
         message=done.message,
     )
