@@ -1,8 +1,9 @@
-"""HTTP API of the "Edit structure" window (D139), its Minimize (D140) and SMILES (D141). The
-window keeps the structure being edited and its undo history; each tool here takes that
-structure and gives back the changed one, so nothing is stored until the window saves through
-`PUT /api/nodes/{id}/geometry`. Page only (not MCP tools) and quiet for the change counter. All
-rules are in `services/builder.py`, `services/minimize.py` and `services/smiles.py`."""
+"""HTTP API of the "Edit structure" window (D139), its Minimize (D140), SMILES (D141) and the
+Ketcher drawer's Convert to 3D (D142). The window keeps the structure being edited and its undo
+history; each tool here takes that structure and gives back the changed one, so nothing is
+stored until the window saves through `PUT /api/nodes/{id}/geometry`. Page only (not MCP tools)
+and quiet for the change counter. All rules are in `services/builder.py`, `services/minimize.py`
+and `services/smiles.py`."""
 
 import math
 from typing import Any, Literal
@@ -73,6 +74,7 @@ class EditIn(StructureIn):
         "minimize",
         "smiles",
         "hydrogens",
+        "drawing",
     ]
     value: float | None = None  # distance (Å), angle, dihedral or turn (degrees)
     move: int | None = None  # the end atom whose side moves; None: the default side
@@ -84,6 +86,7 @@ class EditIn(StructureIn):
     with_hydrogens: bool = False  # delete: also the H atoms bonded only to the picked ones
     index: int | None = None  # release: which hold
     smiles: str | None = None  # smiles, or a fragment's with one * where it attaches (D141)
+    molfile: str | None = None  # drawing: Ketcher's MOL file (D142)
     bonds: int | None = None  # hydrogens: until each picked atom has this many bonds
     everything: bool = False  # minimize: every atom, not only round the changed ones
 
@@ -182,6 +185,13 @@ def _value(body: EditIn) -> float:
     return body.value
 
 
+def _metal_note(done: builder.Edited, built: smiles.Built) -> None:
+    if built.metals:
+        done.message += (
+            "; the shape round the metal is a rough guess: set its bonds and angles, then Minimize"
+        )
+
+
 @router.post("/edit", response_model=EditOut)
 def edit(body: EditIn):
     structure = _structure(body)
@@ -224,11 +234,21 @@ def edit(body: EditIn):
             text = (body.smiles or "").strip()
             built = smiles.build(text)
             done = builder.add_molecule(structure, picks, built.rows, f"“{text}”")
-            if built.metals:
-                done.message += (
-                    "; the shape round the metal is a rough guess: set its bonds and angles, "
-                    "then Minimize"
+            _metal_note(done, built)
+        elif body.tool == "drawing":
+            built = smiles.from_molfile(body.molfile or "")
+            if built.attach is None:
+                done = builder.add_molecule(structure, picks, built.rows, "the drawing")
+            elif len(picks) != 1:
+                raise builder.BuildError(
+                    "The drawing has an attachment point: pick the atom it replaces (an H)"
                 )
+            else:
+                fragment = smiles.as_fragment(built)
+                done = builder.replace_with_fragment(
+                    structure, picks, "the drawn fragment", fragment
+                )
+            _metal_note(done, built)
         elif body.tool == "hydrogens":
             done = builder.add_hydrogens(structure, picks, body.bonds)
         else:

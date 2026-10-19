@@ -2248,6 +2248,7 @@ export type BuilderTool =
   | 'minimize'
   | 'smiles'
   | 'hydrogens'
+  | 'drawing'
 
 export type BuilderOptions = {
   value?: number
@@ -2265,6 +2266,8 @@ export type BuilderOptions = {
   everything?: boolean
   /** smiles, or fragment: a SMILES with one * where it attaches (D141). */
   smiles?: string
+  /** drawing: Ketcher's MOL file; with an attachment point it is a fragment (D142). */
+  molfile?: string
   /** hydrogens: until each picked atom has this many bonds; left out: its usual number. */
   bonds?: number
 }

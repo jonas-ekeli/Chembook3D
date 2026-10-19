@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
   api,
   ApiError,
@@ -16,6 +16,9 @@ import { parseXyz } from '../chem'
 import { HydrogenDisplay } from '../display'
 import { Modal } from './Modal'
 import { Viewer3D, type AtomMarks } from './Viewer3D'
+
+// D142: Ketcher is large, so it is loaded only when Draw… is first opened.
+const KetcherDrawer = lazy(() => import('./KetcherDrawer'))
 
 const ADDED_BOND = '#2f9e44'
 const REMOVED_BOND = '#e03131'
@@ -89,6 +92,8 @@ export function StructureEditor({
   const [busy, setBusy] = useState(false)
   const [closing, setClosing] = useState(false)
   const [everything, setEverything] = useState(false)
+  const [drawing, setDrawing] = useState(false)
+  const [drawn, setDrawn] = useState<string | null>(null)
 
   const changed = past.length > 0
   const count = structure.rows.length
@@ -126,7 +131,7 @@ export function StructureEditor({
     else pick(picks.length >= 4 ? [index] : [...picks, index])
   }
 
-  const run = async (tool: BuilderTool, options: BuilderOptions = {}, on: number[] = picks) => {
+  const run = async (tool: BuilderTool, options: BuilderOptions = {}, on: number[] = picks): Promise<boolean> => {
     setBusy(true)
     setError(null)
     try {
@@ -138,8 +143,10 @@ export function StructureEditor({
       // Minimize and the list of holds leave the picked atoms as they were.
       if (tool !== 'minimize' && on === picks) pick(result.picks)
       setMessage(result.message)
+      return true
     } catch (err) {
       setError(errorText(err))
+      return false
     } finally {
       setBusy(false)
     }
@@ -208,7 +215,7 @@ export function StructureEditor({
   return (
     <Modal
       title={`Edit structure: “${node.label || 'Untitled node'}”`}
-      onClose={close}
+      onClose={drawing ? () => undefined : close}
       wide
       actions={
         <>
@@ -467,6 +474,20 @@ export function StructureEditor({
                   Add SMILES
                 </button>
               </div>
+              <div className="row">
+                <span className="small">Drawn in 2D</span>
+                <button
+                  className="small"
+                  disabled={busy}
+                  onClick={() => {
+                    setError(null)
+                    setDrawing(true)
+                  }}
+                  title="Draw a molecule, or a fragment with an attachment point, and convert it to 3D"
+                >
+                  Draw…
+                </button>
+              </div>
               {picks.length === 0 && (
                 <div className="row">
                   <span className="small">A lone atom</span>
@@ -563,6 +584,34 @@ export function StructureEditor({
           )}
         </div>
       </div>
+      {drawing && (
+        <Suspense
+          fallback={
+            <div className="ketcher-drawer" role="status">
+              Loading the drawer…
+            </div>
+          }
+        >
+          <KetcherDrawer
+            start={drawn}
+            action={
+              picks.length === 1
+                ? `Adds the drawing beside ${name(picks[0])}, or with an attachment point in place of ${name(picks[0])}`
+                : 'Adds the drawing to the structure'
+            }
+            busy={busy}
+            error={error}
+            onConvert={(d) => {
+              setDrawn(d.ket)
+              void run('drawing', { molfile: d.molfile }).then((done) => done && setDrawing(false))
+            }}
+            onClose={(ket) => {
+              if (ket !== null) setDrawn(ket)
+              setDrawing(false)
+            }}
+          />
+        </Suspense>
+      )}
       {closing && (
         <Modal
           title="Close without saving?"

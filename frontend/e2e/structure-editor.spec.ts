@@ -226,3 +226,71 @@ test('build a structure from nothing and from SMILES', async ({ page }) => {
   await expect(dialog).toHaveCount(0)
   expect((await nodes(page)).find((n) => n.label === 'new')?.formula).toBe('C8H13NO')
 })
+
+// T-UI-44, D142: draw in Ketcher, convert to 3D as a molecule and as a fragment with an
+// attachment point; the drawing is kept for the next Draw….
+const CF3 = `
+  Ketcher
+
+  4  3  0  0  0  0  0  0  0  0999 V2000
+    0.0000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+    0.8660    0.5000    0.0000 F   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.8660    0.5000    0.0000 F   0  0  0  0  0  0  0  0  0  0  0  0
+    0.0000   -1.0000    0.0000 F   0  0  0  0  0  0  0  0  0  0  0  0
+  1  2  1  0     0  0
+  1  3  1  0     0  0
+  1  4  1  0     0  0
+M  APO  1   1   1
+M  END
+`
+
+// The drawer puts Ketcher's instance on the window, as Ketcher's own examples do.
+declare global {
+  interface Window {
+    ketcher?: { getSmiles(): Promise<string>; setMolecule(structure: string): Promise<void> }
+  }
+}
+
+async function drawer(page: Page): Promise<Locator> {
+  const drawn = page.getByRole('dialog', { name: 'Draw', exact: true })
+  await expect(drawn.getByRole('button', { name: 'Convert to 3D' })).toBeEnabled({ timeout: 60_000 })
+  return drawn
+}
+
+test('draw in Ketcher and convert to 3D', async ({ page }) => {
+  test.slow() // Ketcher and its WebAssembly load on first use
+  await newInvestigation(page, 'Drawing test')
+  const made = await page.request.post('/api/nodes', { data: { label: 'drawn', pos_x: 100, pos_y: 100 } })
+  expect(made.ok()).toBeTruthy()
+  await page.reload()
+  await canvasNode(page, 'drawn').click()
+  await page.getByRole('button', { name: 'Edit in 3D…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Edit structure: “drawn”' })
+  const summary = dialog.getByLabel('Structure summary')
+
+  await dialog.getByRole('button', { name: 'Draw…' }).click()
+  let drawn = await drawer(page)
+  // Ketcher's own toolbar: benzene from the templates, put on the canvas.
+  await drawn.getByTestId('template-0').click()
+  await drawn.locator('.ketcher-drawer-editor').click({ position: { x: 600, y: 400 } })
+  await expect.poll(() => page.evaluate(() => window.ketcher?.getSmiles())).toBe('C1C=CC=CC=1')
+  await drawn.getByRole('button', { name: 'Convert to 3D' }).click()
+  await expect(drawn).toHaveCount(0)
+  await expect(dialog.getByLabel('Last change')).toHaveText('Added the drawing as atoms 1–12')
+  await expect(summary).toHaveText('C6H6 · 12 atoms')
+
+  // The drawing is still there; a fragment drawn with an attachment point replaces H 7.
+  await pick(dialog, '7')
+  await dialog.getByRole('button', { name: 'Draw…' }).click()
+  drawn = await drawer(page)
+  await expect.poll(() => page.evaluate(() => window.ketcher?.getSmiles())).toBe('C1C=CC=CC=1')
+  await page.evaluate((molfile) => window.ketcher?.setMolecule(molfile), CF3)
+  await drawn.getByRole('button', { name: 'Convert to 3D' }).click()
+  await expect(drawn).toHaveCount(0)
+  await expect(dialog.getByLabel('Last change')).toHaveText('H 7 replaced by the drawn fragment')
+  await expect(summary).toHaveText('C7H5F3 · 15 atoms')
+
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect((await nodes(page)).find((n) => n.label === 'drawn')?.formula).toBe('C7H5F3')
+})

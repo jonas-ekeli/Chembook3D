@@ -2904,6 +2904,42 @@ table.scan-path-held input.drive-value {
   }
 }
 
+/* D142: the Ketcher drawer over the Edit structure window. Ketcher keeps its own styles. */
+.ketcher-drawer {
+  position: fixed;
+  inset: 2vh 2vw;
+  z-index: 20;
+  background: var(--panel);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgb(16 24 40 / 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+.ketcher-drawer-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.ketcher-drawer-head h2 {
+  margin: 0;
+}
+.ketcher-drawer-editor {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  /* Ketcher draws on white whatever the app's theme. */
+  background: #fff;
+  color: #333;
+}
+.ketcher-drawer-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 /* D139: the Edit structure window. */
 .structure-editor {
   display: grid;
