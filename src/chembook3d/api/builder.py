@@ -1,9 +1,9 @@
 """HTTP API of the "Edit structure" window (D139), its Minimize (D140), SMILES (D141) and the
-Ketcher drawer's Convert to 3D (D142). The window keeps the structure being edited and its undo
-history; each tool here takes that structure and gives back the changed one, so nothing is
-stored until the window saves through `PUT /api/nodes/{id}/geometry`. Page only (not MCP tools)
-and quiet for the change counter. All rules are in `services/builder.py`, `services/minimize.py`
-and `services/smiles.py`."""
+Ketcher drawer (D142, D143). The window keeps the structure being edited and its undo history;
+each tool here takes that structure and gives back the changed one, so nothing is stored until
+the window saves through `PUT /api/nodes/{id}/geometry`. Page only (not MCP tools) and quiet for
+the change counter. All rules are in `services/builder.py`, `services/minimize.py`,
+`services/smiles.py` and `services/redraw.py`."""
 
 import math
 from typing import Any, Literal
@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from chembook3d import xyz
-from chembook3d.services import builder, minimize, smiles
+from chembook3d.services import builder, minimize, redraw, smiles
 
 router = APIRouter(prefix="/api/builder")
 
@@ -75,6 +75,7 @@ class EditIn(StructureIn):
         "smiles",
         "hydrogens",
         "drawing",
+        "redraw",
     ]
     value: float | None = None  # distance (Å), angle, dihedral or turn (degrees)
     move: int | None = None  # the end atom whose side moves; None: the default side
@@ -86,7 +87,7 @@ class EditIn(StructureIn):
     with_hydrogens: bool = False  # delete: also the H atoms bonded only to the picked ones
     index: int | None = None  # release: which hold
     smiles: str | None = None  # smiles, or a fragment's with one * where it attaches (D141)
-    molfile: str | None = None  # drawing: Ketcher's MOL file (D142)
+    molfile: str | None = None  # drawing, redraw: Ketcher's MOL file (D142, D143)
     bonds: int | None = None  # hydrogens: until each picked atom has this many bonds
     everything: bool = False  # minimize: every atom, not only round the changed ones
 
@@ -152,6 +153,19 @@ def _structure(body: StructureIn) -> builder.Structure:
 @router.get("/parts", response_model=PartsOut)
 def parts():
     return PartsOut(fragments=list(builder.FRAGMENTS), molecules=list(builder.MOLECULES))
+
+
+class DrawingOut(BaseModel):
+    molfile: str
+
+
+@router.post("/drawing", response_model=DrawingOut)
+def drawing(body: StructureIn):
+    """The structure in 2D for the Ketcher drawer's Draw from this structure (D143)."""
+    try:
+        return DrawingOut(molfile=redraw.to_drawing(_structure(body)))
+    except builder.BuildError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post("/describe", response_model=DescribeOut)
@@ -249,6 +263,8 @@ def edit(body: EditIn):
                     structure, picks, "the drawn fragment", fragment
                 )
             _metal_note(done, built)
+        elif body.tool == "redraw":
+            done = redraw.from_drawing(structure, body.molfile or "")
         elif body.tool == "hydrogens":
             done = builder.add_hydrogens(structure, picks, body.bonds)
         else:

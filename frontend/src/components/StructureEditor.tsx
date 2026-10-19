@@ -92,7 +92,8 @@ export function StructureEditor({
   const [busy, setBusy] = useState(false)
   const [closing, setClosing] = useState(false)
   const [everything, setEverything] = useState(false)
-  const [drawing, setDrawing] = useState(false)
+  // D142: Draw… (a new molecule, the drawing kept as `drawn`); D143: Draw from this structure.
+  const [drawing, setDrawing] = useState<null | 'new' | { molfile: string }>(null)
   const [drawn, setDrawn] = useState<string | null>(null)
 
   const changed = past.length > 0
@@ -188,6 +189,18 @@ export function StructureEditor({
 
   const close = () => (changed ? setClosing(true) : onClose())
 
+  const drawFromStructure = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      setDrawing(await api.builderDrawing(structure))
+    } catch (err) {
+      setError(errorText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const addMolecule = () => {
     if (molecule.startsWith('node:')) {
       const other = nodes.find((n) => n.id === molecule.slice(5))
@@ -254,6 +267,14 @@ export function StructureEditor({
             </button>
             <button className="small" disabled={!future.length || busy} onClick={redo}>
               Redo
+            </button>
+            <button
+              className="small"
+              disabled={!count || busy}
+              onClick={() => void drawFromStructure()}
+              title="Change the structure in 2D; atoms you leave as they are stay where they are in 3D"
+            >
+              Draw from this structure…
             </button>
           </div>
           <label className="field">
@@ -481,7 +502,7 @@ export function StructureEditor({
                   disabled={busy}
                   onClick={() => {
                     setError(null)
-                    setDrawing(true)
+                    setDrawing('new')
                   }}
                   title="Draw a molecule, or a fragment with an attachment point, and convert it to 3D"
                 >
@@ -593,21 +614,25 @@ export function StructureEditor({
           }
         >
           <KetcherDrawer
-            start={drawn}
-            action={
-              picks.length === 1
-                ? `Adds the drawing beside ${name(picks[0])}, or with an attachment point in place of ${name(picks[0])}`
-                : 'Adds the drawing to the structure'
+            start={drawing === 'new' ? drawn : drawing.molfile}
+            help={
+              drawing !== 'new'
+                ? 'Change the structure in 2D. Convert to 3D puts it back: atoms left as they were stay where they are in 3D, and Minimize cleans up round the changes.'
+                : picks.length === 1
+                  ? `Convert to 3D adds the drawing beside ${name(picks[0])}; a drawing with an attachment point (or an R# atom) replaces ${name(picks[0])}.`
+                  : 'Convert to 3D adds the drawing to the structure. To replace an atom with a drawn fragment, pick it first and draw an attachment point.'
             }
             busy={busy}
             error={error}
             onConvert={(d) => {
-              setDrawn(d.ket)
-              void run('drawing', { molfile: d.molfile }).then((done) => done && setDrawing(false))
+              if (drawing === 'new') setDrawn(d.ket)
+              void run(drawing === 'new' ? 'drawing' : 'redraw', { molfile: d.molfile }).then(
+                (done) => done && setDrawing(null),
+              )
             }}
             onClose={(ket) => {
-              if (ket !== null) setDrawn(ket)
-              setDrawing(false)
+              if (drawing === 'new' && ket !== null) setDrawn(ket)
+              setDrawing(null)
             }}
           />
         </Suspense>

@@ -35,14 +35,14 @@ export type Drawing = { molfile: string; ket: string }
  * only when Draw… is first opened (this module is imported lazily). */
 export default function KetcherDrawer({
   start,
-  action,
+  help,
   busy,
   error,
   onConvert,
   onClose,
 }: {
   start: string | null
-  action: string
+  help: string
   busy: boolean
   error: string | null
   onConvert: (drawing: Drawing) => void
@@ -90,8 +90,7 @@ export default function KetcherDrawer({
       <div className="ketcher-drawer-head">
         <h2>Draw</h2>
         <span className="muted small">
-          Draw in 2D; Convert to 3D makes it 3D with RDKit. An attachment point (or an R# atom) makes the drawing a fragment
-          that replaces the picked atom. Open a ChemDraw .cdxml or MOL file, or paste a SMILES, with the Open button.
+          {help} Open a ChemDraw .cdxml or MOL file, or paste a SMILES, with Ketcher&apos;s Open button.
         </span>
       </div>
       <div className="ketcher-drawer-editor">
@@ -118,7 +117,7 @@ export default function KetcherDrawer({
         )}
         <span className="spacer" />
         <button onClick={() => void close()}>Close</button>
-        <button className="primary" disabled={!ready || busy} onClick={() => void convert()} title={action}>
+        <button className="primary" disabled={!ready || busy} onClick={() => void convert()}>
           Convert to 3D
         </button>
       </div>
