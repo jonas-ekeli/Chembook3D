@@ -308,6 +308,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-MCP-04 | Open tabs reload what they show when the investigation is changed elsewhere, without reloading the page. | D91 | after 5 |
 | FR-MCP-05 | The tab reports what is selected and the energy level, type and reference shown; Claude reads it with names. | D91, A38 | after 5 |
 | FR-MCP-06 | Changes made through the server are marked "claude" in the history. The server's instructions state the domain rules (steps are not transitions, one composite level, X1 with D93's cloud jobs, X5). | D91 | after 5 |
+| FR-MCP-07 | Claude builds and changes structures through the Edit structure window's tools as a list of steps (atoms from 1), checks them (formula, electrons, measurements, each metal's bonded atoms, clashes) and saves with `set_coordinates`; neither tool stores anything. | D144, A89 | after 5 |
 
 **AC:** with the app open, Claude Code renames a node: the canvas shows the new name at once and the history marks it "claude". Asked to delete it, Claude waits; Refuse in the app keeps the node, Confirm deletes it.
 

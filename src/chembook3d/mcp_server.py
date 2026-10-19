@@ -60,6 +60,9 @@ Rules:
   the user the job and start it only when they agree (start_cloud_job, give them the session
   link), get_cloud_job with `wait` until it is finished, fetch_cloud_job, then import the
   outputs (import_file, commit_import) or set coordinates on the node the user names.
+- Building or changing a structure (D144): build_structure runs the app's structure editor
+  tools as steps and changes nothing; check its answer (messages, metals, close_contacts), then
+  save the xyz with set_coordinates. Do not write changed coordinates yourself.
 - "This node", "these", "the selected": call get_selection first.
 - Import only files at paths the user gave you: import_file, check the plan, then
   commit_import.

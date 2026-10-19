@@ -32,6 +32,8 @@ READ_POSTS = {
     "/api/overlay",
     "/api/atom-match",
     "/api/scan-paths/plan",
+    "/api/builder/run",
+    "/api/builder/check",
 }
 # Changes that delete nothing and are undone at once, so they do not ask (A38).
 UNASKED_DELETES = {
@@ -54,7 +56,7 @@ NOT_OFFERED = re.compile(
     r"|remote(/.*)?"  # D122: logging in to a server is for the app's own page only
     r"|inspections(/.*)?"  # D123c: the Inspect window, the page's own like the server's
     r"|scan-editor(/.*)?"  # D135: the scan editor window, the page's own as Inspect
-    r"|builder(/.*)?"  # D139: the Edit structure window's tools, the page's own
+    r"|builder/(parts|drawing|describe|edit)"  # D139: the Edit structure window's, D144
     r"|nodes/[^/]+/irc/(summary|files/[^/]+|[^/]+/node)"  # D131: the IRC window's own
     r"|presence(/.*)?|shutdown)$"  # D107: tabs coming and going, and the Shut down button
 )
