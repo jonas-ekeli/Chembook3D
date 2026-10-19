@@ -4,6 +4,7 @@ import {
   ApiError,
   geometryToXyz,
   type BuilderDescription,
+  type BuilderHold,
   type BuilderOptions,
   type BuilderParts,
   type BuilderStructure,
@@ -18,6 +19,7 @@ import { Viewer3D, type AtomMarks } from './Viewer3D'
 
 const ADDED_BOND = '#2f9e44'
 const REMOVED_BOND = '#e03131'
+const FROZEN = '#1971c2'
 
 function rowsOf(text: string | null): GeometryRows {
   return text ? parseXyz(text).map((a) => [a.element, a.x, a.y, a.z]) : []
@@ -44,7 +46,9 @@ const UNITS = { distance: 'Å', angle: '°', dihedral: '°' } as const
 /** D139: change a node's structure in 3D and save it through the node's own rules (in place
  * without calculations, else a derived node; or always a new node). Atoms are picked by
  * clicking them or typing their numbers; the tools offered follow how many are picked. Every
- * change can be undone until the window is closed; nothing is stored before saving. */
+ * change can be undone until the window is closed; nothing is stored before saving. D140: atoms
+ * frozen and distances, angles and dihedrals held for Minimize, a quick UFF clean-up of what
+ * changed (or everything). */
 export function StructureEditor({
   node,
   nodes,
@@ -57,7 +61,10 @@ export function StructureEditor({
   onClose: () => void
   onSaved: (node: Node, derived: boolean) => void
 }) {
-  const start: BuilderStructure = useMemo(() => ({ rows: rowsOf(node.xyz), added: [], removed: [] }), [node.xyz])
+  const start: BuilderStructure = useMemo(
+    () => ({ rows: rowsOf(node.xyz), added: [], removed: [], changed: [], holds: [] }),
+    [node.xyz],
+  )
   const [structure, setStructure] = useState<BuilderStructure>(start)
   const [past, setPast] = useState<BuilderStructure[]>([])
   const [future, setFuture] = useState<BuilderStructure[]>([])
@@ -76,6 +83,7 @@ export function StructureEditor({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [closing, setClosing] = useState(false)
+  const [everything, setEverything] = useState(false)
 
   const changed = past.length > 0
   const count = structure.rows.length
@@ -113,15 +121,17 @@ export function StructureEditor({
     else pick(picks.length >= 4 ? [index] : [...picks, index])
   }
 
-  const run = async (tool: BuilderTool, options: BuilderOptions = {}) => {
+  const run = async (tool: BuilderTool, options: BuilderOptions = {}, on: number[] = picks) => {
     setBusy(true)
     setError(null)
     try {
-      const result = await api.builderEdit(structure, picks, tool, options)
+      const result = await api.builderEdit(structure, on, tool, options)
       setPast([...past, structure])
       setFuture([])
-      setStructure({ rows: result.rows, added: result.added, removed: result.removed })
-      pick(result.picks)
+      const { rows, added, removed, changed, holds } = result
+      setStructure({ rows, added, removed, changed, holds })
+      // Minimize and the list of holds leave the picked atoms as they were.
+      if (tool !== 'minimize' && on === picks) pick(result.picks)
       setMessage(result.message)
     } catch (err) {
       setError(errorText(err))
@@ -175,8 +185,9 @@ export function StructureEditor({
     }
   }
 
+  const frozen = structure.holds.filter((h) => h.atoms.length === 1).map((h) => h.atoms[0])
   const marks: AtomMarks = {
-    labels: [],
+    labels: frozen.map((index) => ({ index, text: 'frozen', colour: FROZEN })),
     lines: [
       ...structure.added.map(([from, to]) => ({ from, to, colour: ADDED_BOND })),
       ...structure.removed.map(([from, to]) => ({ from, to, colour: REMOVED_BOND })),
@@ -289,6 +300,14 @@ export function StructureEditor({
                     onClick={() => void run(kind, { value: numeric, move: chosen })}
                   >
                     Set
+                  </button>
+                  <button
+                    className="small"
+                    disabled={busy || value.trim() === '' || !Number.isFinite(numeric)}
+                    title={`Keep this ${kind} at the value typed when minimizing`}
+                    onClick={() => void run('hold', { value: numeric })}
+                  >
+                    Hold
                   </button>
                 </span>
               </label>
@@ -405,6 +424,53 @@ export function StructureEditor({
             </section>
           )}
 
+          <section className="structure-editor-section" aria-label="Minimize">
+            {picks.length > 0 && (
+              <div className="row">
+                <button className="small" disabled={busy} onClick={() => void run('freeze')} title="Keep the picked atoms where they are when minimizing">
+                  Freeze
+                </button>
+                {picks.some((i) => frozen.includes(i)) && (
+                  <button className="small" disabled={busy} onClick={() => void run('unfreeze')}>
+                    Unfreeze
+                  </button>
+                )}
+              </div>
+            )}
+            {structure.holds.length > 0 && (
+              <ul className="small holds" aria-label="Held">
+                {structure.holds.map((hold, index) => (
+                  <HoldRow
+                    key={`${hold.atoms.join('-')}:${hold.value ?? ''}`}
+                    hold={hold}
+                    names={hold.atoms.map(name)}
+                    busy={busy}
+                    onValue={(v) => void run('hold', { value: v }, hold.atoms)}
+                    onRelease={() => void run('release', { index })}
+                  />
+                ))}
+              </ul>
+            )}
+            <fieldset className="sides" aria-label="What Minimize moves">
+              <label className="small">
+                <input type="radio" name="minimize" checked={!everything && structure.changed.length > 0} disabled={!structure.changed.length} onChange={() => setEverything(false)} />
+                {structure.changed.length
+                  ? `The ${structure.changed.length} changed atom${structure.changed.length === 1 ? '' : 's'} and two bonds round them`
+                  : 'What changed (nothing yet)'}
+              </label>
+              <label className="small">
+                <input type="radio" name="minimize" checked={everything || !structure.changed.length} onChange={() => setEverything(true)} />
+                Everything
+              </label>
+            </fieldset>
+            <div className="row">
+              <button className="small" disabled={busy || count < 2} onClick={() => void run('minimize', { everything: everything || !structure.changed.length })}>
+                Minimize
+              </button>
+              <span className="muted small">A quick UFF clean-up; frozen and held stay.</span>
+            </div>
+          </section>
+
           {(structure.added.length > 0 || structure.removed.length > 0) && (
             <section className="structure-editor-section" aria-label="Bonds changed">
               <p className="small">
@@ -459,5 +525,56 @@ export function StructureEditor({
         </Modal>
       )}
     </Modal>
+  )
+}
+
+const HOLD_NAMES = { 2: 'Distance', 3: 'Angle', 4: 'Dihedral' } as Record<number, string>
+
+/** D140: one entry of the list of holds; a held value can be changed in place. */
+function HoldRow({
+  hold,
+  names,
+  busy,
+  onValue,
+  onRelease,
+}: {
+  hold: BuilderHold
+  names: string[]
+  busy: boolean
+  onValue: (value: number) => void
+  onRelease: () => void
+}) {
+  const distance = hold.atoms.length === 2
+  const shown = hold.value === null ? '' : hold.value.toFixed(distance ? 3 : 1)
+  const [text, setText] = useState(shown)
+  const commit = () => {
+    const v = Number(text)
+    if (text.trim() !== '' && Number.isFinite(v) && text !== shown) onValue(v)
+  }
+  return (
+    <li className="row">
+      {hold.atoms.length === 1 ? (
+        <span style={{ color: FROZEN }}>{names[0]} frozen</span>
+      ) : (
+        <>
+          <span>
+            {HOLD_NAMES[hold.atoms.length]} {names.join('–')} at
+          </span>
+          <input
+            aria-label={`Held ${HOLD_NAMES[hold.atoms.length].toLowerCase()} ${names.join('–')}`}
+            className="number"
+            value={text}
+            disabled={busy}
+            onChange={(event) => setText(event.target.value)}
+            onBlur={commit}
+            onKeyDown={(event) => event.key === 'Enter' && commit()}
+          />
+          <span>{distance ? 'Å' : '°'}</span>
+        </>
+      )}
+      <button className="small" disabled={busy} onClick={onRelease} aria-label={`Stop holding ${names.join('–')}`} title="Stop holding">
+        ×
+      </button>
+    </li>
   )
 }

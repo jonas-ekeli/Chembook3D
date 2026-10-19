@@ -36,10 +36,39 @@ class BuildError(ValueError):
 
 
 @dataclass
+class Hold:
+    """D140: one atom frozen, or a distance, angle or dihedral (2 to 4 atoms) held at `value`
+    (Å or degrees) when minimizing."""
+
+    atoms: list[int]
+    value: float | None = None
+
+
+@dataclass
 class Structure:
     rows: Rows
     added: list[Pair] = field(default_factory=list)  # bonds the user added
     removed: list[Pair] = field(default_factory=list)  # bonds the user removed
+    changed: list[int] = field(default_factory=list)  # atoms changed in the window (D140)
+    holds: list[Hold] = field(default_factory=list)  # what Minimize keeps (D140)
+
+    def but(
+        self,
+        rows: Rows | None = None,
+        *,
+        added: list[Pair] | None = None,
+        removed: list[Pair] | None = None,
+        changed: list[int] | tuple[int, ...] = (),
+        holds: list[Hold] | None = None,
+    ) -> "Structure":
+        """A copy with these parts replaced and `changed` atoms added to those changed."""
+        return Structure(
+            self.rows if rows is None else rows,
+            list(self.added if added is None else added),
+            list(self.removed if removed is None else removed),
+            sorted(set(self.changed) | set(changed)),
+            [Hold(list(h.atoms), h.value) for h in (self.holds if holds is None else holds)],
+        )
 
     @property
     def coords(self) -> np.ndarray:
@@ -193,10 +222,15 @@ def _perpendicular(v: np.ndarray) -> np.ndarray:
     return _unit(np.cross(v, other))
 
 
-def _with(structure: Structure, coords: np.ndarray, elements: list[str] | None = None) -> Structure:
+def _with(
+    structure: Structure,
+    coords: np.ndarray,
+    elements: list[str] | None = None,
+    changed: list[int] | tuple[int, ...] = (),
+) -> Structure:
     names = elements if elements is not None else structure.elements
     rows = [[e, *(round(float(c), 8) for c in xyz_)] for e, xyz_ in zip(names, coords, strict=True)]
-    return Structure(rows, list(structure.added), list(structure.removed))
+    return structure.but(rows, changed=changed)
 
 
 def _check_picks(structure: Structure, picks: list[int], count: int | None = None) -> None:
@@ -244,7 +278,9 @@ def _done(
         if moving.whole
         else f"moved atom {moving.atom + 1} and the atoms bonded only to it (the sides are joined)"
     )
-    return Edited(_with(structure, coords), picks, f"{what}: {how}")
+    result = _with(structure, coords, changed=moving.atoms)
+    _set_hold(result, picks)
+    return Edited(result, picks, f"{what}: {how}")
 
 
 # ---------- tools on 2 to 4 atoms ----------
@@ -265,7 +301,11 @@ def set_distance(
         raise BuildError("The two atoms are on top of each other")
     shift = _unit(direction) * (value - np.linalg.norm(direction))
     coords[moving.atoms] += shift
-    return _done(structure, coords, moving, picks, f"Distance {i + 1}–{j + 1} set to {value:.3f} Å")
+    done = _done(structure, coords, moving, picks, f"Distance {i + 1}–{j + 1} set to {value:.3f} Å")
+    if bonded(structure, i, j) and not bonded(done.structure, i, j):
+        # D140: Minimize uses the bonds drawn, so a bond stretched out of sight is gone.
+        done.message += "; no longer drawn bonded (Add bond keeps them bonded)"
+    return done
 
 
 def set_angle(
@@ -354,7 +394,7 @@ def set_bond(structure: Structure, picks: list[int], present: bool) -> Edited:
         added.append(pair)
     if not present and by_distance:
         removed.append(pair)
-    changed = Structure(structure.rows, sorted(added), sorted(removed))
+    changed = structure.but(added=sorted(added), removed=sorted(removed), changed=picks)
     i, j = pair
     verb = "added" if present else "removed"
     return Edited(changed, picks, f"Bond {i + 1}–{j + 1} {verb}")
@@ -378,7 +418,7 @@ def change_element(structure: Structure, picks: list[int], symbol: str) -> Edite
     elements = structure.elements
     for i in picks:
         elements[i] = element
-    changed = _with(structure, structure.coords, elements)
+    changed = _with(structure, structure.coords, elements, changed=picks)
     names = ", ".join(str(i + 1) for i in picks)
     return Edited(changed, picks, f"Atom{'s' if len(picks) > 1 else ''} {names} now {element}")
 
@@ -400,8 +440,22 @@ def delete(structure: Structure, picks: list[int], with_hydrogens: bool = False)
 
     rows = [structure.rows[i] for i in keep]
     count = len(gone)
+    graph = neighbours(structure)
+    # The atoms the deleted ones were bonded to count as changed, so Minimize relaxes them.
+    touched = {o for i in gone for o in graph[i]} | set(structure.changed)
+    holds = [
+        Hold([number[a] for a in h.atoms], h.value)
+        for h in structure.holds
+        if all(a in number for a in h.atoms)
+    ]
     return Edited(
-        Structure(rows, renumbered(structure.added), renumbered(structure.removed)),
+        Structure(
+            rows,
+            renumbered(structure.added),
+            renumbered(structure.removed),
+            sorted(number[a] for a in touched if a in number),
+            holds,
+        ),
         [],
         f"Deleted {count} atom{'s' if count != 1 else ''}; the atoms after them move up",
     )
@@ -495,7 +549,7 @@ def add_atom(structure: Structure, picks: list[int], symbol: str) -> Edited:
     rows = [*structure.rows, [element, *(round(float(c), 8) for c in position)]]
     new = len(rows) - 1
     return Edited(
-        Structure(rows, list(structure.added), list(structure.removed)),
+        structure.but(rows, changed=[new]),
         [new],
         f"Added {element} {new + 1} bonded to atom {atom + 1}",
     )
@@ -632,10 +686,11 @@ def replace_with_fragment(structure: Structure, picks: list[int], name: str) -> 
         [e, *(round(float(c), 8) for c in p)] for (e, _), p in zip(atoms[1:], best[1:], strict=True)
     ]
     old = structure.rows[replaced][0]
+    crowded = " (crowded: Minimize cleans it up)" if room(best) < CLASH else ""
     return Edited(
-        Structure(rows, list(structure.added), list(structure.removed)),
+        structure.but(rows, changed=[replaced, *range(len(structure.rows), len(rows))]),
         [replaced],
-        f"{old} {replaced + 1} replaced by {name}",
+        f"{old} {replaced + 1} replaced by {name}{crowded}",
     )
 
 
@@ -681,7 +736,7 @@ def add_molecule(structure: Structure, picks: list[int], atoms: Rows, what: str)
         [row[0], *(round(float(c), 8) for c in p)] for row, p in zip(atoms, moved, strict=True)
     ]
     return Edited(
-        Structure(rows, list(structure.added), list(structure.removed)),
+        structure.but(rows, changed=range(first, len(rows))),
         [],
         f"Added {what} as atoms {first + 1}–{len(rows)}",
     )
@@ -689,6 +744,71 @@ def add_molecule(structure: Structure, picks: list[int], atoms: Rows, what: str)
 
 def molecule_rows(name: str) -> Rows:
     return [[e, *(float(c) for c in p)] for e, p in _molecule(name)]
+
+
+# ---------- holding for Minimize (D140) ----------
+
+HOLD_KINDS = {2: "distance", 3: "angle", 4: "dihedral"}
+
+
+def _same(atoms: list[int], picks: list[int]) -> bool:
+    return atoms == picks or atoms == picks[::-1]
+
+
+def _set_hold(structure: Structure, picks: list[int]) -> None:
+    """A distance, angle or dihedral just set is held at its new value if it was held."""
+    for hold in structure.holds:
+        if len(hold.atoms) > 1 and _same(hold.atoms, picks):
+            hold.value = measure(structure.coords, hold.atoms)
+
+
+def freeze(structure: Structure, picks: list[int], frozen: bool = True) -> Edited:
+    """Freeze the picked atoms where they are for Minimize, or let them move again."""
+    _check_picks(structure, picks)
+    if not picks:
+        raise BuildError("Pick the atoms to freeze")
+    holds = [h for h in structure.holds if not (len(h.atoms) == 1 and h.atoms[0] in picks)]
+    if frozen:
+        holds += [Hold([i]) for i in sorted(picks)]
+    names = ", ".join(str(i + 1) for i in picks)
+    plural = "s" if len(picks) > 1 else ""
+    verb = "frozen" if frozen else "free to move"
+    return Edited(structure.but(holds=holds), picks, f"Atom{plural} {names} {verb}")
+
+
+def hold(structure: Structure, picks: list[int], value: float | None = None) -> Edited:
+    """Hold the picked distance, angle or dihedral at a value (its current one by default)."""
+    _check_picks(structure, picks)
+    kind = HOLD_KINDS.get(len(picks))
+    if kind is None:
+        raise BuildError("Pick 2, 3 or 4 atoms to hold a distance, angle or dihedral")
+    current = measure(structure.coords, picks)
+    if current is None:
+        raise BuildError("Two of the picked atoms are on top of each other")
+    if value is None:
+        value = current
+    elif kind == "distance" and not 0.3 <= value <= 20:
+        raise BuildError("Give a distance between 0.3 and 20 Å")
+    elif kind == "angle" and not 0 <= value <= 180:
+        raise BuildError("Give an angle between 0 and 180°")
+    elif kind == "dihedral":
+        value = (value + 180) % 360 - 180
+    holds = [h for h in structure.holds if not _same(h.atoms, picks)]
+    holds.append(Hold(list(picks), float(value)))
+    names = "–".join(str(i + 1) for i in picks)
+    shown = f"{value:.3f} Å" if kind == "distance" else f"{value:.1f}°"
+    return Edited(structure.but(holds=holds), picks, f"{kind.capitalize()} {names} held at {shown}")
+
+
+def release(structure: Structure, index: int) -> Edited:
+    """Stop holding one entry of the list of holds."""
+    if not 0 <= index < len(structure.holds):
+        raise BuildError("That is not held")
+    atoms = structure.holds[index].atoms
+    holds = [h for n, h in enumerate(structure.holds) if n != index]
+    names = "–".join(str(i + 1) for i in atoms)
+    what = f"Atom {names}" if len(atoms) == 1 else f"{HOLD_KINDS[len(atoms)].capitalize()} {names}"
+    return Edited(structure.but(holds=holds), [], f"{what} no longer held")
 
 
 # ---------- what the window shows ----------

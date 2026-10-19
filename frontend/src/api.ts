@@ -2217,12 +2217,18 @@ export function energyTypeName(
 }
 
 /** D139: the structure the Edit structure window holds: its atoms and the bonds the user added
- * or removed (atom pairs from 0), which decide which atoms move together. */
+ * or removed (atom pairs from 0), which decide which atoms move together. D140: the atoms changed
+ * in the window and what Minimize keeps. */
 export type BuilderStructure = {
   rows: GeometryRows
   added: [number, number][]
   removed: [number, number][]
+  changed: number[]
+  holds: BuilderHold[]
 }
+
+/** D140: one atom frozen, or a distance, angle or dihedral (2 to 4 atoms) held at `value`. */
+export type BuilderHold = { atoms: number[]; value: number | null }
 
 export type BuilderTool =
   | 'distance'
@@ -2235,6 +2241,11 @@ export type BuilderTool =
   | 'add_atom'
   | 'fragment'
   | 'molecule'
+  | 'freeze'
+  | 'unfreeze'
+  | 'hold'
+  | 'release'
+  | 'minimize'
 
 export type BuilderOptions = {
   value?: number
@@ -2246,6 +2257,10 @@ export type BuilderOptions = {
   what?: string
   present?: boolean
   with_hydrogens?: boolean
+  /** release: which hold. */
+  index?: number
+  /** minimize: every atom, not only the changed ones and two bonds round them. */
+  everything?: boolean
 }
 
 export type BuilderParts = { fragments: string[]; molecules: string[] }
