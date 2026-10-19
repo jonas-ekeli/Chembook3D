@@ -294,3 +294,33 @@ test('draw in Ketcher and convert to 3D', async ({ page }) => {
   await expect(dialog).toHaveCount(0)
   expect((await nodes(page)).find((n) => n.label === 'drawn')?.formula).toBe('C7H5F3')
 })
+
+// T-UI-45, D143: the structure into the drawer in 2D, changed there, and put back.
+test('draw from the structure and put it back', async ({ page }) => {
+  test.slow() // Ketcher and its WebAssembly load on first use
+  await newInvestigation(page, 'Redraw test')
+  const body = { label: 'ethane', xyz: ETHANE, charge: 0, multiplicity: 1, pos_x: 100, pos_y: 100 }
+  expect((await page.request.post('/api/nodes', { data: body })).ok()).toBeTruthy()
+  await page.reload()
+  await canvasNode(page, 'ethane').click()
+  await page.getByRole('button', { name: 'Edit in 3D…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Edit structure: “ethane”' })
+  const summary = dialog.getByLabel('Structure summary')
+  await expect(summary).toHaveText('C2H6 · 8 atoms')
+
+  await dialog.getByRole('button', { name: 'Draw from this structure…' }).click()
+  const drawn = await drawer(page)
+  await expect.poll(() => page.evaluate(() => window.ketcher?.getSmiles())).toBe('CC')
+  // Unchanged, it is refused; with an OH it goes back on.
+  await drawn.getByRole('button', { name: 'Convert to 3D' }).click()
+  await expect(drawn.getByRole('alert')).toHaveText('The drawing has not changed')
+  await page.evaluate(() => window.ketcher?.setMolecule('CCO'))
+  await drawn.getByRole('button', { name: 'Convert to 3D' }).click()
+  await expect(drawn).toHaveCount(0)
+  await expect(dialog.getByLabel('Last change')).toHaveText(/^Drawing put on: 4 atoms added, 3 deleted, 1 changed/)
+  await expect(summary).toHaveText('C2H6O · 9 atoms')
+
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect((await nodes(page)).find((n) => n.label === 'ethane')?.formula).toBe('C2H6O')
+})

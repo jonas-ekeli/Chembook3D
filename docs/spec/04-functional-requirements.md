@@ -208,6 +208,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-3D-18 | In the Edit structure window: freeze picked atoms and hold a picked distance, angle or dihedral at a typed value, listed and changeable; Minimize with a built-in UFF clean-up that keeps metals such as Ru in shape, moving the changed atoms and two bonds round them, or everything; undoable, nothing stored before saving. | D140, A85 | after 5 |
 | FR-3D-19 | In the Edit structure window: start from no atoms with a lone atom, add hydrogens to picked atoms up to their usual or a typed number of bonds, add a molecule from SMILES, and replace an atom with a fragment from SMILES with one `*` where it attaches. | D141, A86 | after 5 |
 | FR-3D-20 | In the Edit structure window: draw a molecule, or a fragment with an attachment point, in 2D with Ketcher (also from ChemDraw CDXML, MOL or SMILES), and convert it to 3D as a molecule beside the structure or in place of the picked atom, keeping charges and drawn stereo. | D142, A87 | after 5 |
+| FR-3D-21 | In the Edit structure window: open the structure itself in the Ketcher drawer, change it in 2D, and put it back with unchanged atoms where they were in 3D and their numbers, new atoms built round them, removed atoms deleted, and the changed part minimized. | D143, A88 | after 5 |
 
 ## FR-STER · Buried volume and steric maps (D81)
 

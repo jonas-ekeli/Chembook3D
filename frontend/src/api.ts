@@ -1920,6 +1920,9 @@ export const api = {
   builderParts: () => request<BuilderParts>('GET', '/builder/parts'),
   builderDescribe: (structure: BuilderStructure, picks: number[], charge: number | null, multiplicity: number | null) =>
     request<BuilderDescription>('POST', '/builder/describe', { ...structure, picks, charge, multiplicity }),
+  /** D143: the structure in 2D for the Ketcher drawer. */
+  builderDrawing: (structure: BuilderStructure) =>
+    request<{ molfile: string }>('POST', '/builder/drawing', structure),
   builderEdit: (structure: BuilderStructure, picks: number[], tool: BuilderTool, options: BuilderOptions = {}) =>
     request<BuilderEdited>('POST', '/builder/edit', { ...structure, picks, tool, ...options }),
   deletePreview: (id: string) => request<NodeDeletePreview>('GET', `/nodes/${id}/delete-preview`),
@@ -2249,6 +2252,7 @@ export type BuilderTool =
   | 'smiles'
   | 'hydrogens'
   | 'drawing'
+  | 'redraw'
 
 export type BuilderOptions = {
   value?: number
@@ -2266,7 +2270,8 @@ export type BuilderOptions = {
   everything?: boolean
   /** smiles, or fragment: a SMILES with one * where it attaches (D141). */
   smiles?: string
-  /** drawing: Ketcher's MOL file; with an attachment point it is a fragment (D142). */
+  /** drawing: Ketcher's MOL file, a fragment with an attachment point (D142); redraw: the
+   * structure drawn again, put back onto it (D143). */
   molfile?: string
   /** hydrogens: until each picked atom has this many bonds; left out: its usual number. */
   bonds?: number

@@ -54,6 +54,20 @@ def build(smiles: str, fragment: bool = False) -> Built:
 
 def from_molfile(text: str) -> Built:
     """A Ketcher drawing (D142): a molecule, or a fragment when it has one attachment point."""
+    mol = read_drawing(text)
+    dummies = [a.GetIdx() for a in mol.GetAtoms() if a.GetAtomicNum() == 0]
+    if len(dummies) > 1 or any(mol.GetAtomWithIdx(d).GetDegree() != 1 for d in dummies):
+        raise BuildError(
+            "A drawn fragment needs one attachment point (or one R# atom bonded to one atom)"
+        )
+    if mol.GetNumAtoms() == len(dummies):
+        raise BuildError("Draw a molecule first")
+    return _built(mol, dummies)
+
+
+def read_drawing(text: str) -> Chem.Mol:
+    """Ketcher's MOL file as a molecule without coordinates (its stereo already read from the
+    wedges), each attachment point as a `*` atom bonded to its atom."""
     mol = Chem.MolFromMolBlock(text, removeHs=False)
     if mol is None:
         mol = Chem.MolFromMolBlock(text, sanitize=False, removeHs=False)
@@ -75,14 +89,7 @@ def from_molfile(text: str) -> Built:
             editable.AddBond(atom.GetIdx(), dummy, Chem.BondType.SINGLE)
     mol = editable.GetMol()
     mol.RemoveAllConformers()  # the 2D drawing's coordinates; its stereo is already assigned
-    dummies = [a.GetIdx() for a in mol.GetAtoms() if a.GetAtomicNum() == 0]
-    if len(dummies) > 1 or any(mol.GetAtomWithIdx(d).GetDegree() != 1 for d in dummies):
-        raise BuildError(
-            "A drawn fragment needs one attachment point (or one R# atom bonded to one atom)"
-        )
-    if mol.GetNumAtoms() == len(dummies):
-        raise BuildError("Draw a molecule first")
-    return _built(mol, dummies)
+    return mol
 
 
 def _built(mol: Chem.Mol, dummies: list[int]) -> Built:
