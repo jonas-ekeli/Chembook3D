@@ -536,9 +536,12 @@ def _placed(
 
 
 def add_atom(structure: Structure, picks: list[int], symbol: str) -> Edited:
-    """A new atom bonded to the picked one, at the sum of their covalent radii."""
-    _check_picks(structure, picks, 1)
+    """A new atom bonded to the picked one, at the sum of their covalent radii; with nothing
+    picked, a lone atom to start from (D141), at the origin or beside the structure."""
     element = _element(symbol)
+    if not picks:
+        return add_molecule(structure, [], [[element, 0.0, 0.0, 0.0]], element)
+    _check_picks(structure, picks, 1)
     (atom,) = picks
     coords = structure.coords
     graph = neighbours(structure)
@@ -553,6 +556,39 @@ def add_atom(structure: Structure, picks: list[int], symbol: str) -> Edited:
         [new],
         f"Added {element} {new + 1} bonded to atom {atom + 1}",
     )
+
+
+# Bonds an atom usually has, for adding hydrogens to it (D141); the user can give another.
+USUAL_BONDS = {"H": 1, "B": 3, "C": 4, "N": 3, "O": 2, "F": 1, "Si": 4, "P": 3, "S": 2}
+USUAL_BONDS |= {"Cl": 1, "Se": 2, "Br": 1, "I": 1}
+
+
+def add_hydrogens(structure: Structure, picks: list[int], bonds: int | None = None) -> Edited:
+    """Hydrogens on each picked atom until it has `bonds` bonds (its usual number by default),
+    each on the atom's free side as Add atom puts it."""
+    _check_picks(structure, picks)
+    if not picks:
+        raise BuildError("Pick the atoms to add hydrogens to")
+    if bonds is not None and not 1 <= bonds <= 8:
+        raise BuildError("Give between 1 and 8 bonds")
+    result = Edited(structure, picks, "")
+    count = 0
+    for atom in picks:
+        element = structure.rows[atom][0]
+        wanted = bonds if bonds is not None else USUAL_BONDS.get(element)
+        if wanted is None:
+            raise BuildError(f"Say how many bonds {element} {atom + 1} should have")
+        while len(neighbours(result.structure)[atom]) < wanted:
+            result = add_atom(result.structure, [atom], "H")
+            count += 1
+    names = ", ".join(str(i + 1) for i in picks)
+    plural = "s" if len(picks) > 1 else ""
+    message = (
+        f"Added {count} H to atom{plural} {names}"
+        if count
+        else f"Atom{plural} {names} already {'have' if plural else 'has'} enough bonds"
+    )
+    return Edited(result.structure, picks, message)
 
 
 # ---------- fragments and molecules ----------
@@ -650,7 +686,12 @@ def _molecule(name: str) -> list[tuple[str, np.ndarray]]:
 MOLECULES = ("ethylene", "propene", "water", "CO")
 
 
-def replace_with_fragment(structure: Structure, picks: list[int], name: str) -> Edited:
+def replace_with_fragment(
+    structure: Structure,
+    picks: list[int],
+    name: str,
+    atoms: list[tuple[str, np.ndarray]] | None = None,
+) -> Edited:
     """Put a substituent in place of an atom bonded to one other atom (usually an H): its
     attaching atom takes the replaced atom's number, its other atoms come last, and it is
     turned about the new bond to keep clear of the rest."""
@@ -663,7 +704,8 @@ def replace_with_fragment(structure: Structure, picks: list[int], name: str) -> 
         )
     (parent,) = graph[replaced]
     coords = structure.coords
-    atoms = _fragment(name)
+    if atoms is None:
+        atoms = _fragment(name)
     u = _unit(coords[replaced] - coords[parent])
     length = _bond_length(structure.rows[parent][0], atoms[0][0])
     base = _frame(np.array([1.0, 0.0, 0.0]), u)
@@ -738,7 +780,9 @@ def add_molecule(structure: Structure, picks: list[int], atoms: Rows, what: str)
     return Edited(
         structure.but(rows, changed=range(first, len(rows))),
         [],
-        f"Added {what} as atoms {first + 1}–{len(rows)}",
+        f"Added {what} as atom {first + 1}"
+        if len(rows) == first + 1
+        else f"Added {what} as atoms {first + 1}–{len(rows)}",
     )
 
 

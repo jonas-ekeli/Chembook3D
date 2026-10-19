@@ -2246,6 +2246,8 @@ export type BuilderTool =
   | 'hold'
   | 'release'
   | 'minimize'
+  | 'smiles'
+  | 'hydrogens'
 
 export type BuilderOptions = {
   value?: number
@@ -2261,6 +2263,10 @@ export type BuilderOptions = {
   index?: number
   /** minimize: every atom, not only the changed ones and two bonds round them. */
   everything?: boolean
+  /** smiles, or fragment: a SMILES with one * where it attaches (D141). */
+  smiles?: string
+  /** hydrogens: until each picked atom has this many bonds; left out: its usual number. */
+  bonds?: number
 }
 
 export type BuilderParts = { fragments: string[]; molecules: string[] }

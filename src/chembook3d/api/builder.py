@@ -1,8 +1,8 @@
-"""HTTP API of the "Edit structure" window (D139) and its Minimize (D140). The window keeps the
-structure being edited and its undo history; each tool here takes that structure and gives back
-the changed one, so nothing is stored until the window saves through
+"""HTTP API of the "Edit structure" window (D139), its Minimize (D140) and SMILES (D141). The
+window keeps the structure being edited and its undo history; each tool here takes that
+structure and gives back the changed one, so nothing is stored until the window saves through
 `PUT /api/nodes/{id}/geometry`. Page only (not MCP tools) and quiet for the change counter. All
-rules are in `services/builder.py` and `services/minimize.py`."""
+rules are in `services/builder.py`, `services/minimize.py` and `services/smiles.py`."""
 
 import math
 from typing import Any, Literal
@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from chembook3d import xyz
-from chembook3d.services import builder, minimize
+from chembook3d.services import builder, minimize, smiles
 
 router = APIRouter(prefix="/api/builder")
 
@@ -71,6 +71,8 @@ class EditIn(StructureIn):
         "hold",
         "release",
         "minimize",
+        "smiles",
+        "hydrogens",
     ]
     value: float | None = None  # distance (Å), angle, dihedral or turn (degrees)
     move: int | None = None  # the end atom whose side moves; None: the default side
@@ -81,9 +83,9 @@ class EditIn(StructureIn):
     present: bool = True  # bond: add (True) or remove
     with_hydrogens: bool = False  # delete: also the H atoms bonded only to the picked ones
     index: int | None = None  # release: which hold
-    everything: bool = (
-        False  # minimize: every atom, not only the changed ones and their surroundings
-    )
+    smiles: str | None = None  # smiles, or a fragment's with one * where it attaches (D141)
+    bonds: int | None = None  # hydrogens: until each picked atom has this many bonds
+    everything: bool = False  # minimize: every atom, not only round the changed ones
 
 
 class EditOut(BaseModel):
@@ -212,8 +214,23 @@ def edit(body: EditIn):
             done = builder.release(structure, -1 if body.index is None else body.index)
         elif body.tool == "minimize":
             done = minimize.run(structure, body.everything)
+        elif body.tool == "fragment" and body.smiles is not None:
+            built = smiles.build(body.smiles, fragment=True)
+            fragment = smiles.as_fragment(built)
+            done = builder.replace_with_fragment(structure, picks, body.smiles.strip(), fragment)
         elif body.tool == "fragment":
             done = builder.replace_with_fragment(structure, picks, body.name or "")
+        elif body.tool == "smiles":
+            text = (body.smiles or "").strip()
+            built = smiles.build(text)
+            done = builder.add_molecule(structure, picks, built.rows, f"“{text}”")
+            if built.metals:
+                done.message += (
+                    "; the shape round the metal is a rough guess: set its bonds and angles, "
+                    "then Minimize"
+                )
+        elif body.tool == "hydrogens":
+            done = builder.add_hydrogens(structure, picks, body.bonds)
         else:
             if body.atoms is not None:
                 what = body.what or "the structure"

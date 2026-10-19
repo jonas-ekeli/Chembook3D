@@ -48,7 +48,8 @@ const UNITS = { distance: 'Å', angle: '°', dihedral: '°' } as const
  * clicking them or typing their numbers; the tools offered follow how many are picked. Every
  * change can be undone until the window is closed; nothing is stored before saving. D140: atoms
  * frozen and distances, angles and dihedrals held for Minimize, a quick UFF clean-up of what
- * changed (or everything). */
+ * changed (or everything). D141: a lone atom to start from, hydrogens up to a number of bonds,
+ * and molecules and fragments from SMILES. */
 export function StructureEditor({
   node,
   nodes,
@@ -78,6 +79,10 @@ export function StructureEditor({
   const [element, setElement] = useState('C')
   const [added, setAdded] = useState('H')
   const [fragment, setFragment] = useState('Me')
+  const [fragmentSmiles, setFragmentSmiles] = useState('')
+  const [smiles, setSmiles] = useState('')
+  const [bonds, setBonds] = useState('')
+  const [lone, setLone] = useState('C')
   const [molecule, setMolecule] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -366,8 +371,23 @@ export function StructureEditor({
                       {f}
                     </option>
                   ))}
+                  <option value="*">SMILES…</option>
                 </select>
-                <button className="small" disabled={busy} onClick={() => void run('fragment', { name: fragment })}>
+                {fragment === '*' && (
+                  <input
+                    aria-label="Fragment SMILES"
+                    className="mono"
+                    placeholder="*c1ccccc1"
+                    title="A SMILES with one * where it attaches"
+                    value={fragmentSmiles}
+                    onChange={(event) => setFragmentSmiles(event.target.value)}
+                  />
+                )}
+                <button
+                  className="small"
+                  disabled={busy || (fragment === '*' && !fragmentSmiles.trim())}
+                  onClick={() => void run('fragment', fragment === '*' ? { smiles: fragmentSmiles } : { name: fragment })}
+                >
                   Replace
                 </button>
               </div>
@@ -389,6 +409,25 @@ export function StructureEditor({
                 </button>
                 <button className="small" disabled={busy} onClick={() => void run('delete', { with_hydrogens: true })}>
                   Delete with its hydrogens
+                </button>
+              </div>
+              <div className="row">
+                <span className="small">Add H until</span>
+                <input
+                  aria-label="Bonds wanted"
+                  className="element"
+                  placeholder="usual"
+                  title="Leave empty for the element's usual number (C 4, N 3, O 2)"
+                  value={bonds}
+                  onChange={(event) => setBonds(event.target.value)}
+                />
+                <span className="small">bonds</span>
+                <button
+                  className="small"
+                  disabled={busy || (bonds.trim() !== '' && !Number.isInteger(Number(bonds)))}
+                  onClick={() => void run('hydrogens', bonds.trim() ? { bonds: Number(bonds) } : {})}
+                >
+                  Add hydrogens
                 </button>
               </div>
             </section>
@@ -421,6 +460,22 @@ export function StructureEditor({
                   Add
                 </button>
               </div>
+              <div className="row">
+                <span className="small">From SMILES</span>
+                <input aria-label="SMILES" className="mono" placeholder="CC(=O)O" value={smiles} onChange={(event) => setSmiles(event.target.value)} />
+                <button className="small" disabled={busy || !smiles.trim()} onClick={() => void run('smiles', { smiles })}>
+                  Add SMILES
+                </button>
+              </div>
+              {picks.length === 0 && (
+                <div className="row">
+                  <span className="small">A lone atom</span>
+                  <input aria-label="Lone atom" className="element" value={lone} onChange={(event) => setLone(event.target.value)} />
+                  <button className="small" disabled={busy || !lone.trim()} onClick={() => void run('add_atom', { element: lone })}>
+                    Add atom
+                  </button>
+                </div>
+              )}
             </section>
           )}
 
