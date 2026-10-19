@@ -70,17 +70,19 @@ def _radicals(mol: Chem.Mol, metals: set[int]) -> None:
     """A drawing gives each atom the hydrogens its valence asks for. Where the structure has
     fewer (an O on a metal with none), the missing ones are drawn as radical electrons, so the
     drawing reads back as it is."""
-    heavy = [a.GetIdx() for a in mol.GetAtoms() if a.GetAtomicNum() != 1]
+    for atom in mol.GetAtoms():
+        atom.SetIntProp("index", atom.GetIdx())
+    # RemoveHs keeps a hydrogen bonded to a metal (a hydride), so atoms are matched by index.
     probe = Chem.RemoveHs(mol, sanitize=False)
     for atom in probe.GetAtoms():
         atom.SetNoImplicit(False)
         atom.SetNumRadicalElectrons(
-            mol.GetAtomWithIdx(heavy[atom.GetIdx()]).GetNumRadicalElectrons()
+            mol.GetAtomWithIdx(atom.GetIntProp("index")).GetNumRadicalElectrons()
         )
     probe.UpdatePropertyCache(strict=False)
     for atom in probe.GetAtoms():
-        index = heavy[atom.GetIdx()]
-        if index in metals:
+        index = atom.GetIntProp("index")
+        if index in metals or atom.GetAtomicNum() == 1:
             continue
         original = mol.GetAtomWithIdx(index)
         has = sum(1 for n in original.GetNeighbors() if n.GetAtomicNum() == 1)

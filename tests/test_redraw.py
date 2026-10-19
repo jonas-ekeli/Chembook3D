@@ -1,4 +1,4 @@
-"""Draw from this structure (D143, A88; T-BLD-19…22): the structure into the Ketcher drawer in
+"""Draw from this structure (D143, A88; T-BLD-19…22, 24): the structure into the Ketcher drawer in
 2D and the drawing back onto it. Metal complexes are morfeus's public SambVca set, Ru made from
 its Ir complex as in test_minimize."""
 
@@ -59,6 +59,21 @@ def test_drawing_of_a_ru_complex():
     assert kinds == [("C", "DATIVE"), ("C", "DATIVE"), ("C", "DATIVE"), ("Cl", "SINGLE")]
     assert all(a.GetSymbol() != "H" for a in mol.GetAtoms())
     assert mol.GetNumAtoms() == sum(1 for r in s.rows if r[0] != "H")
+
+
+def test_hydrogen_bonded_to_the_metal_and_its_atom():
+    # T-BLD-24: an NH3 hydrogen folded onto Pd, so the 3D view bonds it to both N and Pd,
+    # still draws and comes back unchanged (it once failed with HTTP 500).
+    s = Structure(smiles.build("Cl[Pd](Cl)(<-N)<-N").rows)
+    elements = [r[0] for r in s.rows]
+    graph = builder.neighbours(s)
+    pd = elements.index("Pd")
+    n = next(i for i in graph[pd] if elements[i] == "N")
+    h = next(i for i in graph[n] if elements[i] == "H")
+    s = builder.set_angle(s, [pd, n, h], 60.0, h).structure
+    assert {elements[i] for i in builder.neighbours(s)[h]} == {"N", "Pd"}
+    with pytest.raises(BuildError, match="has not changed"):
+        redraw.from_drawing(s, redraw.to_drawing(s))
 
 
 def test_new_group_keeps_the_rest_in_place():
