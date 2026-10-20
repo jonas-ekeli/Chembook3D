@@ -1,5 +1,5 @@
-"""Claude's structure tools (D144, A89; T-MCP-12…14): the Edit structure window's tools as steps,
-on atoms numbered from 1, storing nothing."""
+"""Claude's structure tools (D144, A89; T-MCP-12…14; D148, D149: T-MCP-15…19): the Edit structure
+window's tools as steps, on atoms numbered from 1, storing nothing."""
 
 import json
 from dataclasses import replace
@@ -243,13 +243,14 @@ def test_step_warnings_sides_and_electrons(client):
             "steps": [
                 {"tool": "add_atom", "atoms": [1], "element": "C", "value": 1.9},
                 {"tool": "add_atom", "atoms": [oxygen], "element": "O", "value": 1.15},
+                {"tool": "angle", "atoms": [1, oxygen, oxygen + 1], "value": 60},
             ],
         },
     ).json()
-    first, second = answer["steps"]
+    first, second, third = answer["steps"]
     assert first["message"] == f"Added C {oxygen} bonded to atom 1 at 1.90 Å"
-    assert first["warnings"] == []
-    assert second["warnings"] and second["warnings"][0].startswith(f"Ru 1 and O {oxygen + 1}")
+    assert first["warnings"] == second["warnings"] == []
+    assert third["warnings"] and f"O {oxygen + 1} are now drawn bonded" in third["warnings"][0]
     assert answer["electrons_note"].startswith("Not checked")
 
     checked = client.post(
@@ -298,3 +299,46 @@ def test_short_node_list_through_the_mcp_server(tmp_path):
         assert refused.isError and "remove_coordinates" in refused.content[0].text
 
     anyio.run(run)
+
+
+def test_schemas_without_null_and_a_brief_node_list(tmp_path):
+    # T-MCP-18 (D149): optional fields are their plain type in the schema Claude sees, so
+    # build_id and count show; list_nodes for Claude is a brief list, and a long answer is sent
+    # without indentation.
+    from chembook3d import mcp_server
+    from chembook3d.mcp_tools import BY_NAME, TOOLS, input_schema
+
+    for name in ("set_coordinates", "create_node", "build_structure", "check_structure"):
+        prop = input_schema(BY_NAME[name])["properties"]["build_id"]
+        assert prop["type"] == "string" and "build_structure" in prop["description"]
+    step = input_schema(BY_NAME["build_structure"])["properties"]["steps"]["items"]
+    assert step["properties"]["count"]["type"] == "integer"
+    for spec in TOOLS:
+        assert '{"type": "null"}' not in json.dumps(input_schema(spec)), spec.name
+
+    async def run():
+        bridge, page = _app_bridge()
+        await page.post("/api/investigations", json={"folder": str(tmp_path / "i"), "name": "T"})
+        await bridge.call("create_node", {"label": "W", "xyz": WATER, "notes": "long " * 50})
+        (short,) = _json(await bridge.call("list_nodes", {}))
+        assert short["formula"] == "H2O" and short["xyz"] is None
+        assert "notes" not in short and "pos_x" not in short and short["warnings"] == []
+        (full,) = _json(await bridge.call("list_nodes", {"brief": False}))
+        assert full["notes"].startswith("long")
+
+    anyio.run(run)
+    many = [{"id": n, "label": "x" * 40} for n in range(400)]
+    assert "\n" not in mcp_server._json_text(many) and "\n" in mcp_server._json_text(many[:2])
+
+
+def test_a_clash_drawn_as_a_bond_is_still_a_contact(client):
+    # T-MCP-19 (D149): an H 1.0 Å from another water's O is drawn bonded to both, but an H has
+    # one bond, so the closer pair is reported as a contact; so is a "bond" far too short.
+    text = "6\n\nO 0 0 0\nH 0.96 0 0\nH -0.24 0.93 0\nO 1.96 0 0\nH 2.2 0.93 0\nH 2.4 -0.9 0\n"
+    found = client.post("/api/builder/check", json={"xyz": text}).json()["close_contacts"]
+    assert {"atoms": [2, 4], "elements": ["H", "O"], "distance": 1.0} in found
+    squeezed = "2\n\nC 0 0 0\nCl 1.2 0 0\n"
+    found = client.post("/api/builder/check", json={"xyz": squeezed}).json()["close_contacts"]
+    assert found == [{"atoms": [1, 2], "elements": ["C", "Cl"], "distance": 1.2}]
+    # Ordinary molecules report nothing.
+    assert client.post("/api/builder/check", json={"xyz": ru_xyz()}).json()["close_contacts"] == []

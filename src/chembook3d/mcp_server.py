@@ -95,6 +95,17 @@ def check_url(url: str) -> str:
     return url.rstrip("/")
 
 
+# D149: an answer longer than this is sent without indentation, which roughly halves a long list.
+COMPACT_ABOVE = 20_000
+
+
+def _json_text(value: Any) -> str:
+    text = json.dumps(value, ensure_ascii=False, indent=1)
+    if len(text) > COMPACT_ABOVE:
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return text
+
+
 def _detail(response: httpx.Response) -> str:
     try:
         detail = response.json().get("detail", response.json())
@@ -173,7 +184,7 @@ class Bridge:
         if response.status_code == 204 or not response.content:
             return _text("Done.")
         if "json" in response.headers.get("content-type", ""):
-            return _text(json.dumps(response.json(), ensure_ascii=False, indent=1))
+            return _text(_json_text(response.json()))
         return _text(response.text)
 
     async def _ask(self, spec: ToolSpec, arguments: dict[str, Any]) -> types.CallToolResult:
