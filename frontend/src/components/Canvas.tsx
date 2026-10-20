@@ -67,7 +67,7 @@ import {
 import { MoleculeSketch } from './MoleculeSketch'
 import { CardNotes, type NoteActions } from './CanvasNotes'
 import { noteTitle } from '../notes'
-import { curveOf, LabelPlacer, leaderEnd, type Rect } from '../labelLayout'
+import { curveOf, LabelPlacer, leaderEnd, pointAt, type Curve, type Rect } from '../labelLayout'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import type { Rotation } from '../chem'
@@ -364,6 +364,41 @@ function useLabelPlacer(): LabelPlacer {
   return placer
 }
 
+/** Away from the card, for each side an edge can leave or arrive on. */
+const OUTWARD: Record<Position, { x: number; y: number }> = {
+  [Position.Left]: { x: -1, y: 0 },
+  [Position.Right]: { x: 1, y: 0 },
+  [Position.Top]: { x: 0, y: -1 },
+  [Position.Bottom]: { x: 0, y: 1 },
+}
+/** How far apart (px) the two ends may sit across their side and still count as lined up. */
+const LINED_UP = 40
+/** How far the control points reach out: a share of the ends' distance, kept within these px. */
+const BOW = { share: 0.3, min: 36, max: 90 }
+
+/**
+ * D147: an edge leaving and arriving on the same side of two cards lined up (members of a group
+ * stacked in a column or a row) would be a straight line along the cards' sides, hard to see.
+ * It bows out from that side instead, a little more the further apart its ends are.
+ */
+function bowedOut(sx: number, sy: number, tx: number, ty: number, side: Position): Curve | null {
+  const out = OUTWARD[side]
+  const along = Math.abs(out.x ? ty - sy : tx - sx)
+  // How much further out (along the outward direction) the target end sits than the source end.
+  const ahead = out.x ? (tx - sx) * out.x : (ty - sy) * out.y
+  if (along < 1 || Math.abs(ahead) > LINED_UP) return null
+  const reach = Math.min(BOW.max, Math.max(BOW.min, along * BOW.share))
+  // Both control points reach the same distance past the end further out, so the bow clears both cards.
+  const fromSource = Math.max(0, ahead) + reach
+  const fromTarget = Math.max(0, -ahead) + reach
+  return [
+    { x: sx, y: sy },
+    { x: sx + out.x * fromSource, y: sy + out.y * fromSource },
+    { x: tx + out.x * fromTarget, y: ty + out.y * fromTarget },
+    { x: tx, y: ty },
+  ]
+}
+
 function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
   const { id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd, selected } =
     props
@@ -371,7 +406,15 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
   let [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
   const dx = targetX - sourceX
   const sideways = sourcePosition === Position.Right && targetPosition === Position.Left
-  if (sideways && Math.abs(dx) > 200 && Math.abs(targetY - sourceY) < 60) {
+  const bowed =
+    sourcePosition === targetPosition ? bowedOut(sourceX, sourceY, targetX, targetY, sourcePosition) : null
+  if (bowed) {
+    const [, c1, c2] = bowed
+    path = `M ${sourceX},${sourceY} C ${c1.x},${c1.y} ${c2.x},${c2.y} ${targetX},${targetY}`
+    const middle = pointAt(bowed, 0.5)
+    labelX = middle.x
+    labelY = middle.y
+  } else if (sideways && Math.abs(dx) > 200 && Math.abs(targetY - sourceY) < 60) {
     // An edge that skips a column (e.g. a direct connection past a TS) arcs over the nodes
     // in between instead of running behind them.
     const lift = Math.min(160, Math.abs(dx) * 0.25)

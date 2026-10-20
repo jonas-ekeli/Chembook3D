@@ -141,3 +141,37 @@ test('edge labels in an expanded group keep clear of each other and of the cards
     await page.request.post(`/api/groups/${group.id}/dissolve`, { data: { restore_branches: true } })
   }
 })
+
+test('an edge on the same side of two lined-up members bows out from that side', async ({ page }) => {
+  await openDemo(page)
+  const canvas = await (await page.request.get('/api/canvas')).json()
+  const idOf = (label: string) => canvas.nodes.find((n: { label: string }) => n.label === label).id
+  const members = ['A-S1', 'A-S2'].map(idOf)
+  const transitions = canvas.transitions as { id: string; source_id: string; target_id: string }[]
+  const edge = transitions.find((t) => t.source_id === members[0] && t.target_id === members[1])!
+  const made = await page.request.post('/api/groups/reconnect', { data: { member_ids: members, label: 'GB' } })
+  expect(made.ok()).toBe(true)
+  const group = (await made.json()) as { id: string }
+  try {
+    // One column, the edge leaving and arriving on the right: before D147 a straight line
+    // along the cards' right sides.
+    expect((await page.request.patch(`/api/groups/${group.id}`, { data: { layout: 'vertical' } })).ok()).toBe(true)
+    const sides = { source_side: 'right', target_side: 'right' }
+    expect((await page.request.patch(`/api/transitions/${edge.id}`, { data: sides })).ok()).toBe(true)
+    await page.reload()
+    await page.getByRole('group', { name: 'Group GB' }).getByRole('button', { name: 'Expand group' }).click()
+    for (const label of ['A-S1', 'A-S2']) await expect(canvasNode(page, label)).toBeVisible()
+    const line = page.getByTestId(`rf__edge-${edge.id}`).locator('path.react-flow__edge-path')
+    const reach = () =>
+      line.evaluate((path) => {
+        const right = Math.max(
+          ...[...document.querySelectorAll('.react-flow__node-structure')].map((el) => el.getBoundingClientRect().right),
+        )
+        return path.getBoundingClientRect().right - right
+      })
+    await expect.poll(reach).toBeGreaterThan(10)
+  } finally {
+    await page.request.patch(`/api/transitions/${edge.id}`, { data: { source_side: 'right', target_side: 'left' } })
+    await page.request.post(`/api/groups/${group.id}/dissolve`, { data: { restore_branches: true } })
+  }
+})

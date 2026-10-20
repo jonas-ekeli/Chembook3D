@@ -354,6 +354,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-44 | Edit in 3D… on a node without coordinates: Draw…, benzene from Ketcher's templates, Convert to 3D; pick an H, Draw… again, a CF3 with an attachment point, Convert to 3D, Save | Ketcher loads; the benzene is kept for the second Draw…; C6H6 (12 atoms) then C7H5F3 (15 atoms); the node is saved with the structure (FR-3D-20, D142) |
 | T-UI-45 | Edit in 3D… on ethane: Draw from this structure…, Convert to 3D unchanged, then CCO, Convert to 3D, Save | The drawer shows CC; unchanged is refused in the drawer; C2H6O (9 atoms) with "Drawing put on: …"; the node is saved with the structure (FR-3D-21, D143) |
 | T-UI-46 | In T-UI-42's ethane, after Redo: Metals relax, then Minimize | The window says the largest move was 0.00 Å (FR-3D-18, FR-3D-22, D145, D146) |
+| T-UI-47 | Group two demo nodes joined by an edge, one column; set the edge to leave and arrive on the right; expand the group | The edge's line reaches more than 10 px past the cards' right sides instead of running along them (FR-CAN-10, D147) |
 
 ## 8. Performance observation (no targets)
 
