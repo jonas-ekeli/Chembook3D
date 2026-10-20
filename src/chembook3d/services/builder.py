@@ -34,8 +34,23 @@ SITE_TRIES = 400  # directions tried
 SITE_GAP = 50.0  # degrees
 SITE_LENGTH = 2.1  # Å out from the metal where the room is measured (and SITE_BEYOND further)
 SITE_BEYOND = 1.2
-SITE_CHOICES = 30  # the best open sites a bound molecule is tried at
-CROWDED = 1.25  # a bound molecule's atom closer than this times the radii sum to another
+# D149: how much room a new atom or molecule has is its closest atom's distance to another over
+# the sum of their van der Waals radii (Bondi's; H as Rowland and Taylor's, metals METAL_VDW).
+# Below ROOMY a site is no better for more room; below CROWDED the message says so; below
+# TOO_TIGHT nothing is placed and the message says what is in the way and where it fits.
+VDW = {
+    "H": 1.10, "B": 1.92, "C": 1.70, "N": 1.55, "O": 1.52, "F": 1.47, "Si": 2.10, "P": 1.80,
+    "S": 1.80, "Cl": 1.75, "Se": 1.90, "Br": 1.85, "Te": 2.06, "I": 1.98,
+}  # fmt: skip
+OTHER_VDW = 1.8
+METAL_VDW = 2.0
+ROOMY = 0.85
+CROWDED = 0.7
+TOO_TIGHT = 0.65
+DRAWN = 1.3  # times the covalent radii sum: a new atom this close to another would look bonded
+WIDE = 100.0  # degrees: a new atom's bond this far from the others needs no better place
+OFF_BONDS = 60.0  # degrees: a new atom's bond is put at least this far from the others if it can
+FITS_STEP = 0.1  # Å: longer distances tried for the one where a refused molecule fits
 NON_METALS = {
     "H", "He", "B", "C", "N", "O", "F", "Ne", "Si", "P", "S", "Cl", "Ar", "Ge", "As", "Se",
     "Br", "Kr", "Te", "I", "Xe", "At", "Rn",
@@ -503,6 +518,10 @@ def is_metal(element: str) -> bool:
     return element not in NON_METALS
 
 
+def _vdw(element: str) -> float:
+    return VDW.get(element, METAL_VDW if is_metal(element) else OTHER_VDW)
+
+
 def _sphere(count: int) -> np.ndarray:
     """`count` directions spread evenly over a sphere (a golden spiral)."""
     golden = np.pi * (3 - np.sqrt(5))
@@ -588,21 +607,41 @@ def _free_direction(
 
 
 def _placed(
-    coords: np.ndarray, atom: int, direction: np.ndarray, length: float, skip: set[int]
+    structure: Structure, atom: int, element: str, direction: np.ndarray, length: float
 ) -> np.ndarray:
-    """The position `length` from `atom` along `direction`, or the nearest free one."""
+    """The position `length` from `atom` along `direction`. When that is crowded or too close to
+    one of the atom's bonds (D149), the direction with the most room, then the widest from the
+    atom's bonds, then the nearest the wanted one. The atom's own neighbours are left out of the
+    room: the angle keeps the new atom off them."""
+    coords = structure.coords
     centre = coords[atom]
-    others = [i for i in range(len(coords)) if i != atom and i not in skip]
-
-    def room(position: np.ndarray) -> float:
-        return float(np.linalg.norm(coords[others] - position, axis=1).min()) if others else np.inf
-
-    best = centre + direction * length
-    if room(best) >= CLASH * length:
-        return best
-    # Directions on a sphere, those near the wanted one first.
-    scored = max(_sphere(64), key=lambda d: (room(centre + d * length), d @ direction))
-    return centre + scored * length
+    graph = neighbours(structure)
+    bonded_to = sorted(graph[atom])
+    others = [i for i in range(len(coords)) if i != atom and i not in graph[atom]]
+    units = np.array([_unit(coords[b] - centre) for b in bonded_to]).reshape(-1, 3)
+    tries = np.vstack([direction[None], _sphere(SITE_TRIES)])
+    if len(units):
+        gap = np.degrees(np.arccos(np.clip((tries @ units.T).max(axis=1), -1, 1)))
+    else:
+        gap = np.full(len(tries), 180.0)
+    if others:
+        limit = _vdw(element) + np.array([_vdw(structure.elements[i]) for i in others])
+        points = centre + tries * length
+        d = np.linalg.norm(points[:, None, :] - coords[others][None, :, :], axis=2)
+        room = (d / limit[None, :]).min(axis=1)
+    else:
+        room = np.full(len(tries), np.inf)
+    if room[0] >= ROOMY and gap[0] >= WIDE:
+        return centre + direction * length
+    order = np.lexsort(
+        (
+            -(tries @ direction),
+            -np.round(np.minimum(gap, WIDE) / 5),
+            -np.round(np.minimum(room, ROOMY), 2),
+            -(gap >= OFF_BONDS).astype(int),
+        )
+    )
+    return centre + tries[order[0]] * length
 
 
 def add_atom(
@@ -621,15 +660,22 @@ def add_atom(
     coords = structure.coords
     graph = neighbours(structure)
     partner = structure.rows[atom][0]
-    direction = _free_direction(coords, graph, atom, is_metal(partner))
     wanted = _bond_length(partner, element) if length is None else length
-    position = _placed(coords, atom, direction, wanted, set())
+    note = ""
+    if is_metal(partner) and len(graph[atom]) >= 2:
+        # D149: at a metal's open site, as a molecule of one atom is bound there.
+        fit = _site_fit(structure, atom, np.zeros((1, 3)), [element], [0], wanted, element)
+        position = fit.points[0]
+        note = _crowded_note(structure, fit, [element], len(structure.rows))
+    else:
+        direction = _free_direction(coords, graph, atom)
+        position = _placed(structure, atom, element, direction, wanted)
     rows = [*structure.rows, [element, *(round(float(c), 8) for c in position)]]
     new = len(rows) - 1
     return Edited(
         structure.but(rows, changed=[new]),
         [new],
-        f"Added {element} {new + 1} bonded to atom {atom + 1} at {wanted:.2f} Å",
+        f"Added {element} {new + 1} bonded to atom {atom + 1} at {wanted:.2f} Å{note}",
     )
 
 
@@ -680,17 +726,17 @@ def add_hydrogens(
         message = f"Atom{plural} {names} already {'have' if plural else 'has'} enough bonds"
     graph = neighbours(result.structure)
     elements = result.structure.elements
-    counted = [
-        f"{elements[a]} {a + 1}: " + ", ".join(f"{elements[b]} {b + 1}" for b in sorted(graph[a]))
-        for a in full
-    ]
-    if counted:
-        # D148: the bonds counted, so a stray bond (an atom too close) shows.
-        message += " (" + "; ".join(counted) + ")"
     before = neighbours(structure)
     metals = sorted(
         {b for a in picks for b in before[a] if is_metal(elements[b])} if count is None else set()
     )
+    # D148, D149: the bonds counted, so a stray bond (an atom too close) or a metal's shows.
+    counted = [
+        f"{elements[a]} {a + 1}: " + ", ".join(f"{elements[b]} {b + 1}" for b in sorted(graph[a]))
+        for a in (picks if metals else full)
+    ]
+    if counted:
+        message += " (bonds now " + "; ".join(counted) + ")"
     if metals:
         names = ", ".join(f"{elements[m]} {m + 1}" for m in metals)
         message += f"; the bond to {names} counted (give count for an exact number of H)"
@@ -881,8 +927,150 @@ def _facing(new: np.ndarray, donors: list[int]) -> list[np.ndarray]:
 @dataclass
 class _Fit:
     points: np.ndarray
-    room: float  # the closest pair's distance over the sum of their covalent radii
+    room: float  # D149: the closest pair's distance over the sum of their van der Waals radii
     pair: tuple[int, int]  # that pair: an atom of the molecule (from 0 in it), another atom
+
+
+def _site_directions(
+    coords: np.ndarray, graph: list[set[int]], atom: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """D149: every direction tried for a metal's open site (at least SITE_GAP from its bonds,
+    or all when none is) and how far each is from the nearest bond, in degrees."""
+    centre = coords[atom]
+    units = np.array([_unit(coords[b] - centre) for b in sorted(graph[atom])]).reshape(-1, 3)
+    tries = _sphere(SITE_TRIES)
+    gap = np.degrees(np.arccos(np.clip((tries @ units.T).max(axis=1), -1, 1)))
+    apart = gap >= SITE_GAP
+    if apart.any():
+        tries, gap = tries[apart], gap[apart]
+    return tries, gap
+
+
+def _fits(
+    structure: Structure,
+    atom: int,
+    local: np.ndarray,
+    elements: list[str],
+    donors: list[int],
+    faces: list[np.ndarray],
+    directions: np.ndarray,
+    gaps: np.ndarray,
+    height: float,
+) -> _Fit:
+    """The molecule (centred on its donors) along each direction, `height` out, each face turned
+    to the atom and spun about the direction: the one with the most room (D149), up to ROOMY,
+    then the furthest from the atom's bonds. Its atoms but the donors keep off the atom too."""
+    coords = structure.coords
+    centre = coords[atom]
+    others = [i for i in range(len(coords)) if i != atom]
+    own = np.array([_vdw(e) for e in elements])
+    against = coords[others + [atom]]
+    limit = own[:, None] + np.array([_vdw(structure.elements[i]) for i in others + [atom]])[None]
+    covalent = (
+        np.array([_radius(e) for e in elements])[:, None]
+        + np.array([_radius(structure.elements[i]) for i in others + [atom]])[None]
+    )
+    mask = np.zeros(limit.shape, dtype=bool)
+    mask[donors, -1] = True  # a donor binds to the atom: no room needed there
+    spins = PLACE_TRIES if len(local) > 1 else 1
+    best: tuple[float, float] | None = None
+    found: _Fit | None = None
+    for direction, gap in zip(directions, gaps, strict=True):
+        for face in faces:
+            turned = local @ _frame(face, direction).T
+            spun = np.stack(
+                [turned @ _rotation(direction, 360 * n / spins).T for n in range(spins)]
+            )
+            points = spun + centre + direction * height  # (spins, atoms, 3)
+            apart = np.linalg.norm(points[:, :, None] - against[None, None], axis=3)
+            ratio = apart / limit
+            # An atom the 3D view would draw bonded to another counts as having no room.
+            drawn = apart / covalent
+            ratio = np.where(drawn < DRAWN, np.minimum(ratio, TOO_TIGHT * drawn / DRAWN), ratio)
+            ratio[:, mask] = np.inf
+            flat = ratio.reshape(spins, -1)
+            closest = flat.min(axis=1)
+            n = int(np.argmax(closest))
+            score = (round(min(float(closest[n]), ROOMY), 2), float(gap))
+            if best is None or score > best:
+                i, j = np.unravel_index(int(np.argmin(flat[n])), ratio.shape[1:])
+                partner = (others + [atom])[j]
+                best = score
+                found = _Fit(points[n], float(closest[n]), (int(i), partner))
+    assert found is not None
+    return found
+
+
+def _site_fit(
+    structure: Structure,
+    atom: int,
+    new: np.ndarray,
+    elements: list[str],
+    donors: list[int],
+    distance: float,
+    what: str,
+) -> _Fit:
+    """D148, D149: the molecule bound with each donor `distance` Å from `atom` where it has the
+    most room: at a metal over all its open directions, else along the atom's free side. Refused
+    when even that leaves less than TOO_TIGHT, naming what is in the way and the distance at
+    which it fits."""
+    coords = structure.coords
+    graph = neighbours(structure)
+    metal = is_metal(structure.elements[atom]) and len(graph[atom]) >= 2
+    local = new - new[donors].mean(axis=0)
+    spread = float(np.sqrt((np.linalg.norm(local[donors], axis=1) ** 2).mean()))
+    if distance <= spread:
+        raise BuildError(f"Give a distance over {spread:.2f} Å for these donor atoms")
+    faces = _facing(local, donors)
+    if metal:
+        directions, gaps = _site_directions(coords, graph, atom)
+    else:
+        directions, gaps = _free_direction(coords, graph, atom)[None], np.zeros(1)
+
+    def at(length: float) -> _Fit:
+        height = float(np.sqrt(length**2 - spread**2))
+        return _fits(structure, atom, local, elements, donors, faces, directions, gaps, height)
+
+    fit = at(distance)
+    if fit.room >= TOO_TIGHT:
+        return fit
+    i, j = fit.pair
+    apart = float(np.linalg.norm(fit.points[i] - coords[j]))
+    first = len(structure.rows)
+    where = "the best open site" if metal else "its free side"
+    message = (
+        f"No room for {what} at {distance:.2f} Å from {structure.elements[atom]} {atom + 1}: at "
+        f"{where} {elements[i]} {first + i + 1} would be {apart:.2f} Å from "
+        f"{structure.elements[j]} {j + 1}"
+    )
+    metal_name = f"{structure.elements[atom]} {atom + 1}"
+    length = distance + FITS_STEP
+    while length <= 5.0 + 1e-9:
+        if at(length).room >= CROWDED:
+            message += f". The nearest it fits is {length:.2f} Å"
+            break
+        length += FITS_STEP
+    near = f"{structure.elements[j]} {j + 1}"
+    if j in graph[atom]:
+        message += f". {near} is bonded to {metal_name}"
+    elif j != atom:
+        message += f". Or turn the group {near} is in out of the way (dihedral or rotate)"
+    if metal:
+        message += (
+            f"; to free a site, break a bond to {metal_name} (bond tool) and move that ligand away"
+        )
+    raise BuildError(message)
+
+
+def _crowded_note(structure: Structure, fit: _Fit, elements: list[str], first: int) -> str:
+    if fit.room >= CROWDED:
+        return ""
+    i, j = fit.pair
+    apart = float(np.linalg.norm(fit.points[i] - structure.coords[j]))
+    return (
+        f" (crowded: {elements[i]} {first + i + 1} is {apart:.2f} Å from "
+        f"{structure.elements[j]} {j + 1}; Minimize, or try another distance)"
+    )
 
 
 def _bound(
@@ -892,10 +1080,13 @@ def _bound(
     elements: list[str],
     donors: list[int],
     distance: float | None,
+    what: str,
 ) -> np.ndarray | _Fit:
     """D148: the molecule turned so its donors face `atom` from its free side, each donor
-    `distance` Å from it and spun to the most room; at a metal its open sites, best first, are
-    tried too. Without `distance`, beside it along its free side, 2 Å clear of everything."""
+    `distance` Å from it where it has the most room (`_site_fit`). Without `distance`, beside it
+    along its free side, 2 Å clear of everything."""
+    if distance is not None:
+        return _site_fit(structure, atom, new, elements, donors, distance, what)
     coords = structure.coords
     centre = coords[atom]
     graph = neighbours(structure)
@@ -903,49 +1094,14 @@ def _bound(
     local = new - new[donors].mean(axis=0)
     spread = float(np.sqrt((np.linalg.norm(local[donors], axis=1) ** 2).mean()))
     faces = _facing(local, donors)
-    if distance is None:
-        direction = _free_direction(coords, graph, atom, metal)
-        turned = local @ _frame(faces[0], direction).T
-        height = 2.5 + spread
+    direction = _free_direction(coords, graph, atom, metal)
+    turned = local @ _frame(faces[0], direction).T
+    height = 2.5 + spread
+    moved = turned + centre + direction * height
+    while np.linalg.norm(moved[:, None, :] - coords[None, :, :], axis=2).min() < 2.0:
+        height += 0.5
         moved = turned + centre + direction * height
-        while np.linalg.norm(moved[:, None, :] - coords[None, :, :], axis=2).min() < 2.0:
-            height += 0.5
-            moved = turned + centre + direction * height
-        return moved
-    if distance <= spread:
-        raise BuildError(f"Give a distance over {spread:.2f} Å for these donor atoms")
-    height = float(np.sqrt(distance**2 - spread**2))
-    directions = (
-        open_sites(coords, graph, atom, SITE_CHOICES)
-        if metal and len(graph[atom]) >= 2
-        else [_free_direction(coords, graph, atom, metal)]
-    )
-    others = [i for i in range(len(coords)) if i != atom]
-    rest = [i for i in range(len(local)) if i not in set(donors)]
-    radii = np.array([_radius(e) for e in elements])
-    limit = radii[:, None] + np.array([_radius(structure.elements[i]) for i in others])[None, :]
-    to_atom = radii[rest] + _radius(structure.elements[atom])
-    best: _Fit | None = None
-    for direction in directions:
-        for face in faces:
-            turned = local @ _frame(face, direction).T
-            for n in range(PLACE_TRIES):
-                points = turned @ _rotation(direction, 360 * n / PLACE_TRIES).T
-                points = points + centre + direction * height
-                ratio = np.full((len(points), 1), np.inf)
-                if others:
-                    ratio = np.linalg.norm(points[:, None] - coords[others][None], axis=2) / limit
-                i, j = np.unravel_index(int(np.argmin(ratio)), ratio.shape)
-                fit = _Fit(points, float(ratio[i, j]), (int(i), others[j] if others else atom))
-                if rest:  # the molecule's other atoms keep off the atom it binds to too
-                    off = np.linalg.norm(points[rest] - centre, axis=1) / to_atom
-                    k = int(np.argmin(off))
-                    if off[k] < fit.room:
-                        fit = _Fit(points, float(off[k]), (rest[k], atom))
-                if best is None or fit.room > best.room:
-                    best = fit
-    assert best is not None
-    return best
+    return moved
 
 
 def add_molecule(
@@ -985,19 +1141,13 @@ def add_molecule(
     if picks and donors:
         (atom,) = picks
         elements = [row[0] for row in atoms]
-        found = _bound(structure, atom, new, elements, donors, distance)
+        found = _bound(structure, atom, new, elements, donors, distance, what)
         if isinstance(found, _Fit):
             moved = found.points
             added += [_pair(atom, first + d) for d in donors]
             names = ", ".join(str(first + d + 1) for d in donors)
             note = f", bonded to atom {atom + 1} through {names} at {distance:.2f} Å"
-            if found.room < CROWDED:
-                i, j = found.pair
-                apart = float(np.linalg.norm(moved[i] - coords[j]))
-                note += (
-                    f" (crowded: {elements[i]} {first + i + 1} is {apart:.2f} Å from "
-                    f"{structure.elements[j]} {j + 1}; Minimize, or try another distance)"
-                )
+            note += _crowded_note(structure, found, elements, first)
         else:
             moved = found
     else:

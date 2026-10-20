@@ -718,13 +718,44 @@ def list_folders(path: str | None = None, files: bool = False):
 # ---------- nodes ----------
 
 
-@router.get("/nodes", response_model=list[NodeOut])
-def list_nodes(session: DbSession, include_xyz: bool = True):
-    """include_xyz false (D148): every node without its coordinates, a short list."""
+class NodeBrief(BaseModel):
+    """D149: a node as list_nodes gives it to Claude, without notes, places and times."""
+
+    id: str
+    label: str
+    kind: str
+    role: str
+    status: str
+    charge: int | None
+    multiplicity: int | None
+    formula: str | None
+    atom_count: int
+    calculation_count: int
+    tags: list[str]
+    warnings: list[str]  # the codes only; get_node gives the messages
+    step_id: str | None
+    branch_id: str | None
+    group_id: str | None
+    derived_from_id: str | None
+    xyz: str | None = None
+
+
+@router.get("/nodes", response_model=list[NodeOut] | list[NodeBrief])
+def list_nodes(session: DbSession, include_xyz: bool = True, brief: bool = False):
+    """include_xyz false (D148): every node without its coordinates, a short list; brief (D149)
+    also leaves out the fields a list does not need."""
     found = [_node_out(session, n) for n in node_service.list_nodes(session)]
     if not include_xyz:
         for node in found:
             node.xyz = None
+    if brief:
+        return [
+            NodeBrief(
+                **node.model_dump(include=set(NodeBrief.model_fields) - {"warnings"}),
+                warnings=sorted({w.code for w in node.warnings}),
+            )
+            for node in found
+        ]
     return found
 
 

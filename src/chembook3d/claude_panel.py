@@ -113,7 +113,8 @@ or dihedral, turn about a bond, swap elements, delete, add fragments, a SMILES o
 freeze and hold, Minimize) and changes nothing. Read its messages, `metals` (the atoms bonded
 to Ru and other metals), each step's `warnings` and `close_contacts`, or call `check_structure`;
 fix what is wrong with more steps, going on from the answer's `build_id`. A molecule or SMILES
-binds to a metal's open site with `value` (the distance to its donor atoms). Only then save it
+binds to a metal's open site with `value` (the distance to its donor atoms); when the step says
+there is no room, tell the person what is in the way rather than forcing it. Only then save it
 by its `build_id` with `set_coordinates` on the node the person names, saying that a node with
 calculations gets a new derived node, or with `create_node`; never copy the coordinates.
 Minimize is a quick clean-up, not an energy: an xTB optimisation goes to a cloud job.

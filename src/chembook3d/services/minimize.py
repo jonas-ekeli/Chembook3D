@@ -11,7 +11,11 @@ restraints: its bonds, the angles between its ligands, the angles on at each lig
 torsion about each bond. The organic parts relax; the metal keeps its shape.
 
 Bonds are the editor's (the 3D view's, with the bonds the user added or removed). A bond the
-user added to a metal is held at the sum of the covalent radii until a hold says otherwise.
+user added to a metal is held at the sum of the covalent radii until a hold says otherwise,
+unless it is already at a bond's length (a molecule or atom placed at an open site, D149): then
+it is held where it is, with its angles, like the metal's other bonds. Atoms changed since the
+window opened are first minimized on their own, everything else fixed, and then with the atoms
+round them (D149), so a ligand placed beside crowded ones settles before those move.
 UFF has no metal to push other atoms off, so atoms not bonded to a metal or its ligand atoms are
 kept from coming closer to it than 3.0 Å (H 2.6 Å), or than they already are.
 
@@ -34,6 +38,7 @@ from rdkit.Chem import rdDetermineBonds, rdForceFieldHelpers
 from rdkit.Geometry import Point3D
 
 from chembook3d.services import builder, geometry, metal_shapes
+from chembook3d.services.atom_matching import BOND_SCALE
 from chembook3d.services.builder import BuildError, Structure
 
 # Elements UFF types reliably from bond orders; every other element is held by restraints, or
@@ -55,6 +60,10 @@ CLEAR = {"H": 2.6}  # Å an unbonded atom is kept from a metal; 3.0 for the othe
 CLEAR_HEAVY = 3.0
 CLEAR_FORCE = 100.0  # kcal/mol/Å²
 HOLD_ANGLE = 1e3
+PLACED_FROM = 0.8  # times the covalent radii sum: an added metal bond this long or longer is held
+STRAIGHT = 175.0  # degrees: no torsion is held about a bond in a line this straight
+LINE = 179.0  # degrees: an angle this straight is held by the distance across it
+PLACED_SCALE = 0.2  # of the restraints' constants, for the angles and torsions of a placed ligand
 STEPS = 2000
 ROUNDS = 5  # STEPS each, until converged
 
@@ -191,14 +200,27 @@ def _near(graph: list[set[int]], changed: list[int]) -> set[int]:
     return found
 
 
+def _placed_bond(structure: Structure, m: int, lig: int) -> bool:
+    """D149: a bond the user added that is already at a bond's length (as the 3D view draws one,
+    from 0.8 times the covalent radii sum up): it was placed there, at an open site."""
+    length = float(np.linalg.norm(structure.coords[m] - structure.coords[lig]))
+    usual = builder._bond_length(structure.elements[m], structure.elements[lig])
+    return PLACED_FROM * usual <= length <= BOND_SCALE * usual
+
+
 def _hold_metals(ff, structure: Structure, graph: list[set[int]], metals: list[int]) -> None:
-    """Hold each metal in its current shape. A bond the user added to it has no shape yet: it
-    is held at the covalent radii sum and left out of the angles and torsions."""
+    """Hold each metal in its current shape. A bond the user added to it far from a bond's
+    length has no shape yet: it is held at the covalent radii sum and left out of the angles and
+    torsions; one placed at a bond's length is held as it is, like the others (D149)."""
     coords = structure.coords
     added = {tuple(p) for p in structure.added}
     for m in metals:
         ligands = sorted(graph[m])
-        new = {lig for lig in ligands if (min(m, lig), max(m, lig)) in added}
+        new = {
+            lig
+            for lig in ligands
+            if (min(m, lig), max(m, lig)) in added and not _placed_bond(structure, m, lig)
+        }
         for lig in ligands:
             if lig in new:
                 length = builder._bond_length(structure.elements[m], structure.elements[lig])
@@ -206,21 +228,38 @@ def _hold_metals(ff, structure: Structure, graph: list[set[int]], metals: list[i
                 length = float(np.linalg.norm(coords[m] - coords[lig]))
             ff.UFFAddDistanceConstraint(m, lig, False, length, length, METAL_BOND)
         kept = [lig for lig in ligands if lig not in new]
+        # D149: a ligand placed at an open site keeps its place more loosely, so it can ease out
+        # of a contact without swinging onto the metal's other ligands.
+        placed = {lig for lig in kept if (min(m, lig), max(m, lig)) in added}
         for a, b in combinations(kept, 2):
-            angle = builder.measure(coords, [a, m, b])
-            ff.UFFAddAngleConstraint(a, m, b, False, angle, angle, METAL_ANGLE)
+            scale = PLACED_SCALE if placed & {a, b} else 1.0
+            _angle_held(ff, coords, a, m, b, scale)
         for lig in kept:
+            scale = PLACED_SCALE if lig in placed else 1.0
             others = [o for o in kept if o != lig]
             # A torsion about the bond, from the ligand most nearly across, keeps its turn.
             far = max(others, key=lambda o: builder.measure(coords, [o, m, lig]), default=None)
             for x in graph[lig] - {m}:
-                angle = builder.measure(coords, [m, lig, x])
-                ff.UFFAddAngleConstraint(m, lig, x, False, angle, angle, METAL_ANGLE)
-                if far is not None and builder.measure(coords, [far, m, lig]) < 175:
+                _angle_held(ff, coords, m, lig, x, scale)
+                if (
+                    far is not None
+                    and builder.measure(coords, [far, m, lig]) < STRAIGHT
+                    and builder.measure(coords, [m, lig, x]) < STRAIGHT
+                ):
                     torsion = builder.measure(coords, [far, m, lig, x])
                     ff.UFFAddTorsionConstraint(
-                        far, m, lig, x, False, torsion, torsion, METAL_TORSION
+                        far, m, lig, x, False, torsion, torsion, METAL_TORSION * scale
                     )
+
+
+def _angle_held(ff, coords: np.ndarray, a: int, b: int, c: int, scale: float) -> None:
+    angle = builder.measure(coords, [a, b, c])
+    if angle > LINE:
+        # D149: an angle restraint at 180° has no direction to push in (its gradient is
+        # undefined), so a straight line (trans ligands, a CO) is held between STRAIGHT and 180°.
+        ff.UFFAddAngleConstraint(a, b, c, False, STRAIGHT, 180.0, METAL_ANGLE * scale)
+    else:
+        ff.UFFAddAngleConstraint(a, b, c, False, angle, angle, METAL_ANGLE * scale)
 
 
 def _clear_metals(
@@ -338,29 +377,42 @@ def minimize(
     free -= frozen
     if not free:
         raise BuildError("Every atom that would move is frozen")
-    try:
-        ff = rdForceFieldHelpers.UFFGetMoleculeForceField(mol, ignoreInterfragInteractions=False)
-    except (ValueError, RuntimeError) as exc:
-        raise BuildError(f"UFF could not be set up for this structure ({exc})") from exc
-    if ff is None:
-        raise BuildError("UFF could not be set up for this structure")
-    ff.Initialize()
-    shapes: list[str] = []
-    held = metals
-    if relax:
-        shapes, held = _relax_metals(ff, mol, reference, graph, metals)
-    _hold_metals(ff, reference, graph, held)
-    _clear_metals(ff, reference, graph, metals, clear)
-    _holds(ff, structure, frozen)
-    for i in range(count):
-        if i not in free:
-            ff.AddFixedPoint(i)
-    converged = False
-    for _ in range(ROUNDS):
-        if ff.Minimize(maxIts=STEPS) == 0:
-            converged = True
-            break
-    coords = np.array(ff.Positions(), dtype=float).reshape(-1, 3)
+
+    def run(moving: set[int]) -> tuple[bool, list[str], list[int]]:
+        try:
+            ff = rdForceFieldHelpers.UFFGetMoleculeForceField(
+                mol, ignoreInterfragInteractions=False
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise BuildError(f"UFF could not be set up for this structure ({exc})") from exc
+        if ff is None:
+            raise BuildError("UFF could not be set up for this structure")
+        ff.Initialize()
+        shapes: list[str] = []
+        held = metals
+        if relax:
+            shapes, held = _relax_metals(ff, mol, reference, graph, metals)
+        _hold_metals(ff, reference, graph, held)
+        _clear_metals(ff, reference, graph, metals, clear)
+        _holds(ff, structure, frozen)
+        for i in range(count):
+            if i not in moving:
+                ff.AddFixedPoint(i)
+        converged = False
+        for _ in range(ROUNDS):
+            if ff.Minimize(maxIts=STEPS) == 0:
+                converged = True
+                break
+        for i, p in enumerate(np.array(ff.Positions(), dtype=float).reshape(-1, 3)):
+            conformer.SetAtomPosition(i, Point3D(*map(float, p)))
+        return converged, shapes, held
+
+    # D149: the changed atoms settle first with everything else fixed, then with those round.
+    first = set(structure.changed) - frozen if not everything else set()
+    if first and first < free:
+        run(first)
+    converged, shapes, held = run(free)
+    coords = np.array(conformer.GetPositions(), dtype=float)
     before = structure.coords
     if len(free) == count:
         # Nothing was fixed, so the whole may have drifted: put it back where it was.

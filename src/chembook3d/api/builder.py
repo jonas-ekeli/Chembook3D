@@ -327,7 +327,8 @@ def _apply(structure: builder.Structure, picks: list[int], body: EditIn) -> buil
 # ---------- Claude's structure tools (D144) ----------
 
 MAX_STEPS = 50
-CONTACT = 0.4  # Å past the covalent radii: atoms more than two bonds apart closer than this
+CONTACT = 0.4  # Å past the covalent radii: atoms three bonds apart closer than this
+SHORT = 0.75  # times the covalent radii sum: a drawn bond this short is a clash (D149)
 MAX_CONTACTS = 20
 MAX_WARNINGS = 10
 SIDE_ATOMS = 30  # a measurement lists the atoms of a side up to this many
@@ -611,21 +612,57 @@ def _within_two(graph: list[set[int]], atom: int) -> set[int]:
     return near | {atom}
 
 
-def _close(structure: builder.Structure, graph: list[set[int]]) -> list[tuple[float, int, int]]:
-    """Atoms more than two bonds apart that are closer than their covalent radii and CONTACT:
-    a clash, or a bond the 3D view does not draw. Closest past their radii first."""
+def _within_three(graph: list[set[int]], atom: int) -> set[int]:
+    near = _within_two(graph, atom)
+    return near | {x for other in near for x in graph[other]}
+
+
+def _trusted(structure: builder.Structure) -> list[set[int]]:
+    """D149: the drawn bonds that look like bonds, so a clash drawn as a bond is still reported:
+    an atom keeps only as many bonds to non-metals as it can have (Minimize's rule, the shortest
+    for its radii first), and a bond shorter than SHORT times the radii sum is not one. Bonds the
+    user added and bonds to metals stay."""
+    elements = structure.elements
+    metals = {i for i, e in enumerate(elements) if e not in minimize.TYPED}
+    graph = minimize._bonds(structure, metals)
+    coords = structure.coords
+    added = {tuple(p) for p in structure.added}
+    for i in range(len(elements)):
+        for j in sorted(graph[i]):
+            if j <= i or (i, j) in added:
+                continue
+            length = float(np.linalg.norm(coords[i] - coords[j]))
+            if length < SHORT * builder._bond_length(elements[i], elements[j]):
+                graph[i].discard(j)
+                graph[j].discard(i)
+    return graph
+
+
+def _close(structure: builder.Structure) -> list[tuple[float, int, int]]:
+    """Atoms more than two bonds apart (by the bonds that look like bonds, D149) that are too
+    close: three bonds apart, closer than their covalent radii and CONTACT; further, closer than
+    CROWDED times their van der Waals radii (D149), as a placed molecule is called crowded.
+    Most crowded first."""
     count = len(structure.rows)
     if count < 2 or count > CONTACTS_UP_TO:
         return []
     coords = structure.coords
-    radii = np.array([builder._radius(e) for e in structure.elements])
+    elements = structure.elements
+    radii = np.array([builder._radius(e) for e in elements])
+    vdw = np.array([builder._vdw(e) for e in elements])
     distance = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
-    excess = distance - (radii[:, None] + radii[None, :] + CONTACT)
+    covalent = distance - (radii[:, None] + radii[None, :] + CONTACT)
+    ratio = distance / (vdw[:, None] + vdw[None, :])
+    trusted = _trusted(structure)
+    near = (covalent < 0) | (ratio < builder.CROWDED)
     found = []
-    for i, j in zip(*np.nonzero(np.triu(excess < 0, k=1)), strict=True):
+    for i, j in zip(*np.nonzero(np.triu(near, k=1)), strict=True):
         i, j = int(i), int(j)
-        if j not in _within_two(graph, i):
-            found.append((float(excess[i, j]), i, j))
+        if j in _within_two(trusted, i):
+            continue
+        if j in _within_three(trusted, i) and covalent[i, j] >= 0:
+            continue
+        found.append((float(ratio[i, j]), i, j))
     return sorted(found)
 
 
@@ -640,7 +677,7 @@ def _contacts(structure: builder.Structure, graph: list[set[int]]) -> list[Conta
             elements=(elements[i], elements[j]),
             distance=round(float(np.linalg.norm(coords[i] - coords[j])), 3),
         )
-        for _, i, j in _close(structure, graph)[:MAX_CONTACTS]
+        for _, i, j in _close(structure)[:MAX_CONTACTS]
     ]
 
 
@@ -683,8 +720,8 @@ def _warnings(before: builder.Structure, after: builder.Structure, on: list[int]
             found.append(
                 f"{_name(after, i)} and {_name(after, j)} are now drawn bonded ({distance:.2f} Å)"
             )
-    was = {(i, j) for _, i, j in _close(before, old)}
-    for _, i, j in _close(after, new):
+    was = {(i, j) for _, i, j in _close(before)}
+    for _, i, j in _close(after):
         if (i, j) not in was:
             distance = float(np.linalg.norm(coords[i] - coords[j]))
             found.append(f"{_name(after, i)} and {_name(after, j)} are only {distance:.2f} Å apart")

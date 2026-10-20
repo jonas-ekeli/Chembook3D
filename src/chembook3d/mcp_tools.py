@@ -40,6 +40,9 @@ ID_HELP = "Ids come from list or get tools (or get_selection); they are opaque s
 # Descriptions of inputs that recur across tools; a tool's own `help` comes first.
 FIELD_HELP = {
     "node_id": "Id of a node or free species.",
+    "build_id": (
+        "A build_structure answer's build_id: its coordinates are used, so no xyz is needed (D148)."
+    ),
     "group_id": "Id of a group node.",
     "step_id": "Id of a reaction step.",
     "branch_id": "Id of a branch.",
@@ -131,10 +134,13 @@ TOOLS: list[ToolSpec] = [
         "GET",
         "/api/nodes",
         "All nodes and free species: id, label, kind, role, status, charge, multiplicity, "
-        "formula, atom count, step, branch, group. Coordinates only with include_xyz (large); "
-        "get_node gives one node's.",
-        help={"include_xyz": "Also each node's XYZ text."},
-        defaults={"include_xyz": False},
+        "formula, atom count, calculation count, tags, warning codes, step, branch, group. "
+        "Coordinates only with include_xyz (large); get_node gives one node's in full.",
+        help={
+            "include_xyz": "Also each node's XYZ text.",
+            "brief": "Leave out notes, canvas places, times and warning messages (D149).",
+        },
+        defaults={"include_xyz": False, "brief": True},
     ),
     T(
         "get_node",
@@ -381,8 +387,9 @@ TOOLS: list[ToolSpec] = [
         "contacts, electrons), then save it by passing its build_id to set_coordinates (a "
         "derived node when the node has calculations) or create_node; never copy coordinates. "
         "To go on from an answer, pass its build_id. A molecule or SMILES binds to a metal's "
-        "open site at `value` Å from its donors. Use this rather than writing new coordinates "
-        "yourself.",
+        "open site at `value` Å from its donors, where it has the most room; when no site has "
+        "room the step fails and says what is in the way (free a site first rather than forcing "
+        "it in for Minimize). Use this rather than writing new coordinates yourself.",
     ),
     T(
         "check_structure",
@@ -1022,7 +1029,21 @@ def _inline(schema: Any, components: dict[str, Any], seen: frozenset[str] = froz
         if name in seen:
             return {"type": "object"}
         return _inline(components[name], components, seen | {name})
-    return {k: _inline(v, components, seen) for k, v in schema.items() if k != "title"}
+    out = {k: _inline(v, components, seen) for k, v in schema.items() if k != "title"}
+    return _not_null(out)
+
+
+def _not_null(schema: dict[str, Any]) -> dict[str, Any]:
+    """An optional field written as anyOf [its type, null] becomes its type alone (D149): some
+    clients drop or hide such fields, and a field left out is the same as null here."""
+    choices = schema.get("anyOf")
+    if not isinstance(choices, list) or len(choices) != 2:
+        return schema
+    kept = [c for c in choices if c != {"type": "null"}]
+    if len(kept) != 1 or not isinstance(kept[0], dict):
+        return schema
+    rest = {k: v for k, v in schema.items() if k != "anyOf" and not (k == "default" and v is None)}
+    return {**kept[0], **rest}
 
 
 @cache

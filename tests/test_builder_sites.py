@@ -1,5 +1,6 @@
 """A metal's open site, molecules bound there, hydrogens counted on a metal's ligand atoms and
-clashes named by their sides (D148, A93; T-BLD-27, T-BLD-28). Public structures only."""
+clashes named by their sides (D148, A93; T-BLD-27, T-BLD-28); a crowded site refused and placed
+ligands kept by Minimize (D149, A94; T-BLD-29). Public structures only."""
 
 import numpy as np
 import pytest
@@ -40,10 +41,10 @@ def test_open_site_and_a_molecule_bound_there():
     assert min(bond_angles(s, pd, site)) > 70
     done = builder.add_molecule(s, [pd], builder.molecule_rows("ethylene"), "ethylene", 2.15)
     out, first = done.structure, len(s.rows)
-    assert done.message == (
+    assert done.message.startswith(
         f"Added ethylene as atoms {first + 1}–{first + 6}, bonded to atom {pd + 1} through "
         f"{first + 1}, {first + 2} at 2.15 Å"
-    )
+    )  # D149: its H come within 0.7 of the van der Waals radii of a Cl, said as crowded
     c1, c2 = first, first + 1
     assert builder.measure(out.coords, [pd, c1]) == pytest.approx(2.15)
     assert builder.measure(out.coords, [pd, c2]) == pytest.approx(2.15)
@@ -85,19 +86,49 @@ def test_open_site_and_a_molecule_bound_there():
         builder.add_molecule(s, [pd], builder.molecule_rows("water"), "water", 9.0)
 
 
-def test_bound_ethylene_survives_minimize_at_a_crowded_ru():
-    # T-BLD-27: in the crowded Ru complex the open sites are tried in turn; after Minimize the
-    # olefin's H stay off the metal (D148: they keep their distance or 2.6 Å).
+def test_crowded_site_refused_and_placed_ligands_kept_by_minimize():
+    # T-BLD-29 (D149): in the crowded Ru complex every open direction is tried with the whole
+    # molecule; ethylene at 2.2 Å has no room anywhere, so nothing is placed and the message names
+    # what is in the way and the nearest distance it fits. CO and water have room, and Minimize
+    # keeps them where they were put: the bond at its length, CO in line, the H off the metal.
     s, ru = ru_complex()
     first = len(s.rows)
-    out = builder.add_molecule(s, [ru], builder.molecule_rows("ethylene"), "ethylene", 2.2)
-    graph = builder.neighbours(out.structure)
-    assert graph[first] - {first + 1, first + 2, first + 3} == {ru}  # bonded to Ru, nothing else
-    minimized = minimize.minimize(out.structure).structure
-    for c in (first, first + 1):
-        assert builder.measure(minimized.coords, [ru, c]) == pytest.approx(2.25, abs=0.15)
+    with pytest.raises(BuildError) as refused:
+        builder.add_molecule(s, [ru], builder.molecule_rows("ethylene"), "ethylene", 2.2)
+    text = str(refused.value)
+    assert text.startswith(f"No room for ethylene at 2.20 Å from Ru {ru + 1}: at the best open")
+    assert "The nearest it fits is 2.80 Å" in text
+    assert f"Cl 5 is bonded to Ru {ru + 1}" in text and "break a bond" in text
+
+    co = builder.add_molecule(s, [ru], builder.molecule_rows("CO"), "CO", 1.9).structure
+    assert ratio_to_rest(co, [first, first + 1], ru) > 1.3  # nothing drawn bonded to it
+    kept = minimize.minimize(co).structure
+    assert builder.measure(kept.coords, [ru, first]) == pytest.approx(1.9, abs=0.05)
+    assert builder.measure(kept.coords, [ru, first, first + 1]) > 170
+    for lig in builder.neighbours(s)[ru]:
+        before = builder.measure(s.coords, [ru, lig])
+        assert builder.measure(kept.coords, [ru, lig]) == pytest.approx(before, abs=0.1)
+
+    water = builder.add_molecule(s, [ru], builder.molecule_rows("water"), "water", 2.2)
+    kept = minimize.minimize(water.structure).structure
+    assert builder.measure(kept.coords, [ru, first]) == pytest.approx(2.2, abs=0.05)
+    for h in (first + 1, first + 2):
+        assert builder.measure(kept.coords, [ru, h]) > 2.6
+
+
+def test_crowded_atom_moves_to_room_off_its_bonds():
+    # T-BLD-29 (D149): an atom added where its usual direction is crowded goes where there is
+    # room but never along one of its partner's bonds; at a metal it takes the open site too.
+    s, ru = ru_complex()
+    first = len(s.rows)
+    carbon = builder.add_atom(s, [ru], "C", 2.2).structure
+    assert ratio_to_rest(carbon, [first], ru) > 1.3
+    chain = builder.add_atom(carbon, [first], "C", 1.38).structure
+    hydrogens = builder.add_hydrogens(chain, [first, first + 1], count=2).structure
+    graph = builder.neighbours(hydrogens)
     for h in range(first + 2, first + 6):
-        assert builder.measure(minimized.coords, [ru, h]) > 2.3
+        assert len(graph[h]) == 1  # each H bonded to its carbon only
+    assert graph[first] == {ru, first + 1, first + 2, first + 3}
 
 
 def test_added_atoms_hydrogens_and_clashes():
@@ -111,8 +142,8 @@ def test_added_atoms_hydrogens_and_clashes():
     assert ratio_to_rest(added.structure, [first], pd) > 1.2
     usual = builder.add_hydrogens(added.structure, [first])
     assert usual.message == (
-        f"Added 1 H to atom {first + 1}; the bond to Pd {pd + 1} counted (give count for an "
-        "exact number of H)"
+        f"Added 1 H to atom {first + 1} (bonds now O {first + 1}: Pd {pd + 1}, H {first + 2}); "
+        f"the bond to Pd {pd + 1} counted (give count for an exact number of H)"
     )
     aqua = builder.add_hydrogens(added.structure, [first], count=2)
     assert aqua.message == f"Added 2 H to atom {first + 1}"
