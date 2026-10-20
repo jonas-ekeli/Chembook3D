@@ -60,7 +60,7 @@ LONGEST_WAIT = 30.0  # one long poll; the caller asks again
 QUIET = re.compile(
     r"^/api/("
     r"live|selection|view-state|confirmations(/.*)?"
-    r"|energies/(profile|table|table\.csv)|pathways/extend|overlay|snapshot|atom-match"
+    r"|energies/(profile|table|table\.csv)|pathways/extend|overlay|snapshot|atom-match|measurements"
     r"|scan-paths|scan-paths/plan|calculations/[^/]+/steps/trim-preview"
     r"|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|imports|imports/[^/]+|imports/[^/]+/preview"

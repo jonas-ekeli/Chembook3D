@@ -64,6 +64,10 @@ Rules:
   tools as steps and changes nothing; check its answer (messages, warnings, metals,
   close_contacts), then save it with set_coordinates or create_node by its build_id (D148).
   Do not write or copy coordinates yourself.
+- Comparing geometries across nodes (D151): measure_nodes measures distances, angles,
+  dihedrals and vector angles on many nodes or a group's members at once, with each row's
+  geometry level and convergence and a summary per column; use reference_node_id or SMARTS
+  when the nodes number their atoms differently, rather than matching atoms yourself.
 - "This node", "these", "the selected": call get_selection first.
 - Import only files at paths the user gave you: import_file, check the plan, then
   commit_import.
