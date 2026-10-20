@@ -26,6 +26,7 @@ from chembook3d.api.lifetime import SHUTDOWN_PUSH_TIMEOUT, Lifetime, watch
 from chembook3d.api.lifetime import router as lifetime_router
 from chembook3d.api.live import ChangeTracker, LiveState
 from chembook3d.api.live import router as live_router
+from chembook3d.api.measurements import router as measurement_router
 from chembook3d.api.notes import router as note_router
 from chembook3d.api.pathway import router as pathway_router
 from chembook3d.api.remote import router as remote_router
@@ -136,6 +137,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(selectivity_router)
     app.include_router(note_router)
     app.include_router(turnover_router)
+    app.include_router(measurement_router)  # D151
     app.include_router(claude_router)
     app.include_router(remote_router)  # D122
     app.include_router(inspect_router)  # D123c

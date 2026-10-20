@@ -373,6 +373,20 @@ TOOLS: list[ToolSpec] = [
         help={"pairs": "Pairs fixed by hand, [start atom, end atom], 1-based."},
     ),
     T(
+        "measure_nodes",
+        "read",
+        "POST",
+        "/api/measurements",
+        "Measure distances, angles, dihedrals and angles between two vectors on many nodes at "
+        "once (D151): the nodes given and every member of the groups given, one row per node "
+        "with the level of theory and convergence of the optimization its geometry came from, "
+        "and per column n, mean, SD, min and max (and per level when the rows mix levels). "
+        "Atoms are numbered as each node has them, as `reference_node_id` has them (each node "
+        "matched to it), or by a SMARTS pattern per measurement. `level` and `converged_only` "
+        "pick nodes by their geometry; `keep` keeps rows by value; `skipped` says why a node "
+        "was left out. Changes nothing.",
+    ),
+    T(
         "build_structure",
         "read",
         "POST",
