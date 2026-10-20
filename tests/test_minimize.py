@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from chembook3d.services import builder, minimize
+from chembook3d.services import builder, minimize, smiles
 from chembook3d.services.builder import BuildError, Hold, Structure
 from tests.test_builder import butane, chain, rows_of
 
@@ -179,3 +179,69 @@ def test_api_holds_and_minimize(open_client):
     )
     assert bad.status_code == 422 and "needs its value" in bad.json()["detail"]
     assert open_client.get("/api/nodes").json() == []
+
+
+def drawn_hoveyda() -> Structure:
+    """A CAAC Hoveyda precatalyst made from a drawing (D142f), its chlorides left and right."""
+    from tests.test_drawing import drawn_at
+
+    text = "CC1(C)CC(C)(C)N(c2c(C(C)C)cccc2C(C)C)C1=[Ru]1(Cl)(Cl)=Cc2ccccc2O1C(C)C"
+    places = {21: (0, 0), 22: (-1.5, 0), 23: (1.5, 0), 20: (0, 1.5), 31: (0.3, -1.5)}
+    return Structure(smiles.from_molfile(drawn_at(text, {**places, 24: (-1, -1.1)})).rows)
+
+
+def metal_bonds(s: Structure) -> list[set[int]]:
+    graph = builder.neighbours(s)
+    return [graph[i] for i, e in enumerate(s.elements) if e not in minimize.TYPED]
+
+
+@pytest.mark.parametrize("make", ["ru", "4.xyz", "drawn"])
+def test_minimize_again_stays_put(make):
+    # T-BLD-25 (D145): a second and third Minimize with nothing changed in between do not move
+    # the atoms, and nothing collapses onto the metal (the drawn Ru complex took a methyl onto
+    # Ru on the first Minimize and could not be minimized again).
+    if make == "ru":
+        s = ru_complex()[0]
+    elif make == "drawn":
+        s = drawn_hoveyda()
+    else:
+        s = Structure(rows_of(STERICS / make))
+    bonds = metal_bonds(s)
+    first = minimize.minimize(s, everything=True)
+    assert first.converged
+    assert first.structure.minimized_from == s.rows
+    assert metal_bonds(first.structure) == bonds
+    again = first.structure
+    for _ in range(2):
+        done = minimize.minimize(again, everything=True)
+        assert done.converged and done.largest < 1e-3
+        again = done.structure
+    assert again.minimized_from == s.rows
+    near = minimize.minimize(Structure(again.rows, changed=[0], minimized_from=s.rows))
+    assert near.largest < 1e-3
+
+
+def test_minimized_from_bookkeeping(open_client):
+    # T-BLD-25 (D145): holds and bonds keep where Minimize started from; anything that moves
+    # atoms starts afresh, and so does the API given another structure's atoms.
+    s = butane()
+    c1, c2, c3, c4 = chain(s)
+    done = minimize.minimize(s, everything=True).structure
+    assert done.minimized_from == s.rows
+    held = builder.hold(done, [c2, c3], None).structure
+    assert held.minimized_from == s.rows
+    moved = builder.set_distance(held, [c2, c3], 1.6, c3).structure
+    assert moved.minimized_from is None
+    body = {"rows": s.rows, "picks": [], "tool": "minimize", "everything": True}
+    out = open_client.post("/api/builder/edit", json=body).json()
+    assert out["minimized_from"] == s.rows
+    again = open_client.post(
+        "/api/builder/edit", json={**out, "tool": "minimize", "everything": True}
+    ).json()
+    assert "the largest move was 0.00 Å" in again["message"]
+    other = [["N", *row[1:]] if n == 0 else row for n, row in enumerate(s.rows)]
+    ignored = open_client.post(
+        "/api/builder/edit",
+        json={**out, "tool": "minimize", "everything": True, "minimized_from": other},
+    )
+    assert ignored.status_code == 200 and ignored.json()["minimized_from"] == out["rows"]

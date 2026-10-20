@@ -2228,6 +2228,9 @@ export type BuilderStructure = {
   removed: [number, number][]
   changed: number[]
   holds: BuilderHold[]
+  /** D145: the coordinates Minimize takes the bonds and the metals' shape from, so Minimize
+   * again stays put; Minimize sets it and any other change of the atoms drops it. */
+  minimized_from?: GeometryRows | null
 }
 
 /** D140: one atom frozen, or a distance, angle or dihedral (2 to 4 atoms) held at `value`. */

@@ -12,6 +12,13 @@ torsion about each bond. The organic parts relax; the metal keeps its shape.
 
 Bonds are the editor's (the 3D view's, with the bonds the user added or removed). A bond the
 user added to a metal is held at the sum of the covalent radii until a hold says otherwise.
+UFF has no metal to push other atoms off, so atoms not bonded to a metal or its ligand atoms are
+kept from coming closer to it than 3.0 Å (H 2.6 Å), or than they already are.
+
+Minimize again stays put (D145): the bonds, the metals' shape and how close atoms may come to a
+metal are taken from the coordinates before the first Minimize since the atoms last changed
+otherwise (`Structure.minimized_from`), not from the minimized ones, so the next run starts at
+the minimum of the same function.
 """
 
 from dataclasses import dataclass
@@ -35,7 +42,7 @@ METAL_BOND = 500.0  # kcal/mol/Å², restraint constants
 METAL_ANGLE = 100.0  # kcal/mol/rad²
 METAL_TORSION = 20.0
 HOLD_DISTANCE = 1e4
-CLEAR = {"H": 2.6}  # Å an unbonded atom is kept from a metal with `clear`; 3.0 for the others
+CLEAR = {"H": 2.6}  # Å an unbonded atom is kept from a metal; 3.0 for the others
 CLEAR_HEAVY = 3.0
 CLEAR_FORCE = 100.0  # kcal/mol/Å²
 HOLD_ANGLE = 1e3
@@ -202,13 +209,28 @@ def _hold_metals(ff, structure: Structure, graph: list[set[int]], metals: list[i
                     )
 
 
-def _clear_metals(ff, structure: Structure, graph: list[set[int]], metals: list[int]) -> None:
+def _clear_metals(
+    ff, structure: Structure, graph: list[set[int]], metals: list[int], push: bool
+) -> None:
+    """Keep atoms not bonded to a metal or its ligand atoms from coming closer to it than CLEAR
+    (an agostic H already closer stays where it is), or with `push` out to CLEAR."""
+    coords = structure.coords
     for m in metals:
         near = graph[m] | {x for lig in graph[m] for x in graph[lig]}
         for i, element in enumerate(structure.elements):
             if i != m and i not in near:
                 low = CLEAR.get(element, CLEAR_HEAVY)
+                if not push:
+                    low = min(low, float(np.linalg.norm(coords[i] - coords[m])))
                 ff.UFFAddDistanceConstraint(m, i, False, low, 1e3, CLEAR_FORCE)
+
+
+def _reference(structure: Structure) -> Structure:
+    """D145: the structure Minimize takes its bonds and the metals' shape from."""
+    rows = structure.minimized_from
+    if rows is None or [row[0] for row in rows] != structure.elements:
+        rows = structure.rows
+    return Structure(rows, structure.added, structure.removed, structure.changed, structure.holds)
 
 
 def _holds(ff, structure: Structure, frozen: set[int]) -> None:
@@ -231,11 +253,15 @@ def minimize(structure: Structure, everything: bool = False, clear: bool = False
     """Minimize the changed atoms and those within NEAR bonds of them (or every atom), keeping
     frozen atoms where they are and held coordinates at their values. With `clear` (a structure
     just made from a drawing, D142f), atoms not bonded to a metal or to its ligand atoms are
-    pushed off it, as UFF has no metal to push them."""
+    pushed out to 3.0 Å (H 2.6 Å) from it, not only kept from coming closer."""
     count = len(structure.rows)
     if count < 2:
         raise BuildError("There is nothing to minimize")
-    mol, graph, metals = _molecule(structure)
+    reference = _reference(structure)
+    mol, graph, metals = _molecule(reference)
+    conformer = mol.GetConformer()
+    for i, p in enumerate(structure.coords):
+        conformer.SetAtomPosition(i, Point3D(*map(float, p)))
     frozen = {h.atoms[0] for h in structure.holds if len(h.atoms) == 1}
     if everything:
         free = set(range(count))
@@ -258,9 +284,8 @@ def minimize(structure: Structure, everything: bool = False, clear: bool = False
     if ff is None:
         raise BuildError("UFF could not be set up for this structure")
     ff.Initialize()
-    _hold_metals(ff, structure, graph, metals)
-    if clear:
-        _clear_metals(ff, structure, graph, metals)
+    _hold_metals(ff, reference, graph, metals)
+    _clear_metals(ff, reference, graph, metals, clear)
     _holds(ff, structure, frozen)
     for i in range(count):
         if i not in free:
@@ -281,7 +306,9 @@ def minimize(structure: Structure, everything: bool = False, clear: bool = False
         [e, *(round(float(c), 8) for c in p)]
         for e, p in zip(structure.elements, coords, strict=True)
     ]
-    return Minimized(structure.but(rows), len(free), largest, converged)
+    return Minimized(
+        structure.but(rows, minimized_from=reference.rows), len(free), largest, converged
+    )
 
 
 def run(structure: Structure, everything: bool = False) -> builder.Edited:

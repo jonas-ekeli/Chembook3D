@@ -139,8 +139,8 @@ export function StructureEditor({
       const result = await api.builderEdit(structure, on, tool, options)
       setPast([...past, structure])
       setFuture([])
-      const { rows, added, removed, changed, holds } = result
-      setStructure({ rows, added, removed, changed, holds })
+      const { rows, added, removed, changed, holds, minimized_from } = result
+      setStructure({ rows, added, removed, changed, holds, minimized_from })
       // Minimize and the list of holds leave the picked atoms as they were.
       if (tool !== 'minimize' && on === picks) pick(result.picks)
       setMessage(result.message)
