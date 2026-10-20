@@ -35,6 +35,8 @@ class StructureIn(BaseModel):
     changed: list[int] = Field(default_factory=list)  # D140: atoms changed in the window
     holds: list[HoldIO] = Field(default_factory=list)  # D140: what Minimize keeps
     picks: list[int] = Field(default_factory=list)  # 0-based
+    # D145: the coordinates Minimize takes the bonds and the metals' shape from, as it gave them
+    minimized_from: list[list[Any]] | None = None
 
 
 class DescribeIn(StructureIn):
@@ -104,6 +106,7 @@ class EditOut(BaseModel):
     holds: list[HoldIO]
     picks: list[int]
     message: str
+    minimized_from: list[list[Any]] | None = None
 
 
 class PartsOut(BaseModel):
@@ -145,12 +148,18 @@ def _structure(body: StructureIn) -> builder.Structure:
         if len(atoms) > 1 and (hold.value is None or not math.isfinite(hold.value)):
             raise HTTPException(422, "A held distance, angle or dihedral needs its value")
         holds.append(builder.Hold(list(atoms), hold.value if len(atoms) > 1 else None))
+    minimized_from = None
+    if body.minimized_from is not None:
+        minimized_from = _rows(body.minimized_from, "The structure before minimizing")
+        if [row[0] for row in minimized_from] != [row[0] for row in rows]:
+            minimized_from = None  # not this structure's atoms: Minimize starts afresh
     return builder.Structure(
         rows,
         [tuple(p) for p in body.added],
         [tuple(p) for p in body.removed],
         sorted(set(body.changed)),
         holds,
+        minimized_from,
     )
 
 
@@ -222,6 +231,7 @@ def edit(body: EditIn):
         holds=[HoldIO(atoms=h.atoms, value=h.value) for h in result.holds],
         picks=done.picks,
         message=done.message,
+        minimized_from=result.minimized_from,
     )
 
 

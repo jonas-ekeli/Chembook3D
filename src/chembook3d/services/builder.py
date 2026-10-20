@@ -51,6 +51,9 @@ class Structure:
     removed: list[Pair] = field(default_factory=list)  # bonds the user removed
     changed: list[int] = field(default_factory=list)  # atoms changed in the window (D140)
     holds: list[Hold] = field(default_factory=list)  # what Minimize keeps (D140)
+    # D145: the coordinates before the first of the Minimize runs since the atoms last changed
+    # otherwise; Minimize takes the bonds and the metals' shape from them, so it stays put.
+    minimized_from: Rows | None = None
 
     def but(
         self,
@@ -60,14 +63,17 @@ class Structure:
         removed: list[Pair] | None = None,
         changed: list[int] | tuple[int, ...] = (),
         holds: list[Hold] | None = None,
+        minimized_from: Rows | None = None,
     ) -> "Structure":
-        """A copy with these parts replaced and `changed` atoms added to those changed."""
+        """A copy with these parts replaced and `changed` atoms added to those changed. New
+        rows drop `minimized_from` unless it is given (Minimize gives it)."""
         return Structure(
             self.rows if rows is None else rows,
             list(self.added if added is None else added),
             list(self.removed if removed is None else removed),
             sorted(set(self.changed) | set(changed)),
             [Hold(list(h.atoms), h.value) for h in (self.holds if holds is None else holds)],
+            minimized_from if rows is not None else (minimized_from or self.minimized_from),
         )
 
     @property
