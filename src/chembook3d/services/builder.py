@@ -29,6 +29,17 @@ TOO_CLOSE = 0.5  # Å: a move that leaves two atoms this close is refused
 PLACE_TRIES = 24  # turns tried about the new bond when placing a fragment
 TETRAHEDRAL = np.degrees(np.arccos(-1 / 3))  # 109.47°
 BENT = 115.0  # degrees: two bonds closer than this are an sp3 centre's, wider an sp2 one's
+# D148: a metal's open site is the direction with the most room, at least SITE_GAP from its bonds.
+SITE_TRIES = 400  # directions tried
+SITE_GAP = 50.0  # degrees
+SITE_LENGTH = 2.1  # Å out from the metal where the room is measured (and SITE_BEYOND further)
+SITE_BEYOND = 1.2
+SITE_CHOICES = 30  # the best open sites a bound molecule is tried at
+CROWDED = 1.25  # a bound molecule's atom closer than this times the radii sum to another
+NON_METALS = {
+    "H", "He", "B", "C", "N", "O", "F", "Ne", "Si", "P", "S", "Cl", "Ar", "Ge", "As", "Se",
+    "Br", "Kr", "Te", "I", "Xe", "At", "Rn",
+}  # fmt: skip
 
 
 class BuildError(ValueError):
@@ -271,19 +282,29 @@ def _overlap(coords: np.ndarray, moved: list[int]) -> tuple[int, int] | None:
     return (moved[a], still[b]) if d[a, b] < TOO_CLOSE else None
 
 
+def _atoms(count: int) -> str:
+    return f"{count} atom{'s' if count != 1 else ''}"
+
+
 def _done(
     structure: Structure, coords: np.ndarray, moving: Side, picks: list[int], what: str
 ) -> Edited:
     clash = _overlap(coords, moving.atoms)
     if clash:
         a, b = clash
-        raise BuildError(
-            f"That puts atom {a + 1} on top of atom {b + 1}; move the other side, or pick atoms "
-            "to move apart first"
+        # D148: say which side moved and which other side could move instead.
+        others = [s for s in sides(structure, picks) if s.atom != moving.atom]
+        instead = (
+            f"move atom {others[0].atom + 1}'s side instead ({_atoms(len(others[0].atoms))})"
+            if others
+            else "move the other side"
         )
-    count = len(moving.atoms)
+        raise BuildError(
+            f"Moving atom {moving.atom + 1}'s side ({_atoms(len(moving.atoms))}) puts atom "
+            f"{a + 1} on top of atom {b + 1}; {instead}, or pick atoms to move apart first"
+        )
     how = (
-        f"moved atom {moving.atom + 1}'s side ({count} atom{'s' if count != 1 else ''})"
+        f"moved atom {moving.atom + 1}'s side ({_atoms(len(moving.atoms))})"
         if moving.whole
         else f"moved atom {moving.atom + 1} and the atoms bonded only to it (the sides are joined)"
     )
@@ -478,11 +499,57 @@ def _bond_length(a: str, b: str) -> float:
     return _radius(a) + _radius(b)
 
 
-def _free_direction(coords: np.ndarray, graph: list[set[int]], atom: int) -> np.ndarray:
+def is_metal(element: str) -> bool:
+    return element not in NON_METALS
+
+
+def _sphere(count: int) -> np.ndarray:
+    """`count` directions spread evenly over a sphere (a golden spiral)."""
+    golden = np.pi * (3 - np.sqrt(5))
+    n = np.arange(count)
+    z = 1 - 2 * (n + 0.5) / count
+    r = np.sqrt(1 - z * z)
+    return np.stack([r * np.cos(golden * n), r * np.sin(golden * n), z], axis=1)
+
+
+def open_sites(coords: np.ndarray, graph: list[set[int]], atom: int, count: int = 1) -> np.ndarray:
+    """D148: a metal's open coordination sites, best first: of the directions at least SITE_GAP
+    from every bond, those with the most room SITE_LENGTH out (and SITE_BEYOND further, for the
+    ligands' substituents), leaning towards the side its bonds leave open."""
+    centre = coords[atom]
+    units = np.array([_unit(coords[b] - centre) for b in sorted(graph[atom])]).reshape(-1, 3)
+    others = np.delete(coords, atom, axis=0)
+    tries = _sphere(SITE_TRIES)
+    if len(units):
+        apart = (tries @ units.T).max(axis=1) <= np.cos(np.radians(SITE_GAP))
+        if apart.any():
+            tries = tries[apart]
+    if not len(others):
+        return tries[:count]
+    room = np.full(len(tries), np.inf)
+    for length in (SITE_LENGTH, SITE_LENGTH + SITE_BEYOND):
+        points = centre + tries * length
+        near = np.linalg.norm(points[:, None, :] - others[None, :, :], axis=2).min(axis=1)
+        room = np.minimum(room, near)
+    total = -units.sum(axis=0) if len(units) else np.zeros(3)
+    lean = tries @ _unit(total) if np.linalg.norm(total) > 1e-6 else np.zeros(len(tries))
+    return tries[np.argsort(-(room + 0.25 * lean), kind="stable")[:count]]
+
+
+def open_site(coords: np.ndarray, graph: list[set[int]], atom: int) -> np.ndarray:
+    return open_sites(coords, graph, atom)[0]
+
+
+def _free_direction(
+    coords: np.ndarray, graph: list[set[int]], atom: int, metal: bool = False
+) -> np.ndarray:
     """Where a new bond from `atom` points: away from its bonds (the third corner of a
     tetrahedron, the open side of a flat or linear centre), away from the rest of the
-    structure for a lone atom, and round any atom it would land on."""
+    structure for a lone atom, and round any atom it would land on. A metal with two or more
+    bonds takes its open site (D148)."""
     bonded_to = sorted(graph[atom])
+    if metal and len(bonded_to) >= 2:
+        return open_site(coords, graph, atom)
     centre = coords[atom]
     units = [_unit(coords[b] - centre) for b in bonded_to]
     if not units:
@@ -534,36 +601,35 @@ def _placed(
     if room(best) >= CLASH * length:
         return best
     # Directions on a sphere, those near the wanted one first.
-    golden = np.pi * (3 - np.sqrt(5))
-    tries = []
-    for n in range(64):
-        z = 1 - 2 * (n + 0.5) / 64
-        r = np.sqrt(1 - z * z)
-        tries.append(np.array([r * np.cos(golden * n), r * np.sin(golden * n), z]))
-    scored = max(tries, key=lambda d: (room(centre + d * length), d @ direction))
+    scored = max(_sphere(64), key=lambda d: (room(centre + d * length), d @ direction))
     return centre + scored * length
 
 
-def add_atom(structure: Structure, picks: list[int], symbol: str) -> Edited:
-    """A new atom bonded to the picked one, at the sum of their covalent radii; with nothing
-    picked, a lone atom to start from (D141), at the origin or beside the structure."""
+def add_atom(
+    structure: Structure, picks: list[int], symbol: str, length: float | None = None
+) -> Edited:
+    """A new atom bonded to the picked one, at the sum of their covalent radii or `length` Å (at
+    a metal's open site, D148); with nothing picked, a lone atom to start from (D141), at the
+    origin or beside the structure."""
     element = _element(symbol)
     if not picks:
         return add_molecule(structure, [], [[element, 0.0, 0.0, 0.0]], element)
     _check_picks(structure, picks, 1)
+    if length is not None and not 0.5 <= length <= 5:
+        raise BuildError("Give a bond length between 0.5 and 5 Å")
     (atom,) = picks
     coords = structure.coords
     graph = neighbours(structure)
-    direction = _free_direction(coords, graph, atom)
-    position = _placed(
-        coords, atom, direction, _bond_length(structure.rows[atom][0], element), set()
-    )
+    partner = structure.rows[atom][0]
+    direction = _free_direction(coords, graph, atom, is_metal(partner))
+    wanted = _bond_length(partner, element) if length is None else length
+    position = _placed(coords, atom, direction, wanted, set())
     rows = [*structure.rows, [element, *(round(float(c), 8) for c in position)]]
     new = len(rows) - 1
     return Edited(
         structure.but(rows, changed=[new]),
         [new],
-        f"Added {element} {new + 1} bonded to atom {atom + 1}",
+        f"Added {element} {new + 1} bonded to atom {atom + 1} at {wanted:.2f} Å",
     )
 
 
@@ -572,31 +638,62 @@ USUAL_BONDS = {"H": 1, "B": 3, "C": 4, "N": 3, "O": 2, "F": 1, "Si": 4, "P": 3, 
 USUAL_BONDS |= {"Cl": 1, "Se": 2, "Br": 1, "I": 1}
 
 
-def add_hydrogens(structure: Structure, picks: list[int], bonds: int | None = None) -> Edited:
+def add_hydrogens(
+    structure: Structure, picks: list[int], bonds: int | None = None, count: int | None = None
+) -> Edited:
     """Hydrogens on each picked atom until it has `bonds` bonds (its usual number by default),
-    each on the atom's free side as Add atom puts it."""
+    each on the atom's free side as Add atom puts it. Every drawn bond counts, a bond to a metal
+    too; `count` adds exactly that many to each atom instead (D148)."""
     _check_picks(structure, picks)
     if not picks:
         raise BuildError("Pick the atoms to add hydrogens to")
+    if bonds is not None and count is not None:
+        raise BuildError("Give the bonds each atom ends with, or how many H to add, not both")
     if bonds is not None and not 1 <= bonds <= 8:
         raise BuildError("Give between 1 and 8 bonds")
+    if count is not None and not 1 <= count <= 8:
+        raise BuildError("Give between 1 and 8 H")
     result = Edited(structure, picks, "")
-    count = 0
+    added = 0
+    full = []
     for atom in picks:
         element = structure.rows[atom][0]
+        if count is not None:
+            for _ in range(count):
+                result = add_atom(result.structure, [atom], "H")
+            added += count
+            continue
         wanted = bonds if bonds is not None else USUAL_BONDS.get(element)
         if wanted is None:
             raise BuildError(f"Say how many bonds {element} {atom + 1} should have")
+        start = added
         while len(neighbours(result.structure)[atom]) < wanted:
             result = add_atom(result.structure, [atom], "H")
-            count += 1
+            added += 1
+        if added == start:
+            full.append(atom)
     names = ", ".join(str(i + 1) for i in picks)
     plural = "s" if len(picks) > 1 else ""
-    message = (
-        f"Added {count} H to atom{plural} {names}"
-        if count
-        else f"Atom{plural} {names} already {'have' if plural else 'has'} enough bonds"
+    if added:
+        message = f"Added {added} H to atom{plural} {names}"
+    else:
+        message = f"Atom{plural} {names} already {'have' if plural else 'has'} enough bonds"
+    graph = neighbours(result.structure)
+    elements = result.structure.elements
+    counted = [
+        f"{elements[a]} {a + 1}: " + ", ".join(f"{elements[b]} {b + 1}" for b in sorted(graph[a]))
+        for a in full
+    ]
+    if counted:
+        # D148: the bonds counted, so a stray bond (an atom too close) shows.
+        message += " (" + "; ".join(counted) + ")"
+    before = neighbours(structure)
+    metals = sorted(
+        {b for a in picks for b in before[a] if is_metal(elements[b])} if count is None else set()
     )
+    if metals:
+        names = ", ".join(f"{elements[m]} {m + 1}" for m in metals)
+        message += f"; the bond to {names} counted (give count for an exact number of H)"
     return Edited(result.structure, picks, message)
 
 
@@ -754,44 +851,183 @@ def _frame(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return _rotation(axis, np.degrees(np.arccos(np.clip(a @ b, -1, 1))))
 
 
-def add_molecule(structure: Structure, picks: list[int], atoms: Rows, what: str) -> Edited:
+# D148: the atoms of each built-in molecule that bind to the picked atom (its C=C, C or O).
+DONORS = {"ethylene": [0, 1], "propene": [0, 1], "water": [0], "CO": [0]}
+
+
+def _facing(new: np.ndarray, donors: list[int]) -> list[np.ndarray]:
+    """Directions in the molecule (centred on its donors) that should point away from the atom
+    it binds to: out from the donors to the rest, square to the donors' bond for two; for a flat
+    molecule whose rest sits round its donors (ethylene), either side of its plane."""
+    rest = [i for i in range(len(new)) if i not in set(donors)]
+    away = new[rest].mean(axis=0) if rest else np.zeros(3)
+    if len(donors) >= 2:
+        span = new[donors]
+        _, _, vt = np.linalg.svd(span - span.mean(axis=0))
+        along = vt[: min(len(donors) - 1, 2)]
+        away = away - along.T @ (along @ away)
+    if np.linalg.norm(away) > 0.3:
+        return [_unit(away)]
+    if len(new) >= 3:
+        _, _, vt = np.linalg.svd(new - new.mean(axis=0))
+        normal = vt[2]
+    elif len(new) == 2:
+        normal = _perpendicular(new[1] - new[0])
+    else:
+        normal = np.array([1.0, 0.0, 0.0])
+    return [normal, -normal]
+
+
+@dataclass
+class _Fit:
+    points: np.ndarray
+    room: float  # the closest pair's distance over the sum of their covalent radii
+    pair: tuple[int, int]  # that pair: an atom of the molecule (from 0 in it), another atom
+
+
+def _bound(
+    structure: Structure,
+    atom: int,
+    new: np.ndarray,
+    elements: list[str],
+    donors: list[int],
+    distance: float | None,
+) -> np.ndarray | _Fit:
+    """D148: the molecule turned so its donors face `atom` from its free side, each donor
+    `distance` Å from it and spun to the most room; at a metal its open sites, best first, are
+    tried too. Without `distance`, beside it along its free side, 2 Å clear of everything."""
+    coords = structure.coords
+    centre = coords[atom]
+    graph = neighbours(structure)
+    metal = is_metal(structure.elements[atom])
+    local = new - new[donors].mean(axis=0)
+    spread = float(np.sqrt((np.linalg.norm(local[donors], axis=1) ** 2).mean()))
+    faces = _facing(local, donors)
+    if distance is None:
+        direction = _free_direction(coords, graph, atom, metal)
+        turned = local @ _frame(faces[0], direction).T
+        height = 2.5 + spread
+        moved = turned + centre + direction * height
+        while np.linalg.norm(moved[:, None, :] - coords[None, :, :], axis=2).min() < 2.0:
+            height += 0.5
+            moved = turned + centre + direction * height
+        return moved
+    if distance <= spread:
+        raise BuildError(f"Give a distance over {spread:.2f} Å for these donor atoms")
+    height = float(np.sqrt(distance**2 - spread**2))
+    directions = (
+        open_sites(coords, graph, atom, SITE_CHOICES)
+        if metal and len(graph[atom]) >= 2
+        else [_free_direction(coords, graph, atom, metal)]
+    )
+    others = [i for i in range(len(coords)) if i != atom]
+    rest = [i for i in range(len(local)) if i not in set(donors)]
+    radii = np.array([_radius(e) for e in elements])
+    limit = radii[:, None] + np.array([_radius(structure.elements[i]) for i in others])[None, :]
+    to_atom = radii[rest] + _radius(structure.elements[atom])
+    best: _Fit | None = None
+    for direction in directions:
+        for face in faces:
+            turned = local @ _frame(face, direction).T
+            for n in range(PLACE_TRIES):
+                points = turned @ _rotation(direction, 360 * n / PLACE_TRIES).T
+                points = points + centre + direction * height
+                ratio = np.full((len(points), 1), np.inf)
+                if others:
+                    ratio = np.linalg.norm(points[:, None] - coords[others][None], axis=2) / limit
+                i, j = np.unravel_index(int(np.argmin(ratio)), ratio.shape)
+                fit = _Fit(points, float(ratio[i, j]), (int(i), others[j] if others else atom))
+                if rest:  # the molecule's other atoms keep off the atom it binds to too
+                    off = np.linalg.norm(points[rest] - centre, axis=1) / to_atom
+                    k = int(np.argmin(off))
+                    if off[k] < fit.room:
+                        fit = _Fit(points, float(off[k]), (rest[k], atom))
+                if best is None or fit.room > best.room:
+                    best = fit
+    assert best is not None
+    return best
+
+
+def add_molecule(
+    structure: Structure,
+    picks: list[int],
+    atoms: Rows,
+    what: str,
+    distance: float | None = None,
+    donors: list[int] | None = None,
+) -> Edited:
     """Put a molecule beside the structure: off the picked atom's free side (a metal's open
-    site), or past the structure's edge, never closer than 2 Å to it. Its atoms come last."""
+    site, D148), or past the structure's edge, never closer than 2 Å to it. Its `donors` (its
+    own atoms from 0; a built-in molecule's own by default) face the picked atom; with
+    `distance` each donor is that far from it and bonded to it. Its atoms come last."""
     if not atoms:
         raise BuildError(f"{what} has no coordinates")
     _check_picks(structure, picks)
     if len(picks) > 1:
         raise BuildError("Pick one atom to put the molecule beside, or none")
+    if donors is not None and (
+        not donors
+        or len(set(donors)) != len(donors)
+        or any(not 0 <= i < len(atoms) for i in donors)
+    ):
+        raise BuildError(f"The donor atoms are numbered 1 to {len(atoms)} in {what}, each once")
+    if distance is not None and not picks:
+        raise BuildError("Pick the atom the molecule binds to")
+    if distance is not None and not 1.0 <= distance <= 5.0:
+        raise BuildError("Give a distance between 1 and 5 Å")
+    if picks and donors is None:
+        donors = DONORS.get(what, [0])
     coords = structure.coords
     new = np.array([row[1:4] for row in atoms], dtype=float)
-    new -= new.mean(axis=0)
-    extent = float(np.linalg.norm(new, axis=1).max()) if len(new) else 0.0
-    if len(coords) == 0:
-        moved = new
+    first = len(structure.rows)
+    note = ""
+    added = list(structure.added)
+    if picks and donors:
+        (atom,) = picks
+        elements = [row[0] for row in atoms]
+        found = _bound(structure, atom, new, elements, donors, distance)
+        if isinstance(found, _Fit):
+            moved = found.points
+            added += [_pair(atom, first + d) for d in donors]
+            names = ", ".join(str(first + d + 1) for d in donors)
+            note = f", bonded to atom {atom + 1} through {names} at {distance:.2f} Å"
+            if found.room < CROWDED:
+                i, j = found.pair
+                apart = float(np.linalg.norm(moved[i] - coords[j]))
+                note += (
+                    f" (crowded: {elements[i]} {first + i + 1} is {apart:.2f} Å from "
+                    f"{structure.elements[j]} {j + 1}; Minimize, or try another distance)"
+                )
+        else:
+            moved = found
     else:
-        if picks:
-            (atom,) = picks
-            direction = _free_direction(coords, neighbours(structure), atom)
-            start = coords[atom]
+        new -= new.mean(axis=0)
+        extent = float(np.linalg.norm(new, axis=1).max()) if len(new) else 0.0
+        if len(coords) == 0:
+            moved = new
         else:
             direction = np.array([1.0, 0.0, 0.0])
             start = coords[np.argmax(coords[:, 0])]
-        distance = 2.5 + extent
-        moved = new + start + direction * distance
-        while np.linalg.norm(moved[:, None, :] - coords[None, :, :], axis=2).min() < 2.0:
-            distance += 0.5
-            moved = new + start + direction * distance
+            placed_at = 2.5 + extent
+            moved = new + start + direction * placed_at
+            while np.linalg.norm(moved[:, None, :] - coords[None, :, :], axis=2).min() < 2.0:
+                placed_at += 0.5
+                moved = new + start + direction * placed_at
     rows = [list(row) for row in structure.rows]
-    first = len(rows)
     rows += [
         [row[0], *(round(float(c), 8) for c in p)] for row, p in zip(atoms, moved, strict=True)
     ]
+    done = structure.but(rows, changed=range(first, len(rows)))
+    done.added = added
     return Edited(
-        structure.but(rows, changed=range(first, len(rows))),
+        done,
         [],
-        f"Added {what} as atom {first + 1}"
-        if len(rows) == first + 1
-        else f"Added {what} as atoms {first + 1}–{len(rows)}",
+        (
+            f"Added {what} as atom {first + 1}"
+            if len(rows) == first + 1
+            else f"Added {what} as atoms {first + 1}–{len(rows)}"
+        )
+        + note,
     )
 
 
@@ -867,12 +1103,16 @@ def release(structure: Structure, index: int) -> Edited:
 # ---------- what the window shows ----------
 
 
+def electrons_of(rows: Rows, charge: int) -> int:
+    return sum(xyz.ELEMENTS.index(row[0]) + 1 for row in rows) - charge
+
+
 def electrons_note(rows: Rows, charge: int, multiplicity: int) -> str | None:
     """D139: a structure whose electron count cannot have the node's multiplicity (an odd count
     as a singlet) says so, as the node's charge and multiplicity are not changed by editing."""
     if not rows:
         return None
-    electrons = sum(xyz.ELEMENTS.index(row[0]) + 1 for row in rows) - charge
+    electrons = electrons_of(rows, charge)
     if electrons < 0 or (electrons + multiplicity) % 2 == 1:
         return None
     return (

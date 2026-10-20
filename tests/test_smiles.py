@@ -70,7 +70,8 @@ def test_from_nothing_with_hydrogens():
     assert builder.formula(s.rows) == "CH4"
     angles = [builder.measure(s.coords, [i, 0, j]) for i in range(1, 5) for j in range(i + 1, 5)]
     assert min(angles) > 100
-    assert builder.add_hydrogens(s, [0]).message == "Atom 1 already has enough bonds"
+    full = builder.add_hydrogens(s, [0]).message
+    assert full == "Atom 1 already has enough bonds (C 1: H 2, H 3, H 4, H 5)"
     lone = builder.add_atom(s, [], "N")
     assert lone.message == "Added N as atom 6"
     s = lone.structure

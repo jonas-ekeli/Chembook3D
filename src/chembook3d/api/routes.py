@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from chembook3d import settings as app_settings
 from chembook3d import sync, thermochem, units, xyz
-from chembook3d.api import downloads
+from chembook3d.api import builds, downloads
 from chembook3d.investigation import (
     DB_NAME,
     Investigation,
@@ -165,10 +165,14 @@ class NodeIn(BaseModel):
     pos_y: float | None = None
     view_rotation: list[float] | None = None
     xyz: str | None = None
+    # D148: or the coordinates of a build_structure answer (and its charge and multiplicity
+    # when these are not given); only when creating
+    build_id: str | None = None
 
 
 class GeometryIn(BaseModel):
-    xyz: str
+    xyz: str | None = None  # empty: remove the coordinates (D90)
+    build_id: str | None = None  # D148: or a build_structure answer's coordinates
     # D139: save as a new node derived from this one even when it has no calculations.
     new_node: bool = False
 
@@ -715,15 +719,35 @@ def list_folders(path: str | None = None, files: bool = False):
 
 
 @router.get("/nodes", response_model=list[NodeOut])
-def list_nodes(session: DbSession):
-    return [_node_out(session, n) for n in node_service.list_nodes(session)]
+def list_nodes(session: DbSession, include_xyz: bool = True):
+    """include_xyz false (D148): every node without its coordinates, a short list."""
+    found = [_node_out(session, n) for n in node_service.list_nodes(session)]
+    if not include_xyz:
+        for node in found:
+            node.xyz = None
+    return found
+
+
+def _built_xyz(request: Request, xyz_text: str | None, build_id: str | None) -> str | None:
+    """D148: the coordinates of a build_structure answer, given instead of XYZ text."""
+    if build_id is None:
+        return xyz_text
+    if xyz_text is not None:
+        raise HTTPException(422, "Give xyz or build_id, not both")
+    return builds.xyz_of(builds.get(request, build_id))
 
 
 @router.post("/nodes", response_model=NodeOut, status_code=201)
-def create_node(body: NodeIn, session: DbSession):
-    fields = body.model_dump(exclude_unset=True, exclude={"xyz"})
+def create_node(body: NodeIn, session: DbSession, request: Request):
+    fields = body.model_dump(exclude_unset=True, exclude={"xyz", "build_id"})
+    text = _built_xyz(request, body.xyz, body.build_id)
+    if body.build_id is not None:
+        build = builds.get(request, body.build_id)
+        for name in ("charge", "multiplicity"):
+            if name not in fields and getattr(build, name) is not None:
+                fields[name] = getattr(build, name)
     try:
-        node = node_service.create(session, fields, xyz_text=body.xyz)
+        node = node_service.create(session, fields, xyz_text=text)
     except xyz.XyzParseError as exc:
         raise _xyz_error(exc) from exc
     except node_service.NodeError as exc:
@@ -747,7 +771,7 @@ def get_node(node_id: str, session: DbSession):
 def update_node(node_id: str, body: NodeIn, session: DbSession):
     _get_node(session, node_id)
     changes = body.model_dump(exclude_unset=True)
-    if "xyz" in changes:
+    if "xyz" in changes or "build_id" in changes:
         raise HTTPException(422, "Use PUT /api/nodes/{id}/geometry to change coordinates")
     try:
         node = node_service.update(session, node_id, changes)
@@ -757,10 +781,13 @@ def update_node(node_id: str, body: NodeIn, session: DbSession):
 
 
 @router.put("/nodes/{node_id}/geometry", response_model=GeometryOut)
-def set_geometry(node_id: str, body: GeometryIn, session: DbSession):
+def set_geometry(node_id: str, body: GeometryIn, session: DbSession, request: Request):
     _get_node(session, node_id)
+    text = _built_xyz(request, body.xyz, body.build_id)
+    if text is None:
+        raise HTTPException(422, "Give xyz or build_id")
     try:
-        result = node_service.set_geometry(session, node_id, body.xyz, new_node=body.new_node)
+        result = node_service.set_geometry(session, node_id, text, new_node=body.new_node)
     except xyz.XyzParseError as exc:
         raise _xyz_error(exc) from exc
     except node_service.NodeError as exc:

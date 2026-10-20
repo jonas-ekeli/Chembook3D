@@ -32,7 +32,10 @@ def metal_bonds(answer: dict) -> dict[int, float]:
 def test_steps_build_from_nothing_and_go_on(client):
     built = client.post(
         "/api/builder/run",
-        json={"steps": [{"tool": "smiles", "smiles": "CCO"}, {"tool": "freeze", "atoms": [1]}]},
+        json={
+            "steps": [{"tool": "smiles", "smiles": "CCO"}, {"tool": "freeze", "atoms": [1]}],
+            "include_xyz": True,
+        },
     )
     assert built.status_code == 200, built.text
     answer = built.json()
@@ -55,6 +58,7 @@ def test_steps_build_from_nothing_and_go_on(client):
                 {"tool": "hold"},  # the atoms the step before picked
                 {"tool": "minimize"},
             ],
+            "include_xyz": True,
         },
     ).json()
     assert more["steps"][1]["message"].startswith(f"Distance {carbon}–{oxygen} held at 1.600")
@@ -126,7 +130,8 @@ def test_a_node_is_changed_only_by_saving(open_client):
     )
     assert built.status_code == 200, built.text
     answer = built.json()
-    assert answer["atom_count"] == 76 and answer["electrons_note"] is None
+    assert answer["atom_count"] == 76 and answer["xyz"] is None  # saved by its build_id
+    assert answer["electrons_note"] == "311 electrons with charge 0: multiplicity 2 fits"
     assert answer["close_contacts"] == []
     start = open_client.post("/api/builder/check", json={"node_id": made["id"]}).json()
     singlet = {"node_id": made["id"], "multiplicity": 1}  # the node's charge, this multiplicity
@@ -141,7 +146,9 @@ def test_a_node_is_changed_only_by_saving(open_client):
     assert open_client.get("/api/live").json()["version"] == before
     assert open_client.get(f"/api/nodes/{made['id']}").json()["formula"] == start["formula"]
 
-    saved = open_client.put(f"/api/nodes/{made['id']}/geometry", json={"xyz": answer["xyz"]})
+    saved = open_client.put(
+        f"/api/nodes/{made['id']}/geometry", json={"build_id": answer["build_id"]}
+    )
     assert saved.status_code == 200
     assert saved.json()["node"]["formula"] == answer["formula"]
 
@@ -173,10 +180,121 @@ def test_the_tools_through_the_mcp_server(tmp_path):
             "build_structure", {"node_id": made["id"], "steps": [{"tool": "delete"}]}
         )
         assert refused.isError and "Step 1 (delete)" in refused.content[0].text
-        checked = _json(await bridge.call("check_structure", {"xyz": answer["xyz"]}))
+        checked = _json(await bridge.call("check_structure", {"build_id": answer["build_id"]}))
         assert checked["atom_count"] == 6
         node = _json(await bridge.call("get_node", {"node_id": made["id"]}))
         assert node["formula"] == "H2O"  # unchanged until set_coordinates
         json.dumps(answer)
+
+    anyio.run(run)
+
+
+def test_builds_are_saved_and_continued_by_id(open_client):
+    # T-MCP-15 (D148): an answer's build_id saves exactly its coordinates, starts the next run
+    # with its bonds, changed atoms and holds, and gives a new node its charge.
+    made = open_client.post(
+        "/api/nodes", json={"label": "Ru-1", "xyz": ru_xyz(), "charge": 0, "multiplicity": 2}
+    ).json()
+    first = open_client.post(
+        "/api/builder/run",
+        json={
+            "node_id": made["id"],
+            "steps": [{"tool": "fragment", "atoms": [24], "name": "Me"}, {"tool": "freeze"}],
+            "include_xyz": True,
+        },
+    ).json()
+    assert first["build_id"].startswith("build-")
+    more = open_client.post(
+        "/api/builder/run",
+        json={"build_id": first["build_id"], "steps": [{"tool": "minimize"}]},
+    )
+    assert more.status_code == 200, more.text
+    answer = more.json()
+    assert answer["holds"] == first["holds"] and answer["changed"] == first["changed"]
+    assert answer["electrons_note"] == "311 electrons with charge 0: multiplicity 2 fits"
+    assert answer["xyz"] is None
+
+    saved = open_client.put(
+        f"/api/nodes/{made['id']}/geometry", json={"build_id": first["build_id"]}
+    ).json()
+    assert saved["node"]["xyz"].splitlines()[2:] == first["xyz"].splitlines()[2:]
+    node = open_client.post("/api/nodes", json={"label": "Ru-2", "build_id": answer["build_id"]})
+    assert node.status_code == 201
+    assert (node.json()["charge"], node.json()["multiplicity"]) == (0, 2)
+    assert node.json()["formula"] == answer["formula"]
+
+    gone = open_client.put(f"/api/nodes/{made['id']}/geometry", json={"build_id": "build-x"})
+    assert gone.status_code == 404 and "run build_structure again" in gone.json()["detail"]
+    both = {"build_id": answer["build_id"], "xyz": WATER}
+    assert open_client.put(f"/api/nodes/{made['id']}/geometry", json=both).status_code == 422
+    assert open_client.put(f"/api/nodes/{made['id']}/geometry", json={}).status_code == 422
+    twice = {"build_id": answer["build_id"], "node_id": made["id"], "steps": [{"tool": "minimize"}]}
+    assert open_client.post("/api/builder/run", json=twice).status_code == 422
+
+
+def test_step_warnings_sides_and_electrons(client):
+    # T-MCP-16 (D148): a step that bonds or crowds atoms it was not asked to says so; a
+    # measurement says which atoms setting it moves; an unchecked electron count says so.
+    oxygen = 74  # the next atom of the 73-atom complex
+    answer = client.post(
+        "/api/builder/run",
+        json={
+            "xyz": ru_xyz(),
+            "steps": [
+                {"tool": "add_atom", "atoms": [1], "element": "C", "value": 1.9},
+                {"tool": "add_atom", "atoms": [oxygen], "element": "O", "value": 1.15},
+            ],
+        },
+    ).json()
+    first, second = answer["steps"]
+    assert first["message"] == f"Added C {oxygen} bonded to atom 1 at 1.90 Å"
+    assert first["warnings"] == []
+    assert second["warnings"] and second["warnings"][0].startswith(f"Ru 1 and O {oxygen + 1}")
+    assert answer["electrons_note"].startswith("Not checked")
+
+    checked = client.post(
+        "/api/builder/check", json={"build_id": answer["build_id"], "measure": [[1, oxygen]]}
+    ).json()
+    (measured,) = checked["measurements"]
+    assert measured["moves"] == oxygen
+    # The O drawn bonded to Ru joins the sides, so only the C itself would move.
+    small = next(s for s in measured["sides"] if s["atom"] == oxygen)
+    assert small == {"atom": oxygen, "count": 1, "whole": False, "atoms": [oxygen]}
+    apart = client.post("/api/builder/check", json={"xyz": ru_xyz(), "measure": [[1, 2]]}).json()[
+        "measurements"
+    ][0]
+    big = next(s for s in apart["sides"] if s["atom"] == 1)
+    assert big["count"] > 30 and big["atoms"] is None
+
+
+def test_short_node_list_through_the_mcp_server(tmp_path):
+    # T-MCP-17 (D148): list_nodes leaves the coordinates out unless asked; the app's own list
+    # keeps them; set_coordinates takes a build_id without xyz.
+    async def run():
+        bridge, page = _app_bridge()
+        await page.post("/api/investigations", json={"folder": str(tmp_path / "i"), "name": "T"})
+        made = _json(await bridge.call("create_node", {"label": "W", "xyz": WATER}))
+        short = _json(await bridge.call("list_nodes", {}))
+        assert short[0]["xyz"] is None and short[0]["formula"] == "H2O"
+        full = _json(await bridge.call("list_nodes", {"include_xyz": True}))
+        assert full[0]["xyz"].startswith("3\n")
+        assert (await page.get("/api/nodes")).json()[0]["xyz"].startswith("3\n")
+        built = _json(
+            await bridge.call(
+                "build_structure",
+                {
+                    "node_id": made["id"],
+                    "steps": [{"tool": "fragment", "atoms": [2], "name": "Me"}],
+                },
+            )
+        )
+        saved = _json(
+            await bridge.call(
+                "set_coordinates", {"node_id": made["id"], "build_id": built["build_id"]}
+            )
+        )
+        assert saved["node"]["formula"] == "CH4O"
+        refused = await bridge.call("set_coordinates", {"node_id": made["id"], "xyz": ""})
+        assert refused.isError and "remove_coordinates" in refused.content[0].text
 
     anyio.run(run)
