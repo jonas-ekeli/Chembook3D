@@ -2231,6 +2231,8 @@ export type BuilderStructure = {
   /** D145: the coordinates Minimize takes the bonds and the metals' shape from, so Minimize
    * again stays put; Minimize sets it and any other change of the atoms drops it. */
   minimized_from?: GeometryRows | null
+  /** D146: whether those Minimizes kept the metals' shape or relaxed them. */
+  minimized_metals?: 'keep' | 'relax' | null
 }
 
 /** D140: one atom frozen, or a distance, angle or dihedral (2 to 4 atoms) held at `value`. */
@@ -2271,6 +2273,9 @@ export type BuilderOptions = {
   index?: number
   /** minimize: every atom, not only the changed ones and two bonds round them. */
   everything?: boolean
+  /** minimize: keep each metal's shape, or relax it to UFF's bond lengths and the nearest
+   * ideal shape (D146). */
+  metals?: 'keep' | 'relax'
   /** smiles, or fragment: a SMILES with one * where it attaches (D141). */
   smiles?: string
   /** drawing: Ketcher's MOL file, a fragment with an attachment point (D142); redraw: the

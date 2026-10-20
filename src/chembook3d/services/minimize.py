@@ -15,13 +15,17 @@ user added to a metal is held at the sum of the covalent radii until a hold says
 UFF has no metal to push other atoms off, so atoms not bonded to a metal or its ligand atoms are
 kept from coming closer to it than 3.0 Å (H 2.6 Å), or than they already are.
 
+With "relax" (D146, `metal_shapes`), each metal's bonds go to UFF's lengths and the angles
+between its ligands to the nearest ideal shape, its donors facing it, with no torsions, so the
+ligands turn; a metal with an η ligand or not two to six bonds is held as before.
+
 Minimize again stays put (D145): the bonds, the metals' shape and how close atoms may come to a
 metal are taken from the coordinates before the first Minimize since the atoms last changed
 otherwise (`Structure.minimized_from`), not from the minimized ones, so the next run starts at
 the minimum of the same function.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import combinations
 
 import numpy as np
@@ -29,11 +33,16 @@ from rdkit import Chem, RDLogger
 from rdkit.Chem import rdDetermineBonds, rdForceFieldHelpers
 from rdkit.Geometry import Point3D
 
-from chembook3d.services import builder, geometry
+from chembook3d.services import builder, geometry, metal_shapes
 from chembook3d.services.builder import BuildError, Structure
 
-# Elements UFF types reliably from bond orders; every other element is held by restraints.
-TYPED = {"H", "B", "C", "N", "O", "F", "Si", "P", "S", "Cl", "Ge", "As", "Se", "Br", "Sn", "I"}
+# Elements UFF types reliably from bond orders; every other element is held by restraints, or
+# relaxed (D146). Those in MAIN_GROUP (D146) are held when UFF cannot type them where they are.
+MAIN_GROUP = {"Al", "Sb", "Bi", "Te", "Tl", "Hg"}
+TYPED = {
+    "H", "B", "C", "N", "O", "F", "Si", "P", "S", "Cl", "Ge", "As", "Se", "Br", "Sn", "I",
+    *MAIN_GROUP,
+}  # fmt: skip
 # Most bonds to non-metals an atom keeps (see `_bonds`).
 VALENCE = {"H": 1, "F": 1, "Cl": 1, "Br": 1, "I": 1, "O": 2, "B": 4, "C": 4, "N": 4, "Si": 4}
 NEAR = 2  # bonds out from a changed atom that also move
@@ -58,6 +67,8 @@ class Minimized:
     moved: int  # atoms free to move
     largest: float  # Å, the largest move
     converged: bool
+    shapes: list[str] = field(default_factory=list)  # with `relax`: "Ru 22 octahedral"
+    held: list[str] = field(default_factory=list)  # with `relax`: metals held in their shape
 
 
 def _ligand_orders(elements: list[str], coords: np.ndarray, atoms: list[int], graph) -> Chem.Mol:
@@ -117,11 +128,14 @@ def _bonds(structure: Structure, metals: set[int]) -> list[set[int]]:
     return graph
 
 
-def _molecule(structure: Structure) -> tuple[Chem.Mol, list[set[int]], list[int]]:
-    """The structure as an RDKit molecule with bond orders, its bonds, and its metals."""
+def _molecule(
+    structure: Structure, held: frozenset[str] = frozenset()
+) -> tuple[Chem.Mol, list[set[int]], list[int]]:
+    """The structure as an RDKit molecule with bond orders, its bonds, and its metals (with the
+    elements `held` counted as metals)."""
     elements = structure.elements
     coords = structure.coords
-    metals = [i for i, e in enumerate(elements) if e not in TYPED]
+    metals = [i for i, e in enumerate(elements) if e not in TYPED or e in held]
     graph = _bonds(structure, set(metals))
     organic = [
         set() if i in metals else {j for j in graph[i] if j not in metals}
@@ -225,10 +239,47 @@ def _clear_metals(
                 ff.UFFAddDistanceConstraint(m, i, False, low, 1e3, CLEAR_FORCE)
 
 
-def _reference(structure: Structure) -> Structure:
-    """D145: the structure Minimize takes its bonds and the metals' shape from."""
+def _typed(mol: Chem.Mol, metals: list[int]) -> bool:
+    """Whether UFF has parameters for every atom but the metals."""
+    rest = Chem.RWMol(mol)
+    for m in sorted(metals, reverse=True):
+        rest.RemoveAtom(m)
+    return rdForceFieldHelpers.UFFHasAllMoleculeParams(rest)
+
+
+def _relax_metals(
+    ff, mol: Chem.Mol, structure: Structure, graph: list[set[int]], metals: list[int]
+) -> tuple[list[str], list[int]]:
+    """D146: pull each metal's bonds to UFF's lengths, the angles between its ligands to the
+    nearest ideal shape and those at each ligand atom to its own; no torsions, so ligands turn.
+    Gives the shapes found and the metals that cannot relax (held instead)."""
+    coords = structure.coords
+    shapes, held = [], []
+    for m in metals:
+        found = metal_shapes.relaxed(mol, coords, graph, set(metals), m)
+        if found is None:
+            held.append(m)
+            continue
+        shapes.append(f"{structure.elements[m]} {m + 1} {found.shape}")
+        for lig, length in found.lengths.items():
+            ff.UFFAddDistanceConstraint(m, lig, False, length, length, METAL_BOND)
+        for (a, b), (low, high) in found.angles.items():
+            ff.UFFAddAngleConstraint(a, m, b, False, low, high, METAL_ANGLE)
+        for (lig, x), (low, high) in found.donors.items():
+            if x not in metals:
+                ff.UFFAddAngleConstraint(m, lig, x, False, low, high, METAL_ANGLE)
+    return shapes, held
+
+
+def _reference(structure: Structure, metals: str) -> Structure:
+    """D145: the structure Minimize takes its bonds and the metals' shape from: where the
+    Minimizes since the atoms last changed started, if they treated the metals the same way."""
     rows = structure.minimized_from
-    if rows is None or [row[0] for row in rows] != structure.elements:
+    if (
+        rows is None
+        or structure.minimized_metals != metals
+        or [row[0] for row in rows] != structure.elements
+    ):
         rows = structure.rows
     return Structure(rows, structure.added, structure.removed, structure.changed, structure.holds)
 
@@ -249,16 +300,23 @@ def _holds(ff, structure: Structure, frozen: set[int]) -> None:
             ff.UFFAddTorsionConstraint(*atoms, False, value, value, HOLD_ANGLE)
 
 
-def minimize(structure: Structure, everything: bool = False, clear: bool = False) -> Minimized:
+def minimize(
+    structure: Structure, everything: bool = False, clear: bool = False, relax: bool = False
+) -> Minimized:
     """Minimize the changed atoms and those within NEAR bonds of them (or every atom), keeping
     frozen atoms where they are and held coordinates at their values. With `clear` (a structure
     just made from a drawing, D142f), atoms not bonded to a metal or to its ligand atoms are
-    pushed out to 3.0 Å (H 2.6 Å) from it, not only kept from coming closer."""
+    pushed out to 3.0 Å (H 2.6 Å) from it, not only kept from coming closer. With `relax`
+    (D146), metals relax to UFF's bond lengths and the nearest ideal shape instead of being held
+    in theirs."""
     count = len(structure.rows)
     if count < 2:
         raise BuildError("There is nothing to minimize")
-    reference = _reference(structure)
+    how = "relax" if relax else "keep"
+    reference = _reference(structure, how)
     mol, graph, metals = _molecule(reference)
+    if not _typed(mol, metals) and MAIN_GROUP & set(reference.elements):
+        mol, graph, metals = _molecule(reference, frozenset(MAIN_GROUP))
     conformer = mol.GetConformer()
     for i, p in enumerate(structure.coords):
         conformer.SetAtomPosition(i, Point3D(*map(float, p)))
@@ -284,7 +342,11 @@ def minimize(structure: Structure, everything: bool = False, clear: bool = False
     if ff is None:
         raise BuildError("UFF could not be set up for this structure")
     ff.Initialize()
-    _hold_metals(ff, reference, graph, metals)
+    shapes: list[str] = []
+    held = metals
+    if relax:
+        shapes, held = _relax_metals(ff, mol, reference, graph, metals)
+    _hold_metals(ff, reference, graph, held)
     _clear_metals(ff, reference, graph, metals, clear)
     _holds(ff, structure, frozen)
     for i in range(count):
@@ -306,18 +368,22 @@ def minimize(structure: Structure, everything: bool = False, clear: bool = False
         [e, *(round(float(c), 8) for c in p)]
         for e, p in zip(structure.elements, coords, strict=True)
     ]
-    return Minimized(
-        structure.but(rows, minimized_from=reference.rows), len(free), largest, converged
-    )
+    out = structure.but(rows, minimized_from=reference.rows, minimized_metals=how)
+    names = [f"{structure.elements[m]} {m + 1}" for m in held] if relax else []
+    return Minimized(out, len(free), largest, converged, shapes, names)
 
 
-def run(structure: Structure, everything: bool = False) -> builder.Edited:
+def run(structure: Structure, everything: bool = False, relax: bool = False) -> builder.Edited:
     """Minimize, with the message the window shows."""
-    done = minimize(structure, everything)
+    done = minimize(structure, everything, relax=relax)
     plural = "s" if done.moved != 1 else ""
     message = (
         f"Minimized {done.moved} atom{plural} with UFF; the largest move was {done.largest:.2f} Å"
     )
+    if done.shapes:
+        message += "; relaxed " + ", ".join(done.shapes)
+    if done.held:
+        message += f"; {', '.join(done.held)} kept in shape (an η ligand, or not two to six bonds)"
     if not done.converged:
         message += " (stopped before converging; Minimize again to go on)"
     return builder.Edited(done.structure, [], message)

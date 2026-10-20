@@ -177,6 +177,10 @@ test('hold, freeze and minimize', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Undo' }).click()
   await expect(dialog.getByLabel('Picked', { exact: true })).toHaveText('C1–C2: 1.750 Å')
   await dialog.getByRole('button', { name: 'Redo' }).click()
+  // T-UI-46 (D145, D146): Minimize again stays put, here with the metals set to relax.
+  await dialog.getByRole('group', { name: 'Metals' }).getByLabel('Metals relax').check()
+  await dialog.getByRole('button', { name: 'Minimize', exact: true }).click()
+  await expect(dialog.getByLabel('Last change')).toContainText('the largest move was 0.00 Å')
   await dialog.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(dialog).toHaveCount(0)
 

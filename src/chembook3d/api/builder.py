@@ -37,6 +37,7 @@ class StructureIn(BaseModel):
     picks: list[int] = Field(default_factory=list)  # 0-based
     # D145: the coordinates Minimize takes the bonds and the metals' shape from, as it gave them
     minimized_from: list[list[Any]] | None = None
+    minimized_metals: Literal["keep", "relax"] | None = None  # D146: how those Minimizes did
 
 
 class DescribeIn(StructureIn):
@@ -96,6 +97,7 @@ class EditIn(StructureIn):
     molfile: str | None = None  # drawing, redraw: Ketcher's MOL file (D142, D143)
     bonds: int | None = None  # hydrogens: until each picked atom has this many bonds
     everything: bool = False  # minimize: every atom, not only round the changed ones
+    metals: Literal["keep", "relax"] = "keep"  # minimize: hold metals in shape, or relax (D146)
 
 
 class EditOut(BaseModel):
@@ -107,6 +109,7 @@ class EditOut(BaseModel):
     picks: list[int]
     message: str
     minimized_from: list[list[Any]] | None = None
+    minimized_metals: Literal["keep", "relax"] | None = None
 
 
 class PartsOut(BaseModel):
@@ -160,6 +163,7 @@ def _structure(body: StructureIn) -> builder.Structure:
         sorted(set(body.changed)),
         holds,
         minimized_from,
+        body.minimized_metals if minimized_from is not None else None,
     )
 
 
@@ -232,6 +236,7 @@ def edit(body: EditIn):
         picks=done.picks,
         message=done.message,
         minimized_from=result.minimized_from,
+        minimized_metals=result.minimized_metals,
     )
 
 
@@ -264,7 +269,7 @@ def _apply(structure: builder.Structure, picks: list[int], body: EditIn) -> buil
         elif body.tool == "release":
             done = builder.release(structure, -1 if body.index is None else body.index)
         elif body.tool == "minimize":
-            done = minimize.run(structure, body.everything)
+            done = minimize.run(structure, body.everything, body.metals == "relax")
         elif body.tool == "fragment" and body.smiles is not None:
             built = smiles.build(body.smiles, fragment=True)
             fragment = smiles.as_fragment(built)
@@ -356,8 +361,9 @@ class StepIn(BaseModel):
         "atoms where they are when minimizing, or not. hold: keep the distance, angle or "
         "dihedral of 2 to 4 atoms at `value` (now: its current value) when minimizing. "
         "release: stop the hold numbered `index` in `holds`. minimize: RDKit UFF with metals "
-        "held in their shape by restraints, moving the changed atoms and two bonds round "
-        "them (`everything`: all atoms), keeping frozen atoms and holds."
+        'held in their shape by restraints (`metals`: "relax" pulls them to UFF\'s bond '
+        "lengths and the nearest ideal shape instead), moving the changed atoms and two "
+        "bonds round them (`everything`: all atoms), keeping frozen atoms and holds."
     )
     atoms: list[int] | None = Field(
         None,
@@ -383,6 +389,9 @@ class StepIn(BaseModel):
     index: int | None = Field(None, description="release: the hold's number from 1")
     bonds: int | None = Field(None, description="hydrogens: bonds each atom ends with")
     everything: bool = Field(False, description="minimize: move every atom")
+    metals: Literal["keep", "relax"] = Field(
+        "keep", description="minimize: keep each metal's shape, or relax it (D146)"
+    )
 
 
 class StartIn(BaseModel):
@@ -617,6 +626,7 @@ def _edit_of(step: StepIn) -> EditIn:
         smiles=step.smiles,
         bonds=step.bonds,
         everything=step.everything,
+        metals=step.metals,
     )
 
 
