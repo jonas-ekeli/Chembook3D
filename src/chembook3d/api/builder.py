@@ -84,6 +84,8 @@ class EditIn(StructureIn):
         "hydrogens",
         "drawing",
         "redraw",
+        "rotate_fragment",
+        "align_vectors",
     ]
     value: float | None = None  # distance (Å), angle, dihedral or turn (degrees); D148: a new
     # atom's bond length, a molecule's distance from the picked atom to each of its donors
@@ -102,6 +104,11 @@ class EditIn(StructureIn):
     donors: list[int] | None = None  # molecule, smiles: its atoms (0-based) facing the pick
     everything: bool = False  # minimize: every atom, not only round the changed ones
     metals: Literal["keep", "relax"] = "keep"  # minimize: hold metals in shape, or relax (D146)
+    # D150, rotate_fragment and align_vectors: two points each, a point an atom (0-based) or the
+    # atoms whose middle counts; the picks are the atoms that move
+    axis: list[list[int]] | None = None
+    vector: list[list[int]] | None = None
+    reference: list[list[int]] | None = None
 
 
 class EditOut(BaseModel):
@@ -311,6 +318,13 @@ def _apply(structure: builder.Structure, picks: list[int], body: EditIn) -> buil
             done = redraw.from_drawing(structure, body.molfile or "")
         elif body.tool == "hydrogens":
             done = builder.add_hydrogens(structure, picks, body.bonds, body.count)
+        elif body.tool == "rotate_fragment":
+            done = builder.rotate_fragment(structure, picks, _value(body), body.axis)
+        elif body.tool == "align_vectors":
+            target = 0.0 if body.value is None else _value(body)
+            done = builder.align_vectors(
+                structure, picks, body.vector or [], body.reference or [], target, body.axis
+            )
         else:
             if body.atoms is not None:
                 what = body.what or "the structure"
@@ -351,7 +365,12 @@ STEP_TOOLS = Literal[
     "hold",
     "release",
     "minimize",
+    "rotate_fragment",
+    "align_vectors",
 ]
+POINTS = (
+    "Two points, each an atom (from 1) or a list of atoms whose middle counts, e.g. [4, [62, 63]]"
+)
 
 
 class AtomsHold(BaseModel):
@@ -382,7 +401,16 @@ class StepIn(BaseModel):
         "release: stop the hold numbered `index` in `holds`. minimize: RDKit UFF with metals "
         'held in their shape by restraints (`metals`: "relax" pulls them to UFF\'s bond '
         "lengths and the nearest ideal shape instead), moving the changed atoms and two "
-        "bonds round them (`everything`: all atoms), keeping frozen atoms and holds."
+        "bonds round them (`everything`: all atoms), keeping frozen atoms and holds. "
+        "rotate_fragment (D150): turn `atoms` as one rigid body by `value` degrees about `axis`, "
+        "whatever the bonds; right-handed, positive anticlockwise seen from the axis's second "
+        "point looking back at its first; default axis: from the one atom outside bonded to "
+        "them to the middle of their atoms bonded to it (a ligand's binding axis); the message "
+        "gives each bond to the rest before and after. align_vectors (D150): the same rigid "
+        "turn about `axis`, by the smallest angle that puts the line `vector` (two points among "
+        "`atoms`) at `value` degrees (0 parallel, default; 90 perpendicular) to the line "
+        "`reference` (two points that stay); says the angle reached when the axis cannot reach "
+        "it."
     )
     atoms: list[int] | None = Field(
         None,
@@ -422,6 +450,22 @@ class StepIn(BaseModel):
     metals: Literal["keep", "relax"] = Field(
         "keep", description="minimize: keep each metal's shape, or relax it (D146)"
     )
+    axis: list[int | list[int]] | None = Field(
+        None, description="rotate_fragment, align_vectors: the axis. " + POINTS
+    )
+    vector: list[int | list[int]] | None = Field(
+        None, description="align_vectors: the line that turns with `atoms`. " + POINTS
+    )
+    reference: list[int | list[int]] | None = Field(
+        None, description="align_vectors: the line that stays. " + POINTS
+    )
+
+
+def _points(points: list[int | list[int]] | None) -> list[list[int]] | None:
+    """Points from 1 (an atom or a list whose middle counts) as lists of atoms from 0."""
+    if points is None:
+        return None
+    return [_from_one([p] if isinstance(p, int) else list(p)) for p in points]
 
 
 class StartIn(BaseModel):
@@ -788,6 +832,9 @@ def _edit_of(step: StepIn) -> EditIn:
         donors=None if step.donors is None else _from_one(step.donors),
         everything=step.everything,
         metals=step.metals,
+        axis=_points(step.axis),
+        vector=_points(step.vector),
+        reference=_points(step.reference),
     )
 
 
