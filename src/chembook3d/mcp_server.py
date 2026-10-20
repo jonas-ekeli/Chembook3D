@@ -61,8 +61,9 @@ Rules:
   link), get_cloud_job with `wait` until it is finished, fetch_cloud_job, then import the
   outputs (import_file, commit_import) or set coordinates on the node the user names.
 - Building or changing a structure (D144): build_structure runs the app's structure editor
-  tools as steps and changes nothing; check its answer (messages, metals, close_contacts), then
-  save the xyz with set_coordinates. Do not write changed coordinates yourself.
+  tools as steps and changes nothing; check its answer (messages, warnings, metals,
+  close_contacts), then save it with set_coordinates or create_node by its build_id (D148).
+  Do not write or copy coordinates yourself.
 - "This node", "these", "the selected": call get_selection first.
 - Import only files at paths the user gave you: import_file, check the plan, then
   commit_import.
@@ -144,13 +145,17 @@ class Bridge:
             )
 
     async def _call(self, spec: ToolSpec, arguments: dict[str, Any]) -> types.CallToolResult:
-        if spec.name == "set_coordinates" and not str(arguments.get("xyz", "")).strip():
+        if (
+            spec.name == "set_coordinates"
+            and not str(arguments.get("xyz") or "").strip()
+            and not arguments.get("build_id")
+        ):
             return _text(
                 "Empty coordinates would remove them: use remove_coordinates, which asks the "
                 "user first.",
                 error=True,
             )
-        args = dict(arguments)
+        args = {**spec.defaults, **arguments}
         path = spec.path
         for name in _path_params(spec.path):
             value = args.pop(name, None)

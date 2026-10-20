@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from chembook3d import xyz
+from chembook3d.api import builds
 from chembook3d.api.routes import _investigation
 from chembook3d.models import Node
 from chembook3d.services import builder, minimize, redraw, smiles
@@ -84,7 +85,8 @@ class EditIn(StructureIn):
         "drawing",
         "redraw",
     ]
-    value: float | None = None  # distance (Å), angle, dihedral or turn (degrees)
+    value: float | None = None  # distance (Å), angle, dihedral or turn (degrees); D148: a new
+    # atom's bond length, a molecule's distance from the picked atom to each of its donors
     move: int | None = None  # the end atom whose side moves; None: the default side
     element: str | None = None
     name: str | None = None  # a fragment or built-in molecule
@@ -96,6 +98,8 @@ class EditIn(StructureIn):
     smiles: str | None = None  # smiles, or a fragment's with one * where it attaches (D141)
     molfile: str | None = None  # drawing, redraw: Ketcher's MOL file (D142, D143)
     bonds: int | None = None  # hydrogens: until each picked atom has this many bonds
+    count: int | None = None  # hydrogens: exactly this many on each picked atom (D148)
+    donors: list[int] | None = None  # molecule, smiles: its atoms (0-based) facing the pick
     everything: bool = False  # minimize: every atom, not only round the changed ones
     metals: Literal["keep", "relax"] = "keep"  # minimize: hold metals in shape, or relax (D146)
 
@@ -216,6 +220,12 @@ def _value(body: EditIn) -> float:
     return body.value
 
 
+def _length(body: EditIn) -> float | None:
+    if body.value is not None and not math.isfinite(body.value):
+        raise HTTPException(422, "Give a value")
+    return body.value
+
+
 def _metal_note(done: builder.Edited, built: smiles.Built) -> None:
     if built.metals:
         done.message += (
@@ -258,7 +268,7 @@ def _apply(structure: builder.Structure, picks: list[int], body: EditIn) -> buil
         elif body.tool == "delete":
             done = builder.delete(structure, picks, body.with_hydrogens)
         elif body.tool == "add_atom":
-            done = builder.add_atom(structure, picks, body.element or "H")
+            done = builder.add_atom(structure, picks, body.element or "H", _length(body))
         elif body.tool in ("freeze", "unfreeze"):
             done = builder.freeze(structure, picks, body.tool == "freeze")
         elif body.tool == "hold":
@@ -279,7 +289,9 @@ def _apply(structure: builder.Structure, picks: list[int], body: EditIn) -> buil
         elif body.tool == "smiles":
             text = (body.smiles or "").strip()
             built = smiles.build(text)
-            done = builder.add_molecule(structure, picks, built.rows, f"“{text}”")
+            done = builder.add_molecule(
+                structure, picks, built.rows, f"“{text}”", _length(body), body.donors
+            )
             _metal_note(done, built)
         elif body.tool == "drawing":
             built = smiles.from_molfile(body.molfile or "")
@@ -298,7 +310,7 @@ def _apply(structure: builder.Structure, picks: list[int], body: EditIn) -> buil
         elif body.tool == "redraw":
             done = redraw.from_drawing(structure, body.molfile or "")
         elif body.tool == "hydrogens":
-            done = builder.add_hydrogens(structure, picks, body.bonds)
+            done = builder.add_hydrogens(structure, picks, body.bonds, body.count)
         else:
             if body.atoms is not None:
                 what = body.what or "the structure"
@@ -306,7 +318,7 @@ def _apply(structure: builder.Structure, picks: list[int], body: EditIn) -> buil
             else:
                 what = body.name or ""
                 atoms = builder.molecule_rows(what)
-            done = builder.add_molecule(structure, picks, atoms, what)
+            done = builder.add_molecule(structure, picks, atoms, what, _length(body), body.donors)
     except builder.BuildError as exc:
         raise HTTPException(422, str(exc)) from exc
     return done
@@ -317,6 +329,8 @@ def _apply(structure: builder.Structure, picks: list[int], body: EditIn) -> buil
 MAX_STEPS = 50
 CONTACT = 0.4  # Å past the covalent radii: atoms more than two bonds apart closer than this
 MAX_CONTACTS = 20
+MAX_WARNINGS = 10
+SIDE_ATOMS = 30  # a measurement lists the atoms of a side up to this many
 CONTACTS_UP_TO = 1500  # atoms; larger structures are not searched for close contacts
 STEP_TOOLS = Literal[
     "distance",
@@ -353,11 +367,15 @@ class StepIn(BaseModel):
         "degrees. bond: add (`present`) or remove a bond between 2 atoms; bonds only decide "
         "which atoms move together and what Minimize keeps bonded. element: change the atoms "
         "to `element`. delete: delete the atoms (later atoms move up). add_atom: add `element` "
-        "bonded to the one atom, or alone with none. fragment: replace one H (or other "
-        "terminal atom) with `name` or a SMILES with one * where it attaches. molecule: put "
-        "`name` or `xyz` beside the structure (off the one atom's free side, or none). smiles: "
-        "build `smiles` in 3D and put it beside the structure the same way. hydrogens: add H "
-        "to the atoms until each has its usual bonds (or `bonds`). freeze, unfreeze: keep "
+        "bonded to the one atom (`value`: the bond length; default the covalent radii sum; at a "
+        "metal's open site), or alone with none. fragment: replace one H (or other terminal "
+        "atom) with `name` or a SMILES with one * where it attaches. molecule: put `name` or "
+        "`xyz` beside the structure, its `donors` facing the one atom from its free side (a "
+        "metal's open site), or past the structure with none; with `value`, each donor is "
+        "bonded to the atom at that distance (Å). smiles: build `smiles` in 3D and put it "
+        "there the same way. hydrogens: add H to the atoms until each has its usual bonds "
+        "(every drawn bond counts, one to a metal too; or `bonds`), or exactly `count` H to "
+        "each. freeze, unfreeze: keep "
         "atoms where they are when minimizing, or not. hold: keep the distance, angle or "
         "dihedral of 2 to 4 atoms at `value` (now: its current value) when minimizing. "
         "release: stop the hold numbered `index` in `holds`. minimize: RDKit UFF with metals "
@@ -370,7 +388,11 @@ class StepIn(BaseModel):
         description="The atoms the tool works on, numbered from 1. Leave out to use those the "
         "step before picked (its `picked`); [] for none.",
     )
-    value: float | None = Field(None, description="Å for a distance, degrees otherwise")
+    value: float | None = Field(
+        None,
+        description="Å for a distance, add_atom's bond length and a molecule's or smiles' "
+        "distance to each donor; degrees otherwise",
+    )
     move: int | None = Field(
         None, description="Atom (from 1) at the end whose side moves; leave out for the smaller"
     )
@@ -388,6 +410,13 @@ class StepIn(BaseModel):
     with_hydrogens: bool = Field(False, description="delete: also the H bonded only to them")
     index: int | None = Field(None, description="release: the hold's number from 1")
     bonds: int | None = Field(None, description="hydrogens: bonds each atom ends with")
+    count: int | None = Field(None, description="hydrogens: H added to each atom (D148)")
+    donors: list[int] | None = Field(
+        None,
+        description="molecule, smiles: the molecule's own atoms (from 1, in its xyz or SMILES "
+        "order) that bind to the picked atom; default: a built-in molecule's C=C, C or O, else "
+        "its first atom",
+    )
     everything: bool = Field(False, description="minimize: move every atom")
     metals: Literal["keep", "relax"] = Field(
         "keep", description="minimize: keep each metal's shape, or relax it (D146)"
@@ -395,10 +424,15 @@ class StepIn(BaseModel):
 
 
 class StartIn(BaseModel):
-    node_id: str | None = Field(
-        None, description="Start from this node's coordinates (and its charge, multiplicity)"
+    build_id: str | None = Field(
+        None,
+        description="Go on from this build_structure answer, with its bonds, changed atoms, "
+        "holds and charge (D148); the lists below are then left out",
     )
-    xyz: str | None = Field(None, description="Or from this XYZ text; neither: from nothing")
+    node_id: str | None = Field(
+        None, description="Or start from this node's coordinates (and its charge, multiplicity)"
+    )
+    xyz: str | None = Field(None, description="Or from this XYZ text; none: from nothing")
     added_bonds: list[tuple[int, int]] = Field(
         default_factory=list, description="Bonds added before (from 1), as the last answer gave"
     )
@@ -417,6 +451,9 @@ class StartIn(BaseModel):
 
 class BuildIn(StartIn):
     steps: list[StepIn] = Field(min_length=1, max_length=MAX_STEPS)
+    include_xyz: bool = Field(
+        False, description="Also give the coordinates as XYZ text (save with build_id instead)"
+    )
 
 
 class CheckIn(StartIn):
@@ -426,11 +463,20 @@ class CheckIn(StartIn):
     )
 
 
+class MeasuredSide(BaseModel):
+    atom: int  # the end atom; pass it as `move` to move this side
+    count: int
+    whole: bool  # false: the sides are joined, so only the end atom and its ends move
+    atoms: list[int] | None  # the atoms that move, when there are up to SIDE_ATOMS
+
+
 class Measured(BaseModel):
     atoms: list[int]
     kind: Literal["distance", "angle", "dihedral"]
     value: float  # Å or degrees, dihedral in IUPAC's sign
     bonded: bool | None  # two atoms: bonded by the 3D view's rule and the changes
+    sides: list[MeasuredSide]  # D148: what setting it (or turning about it) would move
+    moves: int  # the side that moves when `move` is left out
 
 
 class Neighbour(BaseModel):
@@ -464,10 +510,12 @@ class StepOut(BaseModel):
     tool: str
     message: str
     picked: list[int]  # what the next step works on when it names no atoms
+    warnings: list[str] = []  # D148: bonds and close contacts the step made that it did not mean
 
 
 class BuildOut(CheckOut):
-    xyz: str
+    build_id: str  # D148: pass to set_coordinates, create_node or the next build_structure
+    xyz: str | None  # only with include_xyz
     steps: list[StepOut]
     added_bonds: list[tuple[int, int]]
     removed_bonds: list[tuple[int, int]]
@@ -481,8 +529,14 @@ def _from_one(atoms: list[int]) -> list[int]:
 
 def _start(request: Request, body: StartIn) -> tuple[builder.Structure, int | None, int | None]:
     charge, multiplicity = body.charge, body.multiplicity
-    if body.node_id is not None and body.xyz is not None:
-        raise HTTPException(422, "Give node_id or xyz, not both")
+    given = [body.build_id, body.node_id, body.xyz]
+    if sum(g is not None for g in given) > 1:
+        raise HTTPException(422, "Give one of build_id, node_id or xyz, not both")
+    if body.build_id is not None:
+        build = builds.get(request, body.build_id)
+        charge = build.charge if charge is None else charge
+        multiplicity = build.multiplicity if multiplicity is None else multiplicity
+        return build.structure, charge, multiplicity
     if body.node_id is not None:
         with _investigation(request).sessions.begin() as session:
             node = session.get(Node, body.node_id)
@@ -526,7 +580,27 @@ def _measured(structure: builder.Structure, lists: list[list[int]]) -> list[Meas
         if value is None or not math.isfinite(value):
             raise HTTPException(422, f"Measure {atoms}: two of the atoms are on top of each other")
         bonded = builder.bonded(structure, *picks) if len(picks) == 2 else None
-        found.append(Measured(atoms=atoms, kind=kind, value=round(value, 4), bonded=bonded))
+        sides = builder.sides(structure, picks)
+        found.append(
+            Measured(
+                atoms=atoms,
+                kind=kind,
+                value=round(value, 4),
+                bonded=bonded,
+                sides=[
+                    MeasuredSide(
+                        atom=side.atom + 1,
+                        count=len(side.atoms),
+                        whole=side.whole,
+                        atoms=sorted(a + 1 for a in side.atoms)
+                        if len(side.atoms) <= SIDE_ATOMS
+                        else None,
+                    )
+                    for side in sides
+                ],
+                moves=builder.default_side(sides) + 1,
+            )
+        )
     return found
 
 
@@ -537,13 +611,11 @@ def _within_two(graph: list[set[int]], atom: int) -> set[int]:
     return near | {atom}
 
 
-def _contacts(structure: builder.Structure, graph: list[set[int]]) -> list[Contact] | None:
+def _close(structure: builder.Structure, graph: list[set[int]]) -> list[tuple[float, int, int]]:
     """Atoms more than two bonds apart that are closer than their covalent radii and CONTACT:
-    a clash, or a bond the 3D view does not draw."""
+    a clash, or a bond the 3D view does not draw. Closest past their radii first."""
     count = len(structure.rows)
-    if count > CONTACTS_UP_TO:
-        return None
-    if count < 2:
+    if count < 2 or count > CONTACTS_UP_TO:
         return []
     coords = structure.coords
     radii = np.array([builder._radius(e) for e in structure.elements])
@@ -554,15 +626,69 @@ def _contacts(structure: builder.Structure, graph: list[set[int]]) -> list[Conta
         i, j = int(i), int(j)
         if j not in _within_two(graph, i):
             found.append((float(excess[i, j]), i, j))
+    return sorted(found)
+
+
+def _contacts(structure: builder.Structure, graph: list[set[int]]) -> list[Contact] | None:
+    if len(structure.rows) > CONTACTS_UP_TO:
+        return None
+    coords = structure.coords
     elements = structure.elements
     return [
         Contact(
             atoms=(i + 1, j + 1),
             elements=(elements[i], elements[j]),
-            distance=round(float(distance[i, j]), 3),
+            distance=round(float(np.linalg.norm(coords[i] - coords[j])), 3),
         )
-        for _, i, j in sorted(found)[:MAX_CONTACTS]
+        for _, i, j in _close(structure, graph)[:MAX_CONTACTS]
     ]
+
+
+def _electrons(rows: builder.Rows, charge: int | None, multiplicity: int | None) -> str | None:
+    """D148: whether the electron count fits, said either way."""
+    if not rows:
+        return None
+    if charge is None or multiplicity is None:
+        return (
+            "Not checked: no charge and multiplicity (a node's own are used when starting from it)"
+        )
+    note = builder.electrons_note(rows, charge, multiplicity)
+    if note is not None:
+        return note
+    electrons = builder.electrons_of(rows, charge)
+    return f"{electrons} electrons with charge {charge}: multiplicity {multiplicity} fits"
+
+
+def _name(structure: builder.Structure, atom: int) -> str:
+    return f"{structure.elements[atom]} {atom + 1}"
+
+
+def _warnings(before: builder.Structure, after: builder.Structure, on: list[int]) -> list[str]:
+    """D148: bonds the 3D view now draws and close contacts that a step made without meaning to:
+    not to the atoms it worked on, not within what it added, not a bond it was asked for."""
+    count = len(before.rows)
+    if len(after.rows) < count or len(after.rows) > CONTACTS_UP_TO:
+        return []  # deleted atoms renumber the rest
+    old, new = builder.neighbours(before), builder.neighbours(after)
+    meant = {tuple(p) for p in after.added} | {tuple(p) for p in before.added}
+    coords = after.coords
+    found = []
+    for i in range(len(after.rows)):
+        for j in sorted(new[i]):
+            if j <= i or (i < count and j in old[i]) or (i, j) in meant:
+                continue
+            if i >= count or (j >= count and i in on) or (i in on and j in on):
+                continue  # within what was added, onto the atoms worked on, or between them
+            distance = float(np.linalg.norm(coords[i] - coords[j]))
+            found.append(
+                f"{_name(after, i)} and {_name(after, j)} are now drawn bonded ({distance:.2f} Å)"
+            )
+    was = {(i, j) for _, i, j in _close(before, old)}
+    for _, i, j in _close(after, new):
+        if (i, j) not in was:
+            distance = float(np.linalg.norm(coords[i] - coords[j]))
+            found.append(f"{_name(after, i)} and {_name(after, j)} are only {distance:.2f} Å apart")
+    return found[:MAX_WARNINGS]
 
 
 def _report(
@@ -593,11 +719,7 @@ def _report(
     return {
         "formula": builder.formula(structure.rows),
         "atom_count": len(structure.rows),
-        "electrons_note": (
-            builder.electrons_note(structure.rows, charge, multiplicity)
-            if charge is not None and multiplicity is not None
-            else None
-        ),
+        "electrons_note": _electrons(structure.rows, charge, multiplicity),
         "measurements": _measured(structure, measure),
         "metals": metals,
         "close_contacts": _contacts(structure, graph),
@@ -625,6 +747,8 @@ def _edit_of(step: StepIn) -> EditIn:
         index=None if step.index is None else step.index - 1,
         smiles=step.smiles,
         bonds=step.bonds,
+        count=step.count,
+        donors=None if step.donors is None else _from_one(step.donors),
         everything=step.everything,
         metals=step.metals,
     )
@@ -640,8 +764,9 @@ def check(body: CheckIn, request: Request):
 
 @router.post("/run", response_model=BuildOut)
 def run(body: BuildIn, request: Request):
-    """D144: the window's tools as steps, in order, on a node's structure, XYZ text or nothing.
-    Stores nothing: Claude saves the result with set_coordinates (ID-5 as for the window)."""
+    """D144: the window's tools as steps, in order, on a node's structure, XYZ text, an earlier
+    build or nothing. Stores nothing in the investigation: the result is kept by its build_id
+    (D148), which set_coordinates and create_node take (ID-5 as for the window)."""
     structure, charge, multiplicity = _start(request, body)
     picks: list[int] = []
     done_steps = []
@@ -655,13 +780,23 @@ def run(body: BuildIn, request: Request):
             raise HTTPException(
                 exc.status_code, f"Step {number} ({step.tool}): {exc.detail}"
             ) from exc
+        warnings = _warnings(structure, done.structure, on)
         structure, picks = done.structure, done.picks
         done_steps.append(
-            StepOut(tool=step.tool, message=done.message, picked=[i + 1 for i in picks])
+            StepOut(
+                tool=step.tool,
+                message=done.message,
+                picked=[i + 1 for i in picks],
+                warnings=warnings,
+            )
         )
     atoms = [xyz.Atom(e, x, y, z) for e, x, y, z in structure.rows]
+    build_id = request.app.state.builds.add(builds.Build(structure, charge, multiplicity))
     return BuildOut(
-        xyz=xyz.format_xyz(atoms, "Built with build_structure; not saved") if atoms else "",
+        build_id=build_id,
+        xyz=xyz.format_xyz(atoms, "Built with build_structure; not saved")
+        if atoms and body.include_xyz
+        else None,
         steps=done_steps,
         added_bonds=[(i + 1, j + 1) for i, j in structure.added],
         removed_bonds=[(i + 1, j + 1) for i, j in structure.removed],

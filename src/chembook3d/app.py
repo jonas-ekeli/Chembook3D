@@ -13,6 +13,7 @@ from starlette.types import Scope
 from chembook3d import __version__, cloud_jobs
 from chembook3d.api.batch_imports import router as batch_router
 from chembook3d.api.builder import router as builder_router
+from chembook3d.api.builds import Builds
 from chembook3d.api.claude import Panel
 from chembook3d.api.claude import router as claude_router
 from chembook3d.api.energies import router as energy_router
@@ -110,6 +111,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.state.claude_panel = Panel()
     app.state.cloud_jobs = cloud_jobs.Launcher()  # D93
     app.state.live = LiveState()  # D91: changes, selection and confirmations
+    app.state.builds = Builds()  # D148: build_structure's results by id
     app.add_middleware(ChangeTracker, live=app.state.live)
 
     @app.get("/api/health")

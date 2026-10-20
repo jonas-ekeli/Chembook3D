@@ -227,16 +227,19 @@ def _clear_metals(
     ff, structure: Structure, graph: list[set[int]], metals: list[int], push: bool
 ) -> None:
     """Keep atoms not bonded to a metal or its ligand atoms from coming closer to it than CLEAR
-    (an agostic H already closer stays where it is), or with `push` out to CLEAR."""
+    (an agostic H already closer stays where it is), or with `push` out to CLEAR. Atoms bonded
+    to its ligand atoms keep at least their distance or CLEAR (D148: the H of an η² olefin, whose
+    carbons UFF types without the metal, would swing onto it)."""
     coords = structure.coords
     for m in metals:
-        near = graph[m] | {x for lig in graph[m] for x in graph[lig]}
+        beyond = {x for lig in graph[m] for x in graph[lig]} - graph[m] - {m}
         for i, element in enumerate(structure.elements):
-            if i != m and i not in near:
-                low = CLEAR.get(element, CLEAR_HEAVY)
-                if not push:
-                    low = min(low, float(np.linalg.norm(coords[i] - coords[m])))
-                ff.UFFAddDistanceConstraint(m, i, False, low, 1e3, CLEAR_FORCE)
+            if i == m or i in graph[m]:
+                continue
+            low = CLEAR.get(element, CLEAR_HEAVY)
+            if not push or i in beyond:
+                low = min(low, float(np.linalg.norm(coords[i] - coords[m])))
+            ff.UFFAddDistanceConstraint(m, i, False, low, 1e3, CLEAR_FORCE)
 
 
 def _typed(mol: Chem.Mol, metals: list[int]) -> bool:
@@ -382,6 +385,9 @@ def run(structure: Structure, everything: bool = False, relax: bool = False) -> 
     )
     if done.shapes:
         message += "; relaxed " + ", ".join(done.shapes)
+        if any(e not in TYPED for e in structure.elements):
+            # D148: UFF's lengths and angles for transition metals are rough.
+            message += " (UFF is rough for transition metals: check their bonds, or keep them)"
     if done.held:
         message += f"; {', '.join(done.held)} kept in shape (an η ligand, or not two to six bonds)"
     if not done.converged:

@@ -32,6 +32,7 @@ class ToolSpec:
     exclude: tuple[str, ...] = ()  # body fields the tool does not offer
     help: dict[str, str] = field(default_factory=dict)  # descriptions of its inputs
     allowed_in_app: bool = False  # D126: the user's go-ahead is a switch in the app's page
+    defaults: dict[str, Any] = field(default_factory=dict)  # inputs the tool fills in when left out
 
 
 ID_HELP = "Ids come from list or get tools (or get_selection); they are opaque strings."
@@ -124,7 +125,17 @@ TOOLS: list[ToolSpec] = [
         "transitions with their free species, groups and pinned notes. Can be large; prefer the "
         "list and get tools for one kind of record.",
     ),
-    T("list_nodes", "read", "GET", "/api/nodes", "All nodes and free species, with coordinates."),
+    T(
+        "list_nodes",
+        "read",
+        "GET",
+        "/api/nodes",
+        "All nodes and free species: id, label, kind, role, status, charge, multiplicity, "
+        "formula, atom count, step, branch, group. Coordinates only with include_xyz (large); "
+        "get_node gives one node's.",
+        help={"include_xyz": "Also each node's XYZ text."},
+        defaults={"include_xyz": False},
+    ),
     T(
         "get_node",
         "read",
@@ -366,10 +377,12 @@ TOOLS: list[ToolSpec] = [
         "bond, change an element, delete, add atoms, fragments, built-in molecules or a SMILES, "
         "add hydrogens, freeze atoms and hold coordinates, and Minimize (RDKit UFF that keeps "
         "metals such as Ru in their shape). Atoms are numbered from 1, as in the answer's XYZ. "
-        "Changes nothing: check the answer (its messages, metals, close contacts, electrons), "
-        "then save its xyz with set_coordinates, which makes a derived node when the node has "
-        "calculations. Use this rather than writing new coordinates yourself. To go on from an "
-        "answer, pass its xyz, added_bonds, removed_bonds, changed and holds back.",
+        "Changes nothing: check the answer (each step's message and warnings, metals, close "
+        "contacts, electrons), then save it by passing its build_id to set_coordinates (a "
+        "derived node when the node has calculations) or create_node; never copy coordinates. "
+        "To go on from an answer, pass its build_id. A molecule or SMILES binds to a metal's "
+        "open site at `value` Å from its donors. Use this rather than writing new coordinates "
+        "yourself.",
     ),
     T(
         "check_structure",
@@ -379,7 +392,9 @@ TOOLS: list[ToolSpec] = [
         "Check a node's structure or XYZ text (D144): formula, atom count, whether the electron "
         "count fits the multiplicity, the distances, angles and dihedrals asked for, each "
         "metal's bonded atoms with distances, and atoms more than two bonds apart closer than "
-        "their covalent radii allow (clashes). Atoms are numbered from 1. Changes nothing.",
+        "their covalent radii allow (clashes). Each measurement says which atoms setting it "
+        "would move (`sides`, and `moves` when `move` is left out). Atoms are numbered from 1. "
+        "Changes nothing.",
     ),
     T(
         "get_irc",
@@ -516,8 +531,10 @@ TOOLS: list[ToolSpec] = [
         "write",
         "POST",
         "/api/nodes",
-        "Create a node (or, with kind 'species', a free species), optionally with coordinates. "
-        "A new node is usually 'planned' until calculations are imported on it.",
+        "Create a node (or, with kind 'species', a free species), optionally with coordinates "
+        "(xyz, or a build_structure answer's build_id, whose charge and multiplicity it takes "
+        "when these are not given). A new node is usually 'planned' until calculations are "
+        "imported on it.",
         exclude=("view_rotation",),
     ),
     T(
@@ -535,7 +552,8 @@ TOOLS: list[ToolSpec] = [
         "write",
         "PUT",
         "/api/nodes/{node_id}/geometry",
-        "Set a node's coordinates from XYZ text. A node with no calculations is changed in "
+        "Set a node's coordinates from XYZ text or a build_structure answer's build_id (D148; "
+        "give one). A node with no calculations is changed in "
         "place; a node with calculations keeps its geometry and a new derived node is made "
         "with the new coordinates (the answer says which, ID-5). To remove coordinates use "
         "remove_coordinates.",
@@ -1048,6 +1066,8 @@ def input_schema(spec: ToolSpec) -> dict[str, Any]:
     for parameter in operation.get("parameters", []):
         name = parameter["name"]
         properties[name] = _describe(_inline(parameter["schema"], components), name, spec)
+        if name in spec.defaults:
+            properties[name]["default"] = spec.defaults[name]
         if parameter.get("required"):
             required.append(name)
     content = operation.get("requestBody", {}).get("content", {}).get("application/json")
