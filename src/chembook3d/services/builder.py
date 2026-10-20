@@ -11,6 +11,7 @@ without passing the picked atom next to it. When the two sides are joined some o
 ring, a chelate, a metallacycle), only the end atom and the atoms bonded to nothing else move.
 """
 
+import math
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
@@ -1183,6 +1184,217 @@ def add_molecule(
 
 def molecule_rows(name: str) -> Rows:
     return [[e, *(float(c) for c in p)] for e, p in _molecule(name)]
+
+
+# ---------- rigid moves of a set of atoms (D150) ----------
+
+Point = list[int]  # atoms (from 0); more than one means their centroid
+ALIGN_STEP = 0.5  # degrees: the turns tried before refining
+REACHED = 0.5  # degrees: an aligned angle this far from the target is said to fall short
+
+
+def _runs(atoms: list[int]) -> str:
+    """Atoms from 0 written from 1 with runs joined: 74–79, 82."""
+    found: list[str] = []
+    ordered = sorted(set(atoms))
+    start = previous = None
+    for a in [*ordered, None]:
+        if a is not None and previous is not None and a == previous + 1:
+            previous = a
+            continue
+        if start is not None:
+            found.append(str(start + 1) if start == previous else f"{start + 1}–{previous + 1}")
+        start = previous = a
+    return ", ".join(found)
+
+
+def _check_point(structure: Structure, point: Point, what: str) -> None:
+    if not point:
+        raise BuildError(f"Give the atoms of {what}")
+    _check_picks(structure, sorted(set(point)))
+
+
+def _at(coords: np.ndarray, point: Point) -> np.ndarray:
+    return coords[point].mean(axis=0)
+
+
+def _name_point(structure: Structure, point: Point) -> str:
+    if len(point) == 1:
+        return f"{structure.elements[point[0]]} {point[0] + 1}"
+    names = ", ".join(f"{structure.elements[a]} {a + 1}" for a in point)
+    return f"the middle of {names}"
+
+
+def _moving_set(structure: Structure, atoms: list[int]) -> list[int]:
+    if not atoms:
+        raise BuildError("Give the atoms that move together")
+    _check_picks(structure, sorted(set(atoms)))
+    moving = sorted(set(atoms))
+    if len(moving) == len(structure.rows):
+        raise BuildError("Every atom would move: leave out the atoms that stay")
+    return moving
+
+
+def _rigid_axis(
+    structure: Structure, moving: list[int], axis: list[Point] | None
+) -> tuple[list[Point], np.ndarray, np.ndarray]:
+    """The axis (two points) and its origin and unit direction. Without one, the bond axis of a
+    set bonded to the rest through one atom: from that atom to the middle of the set's atoms
+    bonded to it (a ligand's binding axis, η² or not)."""
+    if axis is None:
+        graph = neighbours(structure)
+        partners = sorted({b for a in moving for b in graph[a]} - set(moving))
+        if len(partners) != 1:
+            raise BuildError(
+                "Give the axis: these atoms are bonded to "
+                + ("nothing else" if not partners else f"{len(partners)} other atoms")
+                + ", so there is no bond to turn them about"
+            )
+        (partner,) = partners
+        axis = [[partner], sorted(a for a in moving if partner in graph[a])]
+    if len(axis) != 2:
+        raise BuildError("Give the axis as two points (each an atom or atoms whose middle counts)")
+    for n, point in enumerate(axis, start=1):
+        _check_point(structure, point, f"the axis's point {n}")
+    coords = structure.coords
+    origin, end = _at(coords, axis[0]), _at(coords, axis[1])
+    if np.linalg.norm(end - origin) < 1e-6:
+        raise BuildError("The axis's two points are on top of each other")
+    return axis, origin, _unit(end - origin)
+
+
+def _turned(coords: np.ndarray, moving: list[int], origin, direction, degrees: float):
+    out = coords.copy()
+    out[moving] = (coords[moving] - origin) @ _rotation(direction, degrees).T + origin
+    return out
+
+
+def _kept_bonds(structure: Structure, before: np.ndarray, after: np.ndarray, moving: list[int]):
+    """The bonds from the moved atoms to the rest, as they were and are (D150)."""
+    graph = neighbours(structure)
+    elements = structure.elements
+    kept, changed = [], []
+    for a in moving:
+        for b in sorted(graph[a] - set(moving)):
+            was = float(np.linalg.norm(before[a] - before[b]))
+            now = float(np.linalg.norm(after[a] - after[b]))
+            name = f"{elements[b]} {b + 1}–{elements[a]} {a + 1}"
+            if abs(now - was) < 5e-4:
+                kept.append(f"{name} {now:.3f} Å")
+            else:
+                changed.append(f"{name} {was:.3f} → {now:.3f} Å")
+    text = ""
+    if kept:
+        text += "; bonds to the rest kept: " + ", ".join(kept)
+    if changed:
+        text += "; bonds to the rest changed: " + ", ".join(changed)
+    return text
+
+
+def _rigid_done(structure: Structure, coords: np.ndarray, moving: list[int], what: str) -> Edited:
+    clash = _overlap(coords, moving)
+    if clash:
+        a, b = clash
+        raise BuildError(f"That puts atom {a + 1} on top of atom {b + 1}")
+    note = _kept_bonds(structure, structure.coords, coords, moving)
+    return Edited(_with(structure, coords, changed=moving), moving, what + note)
+
+
+SIGN = "positive turns anticlockwise seen from the axis's second point looking back at its first"
+
+
+def rotate_fragment(
+    structure: Structure, atoms: list[int], degrees: float, axis: list[Point] | None = None
+) -> Edited:
+    """D150: turn the atoms given as one rigid body about an axis, whatever the bonds say: two
+    points, each an atom or the middle of several, from the first to the second. Right-handed:
+    a positive turn is anticlockwise seen from the second point looking back at the first."""
+    moving = _moving_set(structure, atoms)
+    if not math.isfinite(degrees):
+        raise BuildError("Give the turn in degrees")
+    axis, origin, direction = _rigid_axis(structure, moving, axis)
+    coords = _turned(structure.coords, moving, origin, direction, degrees)
+    what = (
+        f"Turned atoms {_runs(moving)} ({_atoms(len(moving))}) by {degrees:g}° about "
+        f"{_name_point(structure, axis[0])} → {_name_point(structure, axis[1])} ({SIGN})"
+    )
+    return _rigid_done(structure, coords, moving, what)
+
+
+def _line_angle(u: np.ndarray, v: np.ndarray) -> float:
+    """The angle between two lines, 0 to 90°: a C=C parallel to Ru=C either way round is 0°."""
+    cos = abs(float(_unit(u) @ _unit(v)))
+    return float(np.degrees(np.arccos(min(cos, 1.0))))
+
+
+def align_vectors(
+    structure: Structure,
+    atoms: list[int],
+    vector: list[Point],
+    reference: list[Point],
+    target: float = 0.0,
+    axis: list[Point] | None = None,
+) -> Edited:
+    """D150: turn the atoms given, rigidly about the axis (as rotate_fragment), by the smallest
+    turn that puts the line of `vector` (two points among them) at `target` degrees to the line
+    of `reference` (two points that stay): 0 parallel, 90 perpendicular. When the axis cannot
+    reach the target, the closest it can is taken and said."""
+    moving = _moving_set(structure, atoms)
+    if not 0 <= target <= 90:
+        raise BuildError("Give the angle between the two lines from 0 (parallel) to 90°")
+    for name, pair in (("vector", vector), ("reference", reference)):
+        if len(pair) != 2:
+            raise BuildError(f"Give the {name} as two points (each an atom or atoms)")
+        for n, point in enumerate(pair, start=1):
+            _check_point(structure, point, f"the {name}'s point {n}")
+    inside = set(moving)
+    if not all(set(p) <= inside for p in vector):
+        raise BuildError("The vector's atoms must be among the atoms that move")
+    if any(set(p) & inside for p in reference):
+        raise BuildError("The reference's atoms must stay where they are, not move")
+    axis, origin, direction = _rigid_axis(structure, moving, axis)
+    coords = structure.coords
+    ref = _at(coords, reference[1]) - _at(coords, reference[0])
+    if np.linalg.norm(ref) < 1e-6:
+        raise BuildError("The reference's two points are on top of each other")
+    vec = _at(coords, vector[1]) - _at(coords, vector[0])
+    if np.linalg.norm(vec) < 1e-6:
+        raise BuildError("The vector's two points are on top of each other")
+
+    def miss(degrees: float) -> float:
+        turned = vec @ _rotation(direction, degrees).T
+        return abs(_line_angle(turned, ref) - target)
+
+    tries = np.arange(-180.0, 180.0, ALIGN_STEP)
+    misses = np.array([miss(t) for t in tries])
+    best = None
+    for t in tries[misses <= misses.min() + 2.0]:
+        low, high = t - ALIGN_STEP, t + ALIGN_STEP  # refine each candidate by golden search
+        for _ in range(40):
+            a, b = low + 0.382 * (high - low), low + 0.618 * (high - low)
+            if miss(a) < miss(b):
+                high = b
+            else:
+                low = a
+        found = (low + high) / 2
+        found = (found + 180.0) % 360.0 - 180.0
+        key = (round(miss(found), 2), abs(found))
+        if best is None or key < best[0]:
+            best = (key, found)
+    assert best is not None
+    degrees = float(best[1])
+    turned = _turned(coords, moving, origin, direction, degrees)
+    reached = _line_angle(_at(turned, vector[1]) - _at(turned, vector[0]), ref)
+    what = (
+        f"Turned atoms {_runs(moving)} ({_atoms(len(moving))}) by {degrees:.1f}° about "
+        f"{_name_point(structure, axis[0])} → {_name_point(structure, axis[1])} ({SIGN}): "
+        f"{_name_point(structure, vector[0])} → {_name_point(structure, vector[1])} is now at "
+        f"{reached:.1f}° to {_name_point(structure, reference[0])} → "
+        f"{_name_point(structure, reference[1])}"
+    )
+    if abs(reached - target) > REACHED:
+        what += f" (the closest this axis allows to {target:g}°)"
+    return _rigid_done(structure, turned, moving, what)
 
 
 # ---------- holding for Minimize (D140) ----------

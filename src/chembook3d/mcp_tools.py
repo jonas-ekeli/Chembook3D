@@ -379,7 +379,8 @@ TOOLS: list[ToolSpec] = [
         "/api/builder/run",
         "Build or change a structure with the app's Edit structure tools (D144), as a list of "
         "steps run in order on a node's coordinates, XYZ text, or nothing (a SMILES or a lone "
-        "atom first): set a distance, angle or dihedral, turn about a bond, add or remove a "
+        "atom first): set a distance, angle or dihedral, turn about a bond, turn any set of "
+        "atoms rigidly about an axis or line up two vectors (D150), add or remove a "
         "bond, change an element, delete, add atoms, fragments, built-in molecules or a SMILES, "
         "add hydrogens, freeze atoms and hold coordinates, and Minimize (RDKit UFF that keeps "
         "metals such as Ru in their shape). Atoms are numbered from 1, as in the answer's XYZ. "
