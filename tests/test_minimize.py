@@ -1,6 +1,7 @@
 """The Edit structure window's holds and Minimize (D140, A85; T-BLD-08…11). Metal complexes
 are morfeus's public SambVca set; Ru is tried by making its Ir complex a Ru one."""
 
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
@@ -217,7 +218,9 @@ def test_minimize_again_stays_put(make):
         assert done.converged and done.largest < 1e-3
         again = done.structure
     assert again.minimized_from == s.rows
-    near = minimize.minimize(Structure(again.rows, changed=[0], minimized_from=s.rows))
+    near = minimize.minimize(
+        Structure(again.rows, changed=[0], minimized_from=s.rows, minimized_metals="keep")
+    )
     assert near.largest < 1e-3
 
 
@@ -245,3 +248,95 @@ def test_minimized_from_bookkeeping(open_client):
         json={**out, "tool": "minimize", "everything": True, "minimized_from": other},
     )
     assert ignored.status_code == 200 and ignored.json()["minimized_from"] == out["rows"]
+
+
+SQUARE_PLANAR = ["4.xyz", "5.xyz", "6.xyz", "7.xyz", "8.xyz", "9.xyz", "12.xyz"]
+
+
+@pytest.mark.parametrize("name", [*SQUARE_PLANAR, "13.xyz", "15.xyz"])
+def test_relaxed_metals_keep_typical_bonds(name):
+    # T-BLD-26 (D146): relaxing the public Pd, Ni, Mn and Zr complexes keeps every metal bond
+    # within 0.25 Å of the crystal's, the shape square planar or octahedral, the bonds as they
+    # were, and Minimize again stays put.
+    s = Structure(rows_of(STERICS / name))
+    metal = next(i for i, e in enumerate(s.elements) if e not in minimize.TYPED)
+    done = minimize.run(s, everything=True, relax=True)
+    shape = "square planar" if name in SQUARE_PLANAR else "octahedral"
+    assert f"relaxed {s.elements[metal]} {metal + 1} {shape}" in done.message
+    out = done.structure
+    ligands = sorted(builder.neighbours(s)[metal])
+    assert metal_bonds(out) == metal_bonds(s)
+    for lig in ligands:
+        before = builder.measure(s.coords, [metal, lig])
+        assert builder.measure(out.coords, [metal, lig]) == pytest.approx(before, abs=0.25)
+    trans = 2 if shape == "square planar" else 3
+    angles = sorted(builder.measure(out.coords, [a, metal, b]) for a, b in combinations(ligands, 2))
+    assert all(a > 155 for a in angles[-trans:])
+    assert all(65 < a < 115 for a in angles[:-trans])
+    assert minimize.minimize(out, everything=True, relax=True).largest < 1e-3
+
+
+def test_relaxed_drawn_ruthenium():
+    # T-BLD-26 (D146): the drawn CAAC Hoveyda precatalyst relaxes to a square pyramid with
+    # typical bonds: Ru=C and Ru–Cl near UFF's lengths, the ether O longer, chlorides trans.
+    s = drawn_hoveyda()
+    ru = s.elements.index("Ru")
+    done = minimize.run(s, everything=True, relax=True)
+    assert f"relaxed Ru {ru + 1} square pyramidal" in done.message
+    out = done.structure
+    assert metal_bonds(out) == metal_bonds(s)
+    lengths = {
+        out.elements[lig] + ("=" if len(builder.neighbours(out)[lig]) == 3 else ""): (
+            builder.measure(out.coords, [ru, lig])
+        )
+        for lig in builder.neighbours(out)[ru]
+    }
+    assert 2.3 < lengths["Cl"] < 2.5
+    assert 1.85 < lengths["O="] < 2.35
+    chlorides = [i for i in builder.neighbours(out)[ru] if out.elements[i] == "Cl"]
+    assert builder.measure(out.coords, [chlorides[0], ru, chlorides[1]]) > 155
+    assert minimize.minimize(out, everything=True, relax=True).largest < 1e-3
+    # Kept after relaxing: the relaxed shape is held, not the drawn one, and stays put again.
+    kept = minimize.minimize(out, everything=True)
+    assert kept.largest < 0.2
+    assert minimize.minimize(kept.structure, everything=True).largest < 1e-3
+
+
+def test_eta_ligands_are_held_when_relaxing():
+    # T-BLD-26 (D146): a zirconocene (η5 Cp) is held in its shape, and the window says so.
+    s = Structure(rows_of(STERICS / "16.xyz"))
+    done = minimize.run(s, everything=True, relax=True)
+    assert "Zr 1 kept in shape" in done.message
+    assert heavy_rmsd(s, done.structure) < 0.2
+
+
+def test_main_group_heavy_atoms_are_optimized():
+    # T-BLD-26 (D146): Sb, Bi, Te, Al, Tl and Hg go to UFF (not held in their shape): a C–Sb bond
+    # stretched to 2.6 Å comes back to UFF's length; when UFF cannot type them, they are held.
+    assert {"Al", "Sb", "Bi", "Te", "Tl", "Hg"} <= minimize.TYPED
+    s = Structure(smiles.build("C[Sb](C)C").rows)
+    sb = s.elements.index("Sb")
+    carbon = next(i for i in builder.neighbours(s)[sb] if s.elements[i] == "C")
+    stretched = builder.set_distance(s, [sb, carbon], 2.6, carbon).structure
+    out = minimize.minimize(stretched, everything=True).structure
+    assert builder.measure(out.coords, [sb, carbon]) == pytest.approx(2.16, abs=0.05)
+    real = minimize._typed
+    try:
+        minimize._typed = lambda mol, metals: False
+        held = minimize.minimize(stretched, everything=True).structure
+    finally:
+        minimize._typed = real
+    assert builder.measure(held.coords, [sb, carbon]) > 2.35
+
+
+def test_api_relaxes_metals(open_client):
+    # T-BLD-26 (D146): the API passes the choice and says how the last Minimizes treated metals.
+    s = ru_complex()[0]
+    body = {"rows": s.rows, "picks": [], "tool": "minimize", "everything": True}
+    out = open_client.post("/api/builder/edit", json={**body, "metals": "relax"}).json()
+    assert out["minimized_metals"] == "relax" and "relaxed Ru 1" in out["message"]
+    kept = open_client.post(
+        "/api/builder/edit", json={**out, "tool": "minimize", "everything": True}
+    ).json()
+    assert kept["minimized_metals"] == "keep"
+    assert kept["minimized_from"] == out["rows"]

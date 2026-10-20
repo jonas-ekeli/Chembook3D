@@ -54,6 +54,7 @@ class Structure:
     # D145: the coordinates before the first of the Minimize runs since the atoms last changed
     # otherwise; Minimize takes the bonds and the metals' shape from them, so it stays put.
     minimized_from: Rows | None = None
+    minimized_metals: str | None = None  # D146: "keep" or "relax", as those Minimizes did
 
     def but(
         self,
@@ -64,6 +65,7 @@ class Structure:
         changed: list[int] | tuple[int, ...] = (),
         holds: list[Hold] | None = None,
         minimized_from: Rows | None = None,
+        minimized_metals: str | None = None,
     ) -> "Structure":
         """A copy with these parts replaced and `changed` atoms added to those changed. New
         rows drop `minimized_from` unless it is given (Minimize gives it)."""
@@ -74,6 +76,7 @@ class Structure:
             sorted(set(self.changed) | set(changed)),
             [Hold(list(h.atoms), h.value) for h in (self.holds if holds is None else holds)],
             minimized_from if rows is not None else (minimized_from or self.minimized_from),
+            minimized_metals if rows is not None else (minimized_metals or self.minimized_metals),
         )
 
     @property

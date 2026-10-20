@@ -92,6 +92,7 @@ export function StructureEditor({
   const [busy, setBusy] = useState(false)
   const [closing, setClosing] = useState(false)
   const [everything, setEverything] = useState(false)
+  const [relaxMetals, setRelaxMetals] = useState(false)
   // D142: Draw… (a new molecule, the drawing kept as `drawn`); D143: Draw from this structure.
   const [drawing, setDrawing] = useState<null | 'new' | { molfile: string }>(null)
   const [drawn, setDrawn] = useState<string | null>(null)
@@ -139,8 +140,8 @@ export function StructureEditor({
       const result = await api.builderEdit(structure, on, tool, options)
       setPast([...past, structure])
       setFuture([])
-      const { rows, added, removed, changed, holds, minimized_from } = result
-      setStructure({ rows, added, removed, changed, holds, minimized_from })
+      const { rows, added, removed, changed, holds, minimized_from, minimized_metals } = result
+      setStructure({ rows, added, removed, changed, holds, minimized_from, minimized_metals })
       // Minimize and the list of holds leave the picked atoms as they were.
       if (tool !== 'minimize' && on === picks) pick(result.picks)
       setMessage(result.message)
@@ -560,8 +561,18 @@ export function StructureEditor({
                 Everything
               </label>
             </fieldset>
+            <fieldset className="sides" aria-label="Metals">
+              <label className="small" title="Each metal keeps its bond lengths and angles (D140)">
+                <input type="radio" name="metals" checked={!relaxMetals} onChange={() => setRelaxMetals(false)} />
+                Metals keep their shape
+              </label>
+              <label className="small" title="Metal bonds go to UFF's lengths and the angles to the nearest ideal shape (D146)">
+                <input type="radio" name="metals" checked={relaxMetals} onChange={() => setRelaxMetals(true)} />
+                Metals relax
+              </label>
+            </fieldset>
             <div className="row">
-              <button className="small" disabled={busy || count < 2} onClick={() => void run('minimize', { everything: everything || !structure.changed.length })}>
+              <button className="small" disabled={busy || count < 2} onClick={() => void run('minimize', { everything: everything || !structure.changed.length, metals: relaxMetals ? 'relax' : 'keep' })}>
                 Minimize
               </button>
               <span className="muted small">A quick UFF clean-up; frozen and held stay.</span>
