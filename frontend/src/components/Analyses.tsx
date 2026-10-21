@@ -548,7 +548,7 @@ function SelectivityEditor({
           </table>
         )}
         <p className="muted small">
-          A group counts with all its members. Experimental amounts are optional, on any scale (95 and 5, or 19 and 1).
+          A group counts with all its members except rejected, failed or superseded ones; a TS imported twice counts once. Experimental amounts are optional, on any scale (95 and 5, or 19 and 1).
         </p>
       </section>
       {error && <p role="alert">{error}</p>}
