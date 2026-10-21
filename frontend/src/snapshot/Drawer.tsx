@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react'
 import { energyTypeName, type EnergyType, type Settings } from '../api'
 import { ProfileChart } from '../components/ProfileChart'
 import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
-import { closesCycle, download } from '../util'
+import { closesCycle, download, tableCellClass } from '../util'
 import { tableCsv, type SnapshotData } from './data'
 
 const NO_BRANCH = '#98a2b3'
@@ -168,7 +168,7 @@ export function SnapshotDrawer({
                 {shown.table.rows.map((row, i) => (
                   <tr key={i}>
                     {row.map((cell, j) => (
-                      <td key={j} className={j >= 4 ? 'num' : undefined}>
+                      <td key={j} className={tableCellClass(j, row.length)}>
                         {cell}
                       </td>
                     ))}

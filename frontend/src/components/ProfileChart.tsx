@@ -21,6 +21,7 @@ function tickDecimals(values: number[]): number {
 }
 
 const MARK = { fontWeight: 700, fill: '#b42318' } as const
+const CHECK = { fontWeight: 700, fill: '#b54708' } as const
 
 let measure: CanvasRenderingContext2D | null | undefined
 
@@ -420,7 +421,19 @@ export function ProfileChart({
             }
             const label = labels.get(`${pi}:${i}`)
             const mark = marks?.get(`${pi}:${i}`)
-            const markSpan = mark && <tspan {...MARK}> {mark}</tspan>
+            // D154: a point the frequency job does not show to be what its role says. Left out of
+            // the saved figure (profileStyle.figureText).
+            const check = point.check && (
+              <tspan data-check="" {...CHECK}>
+                {' '}⚠<title>{point.check.message}</title>
+              </tspan>
+            )
+            const markSpan = (mark || check) && (
+              <>
+                {mark && <tspan {...MARK}> {mark}</tspan>}
+                {check}
+              </>
+            )
             // The mark goes after the name, or after the value when the name is hidden or along the
             // bottom.
             const markOn = above.includes('name') || below.includes('name') ? 'name' : 'value'

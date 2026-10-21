@@ -414,6 +414,7 @@ def result(
                     "species": [],
                     "species_value": None,
                     "message": None,
+                    "check": None,
                 }
             )
             if node.role != Role.TRANSITION_STATE:
@@ -482,6 +483,10 @@ def result(
         for member in outcome["members"]:
             value = energies.value(member["node_id"], key, selectivity.energy_type)
             member["value"] = value.value
+            # D154: a TS the frequency job at this level does not show to be one is noted.
+            member["check"] = value.check
+            if value.check is not None:
+                notes.append(f"“{member['label']}”: {value.check['message']}.")
             if value.value is None:
                 member["message"] = value.message
                 missing.append(f"“{member['label']}” ({value.message})")

@@ -30,6 +30,7 @@ from chembook3d.models import (
     GroupNode,
     LevelOfTheory,
     Node,
+    Role,
 )
 from chembook3d.parsers import joined
 from chembook3d.services import levels
@@ -75,6 +76,10 @@ class Value:
     energy_calculation_id: str | None = None
     thermo_calculation_id: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
+    # D154: what the frequency job at the geometry level says against the node's role (a
+    # transition state without exactly one imaginary frequency, or without a frequency job; a
+    # minimum with one), as {"code", "message"}; None when nothing.
+    check: dict[str, str] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +89,7 @@ class Value:
             "energy_calculation_id": self.energy_calculation_id,
             "thermo_calculation_id": self.thermo_calculation_id,
             "details": self.details,
+            "check": self.check,
         }
 
 
@@ -189,7 +195,53 @@ class NodeEnergies:
             raise found
         return found
 
+    def check(self, key: LevelKey) -> dict[str, str] | None:
+        """D154: the frequency job behind this composite level (at its geometry level; the
+        node's latest when that is not known) against the node's role. Shown wherever the value
+        is used (profiles, the table, selectivities, turnovers) and never changes it (D19)."""
+        role = self.node.role
+        if role not in (Role.TRANSITION_STATE, Role.MINIMUM):
+            return None
+        if key.geometry_level_id is not None:
+            frequency = self.thermo_source(key)
+        else:
+            frequency = next(
+                (
+                    c
+                    for c in sorted(self.node.calculations, key=_order, reverse=True)
+                    if c.type == CalculationType.FREQUENCY and c.result is not None
+                ),
+                None,
+            )
+        if frequency is None:
+            if role == Role.TRANSITION_STATE:
+                return {
+                    "code": "W-TS-NOFREQ",
+                    "message": "no frequency calculation at the geometry level shows it is a "
+                    "transition state",
+                }
+            return None
+        count = frequency.result.imaginary_count
+        if count is None or (count == 1) == (role == Role.TRANSITION_STATE):
+            return None
+        imaginary = [f for f in frequency.result.frequencies if f < 0]
+        shown = ", ".join(f"{f:.1f}" for f in imaginary)
+        plural = "frequency" if count == 1 else "frequencies"
+        if role == Role.TRANSITION_STATE:
+            message = f"{count} imaginary {plural} at the geometry level, not 1"
+        else:
+            message = f"{count} imaginary {plural} at the geometry level"
+        return {
+            "code": "W-IMAG-TS" if role == Role.TRANSITION_STATE else "W-IMAG-MIN",
+            "message": f"{message} ({shown} cm⁻¹)" if shown else message,
+        }
+
     def value(self, key: LevelKey, energy_type: str) -> Value:
+        found = self._value(key, energy_type)
+        found.check = self.check(key)
+        return found
+
+    def _value(self, key: LevelKey, energy_type: str) -> Value:
         source = self.energy(key)
         if source is None:
             return Value(None, None, "no energy at this level")

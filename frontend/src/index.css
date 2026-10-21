@@ -1502,6 +1502,11 @@ table.energy-table td.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+/* D154: what the frequency job says against a point's role */
+.check-mark,
+table.energy-table td.check {
+  color: #b54708;
+}
 
 /* A13: a node that closes a catalytic cycle */
 .cycle-mark {

@@ -115,18 +115,23 @@ def output(*steps: str) -> str:
     return header + "".join(steps)
 
 
-def opt_freq(start, end, energy=-76.4089) -> str:
-    """A compound `opt freq` job: the optimization, then the frequency job as internal step 2."""
+def opt_freq(start, end, energy=-76.4089, frequencies=(1650.0, 3700.0, 3800.0)) -> str:
+    """A compound `opt freq` job: the optimization, then the frequency job as internal step 2.
+    A transition state's gets an imaginary mode on top: `frequencies=TS_FREQUENCIES`."""
     return output(
         step("#P B3LYP/6-31G(d) Opt Freq", [start, end], energy, converged=True, terminate=False),
         step(
             "#P Geom=AllCheck Guess=TCheck SCRTyp=Grad RB3LYP/6-31G(d) Freq",
             [end],
             energy,
-            frequencies=[1650.0, 3700.0, 3800.0],
+            frequencies=list(frequencies),
             internal=True,
         ),
     )
+
+
+# The water modes with an imaginary one first (not a real water TS: what a TS's job prints).
+TS_FREQUENCIES = (-500.0, 1650.0, 3700.0, 3800.0)
 
 
 def single_point(atoms, route="#P B3LYP/def2TZVP SP", energy=-76.45) -> str:

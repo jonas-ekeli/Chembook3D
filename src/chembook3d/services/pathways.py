@@ -503,6 +503,7 @@ def table(
         f"{qh} (hartree)",
         "Free species",
         f"Δ{energy_type} ({unit})",
+        "Check",  # D154
     ]
     rows: list[list[str]] = []
     seen: set[tuple] = set()
@@ -531,6 +532,7 @@ def table(
                     _absolute(values["G_qh"]),
                     species_service.text(point["species"]),
                     relative_text(point["relative"], unit),
+                    point["check"]["message"] if point["check"] else "",
                 ]
             )
     return {"columns": columns, "rows": rows}

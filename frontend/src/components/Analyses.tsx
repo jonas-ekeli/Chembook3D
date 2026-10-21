@@ -309,6 +309,12 @@ function ResultView({
                       {m.label}
                     </button>
                     {m.group_label && <span className="muted"> in {m.group_label}</span>}
+                    {m.check && (
+                      <span className="check-mark" title={m.check.message} aria-label={m.check.message}>
+                        {' '}
+                        ⚠
+                      </span>
+                    )}
                   </td>
                   {result.reference_id && <td>{balanceText(m.species) || '—'}</td>}
                   <td className="num" title={m.message ?? undefined}>

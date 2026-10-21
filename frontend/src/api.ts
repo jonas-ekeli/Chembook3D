@@ -1119,6 +1119,8 @@ export type SelectivityMemberResult = {
   species: SpeciesCount[]
   species_value: number | null
   message: string | null
+  /** D154: what the frequency job at the level says against this TS, if anything. */
+  check?: EnergyCheck | null
 }
 
 export type SelectivityOutcomeResult = {
@@ -1233,7 +1235,13 @@ export type EnergyValue = {
   energy_calculation_id: string | null
   thermo_calculation_id: string | null
   details: Record<string, unknown>
+  /** D154: what the frequency job at the geometry level says against the node's role. */
+  check?: EnergyCheck | null
 }
+
+/** D154: a transition state without exactly one imaginary frequency (or without a frequency
+ * job), or a minimum with one, at the level shown. Never changes the value (D19). */
+export type EnergyCheck = { code: string; message: string }
 
 export type EnergyView = {
   level: string

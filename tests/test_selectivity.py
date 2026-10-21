@@ -40,7 +40,8 @@ def ts(client, label: str, kcal: float, shift: float) -> str:
     """A TS (water, so all have the same atoms) at E0 + kcal, with the same frequencies, so
     ΔG = ΔE. `shift` keeps the geometries apart."""
     atoms = g.moved(g.WATER, shift)
-    node_id = import_file(client, f"{label}.out", g.opt_freq(atoms, atoms, energy(kcal)))["node_id"]
+    text = g.opt_freq(atoms, atoms, energy(kcal), frequencies=g.TS_FREQUENCIES)
+    node_id = import_file(client, f"{label}.out", text)["node_id"]
     patch(client, f"/nodes/{node_id}", {"label": label, "role": "transition_state"})
     return node_id
 
