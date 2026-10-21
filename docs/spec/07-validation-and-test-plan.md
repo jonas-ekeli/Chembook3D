@@ -191,7 +191,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-EN-05 | G_qh on files with low modes, at default and at a non-default T and cutoff | Matches Jonas's reference script `thermochem_corr_G16` "Thermic correction" within 0.01 kcal/mol (D56, D58) |
 | T-EN-06 | Unit switch | Display changes; stored values are unchanged |
 | T-EN-07 | Level drop-down | Lists only combinations that have values |
-| T-EN-10 | Linear molecule frequency job | G_qh "n/a" with a warning (D58) |
+| T-EN-10 | Linear molecule frequency job | G_qh has a value, listed and shown like any other (D164; was "n/a" with a warning, D58) |
 | T-EN-11 | A file with two frequency jobs | G_qh uses only the selected step's frequencies |
 | T-EN-09 | Freq imported later at a different level than the geometry level | The preview flags the mismatch; G at the composite level uses only a freq at the geometry level |
 | T-EN-08 | Energy table CSV | Columns as FR-EN-06; values equal the on-screen values |
@@ -213,6 +213,9 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-EN-27 | The public fixture aziridinium-phos-full-c1.log ("Maximum Displacement … NO" after its frequency job); aminationTS-full-unfrz-c1.log; a synthetic job whose table is met | The preview, the frequency calculation and the card have W-FREQ-NONSTAT naming the criterion, and E, G and G_qh at its level carry it with their values and the status unchanged; the other two have none (D158) |
 | T-EN-28 | A cut-off optimization (no "Optimization completed", no normal termination) and a TS whose frequency job is not at a stationary point, in a profile, the table, a selectivity and a turnover | E carries W-OPT-INC and W-TERM, the TS W-FREQ-NONSTAT, in the profile points, the Check column, the selectivity's notes and the turnover's; the status is unchanged (D158) |
 | T-EN-29 | A frequency job imported before D158 (the stored check removed and the repair not yet run) | Opening the investigation reads the check again from the copied file once and the card has W-FREQ-NONSTAT (D158) |
+| T-EN-43 | The public Gaussian job HCN_singlet.out (HCN, C*V, σ = 1, 4 modes, one rotational temperature), G_qh at cutoff 0 and at 800 cm⁻¹ | At cutoff 0 the G, H and ZPE corrections equal Gaussian's printed ones within 0.001 kcal/mol and S_rot its 11.846 cal/mol-K; at 800 cm⁻¹ two modes are raised for S_vib only (D164) |
+| T-EN-44 | A synthetic CO2 frequency job (D*H, σ = 2) and the same numbers as C*V with σ = 1 | The symmetry number and point group are read from the file, G_qh at cutoff 0 equals the printed G correction within 0.001 kcal/mol, and σ = 2 lowers S_rot by R ln 2 (D164) |
+| T-EN-45 | Rotational temperatures that fit neither rotor (linear point group with unequal values, two values with no point group, a single zero); a linear list with the zero about the axis | W-PARSE, never a value; the list with the zero gives the same G_qh as the single temperature (D164) |
 
 ### Free species (D69)
 

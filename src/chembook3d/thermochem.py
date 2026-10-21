@@ -7,10 +7,13 @@
 - Translational entropy is for an ideal gas at 1 atm: no concentration correction (D57).
   The 1 M standard state (D95) is an option added on top by `services/energies`, with
   `standard_state_correction`; it is not part of the script.
-- Linear molecules are not supported by the script, so they give no value (D58).
+- Linear molecules, which the script does not support (D58), get the linear rigid rotor
+  (D164): one rotational temperature, U_rot = RT and S_rot = R(ln(T/(σΘ_rot)) + 1), with
+  the 3N − 5 vibrations the file lists. Everything else is as for a non-linear molecule.
 
 Each formula is written in the same form and order as the script, so the results agree with
-it to the last digits rather than only within the test tolerance.
+it to the last digits rather than only within the test tolerance. The linear rotor is ours
+(D164) and leaves the non-linear path untouched.
 """
 
 import math
@@ -59,6 +62,7 @@ class QuasiHarmonic:
     real_modes: int
     raised_modes: int  # real modes below the cutoff, raised for the entropy
     imaginary_excluded: int
+    linear: bool = False  # D164: the linear rigid rotor was used
 
 
 def _zpe(frequencies: list[float]) -> float:
@@ -95,6 +99,22 @@ def _rotational_entropy(temperature: float, rotemp: list[float], symmetry_number
     return GAS_CONSTANT * (math.log(qrot / symmetry_number) + 1.5) / J_PER_MOL_HARTREE
 
 
+def _linear_rotational_entropy(temperature: float, rotemp: float, symmetry_number: int) -> float:
+    """D164: the linear rigid rotor, q_rot = T / (σΘ_rot), S_rot = R(ln q_rot + 1)."""
+    qrot = temperature / rotemp
+    return GAS_CONSTANT * (math.log(qrot / symmetry_number) + 1.0) / J_PER_MOL_HARTREE
+
+
+def _linear_temperature(rotemp: list[float]) -> float | None:
+    """D164: a linear molecule's one rotational temperature: the single value Gaussian and
+    ORCA print, or the equal non-zero ones of a list that also has the zero about the axis.
+    None when the values do not describe a linear rotor."""
+    nonzero = [value for value in rotemp if value != 0.0]
+    if not nonzero or any(not math.isclose(v, nonzero[0], rel_tol=1e-3) for v in nonzero):
+        return None
+    return nonzero[0]
+
+
 def _rrho_entropy(frequency: float, temperature: float) -> float:
     factor = PLANCK * frequency * SPEED_OF_LIGHT_CM / (BOLTZMANN * temperature)
     return (
@@ -120,10 +140,22 @@ def quasi_harmonic(
         raise NotComputable(
             "W-QH", "the temperature must be above zero and the cutoff not negative"
         )
-    if (point_group or "").upper() in LINEAR_POINT_GROUPS or (
-        rotational_temperatures is not None and len(rotational_temperatures) != 3
-    ):
-        raise NotComputable("W-LINEAR", "linear molecule: G_qh is not supported (D58)")
+    # D164: a linear point group, or the one rotational temperature printed for one.
+    linear = (point_group or "").upper() in LINEAR_POINT_GROUPS or (
+        rotational_temperatures is not None and len(rotational_temperatures) == 1
+    )
+    linear_temperature = None
+    if rotational_temperatures is not None:
+        if linear:
+            linear_temperature = _linear_temperature(rotational_temperatures)
+            if linear_temperature is None:
+                raise NotComputable(
+                    "W-PARSE", "linear molecule: no single rotational temperature was read"
+                )
+        elif len(rotational_temperatures) != 3:
+            raise NotComputable(
+                "W-PARSE", "G_qh needs three rotational temperatures for a non-linear molecule"
+            )
     real = [f for f in frequencies if f >= 0]
     imaginary = len(frequencies) - len(real)
     if not real:
@@ -149,6 +181,19 @@ def quasi_harmonic(
 
     t = temperature
     zpe = _zpe(real)
+    if linear_temperature is not None:
+        return _linear(
+            real=real,
+            imaginary=imaginary,
+            zpe=zpe,
+            scf_energy=scf_energy,
+            molecular_mass=molecular_mass,
+            multiplicity=multiplicity,
+            rotemp=linear_temperature,
+            symmetry_number=symmetry_number,
+            temperature=t,
+            cutoff=cutoff,
+        )
     u_rot = 1.5 * GAS_CONSTANT * t / J_PER_MOL_HARTREE if zpe != 0.0 else 0.0
     u_vib = _vibrational_energy(real, t)
     if rotational_temperatures == [0.0, 0.0, 0.0] or zpe == 0.0:
@@ -179,6 +224,52 @@ def quasi_harmonic(
         real_modes=len(real),
         raised_modes=sum(1 for f in real if f < cutoff),
         imaginary_excluded=imaginary,
+    )
+
+
+def _linear(
+    *,
+    real: list[float],
+    imaginary: int,
+    zpe: float,
+    scf_energy: float,
+    molecular_mass: float,
+    multiplicity: int,
+    rotemp: float,
+    symmetry_number: int,
+    temperature: float,
+    cutoff: float,
+) -> QuasiHarmonic:
+    """D164: as `quasi_harmonic` for a linear molecule; only the rotor differs, U_rot = RT
+    (two rotations) and the linear S_rot. The vibrations are the 3N − 5 the file lists."""
+    t = temperature
+    u_rot = GAS_CONSTANT * t / J_PER_MOL_HARTREE
+    u_vib = _vibrational_energy(real, t)
+    s_rot = _linear_rotational_entropy(t, rotemp, symmetry_number)
+    u_trans = 1.5 * GAS_CONSTANT * t / J_PER_MOL_HARTREE
+    s_trans = _translational_entropy(molecular_mass, t)
+    s_elec = GAS_CONSTANT * math.log(multiplicity) / J_PER_MOL_HARTREE
+    s_vib = sum(_rrho_entropy(cutoff if f < cutoff else f, t) for f in real)  # D56
+
+    pv = GAS_CONSTANT * t / J_PER_MOL_HARTREE
+    h = scf_energy + u_rot + u_vib + u_trans + pv
+    s = s_rot + s_vib + s_trans + s_elec
+    g = h - t * s
+    return QuasiHarmonic(
+        temperature=t,
+        cutoff=cutoff,
+        g_corr=g - scf_energy,
+        h_corr=h - scf_energy,
+        zpe=zpe,
+        entropy=s,
+        s_vib=s_vib,
+        s_rot=s_rot,
+        s_trans=s_trans,
+        s_elec=s_elec,
+        real_modes=len(real),
+        raised_modes=sum(1 for f in real if f < cutoff),
+        imaginary_excluded=imaginary,
+        linear=True,
     )
 
 

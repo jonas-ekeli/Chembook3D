@@ -7,6 +7,7 @@ jobs. Run `python -m tests.gaussian_text <folder>` to write the custom-basis fil
 tests.
 """
 
+import math
 import sys
 from pathlib import Path
 
@@ -82,6 +83,7 @@ def step(
     internal=False,
     body=(),
     after=(),
+    thermo=THERMO,
 ) -> str:
     lines = [
         " Link1:  Proceeding to internal job step number  2."
@@ -105,7 +107,7 @@ def step(
         lines += [" Optimization completed.", "    -- Stationary point found."]
     if frequencies:
         lines += frequency_block(frequencies, len(geometries[-1]))
-        lines += THERMO.splitlines()
+        lines += thermo.splitlines()
     lines += after
     if terminate:
         lines.append(" Normal termination of Gaussian 16 at Tue Sep 29 12:00:00 2026.")
@@ -154,6 +156,104 @@ TS_FREQUENCIES = (-500.0, 1650.0, 3700.0, 3800.0)
 
 def single_point(atoms, route="#P B3LYP/def2TZVP SP", energy=-76.45) -> str:
     return output(step(route, [atoms], energy))
+
+
+# ---------- a linear molecule (D164) ----------
+
+# CO2 at a B3LYP-like geometry and frequencies: D*H, σ = 2, 3N − 5 = 4 modes, one rotational
+# temperature. The printed thermochemistry is computed here from the textbook rigid-rotor,
+# harmonic-oscillator formulas with CODATA 2018 constants, independently of
+# `chembook3d.thermochem`, in the form Gaussian prints it (1 atm, 6 decimals in hartree).
+CO2 = [
+    ("C", 6, 0.000000, 0.000000, 0.000000),
+    ("O", 8, 0.000000, 0.000000, 1.169000),
+    ("O", 8, 0.000000, 0.000000, -1.169000),
+]
+CO2_FREQUENCIES = (640.5, 640.5, 1372.5, 2436.0)
+CO2_ENERGY = -188.580900
+CO2_MASS = 43.98983  # amu, 12C and 16O
+CO2_ROTATIONAL_TEMPERATURE = 0.56130  # K
+
+
+def rrho_linear(
+    frequencies,
+    mass,
+    rotational_temperature,
+    symmetry_number,
+    multiplicity=1,
+    temperature=298.15,
+) -> dict[str, float]:
+    """Corrections in hartree of a linear molecule at 1 atm: zpe, e_corr, h_corr, g_corr."""
+    k, h, c = 1.380649e-23, 6.62607015e-34, 2.99792458e10  # J/K, J s, cm/s
+    avogadro, amu, hartree = 6.02214076e23, 1.66053906660e-27, 4.3597447222071e-18
+    r = k * avogadro  # J/(mol K)
+    per_mol = hartree * avogadro  # J/mol per hartree
+    t = temperature
+    thetas = [h * c * f / k for f in frequencies]
+    zpe = sum(r * theta / 2 for theta in thetas)
+    e_vib = sum(r * theta * (0.5 + 1 / (math.exp(theta / t) - 1)) for theta in thetas)
+    s_vib = sum(
+        r * ((theta / t) / (math.exp(theta / t) - 1) - math.log(1 - math.exp(-theta / t)))
+        for theta in thetas
+    )
+    q_trans = (2 * math.pi * mass * amu * k * t / h**2) ** 1.5 * k * t / 101325.0
+    s_trans = r * (math.log(q_trans) + 2.5)
+    s_rot = r * (math.log(t / (symmetry_number * rotational_temperature)) + 1)
+    s_elec = r * math.log(multiplicity)
+    e_corr = 1.5 * r * t + r * t + e_vib
+    h_corr = e_corr + r * t
+    g_corr = h_corr - t * (s_trans + s_rot + s_vib + s_elec)
+    return {
+        "zpe": zpe / per_mol,
+        "e_corr": e_corr / per_mol,
+        "h_corr": h_corr / per_mol,
+        "g_corr": g_corr / per_mol,
+    }
+
+
+def linear_thermo(energy, mass, rotational_temperature, symmetry_number, frequencies) -> str:
+    """Gaussian's thermochemistry block for a linear molecule (one rotational temperature)."""
+    v = rrho_linear(frequencies, mass, rotational_temperature, symmetry_number)
+    pad = " " * 27
+    return "\n".join(
+        [
+            " Temperature   298.150 Kelvin.  Pressure   1.00000 Atm.",
+            f" Molecular mass:    {mass:.5f} amu.",
+            f" Rotational symmetry number  {symmetry_number}.",
+            f" Rotational temperature (Kelvin)      {rotational_temperature:.5f}",
+            f" Rotational constant (GHZ):          {rotational_temperature * 20.836619:.6f}",
+            f" Zero-point correction={pad}{v['zpe']:.6f} (Hartree/Particle)",
+            f" Thermal correction to Energy=                    {v['e_corr']:.6f}",
+            f" Thermal correction to Enthalpy=                  {v['h_corr']:.6f}",
+            f" Thermal correction to Gibbs Free Energy=         {v['g_corr']:.6f}",
+            f" Sum of electronic and zero-point Energies=          {energy + v['zpe']:.6f}",
+            f" Sum of electronic and thermal Energies=             {energy + v['e_corr']:.6f}",
+            f" Sum of electronic and thermal Enthalpies=           {energy + v['h_corr']:.6f}",
+            f" Sum of electronic and thermal Free Energies=        {energy + v['g_corr']:.6f}",
+        ]
+    )
+
+
+def co2_freq(point_group="D*H", symmetry_number=2) -> str:
+    """A CO2 frequency job (D164). `symmetry_number=1` with `point_group="C*V"` stands in for
+    an unsymmetric linear molecule such as CO or HCl with the same numbers."""
+    return output(
+        step(
+            "#P B3LYP/6-31G(d) Freq",
+            [CO2],
+            CO2_ENERGY,
+            title="carbon dioxide",
+            frequencies=list(CO2_FREQUENCIES),
+            body=[f" Full point group                 {point_group}     NOp   4"],
+            thermo=linear_thermo(
+                CO2_ENERGY,
+                CO2_MASS,
+                CO2_ROTATIONAL_TEMPERATURE,
+                symmetry_number,
+                CO2_FREQUENCIES,
+            ),
+        )
+    )
 
 
 # ---------- custom basis sets and IOp dispersion (D59) ----------

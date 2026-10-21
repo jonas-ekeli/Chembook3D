@@ -96,7 +96,7 @@ Notes:
 | W-TERM | A calculation did not terminate normally |
 | W-OPT-INC | Node carries the `optimization-incomplete` tag |
 | W-NOFREQ | Free energy requested but the node has no frequency calculation at the required level |
-| W-LINEAR | G_qh requested for a linear molecule (D58, A14) |
+| W-LINEAR | No longer raised: linear molecules get G_qh from the linear rigid rotor (D164; was D58, A14) |
 | W-QH | G_qh cannot be computed at the chosen temperature or cutoff (A14) |
 | W-CHG | Calculations on one node disagree on charge or multiplicity; those for another state than the node's give none of its energies (D155) |
 | W-GEOM | A calculation's geometry does not match its node's geometry |
