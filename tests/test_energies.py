@@ -4,6 +4,7 @@ script docs/reference/thermochem_corr_G16.py and its .thch outputs (D56–D58)."
 
 import csv
 import io
+import math
 import re
 import shutil
 import subprocess
@@ -143,32 +144,113 @@ def test_quasi_harmonic_without_low_modes_equals_the_printed_correction(name):
     assert abs(qh.zpe - t["zpe"]) < TOLERANCE
 
 
-def test_linear_molecule_has_no_quasi_harmonic_value(open_client):
-    # T-EN-10, D58: G_qh "n/a" with a warning; G from the job is still available.
-    linear = g.opt_freq(g.WATER, g.WATER).replace(
-        " Rotational temperatures (Kelvin)     40.05000    20.12000    13.39000",
-        " Rotational temperature (Kelvin)      2.05000",
-    )
-    node_id = import_file(open_client, "co2.out", linear)["node_id"]
-    freq = calculations(open_client, node_id)[-1]
-    assert freq["quasi_harmonic"]["correction"] is None
-    assert freq["quasi_harmonic"]["code"] == "W-LINEAR"
+LINEAR = "HCN_singlet.out"  # GoodVibes example: G09, B97D/6-31G(d), HCN, C*V, σ = 1
+LINEAR_TOLERANCE = 0.001 / KCAL  # D164: 0.001 kcal/mol, in hartree
 
-    key = level_key(open_client, "Gaussian B3LYP/6-31G(D)")
-    assert options(open_client)["Gaussian B3LYP/6-31G(D)"] == ["E", "H", "G"]
+
+def linear_qh(step, cutoff: float = 0.0, **changes) -> thermochem.QuasiHarmonic:
+    t = step.thermo
+    given = {
+        "frequencies": step.frequencies,
+        "scf_energy": step.scf_energy,
+        "molecular_mass": t["molecular_mass"],
+        "multiplicity": step.multiplicity,
+        "rotational_temperatures": t["rotational_temperatures"],
+        "symmetry_number": t["symmetry_number"],
+        "point_group": t["point_group"],
+        "temperature": t["temperature"],
+        "cutoff": cutoff,
+    }
+    return thermochem.quasi_harmonic(**{**given, **changes})
+
+
+def test_linear_molecule_reproduces_gaussian_thermochemistry():
+    # T-EN-43, D164 (extends D58): a real Gaussian job on a linear molecule (HCN, C*V, σ = 1,
+    # 3N − 5 = 4 modes, one rotational temperature). With cutoff 0 the linear rigid rotor
+    # gives Gaussian's printed G, H and ZPE corrections within 0.001 kcal/mol.
+    step = gaussian.parse(fixture(LINEAR)).steps[-1]
+    t = step.thermo
+    assert (t["point_group"], t["symmetry_number"]) == ("C*V", 1)
+    assert t["rotational_temperatures"] == [2.08853]
+    assert len(step.frequencies) == 4
+    qh = linear_qh(step)
+    assert qh.linear and qh.real_modes == 4 and qh.raised_modes == 0
+    assert abs(qh.g_corr - t["g_corr"]) < LINEAR_TOLERANCE
+    assert abs(qh.h_corr - t["h_corr"]) < LINEAR_TOLERANCE
+    assert abs(qh.zpe - t["zpe"]) < LINEAR_TOLERANCE
+    # Gaussian's table: S rotational 11.846 cal/mol-K (two rotations, not three).
+    assert qh.s_rot * KCAL * 1000 == pytest.approx(11.846, abs=0.001)
+    # Truhlar's raise still applies to the vibrational entropy only (D56).
+    raised = linear_qh(step, cutoff=800.0)
+    assert raised.raised_modes == 2 and raised.zpe == qh.zpe and raised.s_vib < qh.s_vib
+    # The independent RRHO formulas behind the synthetic CO2 job print Gaussian's numbers too.
+    printed = g.rrho_linear(
+        step.frequencies, t["molecular_mass"], t["rotational_temperatures"][0], 1
+    )
+    for key in ("zpe", "h_corr", "g_corr"):
+        assert abs(printed[key] - t[key]) < LINEAR_TOLERANCE
+
+
+@pytest.mark.parametrize(("point_group", "sigma"), [("D*H", 2), ("C*V", 1)])
+def test_linear_symmetry_number_and_point_group(point_group, sigma):
+    # T-EN-44, D164: CO2 (D*H, σ = 2) and the same numbers as an unsymmetric linear molecule
+    # (C*V, σ = 1, as CO or HCl): the symmetry number is read from the file and counts as
+    # R ln σ in S_rot; G_qh at cutoff 0 equals the printed G correction within 0.001 kcal/mol.
+    step = gaussian.parse(g.co2_freq(point_group, sigma)).steps[-1]
+    t = step.thermo
+    assert (t["point_group"], t["symmetry_number"]) == (point_group, sigma)
+    assert t["rotational_temperatures"] == [g.CO2_ROTATIONAL_TEMPERATURE]
+    qh = linear_qh(step)
+    assert qh.linear and qh.real_modes == 4
+    assert abs(qh.g_corr - t["g_corr"]) < LINEAR_TOLERANCE
+    assert abs(qh.h_corr - t["h_corr"]) < LINEAR_TOLERANCE
+    one = linear_qh(step, symmetry_number=1)
+    gas_constant = 8.314462618 / 2625499.639  # hartree/K per molecule-mole
+    assert one.s_rot - qh.s_rot == pytest.approx(gas_constant * math.log(sigma), rel=1e-6)
+
+
+def test_linear_molecule_has_a_quasi_harmonic_value(open_client):
+    # T-EN-10 as changed by D164: a linear molecule gets G_qh, listed and valued like any
+    # other; HCN's lowest mode (739 cm⁻¹) is above the default cutoff, so G_qh equals G.
+    node_id = import_file(open_client, LINEAR, fixture(LINEAR))["node_id"]
+    freq = calculations(open_client, node_id)[-1]
+    qh = freq["quasi_harmonic"]
+    assert qh["code"] is None and qh["correction"] is not None
+    assert abs(qh["correction"] - freq["result"]["g_corr"]) < LINEAR_TOLERANCE
+
+    label = next(label for label in options(open_client) if "B97D" in label)
+    assert "G_qh" in options(open_client)[label]
+    key = level_key(open_client, label)
     value = view(open_client, key, "G_qh")["values"][node_id]
-    assert value["value"] is None and value["code"] == "W-LINEAR"
-    assert view(open_client, key, "G")["values"][node_id]["value"] is not None
-    with pytest.raises(thermochem.NotComputable):
-        thermochem.quasi_harmonic(
-            frequencies=[500.0, 1300.0, 2300.0],
-            scf_energy=-188.0,
-            molecular_mass=44.0,
-            multiplicity=1,
-            rotational_temperatures=[0.56],
-            symmetry_number=2,
-            point_group="D*H",
-        )
+    printed = view(open_client, key, "G")["values"][node_id]
+    assert value["value"] is not None and value.get("code") is None
+    assert abs(value["value"] - printed["value"]) < LINEAR_TOLERANCE
+
+
+def test_inconsistent_rotational_data_is_a_parse_warning():
+    # T-EN-45, D164: rotational temperatures that describe neither rotor give W-PARSE, never
+    # a wrong value; W-LINEAR is no longer raised.
+    common = {
+        "frequencies": [640.5, 640.5, 1372.5, 2436.0],
+        "scf_energy": -188.58,
+        "molecular_mass": 43.99,
+        "multiplicity": 1,
+        "symmetry_number": 2,
+    }
+    for rotational, group in (([0.56, 0.9], "D*H"), ([0.56, 0.9], None), ([0.0], "C*V")):
+        with pytest.raises(thermochem.NotComputable) as raised:
+            thermochem.quasi_harmonic(
+                **common, rotational_temperatures=rotational, point_group=group
+            )
+        assert raised.value.code == "W-PARSE"
+    # A list with the zero about the axis and two equal values is a linear rotor.
+    zero_first = thermochem.quasi_harmonic(
+        **common, rotational_temperatures=[0.0, 0.5613, 0.5613], point_group="D*H"
+    )
+    single = thermochem.quasi_harmonic(
+        **common, rotational_temperatures=[0.5613], point_group="D*H"
+    )
+    assert zero_first == single and single.linear
 
 
 def test_two_frequency_jobs_in_one_file_use_only_the_selected_step(open_client):

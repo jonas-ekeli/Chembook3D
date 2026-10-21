@@ -51,11 +51,11 @@ The exact input file variants beyond these (e.g. .fchk, .gjf, ORCA .hess, CREST 
 - **G_qh (Truhlar)** (EN-5, D49, D56). The reference implementation is Jonas's script `thermochem_corr_G16` (derived from GoodVibes). The app must reproduce it:
   - **Inputs** from the chosen frequency step only: real frequencies (imaginary ones excluded and reported), SCF energy of that step, molecular mass, multiplicity, rotational temperatures, rotational symmetry number.
   - **ZPE** = Σ ½hcν over the **unmodified** real frequencies.
-  - **U_vib(T)** from the **unmodified** frequencies (harmonic, including ZPE); U_rot = 3/2 RT (non-linear); U_trans = 3/2 RT; PV = RT.
+  - **U_vib(T)** from the **unmodified** frequencies (harmonic, including ZPE); U_rot = 3/2 RT (non-linear; RT for a linear molecule, D164); U_trans = 3/2 RT; PV = RT.
   - **S_vib**: RRHO entropy per mode, with every frequency below the cutoff **replaced by the cutoff** (Truhlar). S_trans: ideal gas at 101 325 Pa. S_rot from rotational temperatures and the symmetry number. S_elec = R ln(multiplicity).
   - H = E_SCF + U_rot + U_vib + U_trans + PV; G = H − T·S; **G_corr,qh = G − E_SCF**.
   - Constants and conversions as in the script (CODATA 2018 SI values, 1 hartree = 627.5094740631 kcal/mol), consistent with P17.
-  - **Linear molecules:** the script does not support them; v1 shows G_qh as "n/a" with a warning for linear molecules (D58).
+  - **Linear molecules:** the script does not support them (D58); the app adds the linear rigid rotor (D164): one rotational temperature, U_rot = RT, S_rot = R(ln(T/(σΘ_rot)) + 1), the 3N − 5 vibrations the file lists, everything else as above. With cutoff 0 it gives Gaussian's printed G − E within 0.001 kcal/mol. Non-linear molecules are unchanged.
 - **Parameters** (D58): T (default 298.15 K) and cutoff (default 100 cm⁻¹) are settings, and each stored G_qh value records the T and cutoff it was computed with. The energy-type drop-down labels it, e.g. "G_qh (298.15 K, 100 cm⁻¹)".
 - **Multi-step files:** only the frequencies of the selected frequency step are used. (The reference script collects frequency lines from every step in a file, which double-counts modes if a file has two frequency jobs. The app deliberately differs here.)
 - **Verification:** G_corr,qh must match the reference script's "Thermic correction" on the same single-frequency-job file within the test tolerance (P29). With no frequencies below the cutoff and T equal to the job's T, it must also match the job-printed G correction within tolerance.
