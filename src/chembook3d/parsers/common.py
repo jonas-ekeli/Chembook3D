@@ -95,7 +95,11 @@ class ParsedStep:
     geometry_stages: list[int | None] = field(default_factory=list)
     node_geometry: int | None = None
     irc: IrcRun | None = None  # D131: an IRC step's points and directions
-    scf_energy: float | None = None
+    scf_energy: float | None = None  # the step's energy: a correlated method's total (D153)
+    # D153: the printed total `scf_energy` is (e.g. "E(B2PLYPD3)", "EUMP2", "CCSD(T)"); None
+    # for an SCF energy. `correlated_missing`: a correlated method whose total was not read.
+    energy_label: str | None = None
+    correlated_missing: bool = False
     optimization_converged: bool | None = None  # None when the step is not an optimization
     termination: str = "abnormal"  # normal | abnormal (05 §3.1: missing means abnormal)
     # GEN/GENECP basis read from the input: {element: definition text}, and its header.

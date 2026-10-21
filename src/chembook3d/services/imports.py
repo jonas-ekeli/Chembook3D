@@ -1853,7 +1853,10 @@ def _create_calculation(
         imaginary_count=step.imaginary_count if step.frequencies else None,
         optimization_converged=step.optimization_converged,
         geometry_count=len(step.geometries),
-        printed=step.printed,
+        # D153: which printed total the energy is, for a correlated method.
+        printed={**step.printed, "energy_label": step.energy_label}
+        if step.energy_label
+        else step.printed,
     )
     history.record(
         session,

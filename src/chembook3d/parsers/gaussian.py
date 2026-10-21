@@ -97,6 +97,9 @@ def keyword_of(word: str) -> tuple[str, list[str]]:
 
 
 _FROM_CHECKPOINT = "CHECK"
+# D153: a method written with options before the basis set, such as CCSD(T)/…, MP2(Full)/…
+# or MP4(SDQ)/… (IOp(3/174=…) has an "=" and stays a keyword).
+_METHOD_WITH_OPTIONS = re.compile(r"^(?!IOP\()[A-Z][A-Z0-9-]*\([A-Z0-9,]+\)$", re.IGNORECASE)
 
 
 def parse_route(text: str) -> Route:
@@ -113,7 +116,9 @@ def parse_route(text: str) -> Route:
 
     for word in words:
         slash = word.find("/")
-        if slash > 0 and not re.search(r"[=(]", word[:slash]):
+        if slash > 0 and (
+            not re.search(r"[=(]", word[:slash]) or _METHOD_WITH_OPTIONS.match(word[:slash])
+        ):
             route.method, route.basis = word[:slash].upper(), word[slash + 1 :].upper()
             break
     else:
@@ -183,6 +188,23 @@ _TEMPERATURE_RE = re.compile(
     r"^ Temperature\s+(" + _FLOAT + r") Kelvin\.\s+Pressure\s+(" + _FLOAT + r") Atm\."
 )
 _CHARGE_RE = re.compile(r"^ Charge =\s*(-?\d+) Multiplicity =\s*(\d+)")
+
+# D153: the total energy of a correlated method, which Gaussian prints after the SCF energy of
+# its reference. A double hybrid prints `E2(B2PLYPD3) = … E(B2PLYPD3) = …`, MP2 `E2 = … EUMP2
+# = …` (for a restricted reference too), MP3 `EUMP3=`, MP4 `UMP4(DQ)=`, `UMP4(SDQ)=` and
+# `UMP4(SDTQ)=`, CCSD(T) and QCISD(T) `CCSD(T)=` and `QCISD(T)=`. The key names which total a
+# method's energy is: a CCSD job prints MP2, MP3 and MP4(SDQ) totals on the way.
+_NUMBER = r"(-?\d+\.\d+(?:[DE][+-]?\d+)?)"
+_CORRELATED_RE = [
+    (re.compile(r"^ E2\((\S+)\)\s*=\s*\S+\s+E\(\1\)\s*=\s*" + _NUMBER), "double hybrid"),
+    (re.compile(r"^ E2\s*=\s*\S+\s+EUMP2\s*=\s*" + _NUMBER), "MP2"),
+    (re.compile(r"^ E3\s*=\s*\S+\s+EUMP3\s*=\s*" + _NUMBER), "MP3"),
+    (re.compile(r"^ E4\((DQ|SDQ|SDTQ)\)\s*=\s*\S+\s+UMP4\(\1\)\s*=\s*" + _NUMBER), "MP4"),
+    (re.compile(r"^ (CCSD|QCISD)\(T\)\s*=\s*" + _NUMBER), "(T)"),
+]
+_DOUBLE_HYBRID = re.compile(r"2PLYP|^DSD|^PBE0DH$|^PBEQIDH$")
+# A written R, U or RO before one of these is a reference prefix (UMP2, RB2PLYPD3).
+_CORRELATED_NAME = re.compile(r"MP\d|CC|QCI|CID|CISD|BD|B2|MPW2|DSD|PBE0DH|PBEQ")
 _ORIENTATIONS = ("Input orientation:", "Z-Matrix orientation:", "Standard orientation:")
 # D123b: Berny's convergence table after each optimization step, and its predicted change.
 _CRITERION_RE = re.compile(r"^ (Maximum|RMS)\s+(Force|Displacement)\s+(\S+)\s+(\S+)\s+(YES|NO)\s*$")
@@ -482,6 +504,58 @@ class _IrcReader:
         step.irc = run
 
 
+def correlated_total_of(method: str | None) -> str | None:
+    """D153: the printed total that is a correlated method's energy (`E(B2PLYPD3)`, `EUMP2`,
+    `UMP4(SDTQ)`, `CCSD(T)`…), "" for a correlated method whose total is not read (CCSD,
+    QCISD, CISD, BD…), None for SCF methods (HF and hybrid or plain DFT)."""
+    if not method:
+        return None
+    upper = method.upper()
+    for prefix in ("RO", "R", "U"):
+        rest = upper[len(prefix) :]
+        if upper.startswith(prefix) and _CORRELATED_NAME.match(rest):
+            upper = rest
+            break
+    base, _, options = upper.partition("(")
+    options = {o.strip() for o in options.rstrip(")").split(",") if o.strip()}
+    if _DOUBLE_HYBRID.search(base):
+        return f"E({base})"
+    if base == "MP2":
+        return "EUMP2"
+    if base == "MP3":
+        return "EUMP3"
+    if base == "MP4":
+        kind = "SDQ" if "SDQ" in options else "DQ" if "DQ" in options else "SDTQ"
+        return f"UMP4({kind})"
+    if (base in ("CCSD", "QCISD") and "T" in options) or base in ("CCSD-T", "QCISD-T"):
+        return f"{base.removesuffix('-T')}(T)"
+    if re.match(r"^(MP\d|CC|QCI|CID|CISD|BD)", base):  # CIS's ground state is HF
+        return ""
+    return None
+
+
+def _correlated_total(line: str, wanted: str) -> tuple[str, float] | None:
+    """(the printed name, the total) on a line Gaussian prints for a correlated method, when it
+    is the total `wanted`."""
+    if not wanted:
+        return None
+    for pattern, kind in _CORRELATED_RE:
+        if (match := pattern.match(line)) is None:
+            continue
+        if kind == "double hybrid":
+            # The printed name may differ from the route's spelling (B2PLYPD3 for B2PLYP with
+            # EmpiricalDispersion=GD3): any E2(…)/E(…) pair is a double hybrid's total.
+            found = f"E({match.group(1).upper()})"
+            matches = wanted.startswith("E(")
+        else:
+            found = {"MP2": "EUMP2", "MP3": "EUMP3"}.get(kind) or (
+                f"UMP4({match.group(1)})" if kind == "MP4" else f"{match.group(1)}(T)"
+            )
+            matches = wanted == found
+        return (found, float(match.group(match.lastindex).replace("D", "E"))) if matches else None
+    return None
+
+
 def _parse_step(lines: list[str], index: int) -> ParsedStep:
     step = ParsedStep(index=index)
     route_text, step.title = _read_route_and_title(lines)
@@ -500,6 +574,8 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
     irc = _IrcReader(step.route) if step.route and step.route.irc is not None else None
     scanned_table: list[list[int]] = []
     scanned_input: list[list[int]] = []
+    wanted = correlated_total_of(step.route.method) if step.route else None
+    correlated: float | None = None
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -520,6 +596,11 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
             for name in _ORIENTATIONS:
                 if energies[name]:
                     energies[name][-1] = step.scf_energy
+        elif wanted and (total := _correlated_total(line, wanted)) is not None:
+            (step.energy_label, correlated), step.printed["energy"] = total, line.strip()
+            for name in _ORIENTATIONS:
+                if energies[name]:
+                    energies[name][-1] = correlated
         elif "Optimization completed." in line or "-- Stationary point found." in line:
             step.optimization_converged = True
             for name in _ORIENTATIONS:
@@ -608,6 +689,10 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
         i += 1
 
     step.frequencies = frequencies
+    if wanted is not None:
+        # D153: the step's energy is the method's own total; never its SCF reference's.
+        step.scf_energy = correlated
+        step.correlated_missing = correlated is None
     chosen = None
     for name in _ORIENTATIONS:
         if orientations[name]:
@@ -750,7 +835,9 @@ def _missing_fields(step: ParsedStep) -> list[str]:
         missing.append("charge and multiplicity")
     if not step.geometries:
         missing.append("geometry")
-    if step.scf_energy is None and step.job_type != "other":
+    if step.correlated_missing:
+        missing.append(f"correlated energy ({step.route.method})")
+    elif step.scf_energy is None and step.job_type != "other":
         missing.append("SCF energy")
     if step.job_type == "frequency":
         if not step.frequencies:
