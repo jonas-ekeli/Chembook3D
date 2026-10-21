@@ -34,7 +34,7 @@ export default defineConfig({
   // The CI runners (Windows above all) are sometimes slow to create an investigation or parse a
   // large output; a lost wait there leaves a request running into the next test.
   expect: { timeout: process.env.CI ? 15_000 : 5_000 },
-  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
+  reporter: process.env.CI ? [['list'], ['github'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     viewport: { width: 1600, height: 1000 },
