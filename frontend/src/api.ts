@@ -1062,10 +1062,23 @@ export type Calculation = {
   source_file: SourceFile | null
   result: CalculationResult | null
   quasi_harmonic: QuasiHarmonic | null
+  /** D162: the ⟨S²⟩ printed (absent in a read-only copy made before it). */
+  spin?: Spin | null
   notes: string
   /** D117: scan points left out of a scan path. */
   removed_points: number[]
   created_at: string
+}
+
+/** D162: the spin expectation value a calculation printed (Gaussian's before annihilation,
+ * with `after` the value after it), S(S+1) of its multiplicity, and whether it is further from
+ * it than 10 % (a singlet: above 0.1), which is W-SPIN. */
+export type Spin = {
+  s2: number
+  after: number | null
+  ideal: number | null
+  multiplicity: number | null
+  contaminated: boolean
 }
 
 /** FR-EN-04: the G_qh correction recomputed from a frequency step, next to the printed one. */

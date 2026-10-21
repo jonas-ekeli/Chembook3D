@@ -29,6 +29,15 @@ class Route:
 # printed. Gaussian prints the check after a frequency job; ORCA and xTB print none.
 NOT_STATIONARY = "not_stationary"
 
+# D162: the keys in `ParsedStep.printed` (and the stored result's `printed`) of the step's
+# spin expectation value, as printed, the last one of the step: <S**2> (Gaussian's before
+# annihilation, ORCA's "Expectation value of <S**2>"), Gaussian's after annihilation and
+# ORCA's ideal S(S+1). Absent when the program printed none (a closed-shell calculation).
+S2 = "s2"
+S2_AFTER = "s2_after"
+S2_IDEAL = "s2_ideal"
+SPIN_KEYS = (S2, S2_AFTER, S2_IDEAL)
+
 
 @dataclass
 class Criterion:

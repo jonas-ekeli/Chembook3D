@@ -152,14 +152,43 @@ function SourceFileBox({ source, onChanged }: { source: SourceFile; onChanged: (
 }
 
 /** Key results of a calculation (FR-CALC-01); also shown by the read-only copy (D79). */
-export function ResultValues({ calculation }: { calculation: Pick<Calculation, 'result' | 'quasi_harmonic'> }) {
+export function ResultValues({
+  calculation,
+}: {
+  calculation: Pick<Calculation, 'result' | 'quasi_harmonic'> & Partial<Pick<Calculation, 'spin'>>
+}) {
   const r = calculation.result
   if (!r) return null
+  const spin = calculation.spin
   return (
     <dl className="values">
       {/* D153: a correlated method's energy is its own printed total, named here. */}
       <dt>{r.printed?.energy_label ?? 'E(SCF)'}</dt>
       <dd className="mono">{hartree(r.energy, 8)}</dd>
+      {spin && (
+        <>
+          {/* D162: the spin expectation value, judged before annihilation (W-SPIN). */}
+          <dt>⟨S²⟩</dt>
+          <dd aria-label="Spin expectation value">
+            <span className="mono">{spin.s2.toFixed(4)}</span>
+            {spin.after !== null && (
+              <>
+                {' '}
+                before annihilation, <span className="mono">{spin.after.toFixed(4)}</span> after
+              </>
+            )}
+            {spin.ideal !== null && (
+              <span className="muted small"> (S(S+1) = {spin.ideal.toFixed(4)})</span>
+            )}
+            {spin.contaminated && (
+              <span title="W-SPIN: more than 10 % from S(S+1); for a singlet, above 0.1">
+                {' '}
+                ⚠ spin contaminated
+              </span>
+            )}
+          </dd>
+        </>
+      )}
       {r.optimization_converged !== null && (
         <>
           <dt>Optimization</dt>

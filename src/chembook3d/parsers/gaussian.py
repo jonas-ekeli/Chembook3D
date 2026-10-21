@@ -18,6 +18,8 @@ from typing import Any
 
 from chembook3d.parsers.common import (
     NOT_STATIONARY,
+    S2,
+    S2_AFTER,
     Criterion,
     IrcPoint,
     IrcRun,
@@ -219,6 +221,13 @@ _ORIENTATIONS = ("Input orientation:", "Z-Matrix orientation:", "Standard orient
 # D123b: Berny's convergence table after each optimization step, and its predicted change.
 _CRITERION_RE = re.compile(r"^ (Maximum|RMS)\s+(Force|Displacement)\s+(\S+)\s+(\S+)\s+(YES|NO)\s*$")
 _PREDICTED_RE = re.compile(r"^ Predicted change in Energy=\s*(\S+)")
+# D162: the spin expectation value printed after each unrestricted SCF: the summary line
+# ("<Sx>= 0.0000 <Sy>= 0.0000 <Sz>= 0.5000 <S**2>= 0.7590 S= 0.5048") and, after it, the
+# values before and after annihilating the first spin contaminant.
+_S2_RE = re.compile(r"<S\*\*2>=\s*(-?\d+\.\d+)")
+_ANNIHILATION_RE = re.compile(
+    r"^ S\*\*2 before annihilation\s+(-?\d+\.\d+),\s+after\s+(-?\d+\.\d+)"
+)
 _UNITS = {"Force": "Eh/bohr", "Displacement": "bohr"}
 # D135: the coordinate a scan drives, from the initial parameter table Gaussian prints
 # (`! R5    R(2,3)    2.5262    Scan    !`), else from a ModRedundant line in the echoed input
@@ -647,6 +656,12 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
             for name in _ORIENTATIONS:
                 if energies[name]:
                     energies[name][-1] = correlated
+        elif (match := _ANNIHILATION_RE.match(line)) is not None:
+            # D162: the last one of the step counts, as the step's energy does.
+            step.printed[S2], step.printed[S2_AFTER] = match.group(1), match.group(2)
+        elif line.startswith(" <Sx>=") and (match := _S2_RE.search(line)) is not None:
+            step.printed[S2] = match.group(1)
+            step.printed.pop(S2_AFTER, None)  # its own annihilation line follows, if any
         elif "Optimization completed." in line or "-- Stationary point found." in line:
             step.optimization_converged = True
             stationary = True
