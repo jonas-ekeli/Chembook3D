@@ -46,6 +46,7 @@ from chembook3d.services import (
     imports,
     levels,
     scan_edges,
+    spin,
 )
 from chembook3d.services import files as file_service
 from chembook3d.services import nodes as node_service
@@ -262,6 +263,17 @@ class QuasiHarmonicOut(BaseModel):
     imaginary_excluded: int | None = None
 
 
+class SpinOut(BaseModel):
+    """D162: the ⟨S²⟩ the calculation printed (Gaussian's before annihilation, with the value
+    after it), S(S+1) of its multiplicity, and whether it is contaminated (W-SPIN)."""
+
+    s2: float
+    after: float | None
+    ideal: float | None
+    multiplicity: int | None
+    contaminated: bool
+
+
 class CalculationOut(BaseModel):
     id: str
     node_id: str
@@ -286,6 +298,7 @@ class CalculationOut(BaseModel):
     source_file: SourceFileOut | None
     result: ResultOut | None
     quasi_harmonic: QuasiHarmonicOut | None
+    spin: SpinOut | None = None  # D162
     notes: str
     removed_points: list[int] = []  # D117: scan points left out of a scan path
     created_at: UtcDatetime
@@ -1103,6 +1116,12 @@ def _quasi_harmonic_out(calculation: Calculation) -> QuasiHarmonicOut | None:
     return out
 
 
+def _spin_out(calculation: Calculation) -> SpinOut | None:
+    node = calculation.node
+    found = spin.of(calculation, node.multiplicity if node is not None else None)
+    return SpinOut(**found.as_dict()) if found is not None else None
+
+
 def _calculation_out(request: Request, calculation: Calculation) -> CalculationOut:
     result = calculation.result
     parsed = calculation.parsed_level
@@ -1143,6 +1162,7 @@ def _calculation_out(request: Request, calculation: Calculation) -> CalculationO
         source_file=_source_out(request, calculation.source_file),
         result=ResultOut.model_validate(result, from_attributes=True) if result else None,
         quasi_harmonic=_quasi_harmonic_out(calculation),
+        spin=_spin_out(calculation),
         notes=calculation.notes,
         removed_points=calculation.removed_points or [],
         created_at=calculation.created_at,

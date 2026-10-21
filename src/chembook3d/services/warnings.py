@@ -7,7 +7,7 @@ from sqlalchemy.orm import object_session
 
 from chembook3d import settings as app_settings
 from chembook3d.models import Calculation, CalculationType, Node, Role
-from chembook3d.services import energies, geometry, levels
+from chembook3d.services import energies, geometry, levels, spin
 
 OPTIMIZATION_INCOMPLETE = "optimization-incomplete"  # system tag (D26)
 FREQUENCY_TYPES = (CalculationType.FREQUENCY,)
@@ -54,6 +54,10 @@ def calculation_warnings(
                 calculation.id,
             )
         )
+    contaminated = spin.contamination(calculation, node.multiplicity)
+    if contaminated is not None:
+        # D162: ⟨S²⟩ far from S(S+1) of the calculation's multiplicity.
+        found.append(Finding("W-SPIN", spin.message(contaminated), calculation.id))
     if calculation.geometry and node.geometry:
         if tolerance is None:
             tolerance = app_settings.load().geometry_tolerance

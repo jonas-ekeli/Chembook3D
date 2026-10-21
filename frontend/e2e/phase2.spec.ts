@@ -120,6 +120,24 @@ test('a saved basis set can be inspected and downloaded', async ({ page }) => {
   await expect(inspector.getByRole('heading', { name: 'MeI_TS' })).toBeVisible()
 })
 
+test('an open-shell calculation shows its spin expectation value', async ({ page }) => {
+  // D162, T-IMP-48: ORCA's <S**2> of the doublet cation, with S(S+1); 3.8 % off, so no W-SPIN.
+  await newInvestigation(page, 'Spin test')
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Upload a file').setInputFiles(join(FIXTURES, '..', 'orca', 'dvb_sp_un_dft.out'))
+  await expect(dialog.getByRole('table', { name: 'Job steps' })).toContainText('ORCA B3LYP')
+  await expect(dialog.getByText('W-SPIN')).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  const inspector = page.getByLabel('Node inspector')
+  const calculations = inspector.getByRole('list', { name: 'Calculations' })
+  await calculations.getByRole('button', { name: /Single point/ }).click()
+  const spin = inspector.getByLabel('Spin expectation value')
+  await expect(spin).toContainText('0.7782')
+  await expect(spin).toContainText('S(S+1) = 0.7500')
+  await expect(spin).not.toContainText('spin contaminated')
+})
+
 test('cancelling an import writes nothing', async ({ page }) => {
   // T-IMP-07
   await newInvestigation(page, 'Cancel test')

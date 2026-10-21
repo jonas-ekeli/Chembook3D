@@ -102,10 +102,11 @@ Notes:
 | W-GEOM | A calculation's geometry does not match its node's geometry |
 | W-PARSE | A file was only partly parsed; the missing fields are listed |
 | W-CONSTRAINED | A calculation is a scan or an optimization held by frozen coordinates or atoms; what held it is listed, and it gives no geometry level (D157) |
+| W-SPIN | A calculation's ⟨S²⟩ (Gaussian's before annihilation) is further from S(S+1) of its multiplicity than 10 % of S(S+1); for a singlet, above 0.1 (D162) |
 | W-DUP | Possible duplicate of another node (ID-8) |
 | W-BALANCE | A transition's atoms or total charge differ before (source + joining species) and after (target + leaving species); checked only when all of them have coordinates (D69) |
 
-**Where energies are used (D154, D158):** every energy value carries the check of the frequency calculation at its geometry level against the node's role (W-IMAG-TS, W-TS-NOFREQ, W-IMAG-MIN with the imaginary frequencies) and, for any role, W-FREQ-NONSTAT for that frequency calculation, W-OPT-INC when the latest optimization at the geometry level did not finish, and W-TERM when the energy calculation (for H, G and G_qh also the frequency calculation) did not terminate normally. Profiles mark such points, the energy table and its CSV have a "Check" column, and selectivities and turnovers list them in their notes. The check never changes a value or a status (D19).
+**Where energies are used (D154, D158, D162):** every energy value carries the check of the frequency calculation at its geometry level against the node's role (W-IMAG-TS, W-TS-NOFREQ, W-IMAG-MIN with the imaginary frequencies) and, for any role, W-FREQ-NONSTAT for that frequency calculation, W-OPT-INC when the latest optimization at the geometry level did not finish, and W-TERM when the energy calculation (for H, G and G_qh also the frequency calculation) did not terminate normally, and W-SPIN when one of them is spin-contaminated (D162). Profiles mark such points, the energy table and its CSV have a "Check" column, and selectivities and turnovers list them in their notes. The check never changes a value or a status (D19).
 
 ## 5. Energies
 

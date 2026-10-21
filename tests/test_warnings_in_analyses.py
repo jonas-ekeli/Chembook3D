@@ -188,7 +188,7 @@ def test_opening_an_older_notebook_reads_the_check_again(open_client):
     opened = inv.open_investigation(folder)
     try:
         with opened.sessions() as session:
-            assert session.get(InvestigationInfo, 1).repairs == list(repairs.REPAIRS)
+            assert sorted(session.get(InvestigationInfo, 1).repairs) == sorted(repairs.REPAIRS)
     finally:
         opened.close()
     open_client.post("/api/investigations/open", json={"folder": str(folder)})

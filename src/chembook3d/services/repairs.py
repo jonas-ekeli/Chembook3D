@@ -4,7 +4,7 @@ once per investigation, when it is opened by a version that has it; its name is 
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +19,7 @@ from chembook3d.models import (
     InvestigationInfo,
     Node,
 )
-from chembook3d.parsers.common import NOT_STATIONARY
+from chembook3d.parsers.common import NOT_STATIONARY, SPIN_KEYS
 from chembook3d.services import geometry, history, imports, levels
 
 log = logging.getLogger(__name__)
@@ -213,37 +213,65 @@ def scan_path_edges(session: Session, folder: Path) -> dict[str, int]:
     return scan_edges.link_imported(session, folder)
 
 
-def frequency_stationary(session: Session, folder: Path) -> dict[str, int]:
-    """D158: Gaussian frequency jobs imported before the app kept the stationary-point check
-    printed after them (W-FREQ-NONSTAT), read again from their copied files."""
-    query = (
-        select(Calculation)
-        .where(Calculation.type == CalculationType.FREQUENCY, Calculation.program == "Gaussian")
-        .options(selectinload(Calculation.result), selectinload(Calculation.source_file))
-    )
+def _steps_again(
+    session: Session, folder: Path, query, needle: bytes | None = None
+) -> Iterator[tuple[Calculation, Any]]:
+    """Each calculation the query finds with the step it came from, read again from its copied
+    file (each file read once, and only when it holds `needle`); calculations whose file or
+    step is gone are left out."""
     parsed: dict[str, Any] = {}
-    counts = {"checked": 0, "not_stationary": 0}
-    for calculation in session.scalars(query):
+    for calculation in session.scalars(
+        query.options(selectinload(Calculation.result), selectinload(Calculation.source_file))
+    ):
         source, result = calculation.source_file, calculation.result
         if source is None or result is None or calculation.step_index is None:
             continue
         if source.id not in parsed:
             try:
                 data = (folder / source.stored_path).read_bytes()
-                parsed[source.id] = imports.read_file(
-                    data.decode("utf-8", errors="replace"), source.original_name
-                )
+                parsed[source.id] = None
+                if needle is None or needle in data:
+                    parsed[source.id] = imports.read_file(
+                        data.decode("utf-8", errors="replace"), source.original_name
+                    )
             except (OSError, imports.ImportFailed):
                 parsed[source.id] = None
         steps = getattr(parsed[source.id], "steps", None) or []
         step = next((s for s in steps if s.index == calculation.step_index), None)
-        if step is None:
-            continue
+        if step is not None:
+            yield calculation, step
+
+
+def frequency_stationary(session: Session, folder: Path) -> dict[str, int]:
+    """D158: Gaussian frequency jobs imported before the app kept the stationary-point check
+    printed after them (W-FREQ-NONSTAT), read again from their copied files."""
+    query = select(Calculation).where(
+        Calculation.type == CalculationType.FREQUENCY, Calculation.program == "Gaussian"
+    )
+    counts = {"checked": 0, "not_stationary": 0}
+    for calculation, step in _steps_again(session, folder, query):
         counts["checked"] += 1
         if NOT_STATIONARY in step.printed:
             unmet = step.printed[NOT_STATIONARY]
+            result = calculation.result
             result.printed = {**(result.printed or {}), NOT_STATIONARY: unmet}
             counts["not_stationary"] += 1
+    return counts
+
+
+def spin_values(session: Session, folder: Path) -> dict[str, int]:
+    """D162: Gaussian and ORCA calculations imported before the app kept the ⟨S²⟩ they printed
+    (W-SPIN), read again from their copied files."""
+    query = select(Calculation).where(Calculation.program.in_(("Gaussian", "ORCA")))
+    counts = {"checked": 0, "with_s2": 0}
+    for calculation, step in _steps_again(session, folder, query, b"S**2"):
+        counts["checked"] += 1
+        found = {key: step.printed[key] for key in SPIN_KEYS if key in step.printed}
+        if found:
+            result = calculation.result
+            kept = {k: v for k, v in (result.printed or {}).items() if k not in SPIN_KEYS}
+            result.printed = {**kept, **found}
+            counts["with_s2"] += 1
     return counts
 
 
@@ -252,6 +280,7 @@ REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "scan_path_edges": scan_path_edges,
     "constrained_steps": constrained_steps,
     "frequency_stationary": frequency_stationary,
+    "spin_values": spin_values,
 }
 
 

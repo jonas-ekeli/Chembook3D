@@ -50,7 +50,7 @@ from chembook3d.models import (
 )
 from chembook3d.parsers import crest, gaussian, joined, orca, xtb
 from chembook3d.parsers.common import NOT_STATIONARY, ParsedFile, ParsedStep
-from chembook3d.services import geometry, history, levels
+from chembook3d.services import geometry, history, levels, spin
 from chembook3d.services import groups as group_service
 from chembook3d.services import nodes as node_service
 from chembook3d.services.warnings import OPTIMIZATION_INCOMPLETE
@@ -966,6 +966,14 @@ def _plan_steps(
                         f"The frequency job in step {step.index} is not at a stationary point: "
                         f"{step.printed[NOT_STATIONARY]} (D158)."
                     ),
+                }
+            )
+        contaminated = spin.read(step.printed, step.multiplicity)
+        if contaminated is not None and contaminated.contaminated:
+            warnings.append(
+                {
+                    "code": "W-SPIN",
+                    "message": f"Step {step.index}: {spin.message(contaminated)} (D162).",
                 }
             )
         if step_plan.missing:
