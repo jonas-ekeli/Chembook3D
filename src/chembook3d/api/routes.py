@@ -2,7 +2,7 @@
 
 import os
 import string
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -12,7 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import AfterValidator, BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from chembook3d import settings as app_settings
 from chembook3d import sync, thermochem, units, xyz
@@ -46,6 +46,7 @@ from chembook3d.services import (
     imports,
     levels,
     scan_edges,
+    thermo_settings,
 )
 from chembook3d.services import files as file_service
 from chembook3d.services import nodes as node_service
@@ -366,10 +367,15 @@ class SettingsOut(BaseModel):
     geometry_tolerance: float
     duplicate_tolerance: float
     energy_decimals: dict[str, int]
+    # D159: the open investigation's G_qh temperature and cutoff and standard state ("scope"
+    # "investigation"), or with none open the app's defaults for new investigations ("app")
     qh_temperature: float
     qh_cutoff: float
     standard_state: str
     standard_states: list[str]
+    thermo_scope: str
+    # D159: what a new investigation starts with (the app's settings)
+    thermo_defaults: dict[str, Any]
     crest_count: int
     hydrogens: str
     hydrogen_modes: list[str]
@@ -384,9 +390,13 @@ class SettingsIn(BaseModel):
     last_device: str | None = None
     geometry_tolerance: float | None = None
     duplicate_tolerance: float | None = None
+    # D159: the open investigation's (each change in its history), or with none open the
+    # defaults for new investigations
     qh_temperature: float | None = None
     qh_cutoff: float | None = None
     standard_state: str | None = None
+    # D159: the open investigation's three values become the defaults for new investigations
+    thermo_as_default: bool = False
     crest_count: int | None = None
     hydrogens: str | None = None
     steric_colours: str | None = None
@@ -900,9 +910,22 @@ def get_history(session: DbSession, record_id: str | None = None, limit: int = 2
 # ---------- settings ----------
 
 
+def _with_investigation(request: Request, change: Callable[[Session | None], Any]) -> Any:
+    """`change` run in a transaction of the open investigation, or with None when none is
+    open (the settings routes work either way)."""
+    investigation = getattr(request.app.state, "investigation", None)
+    if investigation is None:
+        return change(None)
+    with investigation.sessions.begin() as session:
+        return change(session)
+
+
 @router.get("/settings", response_model=SettingsOut)
-def get_settings():
+def get_settings(request: Request):
     s = app_settings.load()
+    thermo = _with_investigation(
+        request, lambda session: None if session is None else thermo_settings.values(session, s)
+    )
     return SettingsOut(
         energy_unit=s.energy_unit,
         energy_units=list(app_settings.ENERGY_UNITS),
@@ -913,10 +936,10 @@ def get_settings():
         geometry_tolerance=s.geometry_tolerance,
         duplicate_tolerance=s.duplicate_tolerance,
         energy_decimals=units.DECIMALS,
-        qh_temperature=s.qh_temperature,
-        qh_cutoff=s.qh_cutoff,
-        standard_state=s.standard_state,
+        **(thermo or {f: getattr(s, f) for f in thermo_settings.FIELDS}),
         standard_states=list(app_settings.STANDARD_STATES),
+        thermo_scope="app" if thermo is None else "investigation",
+        thermo_defaults={f: getattr(s, f) for f in thermo_settings.FIELDS},
         crest_count=s.crest_count,
         hydrogens=s.hydrogens,
         hydrogen_modes=list(app_settings.HYDROGEN_MODES),
@@ -927,7 +950,7 @@ def get_settings():
 
 
 @router.put("/settings", response_model=SettingsOut)
-def put_settings(body: SettingsIn):
+def put_settings(body: SettingsIn, request: Request):
     s = app_settings.load()
     if body.energy_unit is not None:
         if body.energy_unit not in app_settings.ENERGY_UNITS:
@@ -941,18 +964,25 @@ def put_settings(body: SettingsIn):
             if value <= 0:
                 raise HTTPException(422, f"{key.replace('_', ' ')} must be above zero")
             setattr(s, key, value)
-    if body.qh_temperature is not None:
-        if body.qh_temperature <= 0:
-            raise HTTPException(422, "The G_qh temperature must be above zero")
-        s.qh_temperature = body.qh_temperature
-    if body.qh_cutoff is not None:
-        if body.qh_cutoff < 0:
-            raise HTTPException(422, "The G_qh cutoff must not be negative")
-        s.qh_cutoff = body.qh_cutoff
-    if body.standard_state is not None:
-        if body.standard_state not in app_settings.STANDARD_STATES:
-            raise HTTPException(422, f"Unknown standard state '{body.standard_state}'")
-        s.standard_state = body.standard_state
+    # D159: the thermochemistry is the open investigation's, else the app's default
+    thermo = {f: getattr(body, f) for f in thermo_settings.FIELDS}
+
+    def change_thermo(session: Session | None) -> None:
+        try:
+            if session is None:
+                for field, value in thermo.items():
+                    if value is not None:
+                        setattr(s, field, thermo_settings.check(field, value))
+                return
+            found = thermo_settings.update(session, thermo)
+        except thermo_settings.Invalid as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if body.thermo_as_default:
+            for field, value in found.items():
+                setattr(s, field, value)
+
+    if body.thermo_as_default or any(v is not None for v in thermo.values()):
+        _with_investigation(request, change_thermo)
     if body.crest_count is not None:
         if body.crest_count < 1:
             raise HTTPException(422, "The number of CREST conformers must be at least 1")
@@ -970,7 +1000,7 @@ def put_settings(body: SettingsIn):
             {**s.profile_style, **body.profile_style}
         )
     app_settings.save(s)
-    return get_settings()
+    return get_settings(request)
 
 
 # ---------- import (FR-IMP, FR-FILE) ----------
@@ -1090,7 +1120,7 @@ def _source_out(request: Request, source: SourceFile | None) -> SourceFileOut | 
 def _quasi_harmonic_out(calculation: Calculation) -> QuasiHarmonicOut | None:
     if calculation.type != CalculationType.FREQUENCY or calculation.result is None:
         return None
-    s = app_settings.load()
+    s = thermo_settings.settings(object_session(calculation))  # D159: the investigation's
     out = QuasiHarmonicOut(temperature=s.qh_temperature, cutoff=s.qh_cutoff, correction=None)
     try:
         qh = energies.quasi_harmonic(calculation, s.qh_temperature, s.qh_cutoff)

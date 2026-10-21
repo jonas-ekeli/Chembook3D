@@ -240,7 +240,7 @@ test('a catalytic cycle closes at the resting state', async ({ page }) => {
   }
 })
 
-test('the 1 M standard state is a setting the energy view names', async ({ page }) => {
+test('the 1 M standard state is an investigation setting the energy view names', async ({ page }) => {
   // D95, A42: off by default; once on, G and G_qh say 1 M and a badge shows it.
   await openDemo(page)
   const view = page.getByRole('group', { name: 'Energy view' })
@@ -248,6 +248,9 @@ test('the 1 M standard state is a setting the energy view names', async ({ page 
   try {
     await page.getByRole('button', { name: 'Settings' }).click()
     const dialog = page.getByRole('dialog', { name: 'Settings' })
+    // D159: the setting is the open investigation's, and says so.
+    await expect(dialog.getByRole('heading', { name: 'Thermochemistry of this investigation' })).toBeVisible()
+    await expect(dialog.getByLabel('Thermochemistry')).toContainText('These belong to Demo investigation')
     await expect(dialog.getByLabel('Standard state')).toHaveValue('1 atm')
     await expect(dialog).toContainText('1.8943 kcal/mol at 298.15 K')
     await dialog.getByLabel('Standard state').selectOption('1 M')
@@ -266,6 +269,10 @@ test('the 1 M standard state is a setting the energy view names', async ({ page 
     await view.getByLabel('Energy type').selectOption('E')
     await expect(view.locator('.badge', { hasText: '1 M' })).toHaveCount(0)
     await view.getByLabel('Energy type').selectOption('G')
+
+    // T-EN-30: the change is in the investigation's history.
+    await page.getByRole('button', { name: 'History' }).click()
+    await expect(page.getByRole('list', { name: 'History' })).toContainText('Standard state of G and G_qh: 1 atm → 1 M')
   } finally {
     await page.request.put('/api/settings', { data: { standard_state: '1 atm' } })
   }

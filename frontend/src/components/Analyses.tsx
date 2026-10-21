@@ -209,7 +209,7 @@ function ResultView({
         <p className="muted small">
           {result.level_label} · {energyTypeName(result.energy_type, result.temperature, result.cutoff, result.standard_state)} · Boltzmann
           factors at {result.temperature} K
-          {result.temperature_from_settings ? ' (the G_qh temperature in Settings)' : ''}
+          {result.temperature_from_settings ? ' (this investigation’s G_qh temperature, in Settings)' : ''}
           {result.reference_label && <> · free species balanced from {result.reference_label}</>}
         </p>
       )}
@@ -447,7 +447,7 @@ function SelectivityEditor({
               label="Selectivity temperature"
               value={selectivity.temperature}
               positive
-              placeholder={`${settings?.qh_temperature ?? 298.15} (Settings)`}
+              placeholder={`${settings?.qh_temperature ?? 298.15} (investigation)`}
               onCommit={(temperature) => save({ temperature })}
             />
           </label>
@@ -654,7 +654,7 @@ function TurnoverResultView({
       {result.level_label && (
         <p className="muted small">
           {result.level_label} · {typeName} · {result.temperature} K
-          {result.temperature_from_settings ? ' (the G_qh temperature in Settings)' : ''}
+          {result.temperature_from_settings ? ' (this investigation’s G_qh temperature, in Settings)' : ''}
         </p>
       )}
       {ok ? (
@@ -910,7 +910,7 @@ function TurnoverEditor({
               label="Turnover temperature"
               value={turnover.temperature}
               positive
-              placeholder={`${settings?.qh_temperature ?? 298.15} (Settings)`}
+              placeholder={`${settings?.qh_temperature ?? 298.15} (investigation)`}
               onCommit={(temperature) => save({ temperature })}
             />
           </label>

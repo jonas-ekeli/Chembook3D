@@ -103,6 +103,13 @@ export function sharedSettings(data: SnapshotData): Settings {
     // Copies made before D95 have no standard state: they are at 1 atm.
     standard_state: data.settings.standard_state ?? '1 atm',
     standard_states: ['1 atm', '1 M'],
+    // D159: the copy's values are its investigation's
+    thermo_scope: 'investigation',
+    thermo_defaults: {
+      qh_temperature: data.settings.qh_temperature,
+      qh_cutoff: data.settings.qh_cutoff,
+      standard_state: data.settings.standard_state ?? '1 atm',
+    },
     profile_style: data.settings.profile_style ?? SCREEN_STYLE,
     profile_presets: { screen: SCREEN_STYLE, publication: SCREEN_STYLE },
   }

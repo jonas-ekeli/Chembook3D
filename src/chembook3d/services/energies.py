@@ -34,7 +34,7 @@ from chembook3d.models import (
 )
 from chembook3d.parsers import joined
 from chembook3d.parsers.common import NOT_STATIONARY
-from chembook3d.services import levels
+from chembook3d.services import levels, thermo_settings
 from chembook3d.services.records import RecordError
 
 ENERGY_TYPES = ("E", "H", "G", "G_qh")
@@ -470,8 +470,9 @@ class Energies:
         temperature: float | None = None,
     ):
         """`temperature` overrides the G_qh temperature setting (a selectivity's own, S4); it
-        is also the temperature of the 1 M standard state (D95)."""
-        settings = settings or app_settings.load()
+        is also the temperature of the 1 M standard state (D95). The settings are the
+        investigation's (D159)."""
+        settings = settings or thermo_settings.settings(session)
         self.session = session
         self.temperature = settings.qh_temperature if temperature is None else temperature
         self.cutoff = settings.qh_cutoff

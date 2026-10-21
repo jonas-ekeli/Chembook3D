@@ -75,6 +75,12 @@ class InvestigationInfo(Base):
     # D105: what the notebook showed when last used (energy level, type, reference, filters,
     # expanded groups, the energy drawer's pathways); view only, not in the history.
     view_state: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    # D159: the investigation's G_qh temperature (K) and cutoff (cm⁻¹) and the standard state
+    # of G and G_qh, every change in the history (services/thermo_settings.py). None until set
+    # from the app's settings (at creation, or by the repair `thermochemistry`).
+    qh_temperature: Mapped[float | None] = mapped_column(default=None)
+    qh_cutoff: Mapped[float | None] = mapped_column(default=None)
+    standard_state: Mapped[str | None] = mapped_column(String(16), default=None)
 
 
 class Node(Base):
@@ -595,7 +601,7 @@ class Selectivity(Base):
     # A composite level key `levelId~geometryLevelId`; None until one is chosen.
     level: Mapped[str | None] = mapped_column(String(80), default=None)
     energy_type: Mapped[str] = mapped_column(String(8), default="G_qh")
-    # K; None follows the app's G_qh temperature setting.
+    # K; None follows the investigation's G_qh temperature setting (D159).
     temperature: Mapped[float | None] = mapped_column(default=None)
     # "boltzmann": every TS of an outcome counts (Curtin–Hammett); "lowest": only its lowest.
     conformers: Mapped[str] = mapped_column(String(16), default="boltzmann")
@@ -675,7 +681,7 @@ class Turnover(Base):
     # A composite level key `levelId~geometryLevelId`; None until one is chosen.
     level: Mapped[str | None] = mapped_column(String(80), default=None)
     energy_type: Mapped[str] = mapped_column(String(8), default="G_qh")
-    # K; None follows the app's G_qh temperature setting.
+    # K; None follows the investigation's G_qh temperature setting (D159).
     temperature: Mapped[float | None] = mapped_column(default=None)
     # T5: another turnover to compare with; deleting it clears the comparison.
     compare_id: Mapped[str | None] = mapped_column(

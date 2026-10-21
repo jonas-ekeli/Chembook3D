@@ -149,6 +149,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-EN-11 | The profile in the app can be enlarged: the drawer's height is dragged, the pathways list can be hidden, and the profile zooms (Fit, 50 % to 400 %, Ctrl + wheel) and is dragged about when zoomed. | D106 | 4 |
 | FR-EN-12 | Each energy value says when the frequency calculation at its geometry level does not show the node to be what its role says: a TS without exactly one imaginary frequency or without a frequency calculation, a minimum with one. Profiles mark the point (⚠ with the reason, on screen only), the energy table and CSV have a "Check" column, and a selectivity or turnover lists each such TS or intermediate in its notes. Nothing is left out or changed. | D154, A98 | after 5 |
 | FR-EN-13 | Every frequency calculation a node's energies use (the latest at each composite level) is checked against its role, and a node card's warning names the level, so a good job at one level never hides a wrong one at another. A frequency calculation the program's own check finds not at a stationary point is W-FREQ-NONSTAT. W-FREQ-NONSTAT, W-OPT-INC and W-TERM of the calculations behind a value go with it, as FR-EN-12's checks do. A group card shows a ⚠ when any member has warnings, listing them. No status or value changes. | D158, A102 | after 5 |
+| FR-EN-14 | The G_qh temperature and cutoff and the standard state of G and G_qh are the investigation's own: stored in it, synced with it, and each change recorded in its History. Every G and G_qh value, profile, table, selectivity, turnover, IRC end point, read-only copy and Claude's tools use the open investigation's values. Settings shows them as belonging to the open investigation; the app's values are the default for new investigations, and an investigation saved before this takes them once when opened. | D159, A103 | after 5 |
 
 **AC:**
 - Nodes X and Y have G at level L1, and Y also at L2. With L2 selected, the edge X→Y shows "n/a".
@@ -360,7 +361,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 
 | ID | Requirement | Trace | Phase |
 |---|---|---|---|
-| FR-SET-01 | Settings: energy unit, CREST default N, duplicate tolerance, default origin device name. G_qh temperature and cutoff. | D28, D34, Q32 | 1–5 |
+| FR-SET-01 | Settings: energy unit, CREST default N, duplicate tolerance, default origin device name. G_qh temperature and cutoff (the open investigation's, D159). | D28, D34, Q32 | 1–5 |
 
 ## FR-RUN · Starting and stopping the app (D107)
 

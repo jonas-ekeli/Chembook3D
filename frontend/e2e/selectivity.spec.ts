@@ -49,7 +49,7 @@ test('selectivity from two transition states', async ({ page }) => {
   await expect(headline).toContainText('ee 97.1 % (A-S2)')
   await expect(headline).toContainText('Boltzmann sum')
   await expect(result.getByRole('table', { name: 'Outcomes' })).toContainText('2.50')
-  await expect(result).toContainText('Boltzmann factors at 298.15 K (the G_qh temperature in Settings)')
+  await expect(result).toContainText('Boltzmann factors at 298.15 K (this investigation’s G_qh temperature, in Settings)')
 
   // Renaming an outcome.
   await names.nth(0).fill('A')
