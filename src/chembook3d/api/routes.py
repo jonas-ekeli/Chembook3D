@@ -281,6 +281,7 @@ class CalculationOut(BaseModel):
     charge: int | None
     multiplicity: int | None
     parse_warnings: list[str]
+    constraints: list[str] = []  # D157: a scan, frozen coordinates or atoms
     warnings: list[WarningOut]
     source_file: SourceFileOut | None
     result: ResultOut | None
@@ -1134,6 +1135,7 @@ def _calculation_out(request: Request, calculation: Calculation) -> CalculationO
         charge=calculation.charge,
         multiplicity=calculation.multiplicity,
         parse_warnings=list(calculation.parse_warnings),
+        constraints=list(calculation.constraints or []),
         warnings=[
             WarningOut(**w.as_dict())
             for w in warning_service.calculation_warnings(calculation, calculation.node)

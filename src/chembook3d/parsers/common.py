@@ -121,6 +121,12 @@ class ParsedStep:
     resolved_basis_definition: dict[str, str] | None = None
     # D137: a joined scan's GEN basis set, known only by its fingerprints {element: hash}.
     basis_fingerprints: dict[str, str] = field(default_factory=dict)
+    # D157: what held the structure while it was optimized, as short descriptions ("scan
+    # D(3,4,9,10)", "frozen B(1,2)", "2 frozen atoms"): a Gaussian, ORCA or xTB scan, frozen
+    # coordinates or frozen atoms, as the output file shows them. Such a step ends on no free
+    # stationary point. An xTB scan path (D112) or a joined scan (D137) lists none: it is
+    # imported as a path and never as an optimization.
+    constraints: list[str] = field(default_factory=list)
 
     @property
     def job_type(self) -> str:
@@ -134,8 +140,29 @@ class ParsedStep:
         return self.geometries[self.node_geometry if self.node_geometry is not None else -1]
 
     @property
+    def constrained(self) -> bool:
+        """D157: a scan, or an optimization with frozen coordinates or atoms."""
+        return bool(self.constraints)
+
+    @property
     def imaginary_count(self) -> int:
         return sum(1 for f in self.frequencies if f < 0)
+
+
+_COORDINATE_LETTERS = {1: "X", 2: "B", 3: "A", 4: "D"}
+
+
+def coordinate_name(atoms: list[str], letter: str | None = None) -> str:
+    """D157: a coordinate as Gaussian's ModRedundant input names it, atoms from 1: `B(1,2)`,
+    `A(1,2,3)`, `D(3,4,9,10)`, `X(5)` for one atom's position."""
+    letter = (letter or _COORDINATE_LETTERS.get(len(atoms), "")).upper()
+    return f"{letter}({','.join(atoms)})"
+
+
+def add_constraint(step: ParsedStep, description: str) -> None:
+    """D157: add one constraint to a step, once."""
+    if description not in step.constraints:
+        step.constraints.append(description)
 
 
 @dataclass

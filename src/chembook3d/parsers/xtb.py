@@ -21,7 +21,14 @@ is not imported (its results are in the output) but can be inspected (D123c,
 import re
 import shlex
 
-from chembook3d.parsers.common import Criterion, ParsedFile, ParsedStep, Route
+from chembook3d.parsers.common import (
+    Criterion,
+    ParsedFile,
+    ParsedStep,
+    Route,
+    add_constraint,
+    coordinate_name,
+)
 from chembook3d.xyz import ELEMENTS, Atom, element_of
 
 PROGRAM = "xTB"
@@ -288,6 +295,28 @@ def _parse_block(lines: list[str], step: ParsedStep) -> None:
         step.thermo["e_zpe"] = step.scf_energy + step.thermo["zpe"]
 
 
+_CONSTRAINING = re.compile(r"^\s*constraining\s+(\w+)((?:\s+\d+)+)", re.IGNORECASE)
+_FROZEN_ATOMS = re.compile(r"^frozen atoms in %\s*:\s*\S+\s+(\d+)")
+
+
+def constraints_of(lines: list[str]) -> list[str]:
+    """D157: what an `--input` file's `$constrain`, `$fix` and `$scan` held, as xTB reports it:
+    each "constraining bond 1 2 to …" line, the frozen atoms of its Hessian and a relaxed
+    scan."""
+    found: list[str] = []
+    for line in lines:
+        if match := _CONSTRAINING.match(line):
+            atoms = match.group(2).split()
+            name = coordinate_name(atoms) if 2 <= len(atoms) <= 4 else f"{match.group(1)}"
+            found.append(f"constrained {name}")
+        elif (match := _FROZEN_ATOMS.match(line)) and int(match.group(1)):
+            count = int(match.group(1))
+            found.append(f"{count} frozen atom{'s' if count > 1 else ''}")
+        elif line.strip() == "RELAXED SCAN":
+            found.append("relaxed scan")
+    return list(dict.fromkeys(found))
+
+
 def _termination(lines: list[str]) -> str:
     tail = lines[-80:]
     if any("abnormal termination" in line or "#ERROR!" in line for line in tail):
@@ -341,6 +370,7 @@ def parse(text: str) -> ParsedFile:
     route = route_from_call(args, _method(lines, args))
     charge, multiplicity = _charge_multiplicity(lines, args)
     termination = _termination(lines)
+    held = constraints_of(lines)  # D157: held for the whole run, its Hessian included
 
     chunks = [(lines, route.job_type)]
     if route.compound_freq:
@@ -360,6 +390,8 @@ def parse(text: str) -> ParsedFile:
             step.optimization_converged = bool(step.optimization_converged)
         else:
             step.optimization_converged = None
+        for description in held:
+            add_constraint(step, description)
         step.missing = _missing_fields(step)
         steps.append(step)
     return ParsedFile(program=PROGRAM, version=version, steps=steps)

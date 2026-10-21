@@ -102,8 +102,20 @@ def composite_label(level: LevelOfTheory | None, geometry_level: LevelOfTheory |
     return f"{label(level)} // {label(geometry_level)}"
 
 
+def is_geometry_source(calculation: Calculation) -> bool:
+    """D100, D157: an optimization that can give a geometry level: one with a level that no
+    scan, frozen coordinate or frozen atom held."""
+    return (
+        calculation.type in OPTIMIZATION_TYPES
+        and calculation.level is not None
+        and not calculation.constraints
+    )
+
+
 def optimizations(node: Node) -> list[Calculation]:
-    found = [c for c in node.calculations if c.type in OPTIMIZATION_TYPES and c.level is not None]
+    """The node's optimizations that can give a geometry level (D157: never a constrained
+    one), oldest first."""
+    found = [c for c in node.calculations if is_geometry_source(c)]
     return sorted(found, key=lambda c: (c.created_at, c.step_index or 0))
 
 

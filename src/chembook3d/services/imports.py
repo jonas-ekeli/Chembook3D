@@ -537,15 +537,36 @@ def _already_imported(session: Session, checksum: str) -> list[dict[str, Any]]:
 
 
 def _suggested_role(written: list[ParsedStep]) -> str:
+    """The role the file's last optimization, else its last frequency job, suggests. D157: a
+    constrained one (a scan, frozen coordinates or atoms) suggests none: its structure is no
+    free minimum or TS."""
     for step in reversed(written):
+        if step.job_type in OPTIMIZATION_TYPES and step.constrained:
+            return Role.UNSPECIFIED
         if step.job_type == CalculationType.TS_OPTIMIZATION:
             return Role.TRANSITION_STATE
         if step.job_type == CalculationType.OPTIMIZATION:
             return Role.MINIMUM
     for step in reversed(written):
         if step.frequencies:
+            if step.constrained:
+                return Role.UNSPECIFIED
             return Role.TRANSITION_STATE if step.imaginary_count == 1 else Role.MINIMUM
     return Role.UNSPECIFIED
+
+
+def constrained_message(step: ParsedStep) -> str:
+    """D157: the import preview's W-CONSTRAINED for one step."""
+    what = (
+        "a scan or constrained optimization"
+        if step.job_type in OPTIMIZATION_TYPES
+        else "a scan or constrained job"
+    )
+    return (
+        f"Step {step.index} is {what} ({', '.join(step.constraints)}). Its structure is no "
+        "free minimum or transition state, so the import suggests no role, and it never gives "
+        "a geometry level to single points or frequency jobs."
+    )
 
 
 def _finished(step: ParsedStep) -> bool:
@@ -569,9 +590,10 @@ def continued_optimization(
 ) -> dict[str, Any] | None:
     """D100: a file whose optimization starts from the geometry the node's own optimization
     ended on, at another level, continues that pre-optimization (an xTB pre-optimization
-    followed by a DFT optimization). Its result becomes the node's geometry."""
+    followed by a DFT optimization). Its result becomes the node's geometry. A constrained
+    optimization or scan continues nothing (D157)."""
     for step in steps:
-        if step.job_type not in OPTIMIZATION_TYPES or not step.geometries:
+        if step.job_type not in OPTIMIZATION_TYPES or not step.geometries or step.constrained:
             continue
         if not geometry.matches(_rows(step.geometries[0]), target.geometry, tolerance):
             continue
@@ -868,7 +890,8 @@ def _plan_steps(
             )
 
     # D100: a single point or frequency job takes the level of the optimization that ended on
-    # its geometry, among the node's own and those in this file before it.
+    # its geometry, among the node's own and those in this file before it; never a constrained
+    # one (D157).
     for destination in ("node", "derived"):
         ended: list[tuple[list[Any] | None, tuple[Any, str]]] = []
         if destination == "node" and mode == "onto":
@@ -882,7 +905,8 @@ def _plan_steps(
             identity = resolved[step.index].identity
             rows = _rows(step.final_geometry)
             if step.job_type in OPTIMIZATION_TYPES:
-                ended.append((rows, (identity, step_plan.level_label)))
+                if not step.constrained:
+                    ended.append((rows, (identity, step_plan.level_label)))
                 continue
             if rows:
                 source = ended_on(ended, rows, tolerance)
@@ -952,6 +976,8 @@ def _plan_steps(
                     + ", ".join(step_plan.missing),
                 }
             )
+        if step.constrained:
+            warnings.append({"code": "W-CONSTRAINED", "message": constrained_message(step)})
         if (
             mode == "onto"
             and step_plan.assignment == "node"
@@ -1763,8 +1789,8 @@ def commit(
                     session, owner, step, step_plan, staged, source, geometry_level
                 )
                 calculation_ids.append(calculation.id)
-                if calculation.type in OPTIMIZATION_TYPES:
-                    ended.append((calculation.geometry, calculation.level))
+                if calculation.type in OPTIMIZATION_TYPES and not calculation.constraints:
+                    ended.append((calculation.geometry, calculation.level))  # D157
                 if step.optimization_converged is False:
                     _add_tag(session, owner, OPTIMIZATION_INCOMPLETE)
         session.flush()
@@ -1834,6 +1860,7 @@ def _create_calculation(
         multiplicity=step.multiplicity,
         geometry=_rows(step.final_geometry),
         parse_warnings=list(step_plan.missing),
+        constraints=list(step.constraints),  # D157
         source_file_id=source.id,
         irc_part=irc[0],
         irc_direction=irc[1],

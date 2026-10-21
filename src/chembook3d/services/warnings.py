@@ -32,6 +32,17 @@ def calculation_warnings(
     if calculation.parse_warnings:
         missing = ", ".join(calculation.parse_warnings)
         found.append(Finding("W-PARSE", f"not read from the file: {missing}", calculation.id))
+    if calculation.constraints:
+        # D157: a scan or an optimization held by frozen coordinates or atoms.
+        held = ", ".join(calculation.constraints)
+        found.append(
+            Finding(
+                "W-CONSTRAINED",
+                f"scan or constrained job ({held}): its structure is no free stationary "
+                "point and gives no geometry level",
+                calculation.id,
+            )
+        )
     unmet = energies.not_stationary(calculation)
     if unmet is not None:
         # D158: Gaussian's check after the frequency job did not find a stationary point.

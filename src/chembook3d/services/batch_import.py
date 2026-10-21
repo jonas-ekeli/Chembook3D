@@ -376,9 +376,13 @@ def _basis_missing(staged: imports.StagedFile) -> bool:
 
 
 def _has_optimization(staged: imports.StagedFile) -> bool:
+    """A file with a free optimization goes first; D157: a scan or constrained one is no
+    node's geometry level, so it waits with the single points."""
     if isinstance(staged.parsed, crest.Ensemble):
         return False
-    return any(s.job_type in imports.OPTIMIZATION_TYPES for s in staged.parsed.steps)
+    return any(
+        s.job_type in imports.OPTIMIZATION_TYPES and not s.constrained for s in staged.parsed.steps
+    )
 
 
 def _compatible(node: Node, charge: int | None, multiplicity: int | None) -> bool:
