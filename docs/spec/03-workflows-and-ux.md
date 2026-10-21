@@ -64,9 +64,9 @@ Result: a node on the canvas at the clicked position.
 3. **Transitions:** user drags from one node's handle to another. The transition gets status *planned* by default and optional notes. Connecting two intermediates directly is allowed; such an edge is a **direct connection** and is marked "no TS" (D53).
 4. **Layout helper:** **Arrange branch** lays out the selected branch left to right in step order (D33). Manual positions are otherwise preserved.
 
-### WF-07 Reconnect branches (D13, D14, D18)
-1. User selects the final nodes of several branches, or other conformers, and chooses **Reconnect as group**.
-2. The app creates a group node with those members, records the incoming branches, and asks whether to create an outgoing branch (its parents are the incoming branches).
+### WF-07 Group nodes (D13, D14, D18, D152)
+1. User selects the final nodes of several branches, or other conformers, and chooses **Create group**.
+2. The app creates a group node with those members and records the incoming branches. It starts no branch: edges show where paths meet (D152). For a merge branch, the user makes a branch with the incoming branches as parents and picks it as the group's outgoing branch in the inspector.
 3. The members can be sorted by energy at the view's level. The user marks one as **representative**. The app never pre-selects it (EN-10).
 4. Transitions from the incoming branches into the group are optional (D14).
 5. **Deleting a group (D54):** the user chooses **Dissolve group** (members kept as nodes, P4) or **Delete group with contents** (group and members removed, after a confirmation listing members, calculations and edges).

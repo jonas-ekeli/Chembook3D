@@ -22,7 +22,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. This document defines mean
 | **Split** | The point where one branch's node has transitions to nodes that start new child branches. | D12 |
 | **Free species** | A molecule that joins or leaves the mechanism on a transition, such as a substrate, a released ethylene or a product. It has a geometry, calculations and energies like a node, but no step, branch, group or edges, and is not drawn on the canvas. Transitions list the species that join or leave on them, so relative energies stay mass-balanced. | D69 |
 | **Group node** | A canvas node that contains several member nodes (conformers) and one optional user-chosen **representative**. Used for reconnections and CREST ensembles. | D18, D46 |
-| **Reconnection** | A user-declared group node where incoming branches end and one outgoing branch starts. Members keep their branch (D66). | D13, D14, D18, D66 |
+| **Reconnection** | A user-declared group node where incoming branches end and one outgoing branch starts. Members keep their branch (D66). Since D152 "Create group" starts no branch, so a group is a reconnection only once the user sets its outgoing branch; otherwise edges show where paths meet. | D13, D14, D18, D66, D152 |
 | **Pathway** | A connected sequence of concrete transitions, following edges only. Energy profiles are drawn along pathways. | D4 |
 | **Status** | One of *planned*, *running externally*, *done*, *failed*, *rejected*, *superseded*; set by the user on nodes, transitions and branches. | D19 |
 | **Warning** | An automatic, non-blocking finding about a record (e.g. imaginary-frequency count). Warnings never change a status. | D19 |

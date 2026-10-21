@@ -31,7 +31,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-BR-01 | Lineage of A1-S3 | A1 → A → T |
 | T-BR-02 | Split A at S1 into A1 and A2 | Two branches with parent A. The split node is recorded. |
 | T-BR-03 | Add the A-S3 → rot-TS → B-S3 interconversion | Branch of every node unchanged (INV-4) |
-| T-BR-04 | Reconnect A1…B2 S6 nodes into group G6 with outgoing R | R parents = {A1, A2, B1, B2}. Members keep their branch (D66). The history has one reconnect entry (INV-3). |
+| T-BR-04 | Reconnect A1…B2 S6 nodes into group G6 with outgoing R (through the API; the UI's Create group starts no branch, D152) | R parents = {A1, A2, B1, B2}. Members keep their branch (D66). The history has one reconnect entry (INV-3). |
 | T-BR-05 | Group with no representative | Its outgoing edges show "n/a" (EN-7) |
 | T-BR-06 | Set a representative, then change the energy view | The representative is unchanged; energies never alter it (EN-10) |
 | T-BR-07 | Sort group members by G | The order changes and the representative does not |
