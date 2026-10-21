@@ -2,7 +2,10 @@
 transition states, traced back to the calculations.
 
 - A selectivity has two or more named outcomes ("R" and "S", "Z" and "E"). Each is realised
-  by TS nodes and groups; a group counts with all its members, as they are when computed.
+  by TS nodes and groups; a group counts with all its members, as they are when computed,
+  except rejected, failed and superseded ones, and a member that duplicates an earlier one of
+  its outcome (the D62 duplicate tolerance, and the same value within 0.1 kcal/mol) counts
+  once (D156). The notes name each.
 - Every TS is valued at one composite level and energy type, with no fallback (EN-3, D27):
   one TS without a value makes the result n/a, with the reason.
 - All TSs must have the same atoms and the same charge, or the selectivity is refused.
@@ -36,8 +39,9 @@ from chembook3d.models import (
     Selectivity,
     SelectivityMember,
     SelectivityOutcome,
+    Status,
 )
-from chembook3d.services import history
+from chembook3d.services import geometry, history
 from chembook3d.services import species as species_service
 from chembook3d.services.energies import ENERGY_TYPES, Energies, LevelKey, key_label
 from chembook3d.services.records import RecordError, get, number_value, text_value
@@ -225,8 +229,16 @@ def _name_of(node: Node) -> str:
     return node.label or "Untitled node"
 
 
+# D156: a TS the user has set to one of these is not a candidate any more.
+LEFT_OUT = (Status.REJECTED, Status.FAILED, Status.SUPERSEDED)
+# D156: members of one outcome this close in energy and within the duplicate tolerance in
+# geometry are one TS counted twice (0.1 kcal/mol).
+SAME_ENERGY = 0.1 / 627.5094740631
+
+
 def _members(session: Session, outcome: SelectivityOutcome) -> tuple[list, list[str]]:
-    """(node, group or None) for every TS of the outcome, each node once; and notes."""
+    """(node, group or None) for every TS of the outcome, each node once; and notes. Rejected,
+    failed and superseded TSs are left out (D156)."""
     found: list[tuple[Node, GroupNode | None]] = []
     notes = []
     seen: set[str] = set()
@@ -243,10 +255,46 @@ def _members(session: Session, outcome: SelectivityOutcome) -> tuple[list, list[
                 notes.append(f"Group “{label}” in “{outcome.name}” has no members.")
             pairs = [(node, group) for node in nodes]
         for node, group in pairs:
-            if node is not None and node.id not in seen:
-                seen.add(node.id)
-                found.append((node, group))
+            if node is None or node.id in seen:
+                continue
+            seen.add(node.id)
+            if node.status in LEFT_OUT:
+                notes.append(f"“{_name_of(node)}” is {node.status} and left out.")
+                continue
+            found.append((node, group))
     return found, notes
+
+
+def _drop_duplicates(session: Session, outcome: dict[str, Any], tolerance: float) -> list[str]:
+    """D156: a member with the same atoms, charge and multiplicity as an earlier one of its
+    outcome within the duplicate tolerance (D62, as W-DUP judges a new node) and the same value
+    within 0.1 kcal/mol is the same TS imported twice: it counts once."""
+    notes = []
+    kept: list[tuple[Node, dict[str, Any]]] = []
+    for member in outcome["members"]:
+        node = session.get(Node, member["node_id"])
+        twin = None
+        for other, other_member in kept:
+            if (
+                not node.geometry
+                or not other.geometry
+                or (other.charge, other.multiplicity) != (node.charge, node.multiplicity)
+                or abs(other_member["value"] - member["value"]) > SAME_ENERGY
+            ):
+                continue
+            rmsd = geometry.aligned_rmsd(node.geometry, other.geometry)
+            if rmsd is not None and rmsd <= tolerance:
+                twin = (other_member, rmsd)
+                break
+        if twin is None:
+            kept.append((node, member))
+            continue
+        notes.append(
+            f"“{member['label']}” duplicates “{twin[0]['label']}” (RMSD {twin[1]:.3f} Å, the "
+            "same energy) and counts once."
+        )
+    outcome["members"] = [member for _, member in kept]
+    return notes
 
 
 def _log_weight(values: list[float], base: float, temperature: float) -> float:
@@ -506,6 +554,8 @@ def result(
                 member["value"] = value.value + added
     if missing:
         return stop("n/a", f"No {selectivity.energy_type} at this level for {', '.join(missing)}.")
+    for outcome in found["outcomes"]:
+        notes.extend(_drop_duplicates(session, outcome, settings.duplicate_tolerance))
     if selectivity.energy_type == "E":
         notes.append("E is the electronic energy, with no thermal correction.")
     elif selectivity.energy_type in ("H", "G"):

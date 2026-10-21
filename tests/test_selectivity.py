@@ -105,8 +105,8 @@ def test_conformers_of_an_outcome_are_summed_or_only_the_lowest_counts(open_clie
     # T-SEL-02, S2 (Curtin–Hammett): two equal TSs for R against one for S is 2:1 summed and
     # 1:1 with only the lowest; the summed ΔΔG‡ of S is RT ln 2.
     r1 = ts(open_client, "R-a", 0.0, 0.0)
-    r2 = ts(open_client, "R-b", 0.0, 0.05)
-    s = ts(open_client, "S-a", 0.0, 0.1)
+    r2 = ts(open_client, "R-b", 0.0, 0.2)  # apart, so not one TS counted twice (D156)
+    s = ts(open_client, "S-a", 0.0, 0.4)
     created = selectivity(open_client, {"R": [r1, r2], "S": [s]})
     outcomes = by_name(result(open_client, created["id"]))
     assert outcomes["R"]["boltzmann_percent"] == pytest.approx(200 / 3)
