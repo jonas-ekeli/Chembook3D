@@ -81,6 +81,7 @@ def step(
     terminate=True,
     internal=False,
     body=(),
+    after=(),
 ) -> str:
     lines = [
         " Link1:  Proceeding to internal job step number  2."
@@ -105,6 +106,7 @@ def step(
     if frequencies:
         lines += frequency_block(frequencies, len(geometries[-1]))
         lines += THERMO.splitlines()
+    lines += after
     if terminate:
         lines.append(" Normal termination of Gaussian 16 at Tue Sep 29 12:00:00 2026.")
     return "\n".join(lines) + "\n"
@@ -128,6 +130,22 @@ def opt_freq(start, end, energy=-76.4089, frequencies=(1650.0, 3700.0, 3800.0)) 
             internal=True,
         ),
     )
+
+
+def convergence_table(stationary: bool) -> list[str]:
+    """D158: the check Gaussian prints after a frequency job; not met, the maximum
+    displacement says NO and no stationary point is found (as in aziridinium-phos-full-c1)."""
+    lines = [
+        "         Item               Value     Threshold  Converged?",
+        " Maximum Force            0.000001     0.000015     YES",
+        " RMS     Force            0.000000     0.000010     YES",
+        " Maximum Displacement     0.000083     0.000060     " + ("YES" if stationary else "NO "),
+        " RMS     Displacement     0.000018     0.000040     YES",
+        " Predicted change in Energy=-6.884102D-11",
+    ]
+    if stationary:
+        lines += [" Optimization completed.", "    -- Stationary point found."]
+    return lines
 
 
 # The water modes with an imaginary one first (not a real water TS: what a TS's job prints).

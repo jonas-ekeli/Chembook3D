@@ -175,3 +175,33 @@ test('an edge on the same side of two lined-up members bows out from that side',
     await page.request.post(`/api/groups/${group.id}/dissolve`, { data: { restore_branches: true } })
   }
 })
+
+test("a group's head marks its members' warnings, collapsed and expanded", async ({ page }) => {
+  // T-EN-26 (D158): a collapsed group showed its members' notes but not their warnings.
+  await openDemo(page)
+  const canvas = await (await page.request.get('/api/canvas')).json()
+  const idOf = (label: string) => canvas.nodes.find((n: { label: string }) => n.label === label).id
+  const made = await page.request.post('/api/groups/reconnect', {
+    data: { member_ids: [idOf('A-S2'), idOf('B-S2')], label: 'GW' },
+  })
+  expect(made.ok()).toBe(true)
+  const group = (await made.json()) as { id: string }
+  try {
+    const box = page.getByRole('group', { name: 'Group GW' })
+    await page.reload()
+    await expect(box).toBeVisible()
+    await expect(box.getByRole('img', { name: 'Members have warnings' })).toHaveCount(0)
+    // B-S2's frequency job has one imaginary mode: as a minimum it warns (W-IMAG-MIN).
+    expect((await page.request.patch(`/api/nodes/${idOf('B-S2')}`, { data: { role: 'minimum' } })).ok()).toBe(true)
+    await page.reload()
+    const mark = box.getByRole('img', { name: 'Members have warnings' })
+    await expect(mark).toBeVisible()
+    await expect(mark).toHaveAttribute('title', /B-S2: W-IMAG-MIN: minimum with 1 imaginary frequency at /)
+    await box.getByRole('button', { name: 'Expand group' }).click()
+    await expect(canvasNode(page, 'B-S2')).toBeVisible()
+    await expect(box.locator('.cgroup-head').getByRole('img', { name: 'Members have warnings' })).toBeVisible()
+  } finally {
+    await page.request.patch(`/api/nodes/${idOf('B-S2')}`, { data: { role: 'transition_state' } })
+    await page.request.post(`/api/groups/${group.id}/dissolve`, { data: { restore_branches: true } })
+  }
+})
