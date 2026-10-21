@@ -7,7 +7,7 @@ from sqlalchemy.orm import object_session
 
 from chembook3d import settings as app_settings
 from chembook3d.models import Calculation, CalculationType, Node, Role
-from chembook3d.services import energies, geometry, levels, spin
+from chembook3d.services import energies, geometry, levels, spin, thermo_settings
 
 OPTIMIZATION_INCOMPLETE = "optimization-incomplete"  # system tag (D26)
 FREQUENCY_TYPES = (CalculationType.FREQUENCY,)
@@ -73,9 +73,9 @@ def _frequency_jobs(node: Node) -> list[tuple[str, Calculation]]:
     label, as `energies.NodeEnergies` uses them (another state's are left out, D155)."""
     if not any(c.type in FREQUENCY_TYPES for c in node.calculations):
         return []
-    settings = app_settings.load()
-    found = energies.NodeEnergies(node, settings.qh_temperature, settings.qh_cutoff)
     session = object_session(node)
+    settings = thermo_settings.settings(session)  # D159: the investigation's
+    found = energies.NodeEnergies(node, settings.qh_temperature, settings.qh_cutoff)
     jobs = []
     for key, calculation in found.frequency_jobs():
         if calculation.result is None:

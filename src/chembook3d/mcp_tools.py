@@ -78,7 +78,7 @@ FIELD_HELP = {
     "target_side": "Side of the end box the arrow arrives at: top, right, bottom or left.",
     "direction": "'joins' or 'leaves'.",
     "count": "How many of the species join or leave.",
-    "temperature": "Kelvin; null uses the app's G_qh temperature setting.",
+    "temperature": "Kelvin; null uses the investigation's G_qh temperature setting.",
     "token": "The import token returned by import_file.",
     "job_id": "Id of a calculation job (its folder name in jobs/), from create_cloud_job or "
     "list_cloud_jobs.",

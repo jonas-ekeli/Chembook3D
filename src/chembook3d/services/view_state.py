@@ -5,8 +5,9 @@ is view only: never in the history, and saving it is not a change other tabs rel
 
 What is saved is cleaned twice: on the way in (only known keys and plausible values, so an
 investigation cannot fill up with junk) and on the way out (records deleted since are dropped,
-so the notebook opens on what still exists). App-wide preferences (energy unit, G_qh
-temperature and cutoff, standard state, hydrogens, steric colours) stay in the app's settings."""
+so the notebook opens on what still exists). App-wide preferences (energy unit, hydrogens,
+steric colours) stay in the app's settings; the G_qh temperature and cutoff and the standard
+state are the investigation's own, in its history (D159, services/thermo_settings.py)."""
 
 from typing import Any
 

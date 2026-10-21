@@ -235,10 +235,13 @@ def create_investigation(folder: Path, name: str) -> Investigation:
     engine = _make_engine(folder / DB_NAME)
     _migrate(engine, folder / DB_NAME)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    from chembook3d.services import repairs  # the services import this module
+    from chembook3d.services import repairs, thermo_settings  # the services import this module
 
+    # D159: a new investigation starts with the app's G_qh temperature, cutoff and standard
+    # state, its own from then on.
+    defaults = thermo_settings.values(None)
     with sessions.begin() as session:
-        session.add(InvestigationInfo(id=1, name=name, repairs=list(repairs.REPAIRS)))
+        session.add(InvestigationInfo(id=1, name=name, repairs=list(repairs.REPAIRS), **defaults))
     _write_lock(folder)
     return Investigation(folder, engine, sessions)
 

@@ -20,7 +20,7 @@ from chembook3d.models import (
     Node,
 )
 from chembook3d.parsers.common import NOT_STATIONARY, SPIN_KEYS
-from chembook3d.services import geometry, history, imports, levels
+from chembook3d.services import geometry, history, imports, levels, thermo_settings
 
 log = logging.getLogger(__name__)
 SOURCE = "repair"
@@ -275,12 +275,19 @@ def spin_values(session: Session, folder: Path) -> dict[str, int]:
     return counts
 
 
+def thermochemistry(session: Session, folder: Path) -> bool:
+    """D159: an investigation saved before it kept its own G_qh temperature, cutoff and
+    standard state takes the app's settings once, recorded in its history, so nothing shifts."""
+    return thermo_settings.seed(session, source=SOURCE)
+
+
 REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "geometry_levels": geometry_levels,
     "scan_path_edges": scan_path_edges,
     "constrained_steps": constrained_steps,
     "frequency_stationary": frequency_stationary,
     "spin_values": spin_values,
+    "thermochemistry": thermochemistry,
 }
 
 
@@ -297,5 +304,6 @@ def run(session: Session, folder: Path) -> dict[str, Any]:
         results[name] = repair(session, folder)
         done.append(name)
         log.info("repair %s: %s", name, results[name])
-    info.repairs = done
+    # In REPAIRS' order, whichever ran first; names this version does not know are kept.
+    info.repairs = [n for n in REPAIRS if n in done] + [n for n in done if n not in REPAIRS]
     return results

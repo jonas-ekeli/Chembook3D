@@ -21,7 +21,6 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from chembook3d import __version__, units
-from chembook3d import settings as app_settings
 from chembook3d.api import downloads
 from chembook3d.api import energies as energy_api
 from chembook3d.api import pathway as pathway_api
@@ -29,7 +28,7 @@ from chembook3d.api.routes import DbSession, _calculation_out, _investigation
 from chembook3d.models import Calculation, CalculationType
 from chembook3d.services import nodes as node_service
 from chembook3d.services import notes as note_service
-from chembook3d.services import pathways, species, view_state
+from chembook3d.services import pathways, species, thermo_settings, view_state
 from chembook3d.services.energies import Energies, LevelKey
 from chembook3d.services.records import RecordError
 
@@ -144,7 +143,7 @@ def _note_images(session: Session, notes: list[Any]) -> dict[str, str]:
 
 def snapshot_data(request: Request, session: Session, body: SnapshotIn) -> dict[str, Any]:
     investigation = _investigation(request)
-    settings = app_settings.load()
+    settings = thermo_settings.settings(session)  # D159: the investigation's G_qh
     canvas = pathway_api.canvas(request, session)
     records = [*canvas.nodes, *canvas.species]
 

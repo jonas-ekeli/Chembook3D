@@ -41,7 +41,7 @@ from chembook3d.models import (
     SelectivityOutcome,
     Status,
 )
-from chembook3d.services import geometry, history
+from chembook3d.services import geometry, history, thermo_settings
 from chembook3d.services import species as species_service
 from chembook3d.services.energies import ENERGY_TYPES, Energies, LevelKey, key_label
 from chembook3d.services.records import RecordError, get, number_value, text_value
@@ -403,7 +403,7 @@ def _excess(selectivity: Selectivity, outcomes: list[dict[str, Any]]) -> dict | 
 def result(
     session: Session, selectivity: Selectivity, settings: app_settings.Settings | None = None
 ) -> dict[str, Any]:
-    settings = settings or app_settings.load()
+    settings = settings or thermo_settings.settings(session)  # D159: the investigation's
     temperature = selectivity.temperature or settings.qh_temperature
     found: dict[str, Any] = {
         "status": "ok",
