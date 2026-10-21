@@ -33,6 +33,7 @@ from chembook3d.models import (
     Role,
 )
 from chembook3d.parsers import joined
+from chembook3d.parsers.common import NOT_STATIONARY
 from chembook3d.services import levels
 from chembook3d.services.records import RecordError
 
@@ -78,8 +79,10 @@ class Value:
     details: dict[str, Any] = field(default_factory=dict)
     # D154: what the frequency job at the geometry level says against the node's role (a
     # transition state without exactly one imaginary frequency, or without a frequency job; a
-    # minimum with one), as {"code", "message"}; None when nothing.
-    check: dict[str, str] | None = None
+    # minimum with one); D158: also that job not at a stationary point, the optimization at
+    # the geometry level unfinished, a calculation ended abnormally. As {"code", "message",
+    # "issues"}; None when nothing.
+    check: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -150,6 +153,54 @@ def _state(calculation: Calculation) -> tuple[int, int | None] | None:
 
 def _state_text(state: tuple[int | None, int | None]) -> str:
     return f"charge {state[0]}, multiplicity {state[1]}"
+
+
+def not_stationary(calculation: Calculation) -> str | None:
+    """D158: the criteria a frequency job's stationary-point check did not meet, as
+    "Maximum displacement 0.000083 > 0.000060"; None when it found one or printed none."""
+    result = calculation.result
+    printed = (result.printed or {}).get(NOT_STATIONARY) if result is not None else None
+    if not printed:
+        return None
+    shown = []
+    for item in printed.split("; "):
+        words = item.split()
+        if len(words) == 5 and words[-1] == "NO":
+            shown.append(f"{words[0]} {words[1].lower()} {words[2]} > {words[3]}")
+        else:
+            shown.append(item)
+    return ", ".join(shown)
+
+
+def frequency_issues(role: str, frequency: Calculation, where: str) -> list[dict[str, str]]:
+    """D154, D158: a frequency job against the node's role (a transition state needs exactly
+    one imaginary frequency, a minimum none) and whether it is at a stationary point. `where`
+    says which level, as "at the geometry level" or "at B3LYP/def2-SVP"."""
+    issues = []
+    count = frequency.result.imaginary_count if frequency.result is not None else None
+    if count is not None and role in (Role.TRANSITION_STATE, Role.MINIMUM):
+        if (count == 1) != (role == Role.TRANSITION_STATE):
+            imaginary = [f for f in frequency.result.frequencies if f < 0]
+            shown = ", ".join(f"{f:.1f}" for f in imaginary)
+            plural = "frequency" if count == 1 else "frequencies"
+            message = f"{count} imaginary {plural} {where}"
+            if role == Role.TRANSITION_STATE:
+                message += ", not 1"
+            issues.append(
+                {
+                    "code": "W-IMAG-TS" if role == Role.TRANSITION_STATE else "W-IMAG-MIN",
+                    "message": f"{message} ({shown} cm⁻¹)" if shown else message,
+                }
+            )
+    unmet = not_stationary(frequency)
+    if unmet is not None:
+        issues.append(
+            {
+                "code": "W-FREQ-NONSTAT",
+                "message": f"the frequency job {where} is not at a stationary point ({unmet})",
+            }
+        )
+    return issues
 
 
 class NodeEnergies:
@@ -234,50 +285,90 @@ class NodeEnergies:
             raise found
         return found
 
-    def check(self, key: LevelKey) -> dict[str, str] | None:
-        """D154: the frequency job behind this composite level (at its geometry level; the
-        node's latest when that is not known) against the node's role. Shown wherever the value
-        is used (profiles, the table, selectivities, turnovers) and never changes it (D19)."""
-        role = self.node.role
-        if role not in (Role.TRANSITION_STATE, Role.MINIMUM):
-            return None
+    def frequency_at(self, key: LevelKey) -> Calculation | None:
+        """The frequency job a value at this composite level is judged by (D154): the one at
+        its geometry level, or the node's latest when that level is not known."""
         if key.geometry_level_id is not None:
-            frequency = self.thermo_source(key)
-        else:
-            frequency = next(
-                (
-                    c
-                    for c in sorted(self.node.calculations, key=_order, reverse=True)
-                    if c.type == CalculationType.FREQUENCY and c.result is not None
-                ),
-                None,
-            )
+            return self.thermo_source(key)
+        return next(
+            (
+                c
+                for c in sorted(self.node.calculations, key=_order, reverse=True)
+                if c.type == CalculationType.FREQUENCY and c.result is not None
+            ),
+            None,
+        )
+
+    def frequency_jobs(self) -> list[tuple[LevelKey, Calculation]]:
+        """D158: per composite level a frequency job is at, the latest one there (the one the
+        energies at that geometry level use)."""
+        found: dict[LevelKey, Calculation] = {}
+        for key, calculations in self.by_key.items():
+            for calculation in calculations:
+                if calculation.type == CalculationType.FREQUENCY:
+                    found[key] = calculation
+        return list(found.items())
+
+    def optimization_at(self, key: LevelKey) -> Calculation | None:
+        """D158: the latest optimization at this composite level's geometry level."""
+        if key.geometry_level_id is None:
+            return None
+        at_geometry = LevelKey(key.geometry_level_id, key.geometry_level_id)
+        found = [c for c in self.by_key.get(at_geometry, []) if c.type in levels.OPTIMIZATION_TYPES]
+        return found[-1] if found else None
+
+    def check(self, key: LevelKey, energy_type: str = "E") -> dict[str, Any] | None:
+        """D154, D158: what the calculations behind this value say against using it, shown
+        wherever the value is used (profiles, the table, selectivities, turnovers) and never
+        changing it or any status (D19): the frequency job at the geometry level against the
+        node's role, that job not at a stationary point, the optimization at the geometry
+        level unfinished, and the energy calculation (and for H, G and G_qh the frequency job)
+        ended abnormally. `code` and `message` are the first issue and all messages joined;
+        `issues` lists each."""
+        issues: list[dict[str, str]] = []
+        frequency = self.frequency_at(key)
         if frequency is None:
-            if role == Role.TRANSITION_STATE:
-                return {
-                    "code": "W-TS-NOFREQ",
-                    "message": "no frequency calculation at the geometry level shows it is a "
-                    "transition state",
-                }
-            return None
-        count = frequency.result.imaginary_count
-        if count is None or (count == 1) == (role == Role.TRANSITION_STATE):
-            return None
-        imaginary = [f for f in frequency.result.frequencies if f < 0]
-        shown = ", ".join(f"{f:.1f}" for f in imaginary)
-        plural = "frequency" if count == 1 else "frequencies"
-        if role == Role.TRANSITION_STATE:
-            message = f"{count} imaginary {plural} at the geometry level, not 1"
+            if self.node.role == Role.TRANSITION_STATE:
+                issues.append(
+                    {
+                        "code": "W-TS-NOFREQ",
+                        "message": "no frequency calculation at the geometry level shows it "
+                        "is a transition state",
+                    }
+                )
         else:
-            message = f"{count} imaginary {plural} at the geometry level"
+            issues += frequency_issues(self.node.role, frequency, "at the geometry level")
+        optimization = self.optimization_at(key)
+        if optimization is not None and optimization.result.optimization_converged is False:
+            issues.append(
+                {
+                    "code": "W-OPT-INC",
+                    "message": "the optimization at the geometry level did not finish",
+                }
+            )
+        source = self.energy(key)
+        ended = [("energy", source)]
+        if energy_type != "E" and frequency is not None and frequency is not source:
+            ended.append(("frequency", frequency))
+        for name, calculation in ended:
+            if calculation is not None and calculation.termination == "abnormal":
+                issues.append(
+                    {
+                        "code": "W-TERM",
+                        "message": f"the {name} calculation did not terminate normally",
+                    }
+                )
+        if not issues:
+            return None
         return {
-            "code": "W-IMAG-TS" if role == Role.TRANSITION_STATE else "W-IMAG-MIN",
-            "message": f"{message} ({shown} cm⁻¹)" if shown else message,
+            "code": issues[0]["code"],
+            "message": "; ".join(i["message"] for i in issues),
+            "issues": issues,
         }
 
     def value(self, key: LevelKey, energy_type: str) -> Value:
         found = self._value(key, energy_type)
-        found.check = self.check(key)
+        found.check = self.check(key, energy_type)
         return found
 
     def _value(self, key: LevelKey, energy_type: str) -> Value:

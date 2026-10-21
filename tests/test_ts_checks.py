@@ -20,6 +20,16 @@ def point(client, label: str, frequencies, shift: float, role: str, energy=-76.4
     return node_id
 
 
+def shown(check: dict | None) -> dict | None:
+    """The check's code and message; with one issue, `issues` repeats it (D158)."""
+    if check is None:
+        return None
+    assert check["issues"][0]["code"] == check["code"]
+    if len(check["issues"]) == 1:
+        assert check["issues"][0]["message"] == check["message"]
+    return {"code": check["code"], "message": check["message"]}
+
+
 def codes(client, node_id: str) -> list[str]:
     return [w["code"] for w in node(client, node_id)["warnings"]]
 
@@ -32,15 +42,15 @@ def test_the_value_carries_the_check_at_its_geometry_level(open_client):
     bent = point(open_client, "Min", g.TS_FREQUENCIES, 0.15, "minimum")
     values = view(open_client, level_key(open_client, LEVEL), "G")["values"]
     assert values[good]["check"] is None
-    assert values[flat]["check"] == {
+    assert shown(values[flat]["check"]) == {
         "code": "W-IMAG-TS",
         "message": "0 imaginary frequencies at the geometry level, not 1",
     }
-    assert values[two]["check"] == {
+    assert shown(values[two]["check"]) == {
         "code": "W-IMAG-TS",
         "message": "2 imaginary frequencies at the geometry level, not 1 (-500.0, -120.5 cm⁻¹)",
     }
-    assert values[bent]["check"] == {
+    assert shown(values[bent]["check"]) == {
         "code": "W-IMAG-MIN",
         "message": "1 imaginary frequency at the geometry level (-500.0 cm⁻¹)",
     }
