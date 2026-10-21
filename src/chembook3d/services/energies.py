@@ -141,6 +141,17 @@ def quasi_harmonic(
     )
 
 
+def _state(calculation: Calculation) -> tuple[int, int | None] | None:
+    """D155: a calculation's charge and multiplicity, None when the file did not say."""
+    if calculation.charge is None:
+        return None
+    return (calculation.charge, calculation.multiplicity)
+
+
+def _state_text(state: tuple[int | None, int | None]) -> str:
+    return f"charge {state[0]}, multiplicity {state[1]}"
+
+
 class NodeEnergies:
     """Every energy one node has, by composite level."""
 
@@ -154,20 +165,48 @@ class NodeEnergies:
         tolerance = app_settings.load().geometry_tolerance
         geometry = levels.node_geometry_level(node, tolerance)
         self.by_key: dict[LevelKey, list[Calculation]] = {}
+        # D155: calculations for another charge or multiplicity than the node's are another
+        # electronic state; they stay on the node (W-CHG) but give none of its energies.
+        self.other_state: dict[LevelKey, tuple[int, int | None]] = {}
+        own = (node.charge, node.multiplicity) if node.charge is not None else None
         for calculation in sorted(node.calculations, key=_order):
             if calculation.type == CalculationType.OTHER and calculation.route.startswith(
                 joined.ROUTE
             ):
                 continue  # D137: a joined scan's energies stay on its own chart
             key = calculation_key(calculation, geometry.id if geometry else None, tolerance)
-            if key is not None and calculation.result is not None:
-                self.by_key.setdefault(key, []).append(calculation)
+            if key is None or calculation.result is None:
+                continue
+            state = _state(calculation)
+            if own is not None and state is not None and state != own:
+                self.other_state[key] = state
+                continue
+            self.by_key.setdefault(key, []).append(calculation)
         self._qh: dict[str, thermochem.QuasiHarmonic | thermochem.NotComputable] = {}
 
     def energy(self, key: LevelKey) -> Calculation | None:
-        """The latest calculation with an SCF energy at this composite level."""
+        """The latest calculation with an SCF energy at this composite level; none when they
+        are for different charges or multiplicities (D155: never the latest of two states)."""
         found = [c for c in self.by_key.get(key, []) if c.result.energy is not None]
+        if len({_state(c) for c in found} - {None}) > 1:
+            return None
         return found[-1] if found else None
+
+    def _no_energy(self, key: LevelKey) -> Value:
+        """Why there is no energy at this level (D155: another electronic state's)."""
+        found = [c for c in self.by_key.get(key, []) if c.result.energy is not None]
+        states = sorted({_state(c) for c in found} - {None}, key=str)
+        if len(states) > 1:
+            listed = " and ".join(_state_text(s) for s in states)
+            return Value(None, "W-CHG", f"the calculations at this level are for {listed}")
+        if key in self.other_state and not found:
+            return Value(
+                None,
+                "W-CHG",
+                f"the calculations at this level are for {_state_text(self.other_state[key])}, "
+                f"not the node's {_state_text((self.node.charge, self.node.multiplicity))}",
+            )
+        return Value(None, None, "no energy at this level")
 
     def thermo_source(self, key: LevelKey) -> Calculation | None:
         """EN-4: the latest frequency calculation on this node at the geometry level."""
@@ -244,7 +283,7 @@ class NodeEnergies:
     def _value(self, key: LevelKey, energy_type: str) -> Value:
         source = self.energy(key)
         if source is None:
-            return Value(None, None, "no energy at this level")
+            return self._no_energy(key)
         energy = source.result.energy
         if energy_type == "E":
             return Value(energy, energy_calculation_id=source.id)
@@ -262,6 +301,16 @@ class NodeEnergies:
                 "W-NOFREQ",
                 "no frequency calculation at the geometry level",
                 source.id,
+            )
+        if None not in (_state(source), _state(thermo)) and _state(source) != _state(thermo):
+            # D155: only for a node whose own state is not known; otherwise both match it.
+            return Value(
+                None,
+                "W-CHG",
+                f"the energy is for {_state_text(_state(source))} and the frequency calculation "
+                f"for {_state_text(_state(thermo))}",
+                source.id,
+                thermo.id,
             )
         result = thermo.result
         details: dict[str, Any] = {

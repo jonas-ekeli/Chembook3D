@@ -97,7 +97,7 @@ Notes:
 | W-NOFREQ | Free energy requested but the node has no frequency calculation at the required level |
 | W-LINEAR | G_qh requested for a linear molecule (D58, A14) |
 | W-QH | G_qh cannot be computed at the chosen temperature or cutoff (A14) |
-| W-CHG | Calculations on one node disagree on charge or multiplicity |
+| W-CHG | Calculations on one node disagree on charge or multiplicity; those for another state than the node's give none of its energies (D155) |
 | W-GEOM | A calculation's geometry does not match its node's geometry |
 | W-PARSE | A file was only partly parsed; the missing fields are listed |
 | W-DUP | Possible duplicate of another node (ID-8) |
@@ -119,6 +119,7 @@ Notes:
 | EN-8 | A profile is relative to a user-chosen reference node on the pathway: value(n) = X(n) − X(ref), plus X of every free species that left and minus X of every one that joined between the reference and n (D69). Node cards in energy mode use the same balance, along the route from the reference that D72 defines. |
 | EN-9 | Units: stored in hartree, displayed in kcal/mol by default, configurable (D28). |
 | EN-10 | Energies may be sorted and displayed, but never used by the app to pick nodes, representatives or pathways (D4, X5). |
+| EN-11 | A node's energies come only from calculations for its own charge and multiplicity (D155). A calculation for another state stays on the node with W-CHG but gives no value at any level; when the node's state is not set, a level with calculations for two states, or an energy and a frequency calculation for different states, has no value. |
 
 ## 6. Worked example: Ru-CAAC olefin metathesis (accepted, D12)
 
