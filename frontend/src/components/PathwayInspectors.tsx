@@ -939,27 +939,22 @@ export function GroupInspector({
   )
 }
 
-/** WF-07: reconnect the selected nodes as a group, optionally with an outgoing branch. */
-function ReconnectDialog({
+/** WF-07, D152: make a group of the selected nodes. Where paths meet is shown by edges, so the
+ * dialog starts no branch; one can still be set as the group's outgoing branch in its inspector. */
+function CreateGroupDialog({
   nodes,
-  canvas,
   onClose,
   onDone,
 }: {
   nodes: Node[]
-  canvas: Canvas
   onClose: () => void
   onDone: (group: Group) => void
 }) {
   const [label, setLabel] = useState('')
-  const [outgoing, setOutgoing] = useState(true)
-  const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const incoming = [...new Set(nodes.map((n) => n.branch_id).filter((b): b is string => !!b))]
-  const byId = new Map(canvas.branches.map((b) => [b.id, b]))
   return (
     <Modal
-      title="Reconnect as group"
+      title="Create group"
       onClose={onClose}
       actions={
         <>
@@ -968,40 +963,23 @@ function ReconnectDialog({
             className="primary"
             onClick={() =>
               api
-                .reconnect(
+                .createGroup(
                   nodes.map((n) => n.id),
                   label,
-                  outgoing ? { name } : null,
                 )
                 .then(onDone, (err: unknown) => setError(errorText(err)))
             }
           >
-            Reconnect
+            Create
           </button>
         </>
       }
     >
-      <p>
-        {nodes.length} nodes become members of a new group. Each keeps its branch (D66), and their branches are
-        recorded as the group's incoming branches.
-      </p>
-      <p className="muted small">
-        Incoming branches: {incoming.length ? incoming.map((id) => branchName(byId.get(id))).join(', ') : 'none'}
-      </p>
+      <p>{nodes.length} nodes become members of a new group. Each keeps its branch (D66).</p>
       <label className="field">
         <span>Group label</span>
         <input aria-label="Group label" value={label} onChange={(event) => setLabel(event.target.value)} />
       </label>
-      <label className="check">
-        <input type="checkbox" checked={outgoing} onChange={(event) => setOutgoing(event.target.checked)} />
-        <span>Create an outgoing branch whose parents are the incoming branches</span>
-      </label>
-      {outgoing && (
-        <label className="field">
-          <span>Outgoing branch name</span>
-          <input aria-label="Outgoing branch name" value={name} onChange={(event) => setName(event.target.value)} />
-        </label>
-      )}
       <p className="muted small">Transitions into the group are optional (D14).</p>
       {error && <p role="alert">{error}</p>}
     </Modal>
@@ -1067,7 +1045,7 @@ function describeSelection(nodes: Node[], groups: Group[]): string {
   return `${parts.join(' and ')} selected`
 }
 
-/** Actions on several selected nodes: assign step or branch, reconnect, overlay up to 12, or add
+/** Actions on several selected nodes: assign step or branch, group them, overlay up to 12, or add
  * them to a group selected with them (A20). */
 export function SelectionInspector({
   nodes,
@@ -1086,7 +1064,7 @@ export function SelectionInspector({
   onSelectivity: () => void
 }) {
   const [error, setError] = useState<string | null>(null)
-  const [reconnecting, setReconnecting] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [adding, setAdding] = useState(false)
   const [overlay, setOverlay] = useState(false)
   const [sterics, setSterics] = useState(false)
@@ -1164,10 +1142,10 @@ export function SelectionInspector({
         )}
         <button
           disabled={nodes.length < 2 || groups.length > 0 || free.length !== nodes.length}
-          onClick={() => setReconnecting(true)}
+          onClick={() => setCreating(true)}
           title="WF-07"
         >
-          Reconnect as group…
+          Create group…
         </button>
         <button
           disabled={nodes.length < 2 || nodes.length > MAX_OVERLAY || nodes.some((n) => !n.xyz)}
@@ -1216,13 +1194,12 @@ export function SelectionInspector({
         <p className="muted small">The selected nodes are already in this group.</p>
       )}
       {error && <p role="alert">{error}</p>}
-      {reconnecting && (
-        <ReconnectDialog
+      {creating && (
+        <CreateGroupDialog
           nodes={nodes}
-          canvas={canvas}
-          onClose={() => setReconnecting(false)}
+          onClose={() => setCreating(false)}
           onDone={(group) => {
-            setReconnecting(false)
+            setCreating(false)
             onGroupCreated(group)
           }}
         />

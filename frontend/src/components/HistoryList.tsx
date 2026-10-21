@@ -125,7 +125,7 @@ function describeStructure(entry: HistoryEntry, names: Names): string | null {
   }
   if (entry.action === 'reconnect' && value) {
     const members = (value.member_ids as string[]) ?? []
-    return `Reconnected ${members.length} nodes as group “${title || 'Group'}” (${named(names, members)})`
+    return `Grouped ${members.length} nodes as “${title || 'Group'}” (${named(names, members)})`
   }
   if (entry.action === 'add_members' && value) {
     const before = new Set(((entry.old_value as Record<string, unknown> | null)?.member_ids as string[]) ?? [])

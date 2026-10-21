@@ -668,11 +668,12 @@ TOOLS: list[ToolSpec] = [
         "write",
         "POST",
         "/api/groups/reconnect",
-        "Make a group node of several nodes (e.g. conformers standing for one point); their "
-        "edges are reconnected to the group. The representative is the user's choice.",
+        "Make a group node of several nodes (e.g. conformers standing for one point). Members "
+        "keep their branch and their edges. The representative is the user's choice.",
         help={
             "label": "The group's name.",
-            "outgoing": "Optionally a new outgoing branch {name, colour}.",
+            "outgoing": "Optionally a new outgoing branch {name, colour} whose parents are the "
+            "members' branches; leave it out unless the user asks for one (D152).",
         },
     ),
     T(

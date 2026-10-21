@@ -1,8 +1,9 @@
 """Group nodes and reconnections (FR-GRP-01, 02, 04, 05; D13, D14, D18, D54, P4).
 
-- "Reconnect as group" puts the selected nodes in a new group, records the branches they came
-  from as the group's incoming branches, and can create an outgoing branch whose parents are
-  those branches (D13). Members keep their branch, so one group can hold members from several
+- "Create group" puts the selected nodes in a new group and records the branches they came
+  from as the group's incoming branches. The API can also create an outgoing branch whose
+  parents are those branches (D13); the UI no longer offers it, since edges show where paths
+  meet (D152). Members keep their branch, so one group can hold members from several
   branches, e.g. one conformer per branch of the same species (D66).
 - The representative is chosen by the user and never by the app (FR-GRP-02, EN-10).
 - Transitions into a group are optional (D14): nothing here requires one.
@@ -83,7 +84,7 @@ def reconnect(session: Session, fields: dict[str, Any]) -> GroupNode:
     colour of a new outgoing branch) and step_id."""
     member_ids = fields.get("member_ids")
     if not isinstance(member_ids, list) or len(set(member_ids)) < 2:
-        raise RecordError("Select at least two nodes to reconnect as a group")
+        raise RecordError("Select at least two nodes to make a group")
     nodes = [get(session, Node, node_id, "Node") for node_id in dict.fromkeys(member_ids)]
     _refuse_species(nodes)
     for node in nodes:

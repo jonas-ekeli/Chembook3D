@@ -151,20 +151,21 @@ test('an arrow can leave from and arrive at any side of a node', async ({ page }
   await expect.poll(sides).toBe('right>left')
 })
 
-test('reconnect branches as a group, pick a representative, see its structure, then dissolve it', async ({ page }) => {
-  // WF-07, FR-GRP-01/02/05, T-BR-04, T-BR-10, T-BR-14 (dissolve)
+test('group nodes from two branches, pick a representative, see its structure, then dissolve it', async ({ page }) => {
+  // WF-07, FR-GRP-01/02/05, T-BR-04, T-BR-10, T-BR-14 (dissolve), D152
   await openDemo(page)
   await canvasNode(page, 'A-S3').click()
   await expect(page.getByLabel('Node inspector').getByRole('heading', { name: 'A-S3' })).toBeVisible()
   await canvasNode(page, 'B-S3').click({ modifiers: ['Control'] })
   const selection = page.getByLabel('Selection inspector')
   await expect(selection.getByRole('heading')).toHaveText('2 nodes selected')
-  await selection.getByRole('button', { name: 'Reconnect as group…' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Reconnect as group' })
-  await expect(dialog).toContainText('Incoming branches: A, B')
+  const branchesBefore = (await canvasRecords(page)).branches.length
+  await selection.getByRole('button', { name: 'Create group…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Create group' })
+  // D152: edges show where paths meet, so creating a group starts no branch.
+  await expect(dialog.getByRole('checkbox')).toHaveCount(0)
   await dialog.getByLabel('Group label').fill('G3')
-  await dialog.getByLabel('Outgoing branch name').fill('R')
-  await dialog.getByRole('button', { name: 'Reconnect' }).click()
+  await dialog.getByRole('button', { name: 'Create', exact: true }).click()
 
   const group = page.getByLabel('Group inspector')
   await expect(group.getByRole('heading', { name: 'G3' })).toBeVisible()
@@ -186,7 +187,9 @@ test('reconnect branches as a group, pick a representative, see its structure, t
   await expect(box.getByRole('img', { name: 'Structure' })).toHaveCount(0)
   await box.getByRole('button', { name: 'Expand group' }).click()
   await expect(canvasNode(page, 'A-S3')).toBeVisible()
-  await expect(page.getByRole('list', { name: 'Branch list' })).toContainText('R')
+  const records = await canvasRecords(page)
+  expect(records.branches).toHaveLength(branchesBefore)
+  expect(records.groups.find((g: { label: string }) => g.label === 'G3').outgoing_branch_id).toBeNull()
 
   // D54, P4: dissolve and put members back in the branches they came from.
   await canvasNode(page, 'T-S0').click()
@@ -209,11 +212,10 @@ test('add a node to a group and cycle its members through a column, a row and th
   await expect(page.getByLabel('Node inspector').getByRole('heading', { name: 'A-S3' })).toBeVisible()
   await canvasNode(page, 'B-S3').click({ modifiers: ['Control'] })
   const selection = page.getByLabel('Selection inspector')
-  await selection.getByRole('button', { name: 'Reconnect as group…' }).click()
-  const reconnect = page.getByRole('dialog', { name: 'Reconnect as group' })
-  await reconnect.getByLabel('Group label').fill('G4')
-  await reconnect.getByLabel('Create an outgoing branch whose parents are the incoming branches').uncheck()
-  await reconnect.getByRole('button', { name: 'Reconnect' }).click()
+  await selection.getByRole('button', { name: 'Create group…' }).click()
+  const create = page.getByRole('dialog', { name: 'Create group' })
+  await create.getByLabel('Group label').fill('G4')
+  await create.getByRole('button', { name: 'Create', exact: true }).click()
   const inspector = page.getByLabel('Group inspector')
   await expect(inspector.getByRole('heading', { name: 'G4' })).toBeVisible()
   try {
@@ -221,7 +223,7 @@ test('add a node to a group and cycle its members through a column, a row and th
     const box = page.getByRole('group', { name: 'Group G4' })
     await canvasNode(page, 'A-S1').click({ modifiers: ['Control'] })
     await expect(selection.getByRole('heading')).toHaveText('1 node and 1 group selected')
-    await expect(selection.getByRole('button', { name: 'Reconnect as group…' })).toBeDisabled()
+    await expect(selection.getByRole('button', { name: 'Create group…' })).toBeDisabled()
     await selection.getByRole('button', { name: 'Add to “G4”…' }).click()
     const add = page.getByRole('dialog', { name: 'Add to group' })
     await expect(add).toContainText('A-S1 becomes a member of “G4”')

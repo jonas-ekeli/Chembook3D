@@ -2033,8 +2033,9 @@ export const api = {
   detachSpecies: (id: string, speciesId: string) =>
     request<Transition>('DELETE', `/transitions/${id}/species/${speciesId}`),
 
-  reconnect: (member_ids: string[], label: string, outgoing: { name: string; colour?: string } | null) =>
-    request<Group>('POST', '/groups/reconnect', { member_ids, label, outgoing }),
+  // D152: the UI starts no outgoing branch; the API still takes one (the agent's create_group).
+  createGroup: (member_ids: string[], label: string) =>
+    request<Group>('POST', '/groups/reconnect', { member_ids, label, outgoing: null }),
   updateGroup: (id: string, fields: GroupFields) => request<Group>('PATCH', `/groups/${id}`, fields),
   addToGroup: (id: string, node_ids: string[]) => request<Group>('POST', `/groups/${id}/members`, { node_ids }),
   reorderGroup: (id: string, ids: string[]) => request<Group>('PUT', `/groups/${id}/order`, { ids }),

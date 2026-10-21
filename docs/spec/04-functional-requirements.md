@@ -116,7 +116,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-EDGE-01 | The user can create a directed transition between any two nodes or group nodes, with status and notes. | D3 | 3 |
 | FR-EDGE-02 | Transitions between nodes of different branches are allowed and do not change membership. | D17, INV-4 | 3 |
 | FR-EDGE-03 | A transition where neither endpoint is a TS-role node is a **direct connection**. It is drawn dotted with a "no TS" marker on the canvas, and is listed as such in the overview and the inspector. | D53 | 3 |
-| FR-GRP-01 | "Reconnect as group" creates a group node from selected nodes, records the incoming branches, and optionally creates an outgoing branch whose parents are the incoming branches. | D13, D18 | 3 |
+| FR-GRP-01 | "Create group" creates a group node from selected nodes and records the incoming branches. It starts no branch (D152); an outgoing branch whose parents are the incoming branches can be set by hand, or passed through the API. | D13, D18, D152 | 3 |
 | FR-GRP-02 | The user marks at most one member as representative. The app never sets it automatically. | D18, EN-10 | 3 |
 | FR-GRP-03 | Members can be sorted by energy at the current view level and type. | D18 | 4 |
 | FR-GRP-04 | Transitions into a group node are optional. | D14 | 3 |
