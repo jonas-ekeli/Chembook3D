@@ -86,6 +86,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-IMP-18 | An IRC file in the import dialog is offered to the transition states it starts from instead of the canvas; a batch import puts IRC files into the IRC of their TS; the IRC window imports a file from a server logged in to into a slot, with an ORCA IRC's trajectories (D134) |
 | FR-IMP-19 | The energy of a Gaussian step with a correlated method (double hybrid, MP2, MP3, MP4, CCSD(T), QCISD(T)) is the method's own printed total, and the calculation names it (e.g. "E(B2PLYPD3)"); a correlated method whose total is not read has no energy and W-PARSE (D153). | D153, A97, 05 §3.1 | after 5 |
 | FR-IMP-20 | A step a scan, frozen coordinates or frozen atoms held (Gaussian ModRedundant S/F and frozen atoms, ORCA `%geom Scan`/`Constraints`, xTB `$constrain`/`$scan`/`$fix`) imports with no suggested role and W-CONSTRAINED, and never gives a geometry level (D157) | Must |
+| FR-IMP-22 | ⟨S²⟩ is read from Gaussian (before and after annihilation) and ORCA (with its ideal value), kept with the calculation's results and shown with them; a calculation whose ⟨S²⟩ is more than 10 % from S(S+1) (a singlet: above 0.1) gets W-SPIN, which the values made from it carry into profiles, the energy table and the analyses; older imports are read again once (D162) | Must |
 
 **AC:**
 - An opt+freq output yields one node with 2 calculations (opt, freq), the geometry from the last step, and G, T and P shown.

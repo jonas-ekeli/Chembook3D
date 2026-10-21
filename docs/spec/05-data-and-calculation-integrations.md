@@ -43,6 +43,7 @@ The exact input file variants beyond these (e.g. .fchk, .gjf, ORCA .hess, CREST 
 - **"Highest level of theory"** is not something the app can rank reliably. Default: the **last** step. The preview shows the choice and lets the user override it (FR-IMP-02).
 - **Termination:** "Normal termination" per step. A missing one means abnormal.
 - **Correlated methods (D153):** a step's energy is the method's own printed total, never the SCF energy of its reference: `E(<name>)` after `E2(<name>)` for a double hybrid (B2PLYP, DSD-PBEP86, mPW2PLYP, PBE0-DH…), `EUMP2`, `EUMP3`, `UMP4(DQ|SDQ|SDTQ)`, `CCSD(T)=` and `QCISD(T)=`; in an optimization, each structure's. A correlated method whose total is not read (CCSD, QCISD, CISD, BD…, or a job cut off before it) gets no energy and W-PARSE "correlated energy (method)". ORCA's `FINAL SINGLE POINT ENERGY` already includes the correlation energy.
+- **Spin contamination (D162):** ⟨S²⟩ after each unrestricted SCF, before and after annihilation (`S**2 before annihilation x, after y`, else the `<S**2>=` line), the last of the step; ORCA's `Expectation value of <S**2>` and `Ideal value S*(S+1)` likewise. Kept as printed in the result's `printed`; W-SPIN beyond 10 % of S(S+1) (a singlet: above 0.1).
 
 ## 4. Thermochemistry
 

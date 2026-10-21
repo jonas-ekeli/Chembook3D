@@ -19,6 +19,9 @@ import re
 from collections.abc import Callable
 
 from chembook3d.parsers.common import (
+    S2,
+    S2_IDEAL,
+    SPIN_KEYS,
     Criterion,
     IrcPoint,
     IrcRun,
@@ -162,6 +165,9 @@ _THERMO = {
 }
 _POINT_GROUP = re.compile(r"^Point Group:\s+(\S+),\s+Symmetry Number:\s+(\d+)")
 _ROTATIONAL = re.compile(r"^Rotational constants in cm-1:\s+(.*)$")
+# D162: the "UHF SPIN CONTAMINATION" block printed after an unrestricted SCF.
+_S2 = re.compile(r"^Expectation value of <S\*\*2>\s*:\s*(-?\d+\.\d+)")
+_S2_IDEAL = re.compile(r"^Ideal value S\*\(S\+1\) for S=\S+\s*:\s*(-?\d+\.\d+)")
 _LINEAR_GROUPS = {"DINFH": "D*H", "CINFV": "C*V"}
 _FREQUENCY = re.compile(r"^\s*(\d+):\s+(" + _FLOAT + r")\s+cm\*\*-1")
 
@@ -295,6 +301,10 @@ def _parse_block(lines: list[str], step: ParsedStep, geometries: bool = True) ->
             else:
                 if step.geometry_energies:
                     step.geometry_energies[-1] = energies[-1]
+        elif (match := _S2.match(line)) is not None:
+            step.printed[S2] = match.group(1)  # D162: the last SCF's counts
+        elif (match := _S2_IDEAL.match(line)) is not None:
+            step.printed[S2_IDEAL] = match.group(1)
         elif (match := _CRITERION.match(line)) and step.geometry_criteria:
             # The table belongs to the cycle's structure, the last one read.
             if (found := _criterion(match)) is not None:
@@ -606,6 +616,11 @@ def parse(text: str, companion: Companion | None = None) -> ParsedFile:
                 step.geometries = [previous.geometries[-1]]
             if step.scf_energy is None:
                 step.scf_energy = previous.scf_energy
+                # D162: the frequency job of an `opt freq` runs no SCF of its own.
+                if S2 not in step.printed:
+                    for key in SPIN_KEYS:
+                        if key in previous.printed:
+                            step.printed[key] = previous.printed[key]
         if step.charge is None:
             step.charge, step.multiplicity = _charge_from_input(echoed)
         _read_solvation(lines, step)

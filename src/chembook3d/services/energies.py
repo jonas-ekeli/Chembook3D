@@ -34,7 +34,7 @@ from chembook3d.models import (
 )
 from chembook3d.parsers import joined
 from chembook3d.parsers.common import NOT_STATIONARY
-from chembook3d.services import levels, thermo_settings
+from chembook3d.services import levels, spin, thermo_settings
 from chembook3d.services.records import RecordError
 
 ENERGY_TYPES = ("E", "H", "G", "G_qh")
@@ -323,8 +323,8 @@ class NodeEnergies:
         changing it or any status (D19): the frequency job at the geometry level against the
         node's role, that job not at a stationary point, the optimization at the geometry
         level unfinished, and the energy calculation (and for H, G and G_qh the frequency job)
-        ended abnormally. `code` and `message` are the first issue and all messages joined;
-        `issues` lists each."""
+        ended abnormally or with a contaminated ⟨S²⟩ (D162). `code` and `message` are the
+        first issue and all messages joined; `issues` lists each."""
         issues: list[dict[str, str]] = []
         frequency = self.frequency_at(key)
         if frequency is None:
@@ -357,6 +357,13 @@ class NodeEnergies:
                         "code": "W-TERM",
                         "message": f"the {name} calculation did not terminate normally",
                     }
+                )
+        for name, calculation in ended:
+            # D162: a contaminated ⟨S²⟩ of the calculations the value is made of.
+            found = spin.contamination(calculation, self.node.multiplicity) if calculation else None
+            if found is not None:
+                issues.append(
+                    {"code": "W-SPIN", "message": spin.message(found, f"of the {name} calculation")}
                 )
         if not issues:
             return None

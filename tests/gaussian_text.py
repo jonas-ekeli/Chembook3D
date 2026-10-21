@@ -84,7 +84,11 @@ def step(
     body=(),
     after=(),
     thermo=THERMO,
+    spin=None,
 ) -> str:
+    """One job step. `spin` prints ⟨S²⟩ after every SCF as an unrestricted job does (D162):
+    a (before, after) annihilation pair, or a list of pairs, one per structure; `after` None
+    prints only the summary line."""
     lines = [
         " Link1:  Proceeding to internal job step number  2."
         if internal
@@ -100,9 +104,12 @@ def step(
         f" Charge = {charge:2d} Multiplicity = {multiplicity}",
         *body,
     ]
-    for atoms in geometries:
+    pairs = spin if isinstance(spin, list) else [spin] * len(geometries)
+    for atoms, pair in zip(geometries, pairs, strict=True):
         lines += orientation(atoms)
         lines.append(f" SCF Done:  E(RB3LYP) =  {energy:.8f}     A.U. after   10 cycles")
+        if pair is not None:
+            lines += spin_lines(*pair)
     if converged:
         lines += [" Optimization completed.", "    -- Stationary point found."]
     if frequencies:
@@ -112,6 +119,20 @@ def step(
     if terminate:
         lines.append(" Normal termination of Gaussian 16 at Tue Sep 29 12:00:00 2026.")
     return "\n".join(lines) + "\n"
+
+
+def spin_lines(before: float, after: float | None) -> list[str]:
+    """D162: what Gaussian 16 prints after an unrestricted SCF."""
+    lines = [
+        f" <Sx>= 0.0000 <Sy>= 0.0000 <Sz>= 0.5000 <S**2>= {before:.4f} S= 0.5000",
+        " <L.S>= 0.000000000000E+00",
+    ]
+    if after is not None:
+        lines += [
+            " Annihilation of the first spin contaminant:",
+            f" S**2 before annihilation{before:>11.4f},   after{after:>10.4f}",
+        ]
+    return lines
 
 
 def output(*steps: str) -> str:
