@@ -194,8 +194,9 @@ test('profile along branches with a "no TS" connection, the energy table and exp
   const shown = await table.getByRole('row').evaluateAll((rows) =>
     rows.map((row) => Array.from(row.querySelectorAll('th, td')).map((cell) => cell.textContent ?? '')),
   )
-  expect(shown[0].at(-1)).toBe('ΔG (kcal/mol)')
-  expect(shown.find((row) => row[0] === 'A-S3')?.at(-1)).toBe('-8.50')
+  expect(shown[0].at(-2)).toBe('ΔG (kcal/mol)')
+  expect(shown[0].at(-1)).toBe('Check') // D154
+  expect(shown.find((row) => row[0] === 'A-S3')?.at(-2)).toBe('-8.50')
 
   // T-EN-08: the CSV holds the same text as the table on screen.
   const download = page.waitForEvent('download')

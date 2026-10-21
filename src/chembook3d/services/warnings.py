@@ -69,6 +69,10 @@ def node_warnings(node: Node) -> list[Finding]:
                 )
             )
 
+    elif node.role == Role.TRANSITION_STATE and calculations:
+        # D154: a TS with calculations but no frequency job is not shown to be one.
+        found.append(Finding("W-TS-NOFREQ", "transition state with no frequency calculation"))
+
     states = {(c.charge, c.multiplicity) for c in calculations if c.charge is not None}
     if node.charge is not None and node.multiplicity is not None and states:
         states.add((node.charge, node.multiplicity))

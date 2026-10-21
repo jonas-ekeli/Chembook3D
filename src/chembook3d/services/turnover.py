@@ -331,8 +331,11 @@ def result(
                 "is_ts": role == Role.TRANSITION_STATE,
                 "relative": point["relative"],
                 "control": None,
+                "check": point["check"],
             }
         )
+        if point["check"] is not None:  # D154
+            notes.append(f"“{point['label']}”: {point['check']['message']}.")
         if role == Role.UNSPECIFIED:
             notes.append(
                 f"“{point['label']}” is not marked as a minimum or a transition state; it "

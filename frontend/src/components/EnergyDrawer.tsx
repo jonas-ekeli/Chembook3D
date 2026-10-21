@@ -13,7 +13,7 @@ import {
   type ViewState,
 } from '../api'
 import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
-import { closesCycle, download } from '../util'
+import { closesCycle, download, tableCellClass } from '../util'
 import { ProfileChart } from './ProfileChart'
 import { ProfileStyleDialog } from './ProfileStyleDialog'
 import { CompareStericsDialog } from './Sterics'
@@ -574,7 +574,7 @@ export function EnergyDrawer({
                   {shownTable.rows.map((row, i) => (
                     <tr key={i}>
                       {row.map((cell, j) => (
-                        <td key={j} className={j >= 4 ? 'num' : undefined}>
+                        <td key={j} className={tableCellClass(j, row.length)}>
                           {cell}
                         </td>
                       ))}

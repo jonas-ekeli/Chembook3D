@@ -211,7 +211,7 @@ def test_closed_cycle_ends_at_the_reaction_energy(open_client, cycle):
     body = {"paths": [path], "reference_id": cycle.ids["A"], "level": svp(open_client), "type": "E"}
     table = post(open_client, "/energies/table", body, status=200)
     column = table["columns"].index("Free species")
-    rows = [(r[0], r[column], r[-1]) for r in table["rows"]]
+    rows = [(r[0], r[column], r[-2]) for r in table["rows"]]
     reaction = (E["ethylene"] + E["butene"] - 2 * E["propene"]) * KCAL
     assert rows == [
         ("A", "", "0.00"),

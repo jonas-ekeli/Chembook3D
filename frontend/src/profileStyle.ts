@@ -71,6 +71,7 @@ function figureText(svg: SVGSVGElement): string {
   const copy = svg.cloneNode(true) as SVGSVGElement
   copy.removeAttribute('style')
   copy.removeAttribute('class')
+  copy.querySelectorAll('[data-check]').forEach((mark) => mark.remove()) // D154: on screen only
   return new XMLSerializer().serializeToString(copy)
 }
 

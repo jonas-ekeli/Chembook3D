@@ -294,7 +294,7 @@ def test_unit_switch_changes_display_not_stored_values(open_client):
     shown = {}
     for unit in ("kcal/mol", "kJ/mol", "eV", "hartree"):
         settings(open_client, energy_unit=unit)
-        shown[unit] = post(open_client, "/energies/table", body, status=200)["rows"][1][-1]
+        shown[unit] = post(open_client, "/energies/table", body, status=200)["rows"][1][-2]
         assert view(open_client, key, "E")["values"][b]["value"] == -76.39
     assert shown == {"kcal/mol": "6.28", "kJ/mol": "26.25", "eV": "0.272", "hartree": "0.010000"}
 
@@ -748,6 +748,7 @@ def test_energy_table_and_csv_show_the_same_values(open_client, energetic):
         "G_qh 298.15 K 100 cm-1 (hartree)",
         "Free species",
         "ΔG (kcal/mol)",
+        "Check",
     ]
     assert [row[0] for row in table["rows"]][:3] == ["T-pre", "A-S0", "A1-S1"]
     a1s2 = next(row for row in table["rows"] if row[0] == "A1-S2")

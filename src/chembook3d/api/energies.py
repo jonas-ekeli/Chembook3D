@@ -40,6 +40,8 @@ class ValueOut(BaseModel):
     energy_calculation_id: str | None
     thermo_calculation_id: str | None
     details: dict[str, Any]
+    # D154: what the frequency job at the geometry level says against the node's role
+    check: dict[str, str] | None = None
 
 
 class EdgeValueOut(BaseModel):

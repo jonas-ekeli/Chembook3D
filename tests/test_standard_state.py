@@ -120,4 +120,4 @@ def test_the_energy_table_names_the_standard_state(open_client, cycle):  # noqa:
         "G_qh 298.15 K 100 cm-1 1 M (hartree)",
     ]
     expected = (E["B"] - E["A"] - E["propene"] - 0.02 - shift()) * KCAL
-    assert table["rows"][1][-1] == f"{expected:.2f}"
+    assert table["rows"][1][-2] == f"{expected:.2f}"

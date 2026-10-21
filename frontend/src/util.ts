@@ -64,3 +64,10 @@ export function nameFilter(text: string): (name: string) => boolean {
   const glob = new RegExp(`^${pattern}$`, 's')
   return (name) => glob.test(name.toLowerCase())
 }
+
+/** The energy table's cell class (FR-EN-06): the energies are numbers; the last column holds
+ * what the frequency job says against the point's role (D154). */
+export function tableCellClass(column: number, columns: number): string | undefined {
+  if (column === columns - 1) return 'check'
+  return column >= 4 ? 'num' : undefined
+}

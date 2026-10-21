@@ -91,6 +91,7 @@ Notes:
 |---|---|
 | W-IMAG-MIN | Node role *minimum* and its frequency calculation has ≥1 imaginary frequency |
 | W-IMAG-TS | Node role *transition state* and its frequency calculation does not have exactly 1 imaginary frequency |
+| W-TS-NOFREQ | Node role *transition state*, with calculations but no frequency calculation (D154); on a value, no frequency calculation at its geometry level |
 | W-TERM | A calculation did not terminate normally |
 | W-OPT-INC | Node carries the `optimization-incomplete` tag |
 | W-NOFREQ | Free energy requested but the node has no frequency calculation at the required level |
@@ -100,6 +101,8 @@ Notes:
 | W-GEOM | A calculation's geometry does not match its node's geometry |
 | W-PARSE | A file was only partly parsed; the missing fields are listed |
 | W-DUP | Possible duplicate of another node (ID-8) |
+
+**Where energies are used (D154):** every energy value carries the check of the frequency calculation at its geometry level against the node's role (W-IMAG-TS, W-TS-NOFREQ, W-IMAG-MIN with the imaginary frequencies). Profiles mark such points, the energy table and its CSV have a "Check" column, and selectivities and turnovers list them in their notes. The check never changes a value or a status (D19).
 | W-BALANCE | A transition's atoms or total charge differ before (source + joining species) and after (target + leaving species); checked only when all of them have coordinates (D69) |
 
 ## 5. Energies
