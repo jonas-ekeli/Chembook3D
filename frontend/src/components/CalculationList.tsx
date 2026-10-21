@@ -157,7 +157,8 @@ export function ResultValues({ calculation }: { calculation: Pick<Calculation, '
   if (!r) return null
   return (
     <dl className="values">
-      <dt>E(SCF)</dt>
+      {/* D153: a correlated method's energy is its own printed total, named here. */}
+      <dt>{r.printed?.energy_label ?? 'E(SCF)'}</dt>
       <dd className="mono">{hartree(r.energy, 8)}</dd>
       {r.optimization_converged !== null && (
         <>

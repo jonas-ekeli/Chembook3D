@@ -54,7 +54,7 @@ function RowDetails({ row }: { row: BatchRow }) {
               <th>Step</th>
               <th>Type</th>
               <th>Level of theory</th>
-              <th>E(SCF) / Eh</th>
+              <th>E / Eh</th>
               <th>Termination</th>
               <th>Result</th>
             </tr>
