@@ -205,6 +205,9 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-EN-19 | A TS with an optimization but no frequency job; a planned TS with no calculations | The first has W-TS-NOFREQ on the node and on its E; the planned one has none (D154) |
 | T-EN-20 | A TS whose B3LYP frequency job has no imaginary frequency, then a PBE0 frequency job on it with one | Its B3LYP value still carries W-IMAG-TS (D154) |
 | T-EN-21 | A profile and table from a minimum to a TS with no imaginary frequency; a selectivity of that TS against a good one; a turnover through it | The profile point carries the check, the table's last column "Check" gives it, the selectivity member carries it and the result has one note for it, and the turnover notes it (D154) |
+| T-EN-22 | A singlet node with a singlet single point at B3LYP/def2TZVP, then a triplet single point at the same level imported onto it | E at TZ // DZ stays the singlet's, G_qh pairs it with the singlet frequency job, and W-CHG says the triplet is left out of the node's energies (D155) |
+| T-EN-23 | A singlet node whose only TZ single point is a triplet, with the level shown through another node | Its value is n/a with W-CHG naming the triplet and the node's singlet; the import preview says to import another state as a new node (D155) |
+| T-EN-24 | The node of T-EN-22 with its charge and multiplicity cleared | E at TZ // DZ is n/a, naming both states, instead of the latest (D155) |
 
 ### Free species (D69)
 

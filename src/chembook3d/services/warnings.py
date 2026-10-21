@@ -74,10 +74,19 @@ def node_warnings(node: Node) -> list[Finding]:
         found.append(Finding("W-TS-NOFREQ", "transition state with no frequency calculation"))
 
     states = {(c.charge, c.multiplicity) for c in calculations if c.charge is not None}
-    if node.charge is not None and node.multiplicity is not None and states:
-        states.add((node.charge, node.multiplicity))
-    if len(states) > 1:
-        listed = ", ".join(f"charge {c} mult {m}" for c, m in sorted(states))
+    own = (node.charge, node.multiplicity) if node.charge is not None else None
+    if own is not None and states - {own}:
+        # D155: those calculations are another electronic state and give no energies here.
+        listed = ", ".join(f"charge {c} mult {m}" for c, m in sorted(states - {own}, key=str))
+        found.append(
+            Finding(
+                "W-CHG",
+                f"calculations for {listed} are left out of the energies of this node "
+                f"(charge {own[0]} mult {own[1]})",
+            )
+        )
+    elif len(states) > 1:
+        listed = ", ".join(f"charge {c} mult {m}" for c, m in sorted(states, key=str))
         found.append(Finding("W-CHG", f"charge or multiplicity disagree ({listed})"))
 
     tolerance = app_settings.load().geometry_tolerance if calculations else None

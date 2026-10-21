@@ -955,7 +955,8 @@ def _plan_steps(
                     "message": (
                         f"Step {step.index} has charge {step.charge} and multiplicity "
                         f"{step.multiplicity}; the node has {target.charge} and "
-                        f"{target.multiplicity}."
+                        f"{target.multiplicity}. Another state gives none of this node's "
+                        "energies (D155): import it as a new node to use them."
                     ),
                 }
             )
