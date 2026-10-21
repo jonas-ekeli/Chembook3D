@@ -123,6 +123,7 @@ Notes:
 | EN-9 | Units: stored in hartree, displayed in kcal/mol by default, configurable (D28). |
 | EN-10 | Energies may be sorted and displayed, but never used by the app to pick nodes, representatives or pathways (D4, X5). |
 | EN-11 | A node's energies come only from calculations for its own charge and multiplicity (D155). A calculation for another state stays on the node with W-CHG but gives no value at any level; when the node's state is not set, a level with calculations for two states, or an energy and a frequency calculation for different states, has no value. |
+| EN-12 | A counterpoise job's E counts as the complex's uncorrected energy (its corrected total minus its BSSE), so it changes no value. Only with "With BSSE" chosen does a node with a counterpoise job at the composite level have that job's BSSE added to E, H, G and G_qh, and the profile and table say so (D161). |
 
 ## 6. Worked example: Ru-CAAC olefin metathesis (accepted, D12)
 

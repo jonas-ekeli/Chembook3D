@@ -24,6 +24,7 @@ class EnergyOptionOut(BaseModel):
     key: str
     label: str
     types: list[str]
+    bsse: bool = False  # D161: a node has a counterpoise BSSE at this level
 
 
 class EnergyOptionsOut(BaseModel):
@@ -83,6 +84,7 @@ class RelativeOut(BaseModel):
 class EnergyViewOut(BaseModel):
     level: str
     type: str
+    bsse: bool = False  # D161: counterpoise BSSE added
     values: dict[str, ValueOut]  # nodes and group nodes by id
     edges: dict[str, EdgeValueOut]
     reference_id: str | None = None
@@ -121,6 +123,7 @@ class ProfileIn(BaseModel):
     level: str
     type: str
     unit: str | None = None
+    bsse: bool = False  # D161: add each node's counterpoise BSSE at the level
 
 
 class TableOut(BaseModel):
@@ -207,12 +210,15 @@ def relative_values(
 
 
 @router.get("/energies/view", response_model=EnergyViewOut)
-def energy_view(level: str, type: str, session: DbSession, reference: str | None = None):
+def energy_view(
+    level: str, type: str, session: DbSession, reference: str | None = None, bsse: bool = False
+):
     """Every node's and group's value at one selection, and ΔX on every edge (FR-EN-02).
     With a reference, also every node's and group's ΔX from it, balanced by the free species
-    along the route from the reference (D72)."""
+    along the route from the reference (D72). With `bsse`, each node's counterpoise BSSE at
+    the level is added (D161, off by default)."""
     key = _key(level)
-    energies = Energies(session)
+    energies = Energies(session, bsse=bsse)
     values, edges = view_values(session, energies, key, type)
     relative = (
         relative_values(session, energies, values, key, type, reference)
@@ -222,6 +228,7 @@ def energy_view(level: str, type: str, session: DbSession, reference: str | None
     return EnergyViewOut(
         level=level,
         type=type,
+        bsse=bsse,
         values=values,
         edges=edges,
         reference_id=reference,
@@ -241,14 +248,29 @@ def branch_pathway(branch_id: str, session: DbSession):
 
 @router.post("/energies/profile")
 def energy_profile(body: ProfileIn, session: DbSession) -> dict[str, Any]:
-    return pathways.profiles(session, body.paths, body.reference_id, _key(body.level), body.type)
+    return pathways.profiles(
+        session,
+        body.paths,
+        body.reference_id,
+        _key(body.level),
+        body.type,
+        energies=Energies(session, bsse=body.bsse),
+    )
 
 
 def _table(body: ProfileIn, session) -> dict[str, Any]:
     unit = body.unit or app_settings.load().energy_unit
     if unit not in app_settings.ENERGY_UNITS:
         raise RecordError(f"unknown energy unit '{unit}'")
-    return pathways.table(session, body.paths, body.reference_id, _key(body.level), body.type, unit)
+    return pathways.table(
+        session,
+        body.paths,
+        body.reference_id,
+        _key(body.level),
+        body.type,
+        unit,
+        energies=Energies(session, bsse=body.bsse),
+    )
 
 
 @router.post("/energies/table", response_model=TableOut)

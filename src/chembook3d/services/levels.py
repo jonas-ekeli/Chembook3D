@@ -32,6 +32,8 @@ class NameConflict(ValueError):
     pass
 
 
+_ONIOM = re.compile(r"^ONIOM\s*\(", re.IGNORECASE)
+
 # Method names that begin with R or U without it being a reference prefix.
 _NOT_A_PREFIX = ("REV", "UFF")
 
@@ -43,6 +45,16 @@ def canonical_method(method: str, multiplicity: int | None) -> str:
     `B3LYP` of its optimization. RO (restricted open shell) and a non-default prefix, such as
     U for a broken-symmetry singlet, stay part of the method."""
     upper = method.upper()
+    if _ONIOM.match(method):
+        # D161: each layer's method on its own (`ONIOM(RB3LYP/6-31G(d):UFF)` of a compound
+        # job's frequency step is the `ONIOM(B3LYP/6-31G(d):UFF)` of its optimization).
+        head, _, rest = method.partition("(")
+        inside, _, tail = rest.rpartition(")")
+        layers = []
+        for layer in inside.split(":"):
+            name, slash, basis = layer.partition("/")
+            layers.append(canonical_method(name, multiplicity) + slash + basis)
+        return f"{head}({':'.join(layers)}){tail}"
     if len(method) < 2 or upper.startswith("RO") or upper.startswith(_NOT_A_PREFIX):
         return method
     if (upper[0] == "R" and multiplicity == 1) or (
@@ -52,9 +64,9 @@ def canonical_method(method: str, multiplicity: int | None) -> str:
     return method
 
 
-# Methods that come with their own basis set: semi-empirical xTB (and GFN-FF) and the
-# composite "3c" methods.
-_BUILT_IN_BASIS = re.compile(r"(-3C$|^GFN|XTB)", re.IGNORECASE)
+# Methods that come with their own basis set: semi-empirical xTB (and GFN-FF), the composite
+# "3c" methods and ONIOM, whose layers each name theirs (D161).
+_BUILT_IN_BASIS = re.compile(r"(-3C$|^GFN|XTB|^ONIOM\s*\()", re.IGNORECASE)
 
 
 def needs_basis(program: str, method: str) -> bool:

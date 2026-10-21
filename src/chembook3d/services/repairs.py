@@ -19,7 +19,7 @@ from chembook3d.models import (
     InvestigationInfo,
     Node,
 )
-from chembook3d.parsers.common import NOT_STATIONARY, SPIN_KEYS
+from chembook3d.parsers.common import BSSE, NOT_STATIONARY, SPIN_KEYS
 from chembook3d.services import geometry, history, imports, levels
 
 log = logging.getLogger(__name__)
@@ -275,12 +275,38 @@ def spin_values(session: Session, folder: Path) -> dict[str, int]:
     return counts
 
 
+def counterpoise_energies(session: Session, folder: Path) -> dict[str, int]:
+    """D161: Gaussian counterpoise jobs imported before the app read the corrected total kept
+    the last fragment's SCF energy; their energy, BSSE and W-PARSE are read again from their
+    copied files."""
+    query = select(Calculation).where(Calculation.program == "Gaussian")
+    counts = {"checked": 0, "corrected": 0, "missing": 0}
+    for calculation, step in _steps_again(session, folder, query, b"Counterpoise"):
+        if step.route is None or not step.route.counterpoise:
+            continue
+        counts["checked"] += 1
+        result = calculation.result
+        kept = {k: v for k, v in (result.printed or {}).items() if k not in (BSSE, "energy")}
+        found = {k: step.printed[k] for k in (BSSE, "energy") if k in step.printed}
+        result.printed = {**kept, **found, "energy_label": step.energy_label}
+        result.energy = step.scf_energy
+        warnings = [w for w in calculation.parse_warnings if w != "SCF energy"]
+        if step.energy_missing:
+            warnings.append(step.energy_missing)
+            counts["missing"] += 1
+        else:
+            counts["corrected"] += 1
+        calculation.parse_warnings = list(dict.fromkeys(warnings))
+    return counts
+
+
 REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "geometry_levels": geometry_levels,
     "scan_path_edges": scan_path_edges,
     "constrained_steps": constrained_steps,
     "frequency_stationary": frequency_stationary,
     "spin_values": spin_values,
+    "counterpoise_energies": counterpoise_energies,
 }
 
 

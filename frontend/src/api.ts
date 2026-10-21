@@ -1234,7 +1234,8 @@ export type TurnoverResult = {
 
 /** FR-EN-01: a composite level and the energy types that have at least one value there. */
 export type EnergyOptions = {
-  levels: { key: string; label: string; types: EnergyType[] }[]
+  /** D161: `bsse` when a node has a counterpoise job's BSSE at the level. */
+  levels: { key: string; label: string; types: EnergyType[]; bsse?: boolean }[]
   temperature: number
   cutoff: number
   standard_state: StandardState
@@ -1262,6 +1263,8 @@ export type EnergyCheck = { code: string; message: string; issues?: { code: stri
 export type EnergyView = {
   level: string
   type: EnergyType
+  /** D161: each node's counterpoise BSSE at the level was added ("With BSSE"). */
+  bsse?: boolean
   values: Record<string, EnergyValue>
   edges: Record<string, { delta: number | null; direct: boolean; message?: string | null }>
   reference_id: string | null
@@ -1299,6 +1302,8 @@ export type Profiles = {
   level: string
   level_label: string
   type: EnergyType
+  /** D161: each node's counterpoise BSSE at the level was added. */
+  bsse?: boolean
   reference_id: string
   reference_value: number | null
   temperature: number
@@ -1316,6 +1321,8 @@ export type ProfileRequest = {
   level: string
   type: EnergyType
   unit?: string
+  /** D161: add each node's counterpoise BSSE at the level (off by default). */
+  bsse?: boolean
 }
 
 export type EnergyTable = { columns: string[]; rows: string[][] }
@@ -2070,11 +2077,12 @@ export const api = {
   deleteGroup: (id: string) => request<unknown>('DELETE', `/groups/${id}`),
 
   energyOptions: () => request<EnergyOptions>('GET', '/energies/options'),
-  energyView: (level: string, type: EnergyType, reference: string | null) =>
+  energyView: (level: string, type: EnergyType, reference: string | null, bsse = false) =>
     request<EnergyView>(
       'GET',
       `/energies/view?level=${encodeURIComponent(level)}&type=${type}` +
-        (reference ? `&reference=${encodeURIComponent(reference)}` : ''),
+        (reference ? `&reference=${encodeURIComponent(reference)}` : '') +
+        (bsse ? '&bsse=true' : ''),
     ),
   extendPathway: (path: string[], branchId?: string | null) =>
     request<Pathway>('POST', '/pathways/extend', { path, branch_id: branchId ?? null }),
