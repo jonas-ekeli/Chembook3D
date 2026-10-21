@@ -100,6 +100,7 @@ Notes:
 | W-CHG | Calculations on one node disagree on charge or multiplicity; those for another state than the node's give none of its energies (D155) |
 | W-GEOM | A calculation's geometry does not match its node's geometry |
 | W-PARSE | A file was only partly parsed; the missing fields are listed |
+| W-CONSTRAINED | A calculation is a scan or an optimization held by frozen coordinates or atoms; what held it is listed, and it gives no geometry level (D157) |
 | W-DUP | Possible duplicate of another node (ID-8) |
 
 **Where energies are used (D154):** every energy value carries the check of the frequency calculation at its geometry level against the node's role (W-IMAG-TS, W-TS-NOFREQ, W-IMAG-MIN with the imaginary frequencies). Profiles mark such points, the energy table and its CSV have a "Check" column, and selectivities and turnovers list them in their notes. The check never changes a value or a status (D19).

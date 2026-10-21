@@ -3,6 +3,7 @@ once per investigation, when it is opened by a version that has it; its name is 
 `InvestigationInfo.repairs`. The database was backed up by the migration that came with it."""
 
 import logging
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -119,29 +120,88 @@ def geometry_levels(session: Session, folder: Path) -> dict[str, int]:
     for node in nodes:
         if _continue_pre_optimizations(session, folder, node, tolerance):
             counts["nodes"] += 1
-        for calculation in node.calculations:
-            if (
-                calculation.type != CalculationType.SINGLE_POINT
-                or not calculation.geometry
-                or calculation.id in by_hand
-            ):
-                continue
-            found = levels.optimization_at(node, calculation.geometry, tolerance)
-            new = found.level if found else None
-            if calculation.geometry_level_id == (new.id if new else None):
-                continue
-            history.record(
-                session,
-                "calculation",
-                calculation.id,
-                "update",
-                "geometry_level",
-                levels.label(calculation.geometry_level),
-                levels.label(new),
-                source=SOURCE,
-            )
-            calculation.geometry_level_id = new.id if new else None
-            counts["single_points"] += 1
+        counts["single_points"] += _single_point_levels(session, node, tolerance, by_hand)
+    return counts
+
+
+def _single_point_levels(session: Session, node: Node, tolerance: float, by_hand: set[str]) -> int:
+    """D100: set each single point's geometry level to the optimization ending on its geometry
+    (none when none does), except one set by hand; the number changed."""
+    changed = 0
+    for calculation in node.calculations:
+        if (
+            calculation.type != CalculationType.SINGLE_POINT
+            or not calculation.geometry
+            or calculation.id in by_hand
+        ):
+            continue
+        found = levels.optimization_at(node, calculation.geometry, tolerance)
+        new = found.level if found else None
+        if calculation.geometry_level_id == (new.id if new else None):
+            continue
+        history.record(
+            session,
+            "calculation",
+            calculation.id,
+            "update",
+            "geometry_level",
+            levels.label(calculation.geometry_level),
+            levels.label(new),
+            source=SOURCE,
+        )
+        calculation.geometry_level_id = new.id if new else None
+        changed += 1
+    return changed
+
+
+# D157: text that may mark a scan or a constraint in a Gaussian, ORCA or xTB output; only a
+# file that has one is parsed again.
+_MAY_BE_HELD = re.compile(
+    rb"ModRedundant input section|\bScan\b|Frozen|NQMF=\s*[1-9]|NMMIF=\s*[1-9]|SURFACE SCAN|"
+    rb"Parameter Scan|constrain|RELAXED SCAN|frozen atoms in %\s*:\s*\S+\s+[1-9]",
+    re.IGNORECASE,
+)
+
+
+def constrained_steps(session: Session, folder: Path) -> dict[str, int]:
+    """D157: before it, an optimization held by a scan, frozen coordinates or frozen atoms was
+    imported like a free one and could give single points their geometry level. Read each
+    calculation's copied file again for what held it, and set again the geometry level of the
+    single points on the nodes that had one (not those set by hand). The node's role is left
+    as it is; W-CONSTRAINED now shows on the calculation."""
+    tolerance = app_settings.load().geometry_tolerance
+    calculations = session.scalars(
+        select(Calculation).options(selectinload(Calculation.source_file))
+    ).all()
+    parsed: dict[str, Any] = {}
+    counts = {"calculations": 0, "single_points": 0}
+    affected: dict[str, Node] = {}
+    for calculation in calculations:
+        source = calculation.source_file
+        if source is None or calculation.step_index is None or calculation.constraints:
+            continue
+        if source.id not in parsed:
+            parsed[source.id] = None
+            try:
+                data = (folder / source.stored_path).read_bytes()
+                if _MAY_BE_HELD.search(data):
+                    parsed[source.id] = imports.read_file(
+                        data.decode("utf-8", errors="replace"), source.original_name
+                    )
+            except (OSError, imports.ImportFailed):
+                pass
+        steps = getattr(parsed[source.id], "steps", None) or []
+        step = next((s for s in steps if s.index == calculation.step_index), None)
+        if step is None or not step.constraints:
+            continue
+        calculation.constraints = list(step.constraints)
+        counts["calculations"] += 1
+        if calculation.type in levels.OPTIMIZATION_TYPES and calculation.irc_part is None:
+            affected[calculation.node_id] = calculation.node
+    session.flush()
+    by_hand = _set_by_hand(session)
+    for node in affected.values():
+        counts["single_points"] += _single_point_levels(session, node, tolerance, by_hand)
     return counts
 
 
@@ -155,6 +215,7 @@ def scan_path_edges(session: Session, folder: Path) -> dict[str, int]:
 REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "geometry_levels": geometry_levels,
     "scan_path_edges": scan_path_edges,
+    "constrained_steps": constrained_steps,
 }
 
 

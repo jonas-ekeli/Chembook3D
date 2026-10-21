@@ -426,7 +426,7 @@ def _single_points_on(session: Session, records: ImportRecords, node: Node) -> l
     removed = [
         c
         for c in records.calculations
-        if c.node_id == node.id and c.type in levels.OPTIMIZATION_TYPES
+        if c.node_id == node.id and levels.is_geometry_source(c)  # D157
     ]
     if not removed:
         return []

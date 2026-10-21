@@ -16,7 +16,16 @@ import json
 import re
 from typing import Any
 
-from chembook3d.parsers.common import Criterion, IrcPoint, IrcRun, ParsedFile, ParsedStep, Route
+from chembook3d.parsers.common import (
+    Criterion,
+    IrcPoint,
+    IrcRun,
+    ParsedFile,
+    ParsedStep,
+    Route,
+    add_constraint,
+    coordinate_name,
+)
 from chembook3d.xyz import ELEMENTS, Atom
 
 PROGRAM = "Gaussian"
@@ -217,6 +226,32 @@ _UNITS = {"Force": "Eh/bohr", "Displacement": "bohr"}
 _SCAN_PARAMETER_RE = re.compile(r"^ ! \S+\s+[RAD]\(([\d,]+)\)\s+\S+\s+Scan\s+!")
 _SCAN_LINE_RE = re.compile(r"^ (?:[BAD]\s+)?((?:\d+\s+){2,4})S\s+\d+\s+-?[\d.]+\s*$", re.IGNORECASE)
 _SCAN_POINT_RE = re.compile(r"^ Step number\s+\d+ out of a maximum of\s+\d+ on scan point\s+(\d+)")
+# D157: what holds an optimization in place: a coordinate the parameter table marks Frozen,
+# ModRedundant lines with the action S (scan) or F (freeze), and frozen atoms (NQMF, NMMIF).
+_FROZEN_PARAMETER_RE = re.compile(r"^ ! \S+\s+([A-Z]\([\d,]+\))\s+\S+\s+Frozen\s+!", re.IGNORECASE)
+_MODREDUNDANT = " The following ModRedundant input section has been read:"
+_FROZEN_ATOMS_RE = re.compile(r"NQMF=\s*(\d+)\s+NMMI=\s*\d+\s+NMMIF=\s*(\d+)")
+_HELD_ACTIONS = {"S": "scan", "F": "frozen"}
+
+
+def _held_in_modredundant(lines: list[str], start: int) -> list[str]:
+    """D157: the scanned and frozen coordinates of an echoed ModRedundant section (`D 3 4 9
+    10 S 12 30.0`, `B 1 2 F`, `X 5 F`, `1 2 F`), up to its blank line."""
+    held: list[str] = []
+    for line in lines[start : start + 500]:
+        words = line.split()
+        if not words:
+            break
+        letter = words.pop(0).upper() if words[0].isalpha() else None
+        atoms = []
+        while words and (words[0].isdigit() or words[0] == "*"):
+            atoms.append(words.pop(0))
+        action = next((w.upper() for w in words if w[:1].isalpha()), None)
+        if atoms and action in _HELD_ACTIONS:
+            held.append(f"{_HELD_ACTIONS[action]} {coordinate_name(atoms, letter)}")
+    return held
+
+
 # D131: an IRC's points, directions, coordinates and endings.
 _IRC_POINT_RE = re.compile(r"^ Point Number:\s+(\d+)\s+Path Number:\s+(\d+)")
 _IRC_DIRECTION_RE = re.compile(r"^ Point Number\s+\d+ in (FORWARD|REVERSE) path direction")
@@ -574,6 +609,11 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
     irc = _IrcReader(step.route) if step.route and step.route.irc is not None else None
     scanned_table: list[list[int]] = []
     scanned_input: list[list[int]] = []
+    # D157: scanned and frozen coordinates from the parameter table, else the ModRedundant
+    # input, and the number of frozen atoms (-1 in the molecule specification).
+    held_table: list[str] = []
+    held_input: list[str] = []
+    frozen_atoms = 0
     wanted = correlated_total_of(step.route.method) if step.route else None
     correlated: float | None = None
     i = 0
@@ -639,6 +679,13 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
             atoms = [int(a) for a in match.group(1).split(",")]
             if atoms not in scanned_table:
                 scanned_table.append(atoms)
+            held_table.append(f"scan {line.split()[2]}")
+        elif (match := _FROZEN_PARAMETER_RE.match(line)) is not None:
+            held_table.append(f"frozen {match.group(1)}")
+        elif line.startswith(_MODREDUNDANT):
+            held_input += _held_in_modredundant(lines, i + 1)
+        elif (match := _FROZEN_ATOMS_RE.search(line)) is not None:
+            frozen_atoms = max(frozen_atoms, int(match.group(1)) + int(match.group(2)))
         elif (match := _SCAN_LINE_RE.match(line)) is not None:
             atoms = [int(a) for a in match.group(1).split()]
             if atoms not in scanned_input:
@@ -711,6 +758,12 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
         step.converged_geometries = list(range(len(step.geometries)))
     if step.scan:
         step.scan_coordinates = scanned_table or scanned_input
+    for held in held_table or held_input:
+        add_constraint(step, held)
+    if frozen_atoms:
+        add_constraint(step, f"{frozen_atoms} frozen atom{'s' if frozen_atoms > 1 else ''}")
+    if step.scan and not any(c.startswith("scan") for c in step.constraints):
+        add_constraint(step, f"{step.scan} scan")
     if step.job_type in ("optimization", "ts_optimization") and not step.optimization_converged:
         step.optimization_converged = False
     elif step.job_type not in ("optimization", "ts_optimization"):

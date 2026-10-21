@@ -25,6 +25,8 @@ from chembook3d.parsers.common import (
     ParsedFile,
     ParsedStep,
     Route,
+    add_constraint,
+    coordinate_name,
 )
 from chembook3d.xyz import Atom, element_of
 
@@ -542,6 +544,7 @@ def parse(text: str, companion: Companion | None = None) -> ParsedFile:
             break
 
     words, echoed = _read_input(lines)
+    held = _constraints(echoed)
     multiplicity = None
     for line in lines:
         if line.startswith(" Multiplicity") and "...." in line:
@@ -614,6 +617,12 @@ def parse(text: str, companion: Companion | None = None) -> ParsedFile:
             step.resolved_basis = step.route.basis
         if step.scan:
             step.scan_coordinates = _scan_coordinates(echoed)
+            for atoms in step.scan_coordinates:
+                add_constraint(step, f"scan {coordinate_name([str(a) for a in atoms])}")
+            if not step.constraints:
+                add_constraint(step, f"{step.scan} scan")
+        for description in held:  # D157
+            add_constraint(step, description)
         step.missing = _missing_fields(step)
         if later_jobs is not None:
             step.missing.append("jobs after the first ($new_job)")
@@ -635,6 +644,28 @@ def _scan_coordinates(echoed: list[str]) -> list[list[int]]:
             atoms = [int(a) + 1 for a in match.group(2).split()]
             if len(atoms) == {"b": 2, "a": 3, "d": 4}[match.group(1)]:
                 found.append(atoms)
+    return found
+
+
+_CONSTRAINT = re.compile(r"\{\s*([bacd])\s+([^}]*?)\s+c\s*\}")
+
+
+def _constraints(echoed: list[str]) -> list[str]:
+    """D157: the coordinates and atoms a `%geom Constraints` block freezes (`{B 0 1 C}`, `{A 0
+    1 2 1.5 C}`, `{C 3 C}` for an atom, `{C 0:5 C}`), with ORCA's atoms from 0 counted from 1."""
+    found: list[str] = []
+    for line in echoed:
+        for match in _CONSTRAINT.finditer(line):
+            atoms = []
+            for word in match.group(2).split():
+                if word.isdigit():
+                    atoms.append(str(int(word) + 1))
+                elif re.fullmatch(r"\d+:\d+", word):
+                    first, last = (int(a) + 1 for a in word.split(":"))
+                    atoms.append(f"{first}-{last}")
+            letter = "X" if match.group(1) == "c" else match.group(1)
+            if atoms:
+                found.append(f"frozen {coordinate_name(atoms, letter)}")
     return found
 
 
