@@ -152,6 +152,8 @@ type GroupData = {
   energy: EnergyText | null
   /** D85: the notes on its members, shown as a count while it is collapsed. */
   memberNotes: Note[]
+  /** D158: each member's warnings, "label: code: message", marked on the group's head. */
+  memberWarnings: string[]
 }
 type TransitionData = {
   /** The transitions this line stands for; more than one between two collapsed groups (A24). */
@@ -231,7 +233,7 @@ const LAYOUT_BUTTON: Record<GroupLayout, { label: string; icon: string }> = {
 const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<GroupData>>) {
   const { group, colour, stepName, memberCount, representativeLabel, mode, ts, expanded } = data
   const { representativeXyz, representativeRotation } = data
-  const { onToggle, onLayout, onOrder, energy, memberNotes } = data
+  const { onToggle, onLayout, onOrder, energy, memberNotes, memberWarnings } = data
   // A21: the button cycles grid (a new group's layout), vertical line, horizontal line, grid.
   const next: GroupLayout =
     group.layout === 'vertical' ? 'horizontal' : group.layout === 'horizontal' ? 'grid' : 'vertical'
@@ -253,6 +255,16 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
         <span className="muted small">
           {memberCount} member{memberCount === 1 ? '' : 's'}
         </span>
+        {memberWarnings.length > 0 && (
+          <span
+            className="warn-icon"
+            role="img"
+            aria-label="Members have warnings"
+            title={`Warnings on members:\n${memberWarnings.join('\n')}`}
+          >
+            ⚠
+          </span>
+        )}
         {!expanded && memberNotes.length > 0 && (
           <span
             className="note-count"
@@ -750,6 +762,9 @@ function CanvasView({
           onOrder: onGroupOrder,
           energy: nodeEnergy(group.id),
           memberNotes: members.flatMap((m) => notesOf(m.id)),
+          memberWarnings: members.flatMap((m) =>
+            m.warnings.map((w) => `${m.label || 'Untitled node'}: ${w.code}: ${w.message}`),
+          ),
         } satisfies GroupData,
       })
       drawnAs.set(group.id, group.id)

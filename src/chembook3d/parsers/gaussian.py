@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from chembook3d.parsers.common import (
+    NOT_STATIONARY,
     Criterion,
     IrcPoint,
     IrcRun,
@@ -616,6 +617,11 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
     frozen_atoms = 0
     wanted = correlated_total_of(step.route.method) if step.route else None
     correlated: float | None = None
+    # D158: the last convergence table printed (each line, whether it was met) and whether
+    # Gaussian then said "Stationary point found": after a frequency job it judges the
+    # structure with the Hessian just computed.
+    table: list[tuple[str, bool]] = []
+    stationary = False
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -643,13 +649,17 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
                     energies[name][-1] = correlated
         elif "Optimization completed." in line or "-- Stationary point found." in line:
             step.optimization_converged = True
+            stationary = True
             for name in _ORIENTATIONS:
                 last = len(orientations[name]) - 1
                 if last >= 0 and last not in converged[name]:
                     converged[name].append(last)
+        elif line.split() == ["Item", "Value", "Threshold", "Converged?"]:
+            table, stationary = [], False
         elif (match := _CRITERION_RE.match(line)) is not None:
             # The table belongs to the structure the forces were computed on: the last one.
             size, kind = match.group(1), match.group(2)
+            table.append((" ".join(line.split()), match.group(5) == "YES"))
             try:
                 value, threshold = (float(match.group(k).replace("D", "E")) for k in (3, 4))
             except ValueError:  # ******** for a value too large to print
@@ -736,6 +746,10 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
         i += 1
 
     step.frequencies = frequencies
+    if step.job_type == "frequency" and table and not stationary:
+        # D158: W-FREQ-NONSTAT, kept with the printed lines as the criteria not met.
+        unmet = [text for text, met in table if not met]
+        step.printed[NOT_STATIONARY] = "; ".join(unmet) or "no stationary point found"
     if wanted is not None:
         # D153: the step's energy is the method's own total; never its SCF reference's.
         step.scf_energy = correlated

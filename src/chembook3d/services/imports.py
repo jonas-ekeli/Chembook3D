@@ -49,7 +49,7 @@ from chembook3d.models import (
     new_id,
 )
 from chembook3d.parsers import crest, gaussian, joined, orca, xtb
-from chembook3d.parsers.common import ParsedFile, ParsedStep
+from chembook3d.parsers.common import NOT_STATIONARY, ParsedFile, ParsedStep
 from chembook3d.services import geometry, history, levels
 from chembook3d.services import groups as group_service
 from chembook3d.services import nodes as node_service
@@ -955,6 +955,16 @@ def _plan_steps(
                     "message": (
                         f"The optimization in step {step.index} did not finish. Its last "
                         f"geometry is used and the node is tagged {OPTIMIZATION_INCOMPLETE}."
+                    ),
+                }
+            )
+        if NOT_STATIONARY in step.printed:
+            warnings.append(
+                {
+                    "code": "W-FREQ-NONSTAT",
+                    "message": (
+                        f"The frequency job in step {step.index} is not at a stationary point: "
+                        f"{step.printed[NOT_STATIONARY]} (D158)."
                     ),
                 }
             )

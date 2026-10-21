@@ -3,9 +3,11 @@ records each time and never change a status."""
 
 from dataclasses import asdict, dataclass
 
+from sqlalchemy.orm import object_session
+
 from chembook3d import settings as app_settings
 from chembook3d.models import Calculation, CalculationType, Node, Role
-from chembook3d.services import geometry
+from chembook3d.services import energies, geometry, levels
 
 OPTIMIZATION_INCOMPLETE = "optimization-incomplete"  # system tag (D26)
 FREQUENCY_TYPES = (CalculationType.FREQUENCY,)
@@ -41,6 +43,17 @@ def calculation_warnings(
                 calculation.id,
             )
         )
+    unmet = energies.not_stationary(calculation)
+    if unmet is not None:
+        # D158: Gaussian's check after the frequency job did not find a stationary point.
+        level = levels.label(calculation.level) or "an unknown level"
+        found.append(
+            Finding(
+                "W-FREQ-NONSTAT",
+                f"the frequency job at {level} is not at a stationary point ({unmet})",
+                calculation.id,
+            )
+        )
     if calculation.geometry and node.geometry:
         if tolerance is None:
             tolerance = app_settings.load().geometry_tolerance
@@ -51,38 +64,51 @@ def calculation_warnings(
     return found
 
 
+def _frequency_jobs(node: Node) -> list[tuple[str, Calculation]]:
+    """D158: the latest frequency job at each composite level of the node, with the level's
+    label, as `energies.NodeEnergies` uses them (another state's are left out, D155)."""
+    if not any(c.type in FREQUENCY_TYPES for c in node.calculations):
+        return []
+    settings = app_settings.load()
+    found = energies.NodeEnergies(node, settings.qh_temperature, settings.qh_cutoff)
+    session = object_session(node)
+    jobs = []
+    for key, calculation in found.frequency_jobs():
+        if calculation.result is None:
+            continue
+        if session is not None:
+            label = energies.key_label(session, key)
+        else:
+            label = levels.label(calculation.level)
+        jobs.append((label, calculation))
+    return jobs
+
+
 def node_warnings(node: Node) -> list[Finding]:
     found: list[Finding] = []
     calculations = list(node.calculations)
     if OPTIMIZATION_INCOMPLETE in node.tags:
         found.append(Finding("W-OPT-INC", "the optimization did not finish"))
 
-    frequency = next(
-        (
-            c
-            for c in sorted(calculations, key=lambda c: c.created_at, reverse=True)
-            if c.type in FREQUENCY_TYPES and c.result and c.result.imaginary_count is not None
-        ),
-        None,
-    )
-    if frequency is not None:
-        count = frequency.result.imaginary_count
-        if node.role == Role.MINIMUM and count >= 1:
-            found.append(
-                Finding("W-IMAG-MIN", f"minimum with {count} imaginary frequencies", frequency.id)
-            )
-        if node.role == Role.TRANSITION_STATE and count != 1:
-            found.append(
-                Finding(
-                    "W-IMAG-TS",
-                    f"transition state with {count} imaginary frequencies (expected 1)",
-                    frequency.id,
-                )
-            )
+    # D158: every frequency job the energies use (the latest per composite level) is judged
+    # against the node's role, naming its level, so a good job at one level never hides a
+    # wrong one at another. A job not at a stationary point is each calculation's own warning.
+    frequencies = _frequency_jobs(node)
+    for label, frequency in frequencies:
+        for issue in energies.frequency_issues(node.role, frequency, f"at {label}"):
+            if issue["code"] == "W-FREQ-NONSTAT":
+                continue  # every frequency job's own, below
+            message = issue["message"]
+            if issue["code"] == "W-IMAG-MIN":
+                message = f"minimum with {message}"
+            elif issue["code"] == "W-IMAG-TS":
+                message = f"transition state with {message.replace(', not 1', '')} (expected 1)"
+            found.append(Finding(issue["code"], message, frequency.id))
 
-    elif node.role == Role.TRANSITION_STATE and calculations:
-        # D154: a TS with calculations but no frequency job is not shown to be one.
-        found.append(Finding("W-TS-NOFREQ", "transition state with no frequency calculation"))
+    if not frequencies and node.role == Role.TRANSITION_STATE and calculations:
+        if not any(c.type in FREQUENCY_TYPES for c in calculations):
+            # D154: a TS with calculations but no frequency job is not shown to be one.
+            found.append(Finding("W-TS-NOFREQ", "transition state with no frequency calculation"))
 
     states = {(c.charge, c.multiplicity) for c in calculations if c.charge is not None}
     own = (node.charge, node.multiplicity) if node.charge is not None else None

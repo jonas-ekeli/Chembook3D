@@ -94,7 +94,8 @@ def test_opt_freq_import(open_client):
     assert imported["status"] == "done" and imported["atom_count"] == 91
     assert (imported["charge"], imported["multiplicity"]) == (0, 1)
     assert imported["formula"] == "C31H50BLiNO6P"
-    assert imported["warnings"] == []
+    # D158: Gaussian's check after this frequency job found no stationary point (T-EN-27).
+    assert [w["code"] for w in imported["warnings"]] == ["W-FREQ-NONSTAT"]
     first_atom = imported["xyz"].splitlines()[2].split()
     assert first_atom == ["C", "-2.62554100", "0.29012600", "2.71362900"]
 

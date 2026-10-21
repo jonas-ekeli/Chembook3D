@@ -1240,8 +1240,11 @@ export type EnergyValue = {
 }
 
 /** D154: a transition state without exactly one imaginary frequency (or without a frequency
- * job), or a minimum with one, at the level shown. Never changes the value (D19). */
-export type EnergyCheck = { code: string; message: string }
+ * job), or a minimum with one, at the level shown; D158: also a frequency job not at a
+ * stationary point (W-FREQ-NONSTAT), an unfinished optimization (W-OPT-INC) or a calculation
+ * that ended abnormally (W-TERM). `code` and `message` are the first issue and every message
+ * joined; `issues` lists each. Never changes the value or a status (D19). */
+export type EnergyCheck = { code: string; message: string; issues?: { code: string; message: string }[] }
 
 export type EnergyView = {
   level: string

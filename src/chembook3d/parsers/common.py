@@ -24,6 +24,12 @@ class Route:
     irc: list[str] | None = None  # D131: an IRC job's options as written (upper case)
 
 
+# D158: the key in `ParsedStep.printed` (and the stored result's `printed`) of a frequency
+# step the program judged not to be at a stationary point: the criteria lines not met, as
+# printed. Gaussian prints the check after a frequency job; ORCA and xTB print none.
+NOT_STATIONARY = "not_stationary"
+
+
 @dataclass
 class Criterion:
     """D123b: one convergence criterion an optimizer printed for a structure, as Molden shows

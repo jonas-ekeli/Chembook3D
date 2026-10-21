@@ -33,6 +33,19 @@ class EnergyOptionsOut(BaseModel):
     standard_state: str  # D95: "1 atm", or "1 M" when G and G_qh include RT ln(V_m)
 
 
+class IssueOut(BaseModel):
+    code: str
+    message: str
+
+
+class EnergyCheckOut(BaseModel):
+    """D154, D158: the first issue's code, every issue's message joined, and each issue."""
+
+    code: str
+    message: str
+    issues: list[IssueOut] = []
+
+
 class ValueOut(BaseModel):
     value: float | None
     code: str | None
@@ -40,8 +53,9 @@ class ValueOut(BaseModel):
     energy_calculation_id: str | None
     thermo_calculation_id: str | None
     details: dict[str, Any]
-    # D154: what the frequency job at the geometry level says against the node's role
-    check: dict[str, str] | None = None
+    # D154: what the frequency job at the geometry level says against the node's role; D158:
+    # also a frequency job not at a stationary point, an unfinished optimization, W-TERM
+    check: EnergyCheckOut | None = None
 
 
 class EdgeValueOut(BaseModel):
