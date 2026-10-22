@@ -194,11 +194,13 @@ def test_batch_import_continues_a_constrained_pre_optimization(open_client, tmp_
     assert ("optimization", DFT) in labels(open_client, node_id)
 
 
-def test_a_free_restart_at_the_constrained_level_still_makes_a_derived_node(open_client):
+def test_a_free_optimization_at_the_constrained_level_continues_it_too(open_client):
     node_id = held_pre_optimized_node(open_client)
-    restart = g.output(g.step(PRE_ROUTE, [PRE_END, DFT_END], -75.1, converged=True))
-    plan = upload(open_client, "A_again.log", restart, node_id)
-    assert plan["continues_from"] is None and plan["derived_offered"]
+    free = g.output(g.step(PRE_ROUTE, [PRE_END, DFT_END], -75.1, converged=True))
+    plan = upload(open_client, "A_free.log", free, node_id)
+    assert plan["continues_from"]["level_label"] == f"{PRE} with constraints"
+    assert not plan["derived_offered"]
+    assert [s["assignment"] for s in plan["steps"]] == ["node"]
 
 
 # ---------- T-IMP-17: notebooks imported before D100 are repaired once ----------
