@@ -569,6 +569,8 @@ export type EditorScan = {
   version: string | null
   level: string
   basis_named: boolean
+  /** D167: the scans the chart draws against one energy zero share it. */
+  energy_group: string
   charge: number | null
   multiplicity: number | null
   atoms: number[]

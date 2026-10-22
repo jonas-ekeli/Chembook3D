@@ -340,6 +340,21 @@ def level_difference(a: Scan, b: Scan) -> list[str]:
     return differ
 
 
+def energy_groups(scans: dict[str, Scan]) -> dict[str, str]:
+    """D167: the scans whose energies the chart draws against one zero, each named by its
+    group's first scan: those with no level difference, so a basis set read from the
+    checkpoint goes with the file that names it. Scans that name theirs start the groups."""
+    heads: list[Scan] = []
+    groups: dict[str, str] = {}
+    for scan in sorted(scans.values(), key=lambda s: not s.basis_named):
+        head = next((h for h in heads if not level_difference(h, scan)), None)
+        if head is None:
+            heads.append(scan)
+            head = scan
+        groups[scan.key] = head.key
+    return groups
+
+
 # ---------- reading ----------
 
 

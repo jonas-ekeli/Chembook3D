@@ -142,6 +142,7 @@ class ScanOut(BaseModel):
     version: str | None
     level: str
     basis_named: bool
+    energy_group: str  # D167: scans drawn against one energy zero share it
     charge: int | None
     multiplicity: int | None
     atoms: list[int]
@@ -257,7 +258,7 @@ def _round(rows: list[list[Any]]) -> list[list[Any]]:
     return [[e, round(x, 6), round(y, 6), round(z, 6)] for e, x, y, z in rows]
 
 
-def _scan_out(scan: editor.Scan, server_name: str | None) -> ScanOut:
+def _scan_out(scan: editor.Scan, server_name: str | None, group: str) -> ScanOut:
     return ScanOut(
         key=scan.key,
         file=scan.file,
@@ -269,6 +270,7 @@ def _scan_out(scan: editor.Scan, server_name: str | None) -> ScanOut:
         version=scan.version,
         level=scan.level_label,
         basis_named=scan.basis_named,
+        energy_group=group,
         charge=scan.charge,
         multiplicity=scan.multiplicity,
         atoms=scan.atoms,
@@ -400,9 +402,12 @@ def _editor_out(
     item: _Editor, added: list[str], problems: list[FileProblemOut], note: str | None = None
 ) -> EditorOut:
     names = {key: _server_name(f) for key, f in item.files.items()}
+    groups = editor.energy_groups(item.scans)
     return EditorOut(
         id=item.id,
-        scans=[_scan_out(s, names.get(s.key.split(":")[0])) for s in item.scans.values()],
+        scans=[
+            _scan_out(s, names.get(s.key.split(":")[0]), groups[s.key]) for s in item.scans.values()
+        ],
         added=added,
         problems=problems,
         crossings=[CrossingIO(**c.__dict__) for c in editor.crossings(item.scans)],
