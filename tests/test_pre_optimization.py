@@ -1,11 +1,12 @@
 """Pre-optimizations and the geometry level of single points (D100, FR-CALC-04): T-IMP-15,
-T-IMP-16, T-IMP-17."""
+T-IMP-16, T-IMP-17, T-IMP-54."""
 
 from chembook3d import investigation as inv
 from chembook3d.models import Calculation, HistoryEntry, InvestigationInfo, Node
 from chembook3d.services import history, repairs
 from tests import gaussian_text as g
-from tests.test_batch_import import nodes, row, run, scan
+from tests.test_batch_import import nodes, preview, row, run, scan
+from tests.test_constrained import MODREDUNDANT
 from tests.test_import import calculations, commit, upload
 
 GUESS = g.moved(g.WATER, 0.05)
@@ -111,6 +112,93 @@ def test_batch_import_continues_the_pre_optimization(open_client, tmp_path):
     assert response.status_code == 200, response.text
     assert len(nodes(open_client)) == 1
     assert labels(open_client, node_id)[-1] == ("single_point", f"{SP} // {DFT}")
+
+
+# ---------- T-IMP-54: a free optimization continues a constrained pre-optimization ----------
+
+
+def held_pre_optimized_node(client, label: str = "A") -> str:
+    """A planned node pre-optimized with restraints, like a cloud xTB job with a
+    constraints file (D157)."""
+    planned = client.post("/api/nodes", json={"label": label, "xyz": xyz(GUESS)}).json()
+    held = g.output(
+        g.step(
+            f"{PRE_ROUTE}=ModRedundant", [GUESS, PRE_END], -75.0, converged=True, body=MODREDUNDANT
+        )
+    )
+    plan = upload(client, f"{label}_pre.log", held, planned["id"])
+    assert "W-CONSTRAINED" in {w["code"] for w in plan["warnings"]}
+    commit(client, plan, target_node_id=planned["id"])
+    return planned["id"]
+
+
+def guess_then_opt_freq() -> str:
+    """A guess and a single point at the start geometry, then the optimization and frequency
+    job, as one Gaussian file with several steps."""
+    return g.output(
+        g.step("#P HF/STO-3G SP", [PRE_END], -74.9),
+        g.step("#P B3LYP/6-31G(d) SP", [PRE_END], -76.3),
+        g.step("#P B3LYP/6-31G(d) Opt Freq", [PRE_END, DFT_END], converged=True, terminate=False),
+        g.step(
+            "#P Geom=AllCheck Guess=TCheck SCRTyp=Grad RB3LYP/6-31G(d) Freq",
+            [DFT_END],
+            frequencies=[1650.0, 3700.0, 3800.0],
+            internal=True,
+        ),
+    )
+
+
+def test_optimization_from_a_constrained_pre_optimization_continues_the_node(open_client):
+    node_id = held_pre_optimized_node(open_client)
+    plan = upload(open_client, "A_dft.log", g.opt_freq(PRE_END, DFT_END), node_id)
+    assert plan["mode"] == "onto" and not plan["derived_offered"]
+    assert plan["continues_from"]["level_label"] == f"{PRE} with constraints"
+    assert [s["assignment"] for s in plan["steps"]] == ["node", "node"]
+    assert [w["code"] for w in plan["warnings"]] == ["PRE-OPT"]
+
+    result = commit(open_client, plan, target_node_id=node_id)
+    assert result["derived_node_id"] is None and len(nodes(open_client)) == 1
+    sp = upload(open_client, "A_SP.log", g.single_point(DFT_END), node_id)
+    assert sp["steps"][0]["geometry_level_label"] == DFT
+    commit(open_client, sp, target_node_id=node_id)
+    # The held optimization stays a pre-optimization and gives no geometry level (D157).
+    assert labels(open_client, node_id) == [
+        ("optimization", PRE),
+        ("optimization", DFT),
+        ("frequency", DFT),
+        ("single_point", f"{SP} // {DFT}"),
+    ]
+
+
+def test_batch_import_continues_a_constrained_pre_optimization(open_client, tmp_path):
+    node_id = held_pre_optimized_node(open_client, "Ru-π-complex")
+    folder = tmp_path / "results"
+    folder.mkdir()
+    # π became pi in the file name, so the name fits no label.
+    (folder / "Ru-pi-complex.log").write_text(guess_then_opt_freq(), encoding="utf-8")
+    plan = scan(open_client, folder)
+    opt = row(plan, "Ru-pi-complex.log")
+    assert opt["match"] == "first_geometry" and opt["mode"] == "onto" and not opt["derived"]
+    assert opt["target"]["node_id"] == node_id
+    assert "PRE-OPT" in {w["code"] for w in opt["warnings"]}
+
+    # Choosing the node by hand plans the same.
+    chosen = preview(open_client, plan, rows={opt["id"]: {"target": f"node:{node_id}"}})
+    by_hand = row(chosen, "Ru-pi-complex.log")
+    assert by_hand["match"] == "chosen" and not by_hand["derived"]
+    assert "PRE-OPT" in {w["code"] for w in by_hand["warnings"]}
+
+    response = run(open_client, plan)
+    assert response.status_code == 200, response.text
+    assert len(nodes(open_client)) == 1
+    assert ("optimization", DFT) in labels(open_client, node_id)
+
+
+def test_a_free_restart_at_the_constrained_level_still_makes_a_derived_node(open_client):
+    node_id = held_pre_optimized_node(open_client)
+    restart = g.output(g.step(PRE_ROUTE, [PRE_END, DFT_END], -75.1, converged=True))
+    plan = upload(open_client, "A_again.log", restart, node_id)
+    assert plan["continues_from"] is None and plan["derived_offered"]
 
 
 # ---------- T-IMP-17: notebooks imported before D100 are repaired once ----------

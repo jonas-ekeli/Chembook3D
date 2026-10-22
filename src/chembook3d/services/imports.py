@@ -591,7 +591,9 @@ def continued_optimization(
     """D100: a file whose optimization starts from the geometry the node's own optimization
     ended on, at another level, continues that pre-optimization (an xTB pre-optimization
     followed by a DFT optimization). Its result becomes the node's geometry. A constrained
-    optimization or scan continues nothing (D157)."""
+    optimization or scan continues nothing (D157), but a free optimization continues a
+    constrained pre-optimization, such as an xTB optimization with restrained distances
+    (D165)."""
     for step in steps:
         if step.job_type not in OPTIMIZATION_TYPES or not step.geometries or step.constrained:
             continue
@@ -599,14 +601,15 @@ def continued_optimization(
             continue
         if not geometry.matches(_rows(step.final_geometry), chosen_rows, tolerance):
             continue
-        previous = levels.optimization_at(target, target.geometry, tolerance)
+        previous = levels.pre_optimization_at(target, target.geometry, tolerance)
         if previous is not None and resolved[step.index].identity != levels.fields_of(
             previous.level
         ):
             return {
                 "step": step.index,
                 "calculation_id": previous.id,
-                "level_label": levels.label(previous.level),
+                "level_label": levels.label(previous.level)
+                + (" with constraints" if previous.constraints else ""),
             }
     return None
 
