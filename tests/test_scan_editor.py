@@ -254,6 +254,7 @@ def test_files_are_read_and_the_path_is_joined(page, tmp_path):
     [scan] = shown["scans"]
     assert shown["added"] == [scan["key"]] and scan["coordinate"] == "dihedral C3–C4–C9–C10"
     assert len(scan["points"]) == 13 and scan["level"] == "Gaussian B3LYP/STO-3G"
+    assert scan["energy_group"] == scan["key"]
     [problem] = shown["problems"]
     assert "is not a file" in problem["problem"]
 
@@ -532,3 +533,18 @@ def test_a_scan_read_again_keeps_its_atom_order_and_its_pieces_follow_their_poin
     pieces = [editor.Piece(old.key, 12, 11), editor.Piece(old.key, 2, 0)]
     moved = editor.carry({old.key: old}, {old.key: again}, pieces)
     assert [(p.first, p.last) for p in moved] == [(9, 9), (2, 0)]
+
+
+def test_a_basis_set_read_from_the_checkpoint_shares_the_chart_s_zero(relaxed):
+    """T-IMP-55 (D167): a continuation that reads its basis set from the checkpoint is drawn
+    against the same zero as the file that names it; another level gets its own."""
+    part2 = _part(relaxed, "b:1", list(range(6, 13)), "b_part2.log")
+    part2.level = dict(relaxed.level, basis="")
+    part2.basis_named = False
+    part2.level_label = "Gaussian B3LYP/CHKBASIS"
+    other = _part(relaxed, "c:1", list(range(6, 13)), "c.log")
+    other.level = {**other.level, "method": "PBE0"}
+    other.level_label = "Gaussian PBE0/STO-3G"
+    # The continuation comes first, as a file added before the one it continues.
+    groups = editor.energy_groups({"b:1": part2, "f:1": relaxed, "c:1": other})
+    assert groups == {"f:1": "f:1", "b:1": "f:1", "c:1": "c:1"}

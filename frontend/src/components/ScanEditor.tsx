@@ -670,6 +670,7 @@ export function ScanEditor({
               <ScanChart
                 scans={scans}
                 path={path}
+                pathScan={pieces[0]?.scan ?? null}
                 colour={colour}
                 at={preview ? null : at}
                 preview={preview}
@@ -1057,6 +1058,7 @@ export function ScanEditor({
 function ScanChart({
   scans,
   path,
+  pathScan,
   colour,
   at,
   preview,
@@ -1068,6 +1070,8 @@ function ScanChart({
 }: {
   scans: EditorScan[]
   path: JoinedPath | null
+  /** The scan of the path's first piece, whose energy group the path is in. */
+  pathScan: string | null
   colour: (key: string) => string
   at: number | null
   preview: Preview | null
@@ -1081,17 +1085,19 @@ function ScanChart({
   const axisAtoms = path && path.axis === 'coordinate' && path.atoms.length ? path.atoms : (scans[0]?.atoms ?? [])
   const drawn = scans.filter((s) => sameAtoms(s.atoms, axisAtoms))
   const other = scans.length - drawn.length
-  const level = path?.level || drawn[0]?.level
-  // Each level's zero: the path's zero for its level, else its lowest point.
+  // D167: scans are drawn by energy group (one level of theory, a basis set read from the
+  // checkpoint going with the file that names it), not by their level's label.
+  const group = (path && scans.find((s) => s.key === pathScan)?.energy_group) || drawn[0]?.energy_group
+  // Each group's zero: the path's zero for its group, else its lowest point.
   const zeros = new Map<string, number>()
   for (const scan of drawn) {
     for (const p of scan.points) {
       if (p.energy === null) continue
-      const known = zeros.get(scan.level)
-      if (known === undefined || p.energy < known) zeros.set(scan.level, p.energy)
+      const known = zeros.get(scan.energy_group)
+      if (known === undefined || p.energy < known) zeros.set(scan.energy_group, p.energy)
     }
   }
-  if (level && zeroEnergy !== null) zeros.set(level, zeroEnergy)
+  if (group && zeroEnergy !== null) zeros.set(group, zeroEnergy)
   const showPath =
     path !== null && path.axis === 'coordinate' && sameAtoms(path.atoms, axisAtoms) && path.frames.length > 1
   type Dot = { i: number; x: number; y: number }
@@ -1101,10 +1107,10 @@ function ScanChart({
     scan,
     points: dots(
       scan.points.map((p) => ({ x: p.value, energy: p.energy })),
-      zeros.get(scan.level),
+      zeros.get(scan.energy_group),
     ),
   }))
-  const pathPoints = showPath && level ? dots(path.frames, zeros.get(level)) : []
+  const pathPoints = showPath && group ? dots(path.frames, zeros.get(group)) : []
   const all = [...lines.flatMap((l) => l.points), ...pathPoints]
   if (all.length < 2) {
     return <div className="scan-chart muted small">The chart shows the scans once they have points with energies.</div>
@@ -1183,7 +1189,7 @@ function ScanChart({
               points={line(points)}
               fill="none"
               strokeWidth={1.2}
-              strokeDasharray={level && scan.level !== level ? '4 3' : undefined}
+              strokeDasharray={group && scan.energy_group !== group ? '4 3' : undefined}
               opacity={0.75}
             />
             {points.map((p) => (
@@ -1210,7 +1216,7 @@ function ScanChart({
       </svg>
       <p className="muted small">
         Click a point to see its structure; the path is the bold line.
-        {drawn.some((s) => level && s.level !== level) && ' Dashed: another level of theory, against its own lowest point.'}
+        {drawn.some((s) => group && s.energy_group !== group) && ' Dashed: another level of theory, against its own lowest point.'}
         {other === 1 && ' 1 scan drives another coordinate and is not drawn.'}
         {other > 1 && ` ${other} scans drive another coordinate and are not drawn.`}
       </p>
