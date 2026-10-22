@@ -191,6 +191,46 @@ test('hold, freeze and minimize', async ({ page }) => {
   expect(atoms[2]).toEqual([-0.363, 1.028, 0])
 })
 
+// T-UI-48, D166: Flip shows only with three atoms picked; a tied fragment lists the bonds of
+// the tie to tick, and ignoring one lets the flip through.
+test('flip two atoms about a third', async ({ page }) => {
+  test.slow() // software WebGL is slow on the Windows runners
+  await newInvestigation(page, 'Flip test')
+  const made = await page.request.post('/api/nodes', {
+    data: { label: 'ethane', xyz: ETHANE, charge: 0, multiplicity: 1, pos_x: 100, pos_y: 100 },
+  })
+  expect(made.ok()).toBeTruthy()
+  await page.reload()
+  await canvasNode(page, 'ethane').click()
+  await page.getByRole('button', { name: 'Edit in 3D…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Edit structure: “ethane”' })
+  await expect(dialog.getByTestId('viewer3d').locator('canvas')).toBeVisible()
+  const flip = dialog.getByRole('button', { name: 'Flip H3 ↔ H4' })
+
+  await pick(dialog, '3 4')
+  await expect(dialog.getByLabel('Picked', { exact: true })).toHaveText('H3–H4: 1.780 Å')
+  await expect(dialog.getByLabel('Flip')).toHaveCount(0)
+  await pick(dialog, '3 4 1')
+  await expect(dialog.getByLabel('Bonds to ignore')).toHaveCount(0)
+  await flip.click()
+  await expect(dialog.getByLabel('Last change')).toContainText('Flipped H 3 ↔ H 4: turned 2 atoms by 180°')
+  await expect(dialog.getByLabel('Picked', { exact: true })).toHaveText('H3–H4–C1: 35.2 °')
+
+  // A bond from H3 to the other carbon's H6 ties H3 to the rest past C1.
+  await pick(dialog, '3 6')
+  await dialog.getByRole('button', { name: 'Add bond' }).click()
+  await pick(dialog, '3 4 1')
+  const ties = dialog.getByLabel('Bonds to ignore')
+  await expect(ties.getByLabel('H3–H6')).not.toBeChecked()
+  await expect(ties.getByLabel('C2–H6')).toBeVisible()
+  await expect(flip).toBeDisabled()
+  await ties.getByLabel('H3–H6').check()
+  await expect(flip).toBeEnabled()
+  await flip.click()
+  await expect(dialog.getByLabel('Last change')).toContainText('Flipped H 3 ↔ H 4: turned 2 atoms')
+  await expect(dialog.getByLabel('Last change')).toContainText('ignored H 3–H 6')
+})
+
 // T-UI-43, D141: a node without coordinates built from SMILES, a SMILES fragment, a lone atom
 // and its hydrogens.
 test('build a structure from nothing and from SMILES', async ({ page }) => {

@@ -44,12 +44,21 @@ class StructureIn(BaseModel):
 class DescribeIn(StructureIn):
     charge: int | None = None  # the node's; without both, no electron count check
     multiplicity: int | None = None
+    ignore: list[tuple[int, int]] = Field(default_factory=list)  # D166: bonds a flip ignores
 
 
 class SideOut(BaseModel):
     atom: int
     count: int
     whole: bool
+
+
+class FlipOut(BaseModel):
+    """D166: what Flip would do with the three atoms picked."""
+
+    count: int  # atoms that would turn
+    tie: list[tuple[int, int]]  # tied to the rest: the bonds of the shortest way round
+    error: str | None  # why it cannot flip (the third atom on the line of the first two)
 
 
 class DescribeOut(BaseModel):
@@ -61,6 +70,7 @@ class DescribeOut(BaseModel):
     sides: list[SideOut]
     default_side: int | None
     electrons_note: str | None
+    flip: FlipOut | None = None  # three atoms picked
 
 
 class EditIn(StructureIn):
@@ -86,6 +96,7 @@ class EditIn(StructureIn):
         "redraw",
         "rotate_fragment",
         "align_vectors",
+        "flip",
     ]
     value: float | None = None  # distance (Å), angle, dihedral or turn (degrees); D148: a new
     # atom's bond length, a molecule's distance from the picked atom to each of its donors
@@ -109,6 +120,7 @@ class EditIn(StructureIn):
     axis: list[list[int]] | None = None
     vector: list[list[int]] | None = None
     reference: list[list[int]] | None = None
+    ignore: list[tuple[int, int]] | None = None  # flip: bonds left out (0-based, D166)
 
 
 class EditOut(BaseModel):
@@ -218,7 +230,20 @@ def describe(body: DescribeIn):
             if body.charge is not None and body.multiplicity is not None
             else None
         ),
+        flip=_flip_out(structure, picks, body.ignore)
+        if value is not None and kind == "angle"
+        else None,
     )
+
+
+def _flip_out(
+    structure: builder.Structure, picks: list[int], ignore: list[tuple[int, int]]
+) -> FlipOut:
+    try:
+        plan = builder.flip_plan(structure, picks, ignore)
+    except builder.BuildError as exc:
+        return FlipOut(count=0, tie=[], error=str(exc))
+    return FlipOut(count=len(plan.moving), tie=plan.tie, error=None)
 
 
 def _value(body: EditIn) -> float:
@@ -320,6 +345,8 @@ def _apply(structure: builder.Structure, picks: list[int], body: EditIn) -> buil
             done = builder.add_hydrogens(structure, picks, body.bonds, body.count)
         elif body.tool == "rotate_fragment":
             done = builder.rotate_fragment(structure, picks, _value(body), body.axis)
+        elif body.tool == "flip":
+            done = builder.flip(structure, picks, body.ignore or [])
         elif body.tool == "align_vectors":
             target = 0.0 if body.value is None else _value(body)
             done = builder.align_vectors(
@@ -367,6 +394,7 @@ STEP_TOOLS = Literal[
     "minimize",
     "rotate_fragment",
     "align_vectors",
+    "flip",
 ]
 POINTS = (
     "Two points, each an atom (from 1) or a list of atoms whose middle counts, e.g. [4, [62, 63]]"
@@ -410,7 +438,11 @@ class StepIn(BaseModel):
         "turn about `axis`, by the smallest angle that puts the line `vector` (two points among "
         "`atoms`) at `value` degrees (0 parallel, default; 90 perpendicular) to the line "
         "`reference` (two points that stay); says the angle reached when the axis cannot reach "
-        "it."
+        "it. flip (D166): on 3 atoms, swap the first two by a 180° turn about the line from "
+        "their middle towards the third (which stays), everything reached from them without "
+        "passing the third turning rigidly (an η² ligand end over end about the metal, an "
+        "aryl's two ortho C about its N); refused when that is tied to the rest some other way, "
+        "naming the bonds of the tie: give one in `ignore_bonds`, or remove it first."
     )
     atoms: list[int] | None = Field(
         None,
@@ -458,6 +490,9 @@ class StepIn(BaseModel):
     )
     reference: list[int | list[int]] | None = Field(
         None, description="align_vectors: the line that stays. " + POINTS
+    )
+    ignore_bonds: list[tuple[int, int]] | None = Field(
+        None, description="flip: bonds (atom pairs from 1) to leave out when finding what turns"
     )
 
 
@@ -835,6 +870,9 @@ def _edit_of(step: StepIn) -> EditIn:
         axis=_points(step.axis),
         vector=_points(step.vector),
         reference=_points(step.reference),
+        ignore=None
+        if step.ignore_bonds is None
+        else [(i - 1, j - 1) for i, j in step.ignore_bonds],
     )
 
 
