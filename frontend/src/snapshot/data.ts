@@ -33,6 +33,8 @@ export type SharedView = {
   edges: EnergyView['edges']
   /** ΔX of every node and group, for each reference the reader may choose. */
   relative: Record<string, EnergyView['relative']>
+  /** D160: W-TEMP and W-STDSTATE; copies made before have none. */
+  notes?: EnergyView['notes']
 }
 
 export type SnapshotData = {
@@ -215,6 +217,7 @@ export function energyView(
     edges: found.edges,
     reference_id: relative ? referenceId : null,
     relative: relative ?? {},
+    notes: found.notes ?? [],
   }
 }
 

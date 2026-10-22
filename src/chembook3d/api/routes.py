@@ -40,6 +40,7 @@ from chembook3d.models import (
 )
 from chembook3d.services import (
     basis_sets,
+    concentrations,
     energies,
     history,
     import_undo,
@@ -148,6 +149,9 @@ class NodeOut(BaseModel):
     path_edge_id: str | None = None
     on_edge_only: bool = False
     on_edge: bool = False
+    # D160: a free species' own concentration ({"kind": "1 M"}, {"kind": "neat", "solvent",
+    # "molarity"} or {"kind": "molar", "molarity"} in mol/L); null follows the standard state
+    concentration: dict[str, Any] | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
@@ -166,6 +170,10 @@ class NodeIn(BaseModel):
     pos_x: float | None = None
     pos_y: float | None = None
     view_rotation: list[float] | None = None
+    # D160: a free species only: {"kind": "1 M"}, {"kind": "neat", "solvent": "THF"} (a solvent
+    # of Settings' `solvents`, or any name with "molarity"), {"kind": "molar", "molarity": 0.1};
+    # null: the investigation's standard state
+    concentration: dict[str, Any] | None = None
     xyz: str | None = None
     # D148: or the coordinates of a build_structure answer (and its charge and multiplicity
     # when these are not given); only when creating
@@ -396,6 +404,8 @@ class SettingsOut(BaseModel):
     # D106: how energy profiles are drawn, and the presets the style dialog offers
     profile_style: dict[str, Any]
     profile_presets: dict[str, dict[str, Any]]
+    # D160: the neat solvents a free species' concentration offers, with their molarity
+    solvents: list[dict[str, Any]] = []
 
 
 class SettingsIn(BaseModel):
@@ -485,6 +495,7 @@ def _node_out(session: Session, node: Node) -> NodeOut:
         path_edge_id=node.path_edge_id,
         on_edge_only=node.on_edge_only,
         on_edge=scan_edges.on_edge(session, node),
+        concentration=node.concentration,
         created_at=node.created_at,
         updated_at=node.updated_at,
     )
@@ -959,6 +970,7 @@ def get_settings(request: Request):
         steric_colours=s.steric_colours,
         profile_style=s.profile_style,
         profile_presets=app_settings.PROFILE_PRESETS,
+        solvents=[{"name": x["name"], "molarity": x["molarity"]} for x in concentrations.SOLVENTS],
     )
 
 

@@ -14,6 +14,7 @@ import {
 } from '../api'
 import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
 import { closesCycle, download, tableCellClass } from '../util'
+import { EnergyNotes } from './EnergyNotes'
 import { ProfileChart } from './ProfileChart'
 import { ProfileStyleDialog } from './ProfileStyleDialog'
 import { CompareStericsDialog } from './Sterics'
@@ -362,7 +363,9 @@ export function EnergyDrawer({
           </button>
         </div>
         <span className="muted small">
-          {level ? `${energyTypeName(type, settings?.qh_temperature, settings?.qh_cutoff, settings?.standard_state)} at ${levelLabel}` : 'No energies in this investigation yet'}
+          {level
+            ? `${energyTypeName(type, settings?.qh_temperature, settings?.qh_cutoff, settings?.standard_state, shownProfiles?.job_temperatures)} at ${levelLabel}`
+            : 'No energies in this investigation yet'}
         </span>
         <span className="spacer" />
         {tab === 'profile' ? (
@@ -554,6 +557,7 @@ export function EnergyDrawer({
           onPointerUp={() => (panning.current = null)}
         >
           {!layout.pathways && errorLine}
+          {livePaths.length > 0 && <EnergyNotes notes={shownProfiles?.notes} />}
           {!livePaths.length ? (
             <p className="muted placeholder">
               Add a branch, or select a node on the canvas and start a pathway there. Pathways follow the transitions

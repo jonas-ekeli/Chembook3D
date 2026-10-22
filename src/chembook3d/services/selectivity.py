@@ -43,7 +43,16 @@ from chembook3d.models import (
 )
 from chembook3d.services import geometry, history, thermo_settings
 from chembook3d.services import species as species_service
-from chembook3d.services.energies import ENERGY_TYPES, Energies, LevelKey, key_label
+from chembook3d.services.energies import (
+    ENERGY_TYPES,
+    Energies,
+    LevelKey,
+    check_text,
+    distinct_temperatures,
+    key_label,
+    same_temperature,
+    temperatures_text,
+)
 from chembook3d.services.records import RecordError, get, number_value, text_value
 from chembook3d.units import GAS_CONSTANT, J_PER_MOL_HARTREE
 
@@ -415,6 +424,7 @@ def result(
         "temperature_from_settings": selectivity.temperature is None,
         "cutoff": settings.qh_cutoff,
         "standard_state": settings.standard_state,
+        "job_temperatures": [],  # D160: of the frequency jobs H and G are read from
         "conformers": selectivity.conformers,
         "reference_id": selectivity.reference_id,
         "reference_label": None,
@@ -533,8 +543,10 @@ def result(
             member["value"] = value.value
             # D154: a TS the frequency job at this level does not show to be one is noted.
             member["check"] = value.check
-            if value.check is not None:
-                notes.append(f"“{member['label']}”: {value.check['message']}.")
+            # D160: W-TEMP is noted once below, for every TS.
+            shown = check_text(value.check, ("W-TEMP",))
+            if shown is not None:
+                notes.append(f"“{member['label']}”: {shown}.")
             if value.value is None:
                 member["message"] = value.message
                 missing.append(f"“{member['label']}” ({value.message})")
@@ -552,20 +564,28 @@ def result(
             elif balance:
                 member["species_value"] = added
                 member["value"] = value.value + added
+    if selectivity.energy_type in ("H", "G"):
+        found["job_temperatures"] = distinct_temperatures(job_temperatures)
     if missing:
         return stop("n/a", f"No {selectivity.energy_type} at this level for {', '.join(missing)}.")
     for outcome in found["outcomes"]:
         notes.extend(_drop_duplicates(session, outcome, settings.duplicate_tolerance))
+    # D160: free species at 1 atm in a solvation model.
+    note = species_service.standard_state_note(
+        session, energies, list(balances.values()), key, selectivity.energy_type
+    )
+    if note is not None:
+        notes.append(note["message"])
     if selectivity.energy_type == "E":
         notes.append("E is the electronic energy, with no thermal correction.")
     elif selectivity.energy_type in ("H", "G"):
-        other = sorted(t for t in job_temperatures if abs(t - temperature) > 1e-6)
+        other = [t for t in found["job_temperatures"] if not same_temperature(t, temperature)]
         if other:
-            shown = ", ".join(f"{t:g} K" for t in other)
+            # D160, W-TEMP: once for every TS.
             notes.append(
-                f"{selectivity.energy_type} is read from the files at the job temperature "
-                f"({shown}); only the Boltzmann factors use {temperature:g} K. "
-                f"G_qh is recomputed at {temperature:g} K."
+                f"W-TEMP: {selectivity.energy_type} is read from the files at the job "
+                f"temperature ({temperatures_text(other)}); only the Boltzmann factors use "
+                f"{temperature:g} K. G_qh is recomputed at {temperature:g} K."
             )
 
     # S2, S5: ΔΔG‡ from the lowest outcome and the predicted ratio, both ways.

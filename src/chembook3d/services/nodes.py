@@ -21,7 +21,7 @@ from chembook3d.models import (
     Status,
     TransitionSpecies,
 )
-from chembook3d.services import history, transitions
+from chembook3d.services import concentrations, history, transitions
 
 EDITABLE_FIELDS = (
     "label",
@@ -33,6 +33,7 @@ EDITABLE_FIELDS = (
     "notes",
     "step_id",
     "branch_id",
+    "concentration",  # D160: a free species only
 )
 # Canvas positions and the saved 3D orientation: how a node is shown, not recorded in history.
 LAYOUT_FIELDS = ("pos_x", "pos_y", "view_rotation")
@@ -80,6 +81,7 @@ def snapshot(node: Node) -> dict[str, Any]:
         "branch_id": node.branch_id,
         "group_id": node.group_id,
         "path_edge_id": node.path_edge_id,
+        "concentration": node.concentration,
     }
 
 
@@ -96,6 +98,16 @@ def _validate_link(session: Session, node: Node | None, field: str, value: Any) 
     if session.get(model, value) is None:
         raise NodeError("unknown reaction step" if field == "step_id" else "unknown branch")
     return value
+
+
+def _concentration(node: Node, value: Any) -> dict[str, Any] | None:
+    """D160: only a free species has a concentration of its own."""
+    if value is not None and node.kind != NodeKind.SPECIES:
+        raise NodeError("Only a free species has a concentration (D160)")
+    try:
+        return concentrations.clean(value)
+    except concentrations.Invalid as exc:
+        raise NodeError(str(exc)) from exc
 
 
 def _validate(field: str, value: Any) -> Any:
@@ -172,6 +184,8 @@ def create(session: Session, fields: dict[str, Any], xyz_text: str | None = None
     for field, value in fields.items():
         if field in ("step_id", "branch_id"):
             setattr(node, field, _validate_link(session, node, field, value))
+        elif field == "concentration":
+            node.concentration = _concentration(node, value)
         else:
             setattr(node, field, _validate(field, value))
     if xyz_text is not None and xyz_text.strip():
@@ -189,6 +203,8 @@ def update(session: Session, node_id: str, changes: dict[str, Any]) -> Node:
             raise NodeError(f"'{field}' cannot be edited")
         if field in ("step_id", "branch_id"):
             value = _validate_link(session, node, field, value)
+        elif field == "concentration":
+            value = _concentration(node, value)
         else:
             value = _validate(field, value)
         old = getattr(node, field)
@@ -256,6 +272,7 @@ def derive(session: Session, node: Node, geometry: list[list[Any]]) -> Node:
         pos_x=node.pos_x + DERIVED_NODE_OFFSET,
         pos_y=node.pos_y + DERIVED_NODE_OFFSET,
         view_rotation=node.view_rotation,
+        concentration=node.concentration,  # D160: the same species
     )
     session.add(derived)
     session.flush()

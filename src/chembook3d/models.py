@@ -139,6 +139,9 @@ class Node(Base):
         default=None,
     )
     on_edge_only: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
+    # D160: a free species' concentration ({"kind": "1 M" | "neat" | "molar", ...}, see
+    # `services/concentrations.py`); None follows the investigation's standard state.
+    concentration: Mapped[dict[str, Any] | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 

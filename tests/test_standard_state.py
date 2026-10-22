@@ -71,11 +71,20 @@ def test_free_energies_of_a_node_include_the_correction_at_the_settings_temperat
     freq = calculations(open_client, node_id)[-1]
     assert after["G_qh"]["details"]["correction"] == freq["quasi_harmonic"]["correction"]
 
-    # D95: the temperature in Settings sets both the G_qh and the 1 M correction.
+    # D95, D160: the G_qh temperature sets G_qh's 1 M correction; G is the file's, at its job's
+    # 298.15 K, and so is its correction (T-EN-34), with W-TEMP saying so.
     settings(open_client, qh_temperature=350)
     hot = view(open_client, key, "G")["values"][node_id]
-    assert hot["value"] == pytest.approx(before["G"]["value"] + shift(350), abs=1e-12)
-    assert hot["details"]["standard_state_temperature"] == 350
+    assert hot["value"] == pytest.approx(before["G"]["value"] + shift(), abs=1e-12)
+    assert hot["details"]["standard_state_temperature"] == 298.15
+    assert {
+        "code": "W-TEMP",
+        "message": "G is at the frequency job's 298.15 K, not at 350 K like G_qh",
+    } in hot["check"]["issues"]
+    hot_qh = view(open_client, key, "G_qh")["values"][node_id]
+    assert hot_qh["details"]["standard_state_temperature"] == 350
+    assert hot_qh["details"]["standard_state_correction"] == pytest.approx(shift(350), abs=1e-15)
+    assert "W-TEMP" not in [i["code"] for i in hot_qh["check"]["issues"]]
 
 
 def test_it_cancels_on_unimolecular_steps_and_counts_each_species(open_client, cycle):  # noqa: F811

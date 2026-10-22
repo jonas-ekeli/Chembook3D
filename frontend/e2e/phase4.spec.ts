@@ -39,14 +39,16 @@ test('energy view: one level and type, ΔG on edges, energy mode', async ({ page
   const view = page.getByRole('group', { name: 'Energy view' })
   await expect(view.getByLabel('Level of theory')).toHaveValue(/.+/)
   await expect(view.getByLabel('Level of theory').locator('option')).toHaveText(['Gaussian B3LYP-GD3BJ/def2SVP'])
-  // G is preferred (D32); G_qh is listed with its temperature and cutoff (D58).
+  // G is preferred (D32); G_qh is listed with its temperature and cutoff (D58), G with its frequency
+  // jobs' temperature, and both with the standard state, 1 atm included (D160).
   await expect(view.getByLabel('Energy type')).toHaveValue('G')
   await expect(view.getByLabel('Energy type').locator('option')).toHaveText([
     'E',
     'H',
-    'G',
-    'G_qh (298.15 K, 100 cm⁻¹)',
+    'G (1 atm, 298.15 K)',
+    'G_qh (298.15 K, 100 cm⁻¹, 1 atm)',
   ])
+  await expect(view.locator('.badge.warn')).toHaveCount(0)
 
   // FR-EN-02: ΔG = G(target) − G(source) on each edge; A-S1 → A-S2 is 14.8 − (−3.2).
   await expect(page.locator('.edge-energy', { hasText: 'ΔG 18.00' })).toBeVisible()
@@ -82,6 +84,31 @@ test('energy view: one level and type, ΔG on edges, energy mode', async ({ page
   await view.getByLabel('Energy type').selectOption('E')
   await expect(page.locator('.edge-energy', { hasText: 'ΔE 18.00' })).toBeVisible()
   expect(await (await page.request.get('/api/canvas')).json()).toEqual(before)
+})
+
+test('W-TEMP shows where G is read at another temperature than G_qh', async ({ page }) => {
+  // T-EN-35, D160: the demo's frequency jobs are at 298.15 K.
+  await openDemo(page)
+  const view = page.getByRole('group', { name: 'Energy view' })
+  try {
+    await page.request.put('/api/settings', { data: { qh_temperature: 350 } })
+    await page.reload()
+    await expect(canvasNode(page, 'T-S0')).toBeVisible()
+    await expect(view.getByLabel('Energy type').locator('option')).toHaveText([
+      'E',
+      'H',
+      'G (1 atm, 298.15 K)',
+      'G_qh (350 K, 100 cm⁻¹, 1 atm)',
+    ])
+    await view.getByLabel('Energy type').selectOption('G (1 atm, 298.15 K)')
+    const badge = view.locator('.badge.warn', { hasText: 'W-TEMP' })
+    await expect(badge).toBeVisible()
+    await expect(badge).toHaveAttribute('title', "G values here are at the frequency jobs' 298.15 K; G_qh is at 350 K")
+    await view.getByLabel('Energy type').selectOption('G_qh (350 K, 100 cm⁻¹, 1 atm)')
+    await expect(view.locator('.badge.warn')).toHaveCount(0)
+  } finally {
+    await page.request.put('/api/settings', { data: { qh_temperature: 298.15 } })
+  }
 })
 
 test('a free species on one edge counts on every node card after it', async ({ page }) => {
@@ -194,7 +221,7 @@ test('profile along branches with a "no TS" connection, the energy table and exp
   const shown = await table.getByRole('row').evaluateAll((rows) =>
     rows.map((row) => Array.from(row.querySelectorAll('th, td')).map((cell) => cell.textContent ?? '')),
   )
-  expect(shown[0].at(-2)).toBe('ΔG (kcal/mol)')
+  expect(shown[0].at(-2)).toBe('ΔG 1 atm (kcal/mol)') // D160: the standard state is named
   expect(shown[0].at(-1)).toBe('Check') // D154
   expect(shown.find((row) => row[0] === 'A-S3')?.at(-2)).toBe('-8.50')
 

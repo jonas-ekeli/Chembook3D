@@ -14,7 +14,7 @@ from chembook3d.api.routes import DbSession
 from chembook3d.services import pathways
 from chembook3d.services import species as species_service
 from chembook3d.services import transitions as transition_service
-from chembook3d.services.energies import Energies, LevelKey
+from chembook3d.services.energies import Energies, LevelKey, distinct_temperatures
 from chembook3d.services.records import RecordError
 
 router = APIRouter(prefix="/api")
@@ -25,6 +25,8 @@ class EnergyOptionOut(BaseModel):
     label: str
     types: list[str]
     bsse: bool = False  # D161: a node has a counterpoise BSSE at this level
+    # D160: the temperatures of the frequency jobs H and G at this level are read at
+    job_temperatures: list[float] = []
 
 
 class EnergyOptionsOut(BaseModel):
@@ -69,6 +71,7 @@ class SpeciesCountOut(BaseModel):
     species_id: str
     label: str
     count: int  # added this many times; negative: subtracted
+    concentration: str | None = None  # D160: its own ("1 M", "neat THF, 12.3 M"), if any
 
 
 class RelativeOut(BaseModel):
@@ -89,6 +92,9 @@ class EnergyViewOut(BaseModel):
     edges: dict[str, EdgeValueOut]
     reference_id: str | None = None
     relative: dict[str, RelativeOut] = {}  # by id, when a reference is given
+    # D160: W-TEMP (H or G read at different temperatures) and W-STDSTATE (free species at
+    # 1 atm in a solvation model)
+    notes: list[IssueOut] = []
 
 
 class PathIn(BaseModel):
@@ -129,6 +135,7 @@ class ProfileIn(BaseModel):
 class TableOut(BaseModel):
     columns: list[str]
     rows: list[list[str]]
+    notes: list[IssueOut] = []  # D160: the profile's W-TEMP and W-STDSTATE
 
 
 def _key(text: str) -> LevelKey:
@@ -170,6 +177,26 @@ def view_values(
             message=message,
         )
     return values, edges
+
+
+def view_notes(
+    session, energies: Energies, values: dict[str, ValueOut], key: LevelKey, type: str
+) -> list[IssueOut]:
+    """D160: W-TEMP where H or G values on the canvas are read at different temperatures (or
+    at one other than G_qh's), W-STDSTATE where a free species joins or leaves on an edge at
+    1 atm in a solvation model."""
+    temperatures = distinct_temperatures(
+        v.details.get("job_temperature") for v in values.values() if v.value is not None
+    )
+    changes = [
+        species_service.change(t, forward=True)
+        for t in transition_service.list_transitions(session)
+    ]
+    found = [
+        energies.temperature_note(temperatures, type),
+        species_service.standard_state_note(session, energies, changes, key, type),
+    ]
+    return [IssueOut(**note) for note in found if note is not None]
 
 
 def relative_values(
@@ -233,6 +260,7 @@ def energy_view(
         edges=edges,
         reference_id=reference,
         relative=relative,
+        notes=view_notes(session, energies, values, key, type),
     )
 
 

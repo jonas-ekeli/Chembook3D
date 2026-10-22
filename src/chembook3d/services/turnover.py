@@ -28,7 +28,16 @@ from chembook3d.models import GroupNode, LevelOfTheory, Node, NodeKind, Role, Tu
 from chembook3d.services import history, pathways, thermo_settings
 from chembook3d.services import species as species_service
 from chembook3d.services import transitions as transition_service
-from chembook3d.services.energies import ENERGY_TYPES, Energies, LevelKey, key_label
+from chembook3d.services.energies import (
+    ENERGY_TYPES,
+    Energies,
+    LevelKey,
+    check_text,
+    distinct_temperatures,
+    key_label,
+    same_temperature,
+    temperatures_text,
+)
 from chembook3d.services.records import RecordError, get, number_value, text_value
 from chembook3d.units import BOLTZMANN, GAS_CONSTANT, J_PER_MOL_HARTREE, PLANCK
 
@@ -258,6 +267,7 @@ def result(
         "temperature_from_settings": turnover.temperature is None,
         "cutoff": settings.qh_cutoff,
         "standard_state": settings.standard_state,
+        "job_temperatures": [],  # D160: of the frequency jobs H and G are read from
         "unit": settings.energy_unit,
         "cycle": [],  # ids from the closing node round to it again
         "points": [],  # one per state of the cycle (the closing repeat left out)
@@ -334,8 +344,9 @@ def result(
                 "check": point["check"],
             }
         )
-        if point["check"] is not None:  # D154
-            notes.append(f"“{point['label']}”: {point['check']['message']}.")
+        shown = check_text(point["check"], ("W-TEMP",))  # D154; D160: W-TEMP once, below
+        if shown is not None:
+            notes.append(f"“{point['label']}”: {shown}.")
         if role == Role.UNSPECIFIED:
             notes.append(
                 f"“{point['label']}” is not marked as a minimum or a transition state; it "
@@ -349,6 +360,10 @@ def result(
                 missing.append(entry)
         elif point["details"].get("job_temperature") is not None:
             job_temperatures.add(point["details"]["job_temperature"])
+    if turnover.energy_type in ("H", "G"):
+        found["job_temperatures"] = distinct_temperatures(job_temperatures)
+    # D160: free species at 1 atm in a solvation model.
+    notes.extend(n["message"] for n in data["notes"] if n["code"] == "W-STDSTATE")
     if data["reference_value"] is None:
         first = points[0]
         return stop(
@@ -367,13 +382,13 @@ def result(
     if turnover.energy_type == "E":
         notes.append("E is the electronic energy, with no thermal correction.")
     elif turnover.energy_type in ("H", "G"):
-        other = sorted(t for t in job_temperatures if abs(t - temperature) > 1e-6)
+        other = [t for t in found["job_temperatures"] if not same_temperature(t, temperature)]
         if other:
-            shown = ", ".join(f"{t:g} K" for t in other)
+            # D160, W-TEMP: once for every point.
             notes.append(
-                f"{turnover.energy_type} is read from the files at the job temperature "
-                f"({shown}); only the rate expression uses {temperature:g} K. "
-                f"G_qh is recomputed at {temperature:g} K."
+                f"W-TEMP: {turnover.energy_type} is read from the files at the job "
+                f"temperature ({temperatures_text(other)}); only the rate expression uses "
+                f"{temperature:g} K. G_qh is recomputed at {temperature:g} K."
             )
 
     states = found["points"]

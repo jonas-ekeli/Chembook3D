@@ -18,6 +18,10 @@
   pathway that does not pass through the reference is balanced from the first point it shares
   with one that does, or else from its first point joined to the reference by transitions,
   with that point's balance on the canvas (D72).
+- D160: a profile names the temperatures of the frequency jobs its H or G values are read at
+  (`job_temperatures`) and carries `notes`: W-TEMP where they differ from each other or from
+  the G_qh temperature, W-STDSTATE where free species join or leave at 1 atm in a solvation
+  model. The table's G and G_qh columns name their temperature and standard state.
 """
 
 from dataclasses import dataclass
@@ -31,7 +35,13 @@ from chembook3d.models import Branch, GroupNode, Node, ReactionStep, Transition
 from chembook3d.services import branches as branch_service
 from chembook3d.services import species as species_service
 from chembook3d.services import transitions as transition_service
-from chembook3d.services.energies import ENERGY_TYPES, Energies, LevelKey, key_label
+from chembook3d.services.energies import (
+    ENERGY_TYPES,
+    Energies,
+    LevelKey,
+    distinct_temperatures,
+    key_label,
+)
 from chembook3d.services.records import RecordError, get
 
 Endpoint = Node | GroupNode
@@ -407,6 +417,7 @@ def profiles(
     energies = energies or Energies(session)
     reference = energies.value(prepared.reference_id, key, energy_type).value
     shown = []
+    temperatures: set[float] = set()
     for path, balance, species, segments in zip(
         prepared.paths, prepared.balances, prepared.species, prepared.segments, strict=True
     ):
@@ -415,6 +426,8 @@ def profiles(
             end = prepared.ends[record_id]
             point = _point(session, energies, end, key, energy_type, prepared.steps)
             value = point["value"]
+            if value is not None and energy_type in ("H", "G"):
+                temperatures.add(point["details"].get("job_temperature"))
             added, missing = species_service.energy(session, energies, held, key, energy_type)
             point["species"] = described
             point["species_message"] = missing
@@ -442,6 +455,21 @@ def profiles(
                 ],
             }
         )
+    job_temperatures = distinct_temperatures(temperatures)
+    notes = [
+        note
+        for note in (
+            energies.temperature_note(job_temperatures, energy_type),
+            species_service.standard_state_note(
+                session,
+                energies,
+                [b for balance in prepared.balances for b in balance],
+                key,
+                energy_type,
+            ),
+        )
+        if note is not None
+    ]
     return {
         "level": key.encode(),
         # D161: the chart title and the table's Level column say when the BSSE was added.
@@ -453,8 +481,20 @@ def profiles(
         "temperature": energies.temperature,
         "cutoff": energies.cutoff,
         "standard_state": energies.standard_state,
+        "job_temperatures": job_temperatures,  # D160: of H and G
+        "notes": notes,  # D160: W-TEMP, W-STDSTATE
         "profiles": shown,
     }
+
+
+def column_names(
+    temperature: float, cutoff: float, standard_state: str, job_temperatures: list[float]
+) -> tuple[str, str]:
+    """D160: the G and G_qh columns, each with its own temperature and the standard state:
+    "G 1 atm (353.15 K)", "G_qh 298.15 K 100 cm-1 1 atm"."""
+    shown = ", ".join(f"{t:g} K" for t in job_temperatures)
+    g = f"G {standard_state} ({shown})" if shown else f"G {standard_state}"
+    return g, f"G_qh {temperature:g} K {cutoff:g} cm-1 {standard_state}"
 
 
 def _absolute(value: float | None) -> str:
@@ -470,6 +510,9 @@ def relative_text(value: float | None, unit: str) -> str:
 
 
 BSSE_COLUMN = "BSSE correction (hartree)"  # D161
+
+
+FREE_SPECIES = 8  # the "Free species" column, before which the BSSE column goes
 
 
 def table(
@@ -493,28 +536,9 @@ def table(
         data = profiles(session, paths, reference_id, key, energy_type, energies=energies)
     branch_names = {b.id: b.name or "Unnamed branch" for b in session.scalars(select(Branch))}
     label = data["level_label"]
-    qh = f"G_qh {data['temperature']:g} K {data['cutoff']:g} cm-1"
-    g = "G"
-    if data["standard_state"] == "1 M":  # D95: the free energies are at 1 mol/L
-        qh, g = f"{qh} 1 M", f"G 1 M ({data['temperature']:g} K)"
-    columns = [
-        "Label",
-        "Step",
-        "Branch",
-        "Level",
-        "E (hartree)",
-        "H (hartree)",
-        f"{g} (hartree)",
-        f"{qh} (hartree)",
-        "Free species",
-        f"Δ{energy_type} ({unit})",
-        "Check",  # D154
-    ]
-    if energies.bsse:
-        # D161: the counterpoise BSSE each row's values have had added.
-        columns.insert(columns.index("Free species"), BSSE_COLUMN)
     rows: list[list[str]] = []
     seen: set[tuple] = set()
+    g_temperatures: set[float] = set()
     for profile in data["profiles"]:
         for point in profile["points"]:
             # A point balanced with other free species (a closed cycle) gets its own row.
@@ -527,7 +551,10 @@ def table(
             if point["kind"] == "group":
                 rep = session.get(Node, representative) if representative else None
                 name += f" (representative: {rep.label or 'Untitled node'})" if rep else ""
-            values = {t: energies.value(point["id"], key, t).value for t in ("E", "H", "G", "G_qh")}
+            found = {t: energies.value(point["id"], key, t) for t in ("E", "H", "G", "G_qh")}
+            values = {t: v.value for t, v in found.items()}
+            if values["G"] is not None:
+                g_temperatures.add(found["G"].details.get("job_temperature"))
             row = [
                 name,
                 point["step_name"] or "",
@@ -545,6 +572,32 @@ def table(
                 bsse = (
                     point["details"].get("bsse") if point["details"].get("bsse_applied") else None
                 )
-                row.insert(columns.index(BSSE_COLUMN), "" if bsse is None else f"{bsse:.8f}")
+                row.insert(FREE_SPECIES, "" if bsse is None else f"{bsse:.8f}")
             rows.append(row)
-    return {"columns": columns, "rows": rows}
+    # D95, D160: the free energies name their standard state and their own temperatures.
+    g, qh = column_names(
+        data["temperature"],
+        data["cutoff"],
+        data["standard_state"],
+        distinct_temperatures(g_temperatures),
+    )
+    shown_type = {"G": g.split(" (")[0], "G_qh": f"G_qh {data['standard_state']}"}.get(
+        energy_type, energy_type
+    )
+    columns = [
+        "Label",
+        "Step",
+        "Branch",
+        "Level",
+        "E (hartree)",
+        "H (hartree)",
+        f"{g} (hartree)",
+        f"{qh} (hartree)",
+        "Free species",
+        f"Δ{shown_type} ({unit})",
+        "Check",  # D154
+    ]
+    if energies.bsse:
+        # D161: the counterpoise BSSE each row's values have had added.
+        columns.insert(FREE_SPECIES, BSSE_COLUMN)
+    return {"columns": columns, "rows": rows, "notes": data.get("notes", [])}

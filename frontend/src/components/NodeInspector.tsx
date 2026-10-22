@@ -27,6 +27,7 @@ import { SplitDialog } from './PathwayInspectors'
 import { StericsSection } from './Sterics'
 import { recordNames } from '../names'
 import { Vibrations } from './Vibrations'
+import { SpeciesConcentration } from './SpeciesConcentration'
 import { StepMovie, type Movie } from './StepMovie'
 import { Viewer3D } from './Viewer3D'
 import { XyzEditor } from './XyzEditor'
@@ -528,6 +529,7 @@ export function NodeInspector({
               })}
             </ul>
           )}
+          <SpeciesConcentration node={node} settings={settings} onSave={update} />
         </section>
       ) : (
         <section aria-label="Transitions">
