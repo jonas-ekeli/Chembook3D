@@ -916,11 +916,16 @@ export type Settings = {
   geometry_tolerance: number
   duplicate_tolerance: number
   energy_decimals: Record<string, number>
+  /** D159: the open investigation's G_qh temperature and cutoff and standard state
+   * (`thermo_scope` "investigation"), or with none open the defaults for new ones ("app"). */
   qh_temperature: number
   qh_cutoff: number
   /** D95: the standard state of G and G_qh; "1 M" adds RT ln(V_m / 1 L mol⁻¹) per molecule. */
   standard_state: StandardState
   standard_states: StandardState[]
+  thermo_scope: 'investigation' | 'app'
+  /** D159: what a new investigation starts with (the app's settings). */
+  thermo_defaults: { qh_temperature: number; qh_cutoff: number; standard_state: StandardState }
   /** D34: how many of the lowest CREST conformers are ticked on import. */
   crest_count: number
   /** Hydrogens drawn in the 3D views and on structure cards. */
@@ -1989,7 +1994,10 @@ export const api = {
         | 'steric_colours'
         | 'profile_style'
       >
-    >,
+    > & {
+      /** D159: the open investigation's thermochemistry becomes the default for new ones. */
+      thermo_as_default?: boolean
+    },
   ) => request<Settings>('PUT', '/settings', fields),
 
   uploadImport: (file: Blob, name: string, nodeId?: string | null) => {

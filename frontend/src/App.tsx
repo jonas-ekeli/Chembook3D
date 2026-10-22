@@ -4,7 +4,6 @@ import {
   api,
   ApiError,
   energyTypeName,
-  standardStateCorrection,
   SYNC_PROBLEMS,
   type Canvas,
   type EnergyOptions,
@@ -21,7 +20,6 @@ import {
   type RemoteServer,
   type RemoteStatus,
   type Settings,
-  type StandardState,
   type SyncConflict,
   type SyncStatus,
   type ViewState,
@@ -36,6 +34,8 @@ import { download } from './util'
 import { FilterMenu } from './components/FilterMenu'
 import { FolderPicker } from './components/FolderPicker'
 import { HistoryList } from './components/HistoryList'
+import { NumberSetting } from './components/NumberSetting'
+import { ThermoSettings } from './components/ThermoSettings'
 import { UndoImportDialog } from './components/UndoImportDialog'
 import { BatchImportDialog } from './components/BatchImportDialog'
 import { ImportDialog } from './components/ImportDialog'
@@ -111,35 +111,6 @@ function readMode(): ViewMode {
   } catch {
     return 'compact'
   }
-}
-
-function NumberSetting({
-  label,
-  value,
-  onSave,
-  allowZero = false,
-}: {
-  label: string
-  value: number
-  onSave: (value: number) => void
-  allowZero?: boolean
-}) {
-  const [draft, setDraft] = useState(String(value))
-  const parsed = Number(draft)
-  const valid = draft.trim() !== '' && Number.isFinite(parsed) && (allowZero ? parsed >= 0 : parsed > 0)
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <input
-        aria-label={label}
-        inputMode="decimal"
-        value={draft}
-        aria-invalid={!valid}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={() => valid && parsed !== value && onSave(parsed)}
-      />
-    </label>
-  )
 }
 
 function errorText(err: unknown): string {
@@ -371,7 +342,11 @@ function App() {
   }
 
   // D91: changes Claude (or another tab) makes show at once; Claude's deletes wait for an answer.
-  const claudeRequests = useLive(investigation?.folder ?? null, reload)
+  // D159: the investigation's thermochemistry is in the settings, so they are read again too.
+  const claudeRequests = useLive(investigation?.folder ?? null, () => {
+    reload()
+    api.settings().then(setSettings, () => undefined)
+  })
 
   // D115: a scan path that came back from its cloud session becomes a node by itself.
   const pathImported = (label: string, _nodeId: string, onEdge: boolean) => {
@@ -847,58 +822,15 @@ function App() {
             onSave={(duplicate_tolerance) => api.saveSettings({ duplicate_tolerance }).then(setSettings)}
           />
           <p className="muted small">An import this close to another node is flagged as a possible duplicate (ID-8).</p>
-          <h3>Quasi-harmonic free energy (G_qh)</h3>
-          <NumberSetting
-            label="Temperature (K)"
-            value={settings.qh_temperature}
-            onSave={(qh_temperature) =>
-              api.saveSettings({ qh_temperature }).then((s) => {
-                setSettings(s)
-                reload()
-              })
-            }
+          <ThermoSettings
+            key={`${settings.thermo_scope}:${investigation?.folder ?? ''}`}
+            settings={settings}
+            investigationName={investigation?.name ?? null}
+            onSaved={(s) => {
+              setSettings(s)
+              if (s.thermo_scope === 'investigation') reload()
+            }}
           />
-          <NumberSetting
-            label="Cutoff (cm⁻¹)"
-            value={settings.qh_cutoff}
-            allowZero
-            onSave={(qh_cutoff) =>
-              api.saveSettings({ qh_cutoff }).then((s) => {
-                setSettings(s)
-                reload()
-              })
-            }
-          />
-          <p className="muted small">
-            Frequencies below the cutoff are raised to it for the vibrational entropy only (Truhlar), as in the
-            reference script. Every G_qh value is shown with these two numbers.
-          </p>
-          <h3>Standard state of G and G_qh</h3>
-          <label className="field">
-            <span>Standard state</span>
-            <select
-              aria-label="Standard state"
-              value={settings.standard_state}
-              onChange={(event) =>
-                api.saveSettings({ standard_state: event.target.value as StandardState }).then((s) => {
-                  setSettings(s)
-                  reload()
-                })
-              }
-            >
-              <option value="1 atm">1 atm ideal gas (as in the output files)</option>
-              <option value="1 M">1 M (1 mol/L)</option>
-            </select>
-          </label>
-          <p className="muted small">
-            1 M adds RT ln(V<sub>m</sub> / 1 L mol⁻¹) to the free energy of every node and free species, with the
-            ideal-gas molar volume V<sub>m</sub> at the temperature above:{' '}
-            {(standardStateCorrection(settings.qh_temperature) * settings.energy_factors[settings.energy_unit]).toFixed(
-              settings.energy_decimals[settings.energy_unit] + 2,
-            )}{' '}
-            {settings.energy_unit} at {settings.qh_temperature} K. It changes relative free energies only where the
-            number of molecules changes (species joining or leaving). E and H are not changed.
-          </p>
           <h3>CREST ensembles</h3>
           <NumberSetting
             label="Conformers kept on import"

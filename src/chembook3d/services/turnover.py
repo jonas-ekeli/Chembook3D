@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from chembook3d import settings as app_settings
 from chembook3d.models import GroupNode, LevelOfTheory, Node, NodeKind, Role, Turnover
-from chembook3d.services import history, pathways
+from chembook3d.services import history, pathways, thermo_settings
 from chembook3d.services import species as species_service
 from chembook3d.services import transitions as transition_service
 from chembook3d.services.energies import ENERGY_TYPES, Energies, LevelKey, key_label
@@ -246,7 +246,7 @@ def result(
     *,
     compare: bool = True,
 ) -> dict[str, Any]:
-    settings = settings or app_settings.load()
+    settings = settings or thermo_settings.settings(session)  # D159: the investigation's
     temperature = turnover.temperature or settings.qh_temperature
     found: dict[str, Any] = {
         "status": "ok",

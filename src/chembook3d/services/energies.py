@@ -39,7 +39,7 @@ from chembook3d.models import (
 )
 from chembook3d.parsers import joined
 from chembook3d.parsers.common import BSSE, NOT_STATIONARY
-from chembook3d.services import levels, spin
+from chembook3d.services import levels, spin, thermo_settings
 from chembook3d.services.records import RecordError
 
 ENERGY_TYPES = ("E", "H", "G", "G_qh")
@@ -523,9 +523,10 @@ class Energies:
         bsse: bool = False,
     ):
         """`temperature` overrides the G_qh temperature setting (a selectivity's own, S4); it
-        is also the temperature of the 1 M standard state (D95). `bsse` adds each node's
-        counterpoise BSSE at the level (D161, off by default)."""
-        settings = settings or app_settings.load()
+        is also the temperature of the 1 M standard state (D95). The settings are the
+        investigation's (D159). `bsse` adds each node's counterpoise BSSE at the level
+        (D161, off by default)."""
+        settings = settings or thermo_settings.settings(session)
         self.session = session
         self.bsse = bsse
         self.temperature = settings.qh_temperature if temperature is None else temperature

@@ -39,7 +39,15 @@ from chembook3d import pathtools, thermochem
 from chembook3d import settings as app_settings
 from chembook3d.models import Calculation, CalculationType, Node, Role
 from chembook3d.parsers.common import IrcRun, ParsedStep
-from chembook3d.services import atom_matching, geometry, imports, levels, trajectory, transitions
+from chembook3d.services import (
+    atom_matching,
+    geometry,
+    imports,
+    levels,
+    thermo_settings,
+    trajectory,
+    transitions,
+)
 from chembook3d.services import energies as energy_service
 from chembook3d.services import files as file_service
 from chembook3d.services import groups as group_service
@@ -229,7 +237,7 @@ def _runs(step: ParsedStep, calculation: Calculation, file: str) -> dict[str, _R
 def read(session: Session, folder: Path, node_id: str, structures: bool = True) -> Irc:
     """The node's IRC; without `structures` the points carry no coordinates (Claude's read)."""
     node = get(session, Node, node_id, "Node")
-    settings = app_settings.load()
+    settings = thermo_settings.settings(session)  # D159: the investigation's G_qh
     tolerance = settings.duplicate_tolerance
     warnings: list[str] = []
     parts: dict[str, Part] = {}

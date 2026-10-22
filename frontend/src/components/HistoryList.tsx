@@ -233,6 +233,31 @@ function describeNote(entry: HistoryEntry): string | null {
   return `Pinned note${named} ${field}: ${String(before)} → ${String(after)}`
 }
 
+const THERMO_FIELDS: Record<string, string> = {
+  qh_temperature: 'G_qh temperature',
+  qh_cutoff: 'G_qh cutoff',
+  standard_state: 'Standard state of G and G_qh',
+}
+
+function thermoValue(field: string, value: unknown): string {
+  if (value === null || value === undefined) return '—'
+  if (field === 'qh_temperature') return `${String(value)} K`
+  if (field === 'qh_cutoff') return `${String(value)} cm⁻¹`
+  return String(value)
+}
+
+/** D159: the investigation's own G_qh temperature, cutoff and standard state. */
+function describeThermo(entry: HistoryEntry): string | null {
+  if (entry.record_type !== 'thermochemistry') return null
+  if (entry.action === 'create') {
+    const value = (entry.new_value ?? {}) as Record<string, unknown>
+    const all = Object.keys(THERMO_FIELDS).map((f) => `${THERMO_FIELDS[f]} ${thermoValue(f, value[f])}`)
+    return `Thermochemistry kept in the investigation, from the app's settings: ${all.join(', ')}`
+  }
+  const field = entry.field ?? ''
+  return `${THERMO_FIELDS[field] ?? field}: ${thermoValue(field, entry.old_value)} → ${thermoValue(field, entry.new_value)}`
+}
+
 /** D102: an import undone, one file or a whole batch. */
 function describeUndo(entry: HistoryEntry): string | null {
   if (entry.action === 'undo_import') {
@@ -259,7 +284,11 @@ function describeUndo(entry: HistoryEntry): string | null {
 
 function describe(entry: HistoryEntry, names: Names): string {
   const other =
-    describeUndo(entry) ?? describeNote(entry) ?? describeOther(entry) ?? describeStructure(entry, names)
+    describeUndo(entry) ??
+    describeNote(entry) ??
+    describeThermo(entry) ??
+    describeOther(entry) ??
+    describeStructure(entry, names)
   if (other !== null) return other
   if (entry.action === 'split') return `Split into branches ${named(names, entry.new_value)}`
   if (entry.action === 'create') {
@@ -303,6 +332,7 @@ function RecordLink({
   // A pinned note's changes are recorded on its node (D85).
   const nodeId =
     entry.record_type === 'node' || entry.record_type === 'note' ? entry.record_id : (value?.node_id ?? null)
+  if (entry.record_type === 'thermochemistry') return <span className="muted">investigation</span>
   if (STRUCTURE_TYPES[entry.record_type]) {
     const name = names.get(entry.record_id)
     return <span className="muted">{name ? `${STRUCTURE_TYPES[entry.record_type]} ${name}` : STRUCTURE_TYPES[entry.record_type]}</span>
