@@ -144,6 +144,24 @@ def optimization_at(
     return matching[-1] if matching else None
 
 
+def pre_optimization_at(node: Node, rows: list[Any] | None, tolerance: float) -> Calculation | None:
+    """D100, D165: the optimization on the node that ended on this geometry, the latest if
+    several did, held or not. A constrained or restrained pre-optimization (D157) gives no
+    geometry level, but a free optimization at another level that starts where it ended
+    still continues it."""
+    if not rows:
+        return None
+    found = [
+        c
+        for c in node.calculations
+        if c.type in OPTIMIZATION_TYPES
+        and c.level is not None
+        and geometry.matches(c.geometry, rows, tolerance)
+    ]
+    found.sort(key=lambda c: (c.created_at, c.step_index or 0))
+    return found[-1] if found else None
+
+
 def node_geometry_optimization(
     node: Node | None, tolerance: float | None = None
 ) -> Calculation | None:
