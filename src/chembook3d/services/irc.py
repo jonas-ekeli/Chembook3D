@@ -705,11 +705,13 @@ def _end_value(
             value, message = None, "no frequency job on this end point"
         elif frequency.level_id != optimization.level_id:
             value, message = None, "the frequency job is at another level than the optimization"
-        elif energy_type == "G":
-            correction = frequency.result.g_corr
+        elif energy_type in ("H", "G"):
+            correction = frequency.result.h_corr if energy_type == "H" else frequency.result.g_corr
             value = None if correction is None else energy + correction
             message = (
-                "the frequency job has no printed G correction" if correction is None else None
+                f"the frequency job has no printed {energy_type} correction"
+                if correction is None
+                else None
             )
         else:
             try:
@@ -719,8 +721,12 @@ def _end_value(
                 value = energy + qh.g_corr
             except thermochem.NotComputable as exc:
                 value, message = None, exc.message
-        if value is not None and settings.standard_state == "1 M":
-            value += thermochem.standard_state_correction(settings.qh_temperature)
+        if value is not None and energy_type != "H" and settings.standard_state == "1 M":
+            # D160: G's shift at its own job temperature, G_qh's at the G_qh temperature.
+            temperature = settings.qh_temperature
+            if energy_type == "G" and frequency.result.temperature:
+                temperature = frequency.result.temperature
+            value += thermochem.standard_state_correction(temperature)
     relative = None
     if value is not None and optimization.level_id:
         key = energy_service.LevelKey(optimization.level_id, optimization.level_id)

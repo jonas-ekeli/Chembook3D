@@ -390,9 +390,17 @@ def test_quasi_harmonic_settings_are_checked(open_client):
 # ---------- the Ru-CAAC example: pathways, profiles, groups (T-BR-05…09, 13; T-EN-08) ----------
 
 
-def add_energies(client, node_id: str, energy: float, g_corr: float = 0.02, level=SVP) -> None:
+def add_energies(
+    client,
+    node_id: str,
+    energy: float,
+    g_corr: float = 0.02,
+    level=SVP,
+    temperature: float | None = 298.15,
+) -> None:
     """An optimization and a frequency record at `level`, written directly: the example's
-    geometries are placeholders, and the energies only need to be distinct."""
+    geometries are placeholders, and the energies only need to be distinct. The frequency
+    job is at `temperature` (D160)."""
     with client.app.state.investigation.sessions.begin() as session:
         lot = levels.get_or_create(session, level)
         for index, kind in enumerate(("optimization", "frequency"), start=1):
@@ -415,6 +423,7 @@ def add_energies(client, node_id: str, energy: float, g_corr: float = 0.02, leve
                 molecular_mass=300.0,
                 rotational_temperatures=[0.1, 0.05, 0.04],
                 symmetry_number=1,
+                temperature=temperature if kind == "frequency" else None,
             )
 
 
@@ -826,10 +835,10 @@ def test_energy_table_and_csv_show_the_same_values(open_client, energetic):
         "Level",
         "E (hartree)",
         "H (hartree)",
-        "G (hartree)",
-        "G_qh 298.15 K 100 cm-1 (hartree)",
+        "G 1 atm (298.15 K) (hartree)",
+        "G_qh 298.15 K 100 cm-1 1 atm (hartree)",
         "Free species",
-        "ΔG (kcal/mol)",
+        "ΔG 1 atm (kcal/mol)",
         "Check",
     ]
     assert [row[0] for row in table["rows"]][:3] == ["T-pre", "A-S0", "A1-S1"]

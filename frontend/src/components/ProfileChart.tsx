@@ -79,7 +79,7 @@ export function ProfileChart({
   const soft = style.text === 'black' ? '#000000' : '#667085'
 
   const family = FONTS[style.font]?.family ?? FONTS.system.family
-  const typeName = energyTypeName(data.type, data.temperature, data.cutoff, data.standard_state)
+  const typeName = energyTypeName(data.type, data.temperature, data.cutoff, data.standard_state, data.job_temperatures)
   const reference = data.profiles.flatMap((p) => p.points).find((p) => p.id === data.reference_id)
   const title = `Δ${typeName} at ${data.level_label}`
   const subtitle = `relative to ${reference?.label ?? '—'}${data.reference_value === null ? ' (no value at this level)' : ''}`

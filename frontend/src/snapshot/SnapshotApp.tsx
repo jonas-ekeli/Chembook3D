@@ -1,6 +1,7 @@
 import { ReactFlowProvider } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { energyTypeName, STATUS_LABEL, type Canvas, type EnergyType, type GroupLayout } from '../api'
+import { EnergyNotes } from '../components/EnergyNotes'
 import type { HydrogenMode } from '../chem'
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import { CanvasPane, type CanvasEnergy } from '../components/Canvas'
@@ -314,7 +315,13 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
             >
               {(levelOption?.types ?? []).map((t) => (
                 <option key={t} value={t}>
-                  {energyTypeName(t, options.temperature, options.cutoff, options.standard_state)}
+                  {energyTypeName(
+                    t,
+                    options.temperature,
+                    options.cutoff,
+                    options.standard_state,
+                    levelOption?.job_temperatures,
+                  )}
                 </option>
               ))}
             </select>
@@ -326,6 +333,7 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
                 1 M
               </span>
             )}
+            <EnergyNotes notes={view?.notes} badges />
             <label className="check" title="Show ΔX on transitions (FR-CAN-03)">
               <input type="checkbox" checked={edgeEnergies} onChange={(event) => setEdgeEnergies(event.target.checked)} />
               <span>Energies on edges</span>

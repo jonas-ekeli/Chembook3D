@@ -15,6 +15,9 @@
 - W-BALANCE: when both ends and every attached species have coordinates, the atoms and the
   charge before an edge (source + joining species) must equal those after it (target +
   leaving species).
+- A species' G and G_qh are at its own concentration when it has one (D160,
+  `concentrations`), else at the investigation's standard state. W-STDSTATE notes species
+  joining or leaving at the 1 atm standard state while the level has a solvation model.
 """
 
 import heapq
@@ -24,9 +27,17 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from chembook3d import xyz
-from chembook3d.models import GroupNode, Node, NodeKind, Transition, TransitionSpecies
-from chembook3d.services import history
+from chembook3d import settings as app_settings
+from chembook3d import thermochem, units, xyz
+from chembook3d.models import (
+    GroupNode,
+    LevelOfTheory,
+    Node,
+    NodeKind,
+    Transition,
+    TransitionSpecies,
+)
+from chembook3d.services import concentrations, history
 from chembook3d.services import transitions as transition_service
 from chembook3d.services.energies import ENERGY_TYPES, Energies, LevelKey
 from chembook3d.services.records import RecordError, get
@@ -129,6 +140,11 @@ def set_kind(session: Session, node_id: str, kind: Any) -> Node:
                 setattr(node, field, None)
     elif usage(session, node.id):
         raise RecordError("Remove this species from its transitions before making it a node")
+    elif node.concentration is not None:  # D160: only a free species has one
+        history.record(
+            session, "node", node.id, "update", "concentration", node.concentration, None
+        )
+        node.concentration = None
     history.record(session, "node", node.id, "update", "kind", node.kind, kind)
     node.kind = kind
     session.flush()
@@ -209,22 +225,77 @@ def balances_from(session: Session, reference_id: str) -> dict[str, Balance]:
 
 
 def describe(session: Session, balance: Balance) -> list[dict[str, Any]]:
-    """The balance for display, in the order the species were created."""
+    """The balance for display, in the order the species were created; `concentration` names
+    a species' own concentration (D160), None when it follows the standard state."""
     nodes = [session.get(Node, species_id) for species_id in balance]
     return [
-        {"species_id": n.id, "label": label(n), "count": balance[n.id]}
+        {
+            "species_id": n.id,
+            "label": label(n),
+            "count": balance[n.id],
+            "concentration": concentrations.describe(n.concentration) if n.concentration else None,
+        }
         for n in sorted(nodes, key=lambda n: n.seq)
     ]
 
 
 def text(entries: list[dict[str, Any]]) -> str:
-    """ "+ ethylene − 2 × styrene" for the energy table."""
+    """ "+ ethylene − 2 × styrene (1 M)" for the energy table."""
     parts = []
     for entry in entries:
         count = abs(entry["count"])
         amount = f"{count} × " if count != 1 else ""
-        parts.append(f"{'+' if entry['count'] > 0 else '−'} {amount}{entry['label']}")
+        own = f" ({entry['concentration']})" if entry.get("concentration") else ""
+        parts.append(f"{'+' if entry['count'] > 0 else '−'} {amount}{entry['label']}{own}")
     return " ".join(parts)
+
+
+def solvation(session: Session, key: LevelKey) -> str | None:
+    """The solvation model of the energy's level or its geometry level, as "SMD(THF)"."""
+    for level_id in (key.level_id, key.geometry_level_id):
+        level = session.get(LevelOfTheory, level_id) if level_id else None
+        if level is not None and level.solvation_model:
+            return (
+                f"{level.solvation_model}({level.solvent})"
+                if level.solvent
+                else (level.solvation_model)
+            )
+    return None
+
+
+def standard_state_note(
+    session: Session,
+    energies: Energies,
+    balances: list[Balance],
+    key: LevelKey,
+    energy_type: str,
+) -> dict[str, str] | None:
+    """D160, W-STDSTATE: free species that change the number of molecules join or leave at the
+    1 atm gas-phase standard state while the calculations are in a solvation model, so each
+    association or dissociation is off by RT ln(V_m / 1 L mol⁻¹) against 1 M in solution.
+    Species with a concentration of their own are not counted; None when nothing to note."""
+    if energy_type not in ("G", "G_qh") or energies.standard_state == "1 M":
+        return None
+    following = {
+        n.id
+        for n in session.scalars(select(Node).where(Node.kind == NodeKind.SPECIES))
+        if n.concentration is None
+    }
+    if not any(sum(n for s, n in b.items() if s in following) for b in balances):
+        return None
+    model = solvation(session, key)
+    if model is None:
+        return None
+    unit = app_settings.load().energy_unit
+    shift = thermochem.standard_state_correction(energies.temperature) * units.HARTREE_IN[unit]
+    return {
+        "code": "W-STDSTATE",
+        "message": f"Free species join or leave here and the calculations use {model}, but "
+        f"{energy_type} is at the 1 atm gas-phase standard state: each molecule gained or lost "
+        f"is {shift:.{units.DECIMALS[unit]}f} {unit} off 1 M in solution "
+        f"({energies.temperature:g} K). Choose 1 M for this investigation in Settings, or give "
+        "the free species a concentration.",
+    }
 
 
 # ---------- W-BALANCE ----------

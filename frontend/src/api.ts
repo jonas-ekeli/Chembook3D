@@ -114,9 +114,17 @@ export type Node = {
   /** D121: its box is off the canvas now (set so, linked, still only a scan path, no edges or
    * group of its own). */
   on_edge: boolean
+  /** D160: a free species' own concentration; null follows the investigation's standard state. */
+  concentration?: Concentration | null
   created_at: string
   updated_at: string
 }
+
+/** D160: what a free species' G and G_qh are taken at, on top of the 1 M standard state. */
+export type Concentration =
+  | { kind: '1 M' }
+  | { kind: 'neat'; solvent?: string | null; molarity?: number }
+  | { kind: 'molar'; molarity: number }
 
 export type NodeFields = Partial<
   Pick<
@@ -131,6 +139,7 @@ export type NodeFields = Partial<
     | 'step_id'
     | 'branch_id'
     | 'view_rotation'
+    | 'concentration'
   >
 >
 
@@ -245,11 +254,15 @@ export function speciesChip(entry: { direction: SpeciesDirection; count: number;
 /** The species that balance a point, "+ ethylene − 2 × styrene" (D69). */
 export function balanceText(species: SpeciesCount[]): string {
   return species
-    .map((s) => `${s.count > 0 ? '+' : '−'} ${Math.abs(s.count) > 1 ? `${Math.abs(s.count)} × ` : ''}${s.label}`)
+    .map(
+      (s) =>
+        `${s.count > 0 ? '+' : '−'} ${Math.abs(s.count) > 1 ? `${Math.abs(s.count)} × ` : ''}${s.label}${s.concentration ? ` (${s.concentration})` : ''}`,
+    )
     .join(' ')
 }
 
-export type SpeciesCount = { species_id: string; label: string; count: number }
+/** D160: `concentration` names a species' own concentration ("neat THF, 12.3 M"), if any. */
+export type SpeciesCount = { species_id: string; label: string; count: number; concentration?: string | null }
 
 export type TransitionSpecies = {
   species_id: string
@@ -926,6 +939,8 @@ export type Settings = {
   thermo_scope: 'investigation' | 'app'
   /** D159: what a new investigation starts with (the app's settings). */
   thermo_defaults: { qh_temperature: number; qh_cutoff: number; standard_state: StandardState }
+  /** D160: the neat solvents a free species' concentration offers, in mol/L at 20 °C. */
+  solvents?: { name: string; molarity: number }[]
   /** D34: how many of the lowest CREST conformers are ticked on import. */
   crest_count: number
   /** Hydrogens drawn in the 3D views and on structure cards. */
@@ -1167,6 +1182,8 @@ export type SelectivityResult = {
   temperature_from_settings: boolean
   cutoff: number
   standard_state: StandardState
+  /** D160: the temperatures of the frequency jobs H and G are read from. */
+  job_temperatures?: number[]
   conformers: 'boltzmann' | 'lowest'
   reference_id: string | null
   reference_label: string | null
@@ -1212,6 +1229,8 @@ export type TurnoverResult = {
   temperature_from_settings: boolean
   cutoff: number
   standard_state: StandardState
+  /** D160: the temperatures of the frequency jobs H and G are read from. */
+  job_temperatures?: number[]
   unit: string
   cycle: string[]
   points: TurnoverPoint[]
@@ -1239,8 +1258,9 @@ export type TurnoverResult = {
 
 /** FR-EN-01: a composite level and the energy types that have at least one value there. */
 export type EnergyOptions = {
-  /** D161: `bsse` when a node has a counterpoise job's BSSE at the level. */
-  levels: { key: string; label: string; types: EnergyType[]; bsse?: boolean }[]
+  /** D161: `bsse` when a node has a counterpoise job's BSSE at the level. D160: `job_temperatures`,
+   * those of the frequency jobs H and G at the level are read at. */
+  levels: { key: string; label: string; types: EnergyType[]; bsse?: boolean; job_temperatures?: number[] }[]
   temperature: number
   cutoff: number
   standard_state: StandardState
@@ -1265,6 +1285,10 @@ export type EnergyValue = {
  * joined; `issues` lists each. Never changes the value or a status (D19). */
 export type EnergyCheck = { code: string; message: string; issues?: { code: string; message: string }[] }
 
+/** D160: W-TEMP (H or G values read at different temperatures, or at one other than G_qh's) and
+ * W-STDSTATE (free species joining or leaving at 1 atm in a solvation model). */
+export type EnergyNote = { code: string; message: string }
+
 export type EnergyView = {
   level: string
   type: EnergyType
@@ -1275,6 +1299,7 @@ export type EnergyView = {
   reference_id: string | null
   /** ΔX of each node and group from the reference, with the species that balance it (D72). */
   relative: Record<string, { value: number | null; species: SpeciesCount[]; message: string | null; joined: boolean }>
+  notes?: EnergyNote[]
 }
 
 export type PathChoice = {
@@ -1314,6 +1339,9 @@ export type Profiles = {
   temperature: number
   cutoff: number
   standard_state: StandardState
+  /** D160: the temperatures of the frequency jobs H and G are read from, and the view's notes. */
+  job_temperatures?: number[]
+  notes?: EnergyNote[]
   profiles: {
     points: ProfilePoint[]
     segments: { transition_id: string; forward: boolean; status: string; direct: boolean }[]
@@ -1330,7 +1358,7 @@ export type ProfileRequest = {
   bsse?: boolean
 }
 
-export type EnergyTable = { columns: string[]; rows: string[][] }
+export type EnergyTable = { columns: string[]; rows: string[][]; notes?: EnergyNote[] }
 
 export type StepPlan = {
   index: number
@@ -2243,21 +2271,39 @@ export function standardStateCorrection(temperature: number): number {
   return (R * temperature * Math.log(((R * temperature) / 101325) * 1000)) / joulesPerHartree
 }
 
-/** The energy type as shown; G and G_qh name the 1 M standard state when it is chosen (D95). */
+/** The energy type as shown. G and G_qh always name their standard state, 1 atm included (D95,
+ * D160). G is the files' own, at its frequency jobs' temperatures (`jobTemperatures`); G_qh is at
+ * the G_qh temperature and cutoff (D58). */
 export function energyTypeName(
   type: EnergyType,
   temperature?: number,
   cutoff?: number,
   standardState?: StandardState,
+  jobTemperatures?: number[],
 ): string {
-  const molar = standardState === '1 M'
+  const state = standardState ?? '1 atm'
   if (type === 'G') {
-    if (!molar) return 'G'
-    return temperature === undefined ? 'G (1 M)' : `G (1 M, ${temperature} K)`
+    const shown = (jobTemperatures ?? []).map((t) => `${t} K`).join(', ')
+    return shown ? `G (${state}, ${shown})` : `G (${state})`
   }
   if (type !== 'G_qh') return type
-  if (temperature === undefined) return molar ? 'G_qh (1 M)' : 'G_qh'
-  return `G_qh (${temperature} K, ${cutoff} cm⁻¹${molar ? ', 1 M' : ''})`
+  if (temperature === undefined) return `G_qh (${state})`
+  return `G_qh (${temperature} K, ${cutoff} cm⁻¹, ${state})`
+}
+
+/** D160: G(c) − G(1 atm) of one molecule in hartree: the 1 M shift plus RT ln(c / 1 M); the
+ * backend's `concentrations.correction`, for the node panel's text only. */
+export function concentrationCorrection(temperature: number, value: Concentration): number {
+  const molarity = value.kind === '1 M' ? 1 : (value.molarity ?? 1)
+  const joulesPerHartree = 4.184 * 627.5094740631 * 1000
+  return standardStateCorrection(temperature) + (8.31446261815323 * temperature * Math.log(molarity)) / joulesPerHartree
+}
+
+/** D160: a free species' concentration as shown, "neat THF, 12.3 M". */
+export function concentrationText(value: Concentration): string {
+  if (value.kind === '1 M') return '1 M'
+  if (value.kind === 'molar') return `${value.molarity} M`
+  return `neat ${value.solvent || 'solvent'}, ${value.molarity} M`
 }
 
 /** D139: the structure the Edit structure window holds: its atoms and the bonds the user added

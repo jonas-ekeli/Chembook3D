@@ -75,8 +75,10 @@ export function ThermoSettings({
         {(standardStateCorrection(settings.qh_temperature) * settings.energy_factors[settings.energy_unit]).toFixed(
           settings.energy_decimals[settings.energy_unit] + 2,
         )}{' '}
-        {settings.energy_unit} at {settings.qh_temperature} K. It changes relative free energies only where the
-        number of molecules changes (species joining or leaving). E and H are not changed.
+        {settings.energy_unit} at {settings.qh_temperature} K. G, read from the files, takes it at its own frequency
+        job’s temperature (D160). It changes relative free energies only where the number of molecules changes
+        (species joining or leaving). E and H are not changed. A free species can be given a concentration of its own
+        (1 M, neat solvent or any molarity) in its panel.
       </p>
       {own && (
         <p className="muted small" aria-label="Defaults for new investigations">

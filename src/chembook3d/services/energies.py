@@ -10,7 +10,12 @@
   fallback to another level or type (EN-3, D27). G_qh is recomputed from that step's
   frequencies (EN-5, EN-6, `thermochem`).
 - With the 1 M standard state chosen in Settings (D95), G and G_qh of every node add
-  RT ln(V_m / 1 L mol⁻¹) at the G_qh temperature (or an analysis's own); E and H never do.
+  RT ln(V_m / 1 L mol⁻¹); E and H never do. G is the file's, at its frequency job's
+  temperature, so its shift is at that temperature; G_qh's is at the G_qh temperature (or an
+  analysis's own) (D160). A free species with a concentration of its own is at it whatever the
+  standard state (D160, `concentrations`).
+- W-TEMP (D160): H and G read at a frequency job temperature other than the G_qh temperature
+  (or the analysis's) are noted in the value's check; G_qh is recomputed at it, so it never is.
 - A group node's value is its representative's; with none, it has no value (EN-7).
 - D161: a counterpoise job's stored energy is its corrected total; here it counts as the
   complex's uncorrected energy (that total minus its BSSE), like every other calculation at its
@@ -35,15 +40,46 @@ from chembook3d.models import (
     GroupNode,
     LevelOfTheory,
     Node,
+    NodeKind,
     Role,
 )
 from chembook3d.parsers import joined
 from chembook3d.parsers.common import BSSE, NOT_STATIONARY
-from chembook3d.services import levels, spin, thermo_settings
+from chembook3d.services import concentrations, levels, spin, thermo_settings
 from chembook3d.services.records import RecordError
 
 ENERGY_TYPES = ("E", "H", "G", "G_qh")
 KEY_SEPARATOR = "~"
+# D160: temperatures closer than this are the same (Gaussian prints 298.150 Kelvin).
+TEMPERATURE_TOLERANCE = 0.01
+
+
+def same_temperature(a: float, b: float) -> bool:
+    return abs(a - b) < TEMPERATURE_TOLERANCE
+
+
+def temperatures_text(temperatures: list[float]) -> str:
+    """ "298.15 K", "298.15 K and 353.15 K", "298.15 K, 323.15 K and 353.15 K"."""
+    shown = [f"{t:g} K" for t in temperatures]
+    return shown[0] if len(shown) == 1 else ", ".join(shown[:-1]) + " and " + shown[-1]
+
+
+def distinct_temperatures(temperatures) -> list[float]:
+    """The temperatures given, sorted, each only once (within TEMPERATURE_TOLERANCE)."""
+    found: list[float] = []
+    for t in sorted(t for t in temperatures if t is not None):
+        if not found or not same_temperature(found[-1], t):
+            found.append(t)
+    return found
+
+
+def check_text(check: dict[str, Any] | None, leave_out: tuple[str, ...] = ()) -> str | None:
+    """A check's messages without the codes left out (an analysis notes W-TEMP once for all
+    its values, D160); None when nothing is left."""
+    if check is None:
+        return None
+    shown = [i["message"] for i in check.get("issues", []) if i["code"] not in leave_out]
+    return "; ".join(shown) or None
 
 
 @dataclass(frozen=True, order=True)
@@ -234,6 +270,8 @@ class NodeEnergies:
         self.temperature = temperature
         self.cutoff = cutoff
         self.standard_state = standard_state
+        # D160: a free species' own concentration, whatever the standard state.
+        self.concentration = node.concentration if node.kind == NodeKind.SPECIES else None
         tolerance = app_settings.load().geometry_tolerance
         geometry = levels.node_geometry_level(node, tolerance)
         self.by_key: dict[LevelKey, list[Calculation]] = {}
@@ -391,6 +429,16 @@ class NodeEnergies:
                 issues.append(
                     {"code": "W-SPIN", "message": spin.message(found, f"of the {name} calculation")}
                 )
+        job = self.job_temperature(key) if energy_type in ("H", "G") else None
+        if job is not None and not same_temperature(job, self.temperature):
+            # D160: H and G are the file's, at its temperature; G_qh is at self.temperature.
+            issues.append(
+                {
+                    "code": "W-TEMP",
+                    "message": f"{energy_type} is at the frequency job's {job:g} K, not at "
+                    f"{self.temperature:g} K like G_qh",
+                }
+            )
         if not issues:
             return None
         return {
@@ -398,6 +446,11 @@ class NodeEnergies:
             "message": "; ".join(i["message"] for i in issues),
             "issues": issues,
         }
+
+    def job_temperature(self, key: LevelKey) -> float | None:
+        """D160: the temperature of the frequency job H and G at this level are read from."""
+        thermo = self.thermo_source(key)
+        return thermo.result.temperature if thermo is not None else None
 
     def value(self, key: LevelKey, energy_type: str) -> Value:
         found = self._value(key, energy_type)
@@ -471,7 +524,8 @@ class NodeEnergies:
                     thermo.id,
                 )
             if energy_type == "G":
-                correction += self._standard_state(details)
+                # D160: the file's G is at its job temperature, and so is its 1 M shift.
+                correction += self._standard_state(details, result.temperature or self.temperature)
             return Value(energy + correction, None, None, source.id, thermo.id, details)
         try:
             qh = self.qh(thermo)
@@ -485,18 +539,29 @@ class NodeEnergies:
             raised_modes=qh.raised_modes,
             imaginary_excluded=qh.imaginary_excluded,
         )
-        shift = self._standard_state(details)
+        shift = self._standard_state(details, qh.temperature)
         return Value(energy + qh.g_corr + shift, None, None, source.id, thermo.id, details)
 
-    def _standard_state(self, details: dict[str, Any]) -> float:
-        """D95: the 1 atm → 1 M shift of a free energy (0 at 1 atm), noted in `details`."""
+    def _standard_state(self, details: dict[str, Any], temperature: float) -> float:
+        """D95: the 1 atm → 1 M shift of a free energy (0 at 1 atm), noted in `details`, at the
+        temperature of the value (D160). A free species with its own concentration is at it:
+        the 1 M shift plus RT ln(c / 1 M) (D160)."""
+        if self.concentration is not None:
+            shift = concentrations.correction(temperature, self.concentration)
+            details.update(
+                standard_state=concentrations.describe(self.concentration),
+                concentration=self.concentration,
+                standard_state_correction=shift,
+                standard_state_temperature=temperature,
+            )
+            return shift
         if self.standard_state != "1 M":
             return 0.0
-        shift = thermochem.standard_state_correction(self.temperature)
+        shift = thermochem.standard_state_correction(temperature)
         details.update(
             standard_state="1 M",
             standard_state_correction=shift,
-            standard_state_temperature=self.temperature,
+            standard_state_temperature=temperature,
         )
         return shift
 
@@ -542,24 +607,47 @@ class Energies:
         self.groups = {g.id: g for g in session.scalars(select(GroupNode))}
 
     def options(self) -> list[dict[str, Any]]:
-        """FR-EN-01: composite levels with the energy types that have at least one value."""
+        """FR-EN-01: composite levels with the energy types that have at least one value, and
+        (D160) the temperatures of the frequency jobs H and G there are read at."""
         found: dict[LevelKey, set[str]] = {}
         bsse: set[LevelKey] = set()  # D161: levels where a node has a counterpoise BSSE
+        temperatures: dict[LevelKey, set[float]] = {}
         for node in self.nodes.values():
             for key, types in node.available().items():
                 found.setdefault(key, set()).update(types)
                 if node.counterpoise(key) is not None:
                     bsse.add(key)
+                job = node.job_temperature(key) if "G" in types or "H" in types else None
+                if job is not None:
+                    temperatures.setdefault(key, set()).add(job)
         listed = [
             {
                 "key": key.encode(),
                 "label": key_label(self.session, key),
                 "types": [t for t in ENERGY_TYPES if t in types],
                 "bsse": key in bsse,
+                "job_temperatures": distinct_temperatures(temperatures.get(key, ())),
             }
             for key, types in found.items()
         ]
         return sorted(listed, key=lambda o: o["label"])
+
+    def temperature_note(self, temperatures: list[float], energy_type: str) -> dict | None:
+        """D160: W-TEMP where H or G values read at different job temperatures, or at one other
+        than the G_qh temperature, meet in one view; None otherwise."""
+        if energy_type not in ("H", "G") or not temperatures:
+            return None
+        if len(temperatures) == 1 and same_temperature(temperatures[0], self.temperature):
+            return None
+        if len(temperatures) > 1:
+            message = (
+                f"{energy_type} values here come from frequency jobs at "
+                f"{temperatures_text(temperatures)}"
+            )
+        else:
+            message = f"{energy_type} values here are at the frequency jobs' {temperatures[0]:g} K"
+        message += f"; G_qh is at {self.temperature:g} K"
+        return {"code": "W-TEMP", "message": message}
 
     def value(self, record_id: str, key: LevelKey, energy_type: str) -> Value:
         if energy_type not in ENERGY_TYPES:

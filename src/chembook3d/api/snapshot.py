@@ -188,6 +188,11 @@ def snapshot_data(request: Request, session: Session, body: SnapshotIn) -> dict[
             views[name] = {
                 "values": {k: v.model_dump(mode="json") for k, v in values.items()},
                 "edges": {k: v.model_dump(mode="json") for k, v in edges.items()},
+                # D160: W-TEMP and W-STDSTATE of this view
+                "notes": [
+                    n.model_dump(mode="json")
+                    for n in energy_api.view_notes(session, energies, values, key, energy_type)
+                ],
                 "relative": {
                     ref: {
                         k: v.model_dump(mode="json")

@@ -59,6 +59,7 @@ import { useLive } from './live'
 import type { HydrogenMode } from './chem'
 import { recordNames } from './names'
 import { HydrogenDisplay, StericColourSetting, type StericColours } from './display'
+import { EnergyNotes } from './components/EnergyNotes'
 import { StericColourSelect } from './components/Sterics'
 import {
   CloneDialog,
@@ -1364,7 +1365,13 @@ function App() {
                 >
                   {(levelOption?.types ?? []).map((t) => (
                     <option key={t} value={t}>
-                      {energyTypeName(t, energyOptions?.temperature, energyOptions?.cutoff, energyOptions?.standard_state)}
+                      {energyTypeName(
+                        t,
+                        energyOptions?.temperature,
+                        energyOptions?.cutoff,
+                        energyOptions?.standard_state,
+                        levelOption?.job_temperatures,
+                      )}
                     </option>
                   ))}
                 </select>
@@ -1389,6 +1396,8 @@ function App() {
                     <span>With BSSE</span>
                   </label>
                 )}
+                {/* D160: W-TEMP and W-STDSTATE of the values shown */}
+                <EnergyNotes notes={shownView?.notes} badges />
                 <label className="check" title="Show ΔX on transitions (FR-CAN-03)">
                   <input
                     type="checkbox"

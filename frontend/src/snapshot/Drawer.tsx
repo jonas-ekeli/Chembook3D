@@ -1,5 +1,6 @@
 import { useMemo, useRef } from 'react'
 import { energyTypeName, type EnergyType, type Settings } from '../api'
+import { EnergyNotes } from '../components/EnergyNotes'
 import { ProfileChart } from '../components/ProfileChart'
 import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
 import { closesCycle, download, tableCellClass } from '../util'
@@ -86,7 +87,7 @@ export function SnapshotDrawer({
         </div>
         <span className="muted small">
           {level
-            ? `${energyTypeName(type, settings.qh_temperature, settings.qh_cutoff, settings.standard_state)} at ${levelLabel}`
+            ? `${energyTypeName(type, settings.qh_temperature, settings.qh_cutoff, settings.standard_state, shown?.profiles.job_temperatures)} at ${levelLabel}`
             : 'No energies in this investigation'}
         </span>
         <span className="spacer" />
@@ -154,7 +155,10 @@ export function SnapshotDrawer({
           ) : !shown ? (
             <p className="muted placeholder">No profile at this level and energy type.</p>
           ) : tab === 'profile' ? (
-            <ProfileChart data={shown.profiles} colours={colours} names={names} settings={settings} svgRef={svgRef} />
+            <>
+              <EnergyNotes notes={shown.profiles.notes} />
+              <ProfileChart data={shown.profiles} colours={colours} names={names} settings={settings} svgRef={svgRef} />
+            </>
           ) : (
             <table className="energy-table" aria-label="Energy table">
               <thead>

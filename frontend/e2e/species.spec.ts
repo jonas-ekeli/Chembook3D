@@ -67,6 +67,23 @@ test('free species join or leave on an edge and balance its atoms', async ({ pag
   await expect(species.getByRole('region', { name: 'Transitions' })).toContainText('Ru=CH2 → pi-complex')
   await expect(species.getByRole('button', { name: 'Make it a node' })).toBeDisabled()
 
+  // D160, T-EN-38: a concentration of its own, for its G and G_qh wherever it joins or leaves.
+  const concentration = species.getByRole('group', { name: 'Species concentration' })
+  await expect(concentration.getByLabel('Concentration', { exact: true })).toHaveValue('default')
+  await expect(concentration).toContainText('Follows this investigation’s standard state (1 atm')
+  await concentration.getByLabel('Concentration', { exact: true }).selectOption('neat')
+  await concentration.getByLabel('Neat solvent').selectOption('THF')
+  await expect(concentration).toContainText(/neat THF, 12\.3 M: its G and G_qh add .* at 298\.15 K/)
+  await concentration.getByLabel('Concentration', { exact: true }).selectOption('molar')
+  await concentration.getByLabel('Concentration in mol/L').fill('0.1')
+  await concentration.getByLabel('Concentration in mol/L').blur()
+  await expect(concentration).toContainText('0.1 M: its G and G_qh add')
+  const propene = (await (await page.request.get('/api/canvas')).json()).species.find(
+    (s: { label: string }) => s.label === 'propene',
+  )
+  const saved = await (await page.request.get(`/api/nodes/${propene.id}`)).json()
+  expect(saved.concentration).toEqual({ kind: 'molar', molarity: 0.1 })
+
   // A new species from the outline, and a loose node turned into one.
   await page.getByRole('region', { name: 'Free species', exact: true }).getByRole('button', { name: '+ Species' }).click()
   await expect(page.getByLabel('Node inspector').getByRole('heading', { name: 'Species 2' })).toBeVisible()

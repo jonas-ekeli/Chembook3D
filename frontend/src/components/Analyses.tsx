@@ -207,7 +207,7 @@ function ResultView({
       <h3>Result</h3>
       {result.level_label && (
         <p className="muted small">
-          {result.level_label} · {energyTypeName(result.energy_type, result.temperature, result.cutoff, result.standard_state)} · Boltzmann
+          {result.level_label} · {energyTypeName(result.energy_type, result.temperature, result.cutoff, result.standard_state, result.job_temperatures)} · Boltzmann
           factors at {result.temperature} K
           {result.temperature_from_settings ? ' (this investigation’s G_qh temperature, in Settings)' : ''}
           {result.reference_label && <> · free species balanced from {result.reference_label}</>}
@@ -433,7 +433,7 @@ function SelectivityEditor({
             >
               {types.map((t) => (
                 <option key={t} value={t}>
-                  {energyTypeName(t, result?.temperature, result?.cutoff, result?.standard_state)}
+                  {energyTypeName(t, result?.temperature, result?.cutoff, result?.standard_state, result?.job_temperatures)}
                 </option>
               ))}
             </select>
@@ -647,7 +647,7 @@ function TurnoverResultView({
   if (result.tdts !== null) marks.set(`0:${result.tdts}`, 'TDTS')
   if (result.tdi !== null) marks.set(`0:${result.tdi}`, 'TDI')
   const comparison = result.comparison
-  const typeName = energyTypeName(result.energy_type, result.temperature, result.cutoff, result.standard_state)
+  const typeName = energyTypeName(result.energy_type, result.temperature, result.cutoff, result.standard_state, result.job_temperatures)
   return (
     <section aria-label="Turnover result">
       <h3>Result</h3>
@@ -896,7 +896,7 @@ function TurnoverEditor({
             >
               {types.map((t) => (
                 <option key={t} value={t}>
-                  {energyTypeName(t, result?.temperature, result?.cutoff, result?.standard_state)}
+                  {energyTypeName(t, result?.temperature, result?.cutoff, result?.standard_state, result?.job_temperatures)}
                 </option>
               ))}
             </select>
