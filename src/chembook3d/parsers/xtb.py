@@ -28,6 +28,7 @@ from chembook3d.parsers.common import (
     Route,
     add_constraint,
     coordinate_name,
+    set_thermo_model,
 )
 from chembook3d.xyz import ELEMENTS, Atom, element_of
 
@@ -222,6 +223,7 @@ def _parse_block(lines: list[str], step: ParsedStep) -> None:
     raw_frequencies: list[float] = []
     reduced_masses: list[float] = []
     linear = False
+    scale: str | None = None  # D163: the "scaling factor" of the thermo setup
     cycle: tuple[float | None, float | None] = (None, None)  # D123b: the last cycle's change, gnorm
     i = 0
     while i < len(lines):
@@ -248,6 +250,8 @@ def _parse_block(lines: list[str], step: ParsedStep) -> None:
             linear = True
         elif match := re.match(r"^\s+:\s+symmetry\s+(\S+)\s+:", line):
             step.thermo["point_group"] = match.group(1).upper()
+        elif match := re.match(r"^\s+:\s+scaling factor\s+(\d*\.?\d+)\s+:", line):
+            scale = match.group(1)
         elif match := re.match(r"^\s+:\s+rotational number\s+(\d+)\s+:", line):
             step.thermo["symmetry_number"] = int(match.group(1))
         elif stripped.startswith("T/K") and "G(T)/Eh" in line and i + 2 < len(lines):
@@ -293,6 +297,8 @@ def _parse_block(lines: list[str], step: ParsedStep) -> None:
         step.thermo["h_corr"] = step.thermo["h"] - step.scf_energy
     if "zpe" in step.thermo and step.scf_energy is not None:
         step.thermo["e_zpe"] = step.scf_energy + step.thermo["zpe"]
+    # D163: xTB's G is its modified RRHO (low modes mixed with free rotors, "rotor cutoff").
+    set_thermo_model(step, "mRRHO", scale)
 
 
 _CONSTRAINING = re.compile(r"^\s*constraining\s+(\w+)((?:\s+\d+)+)", re.IGNORECASE)

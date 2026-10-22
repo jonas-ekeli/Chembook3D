@@ -1084,10 +1084,49 @@ export type Calculation = {
   quasi_harmonic: QuasiHarmonic | null
   /** D162: the ⟨S²⟩ printed (absent in a read-only copy made before it). */
   spin?: Spin | null
+  /** D163: the printed G's model and the frequency scale factor (absent in a read-only copy
+   * made before it; null for a calculation without frequencies). */
+  thermo?: ThermoModel | null
   notes: string
   /** D117: scan points left out of a scan path. */
   removed_points: number[]
   created_at: string
+}
+
+/** D162: the spin expectation value a calculation printed (Gaussian's before annihilation,
+ * with `after` the value after it), S(S+1) of its multiplicity, and whether it is further from
+ * it than 10 % (a singlet: above 0.1), which is W-SPIN. */
+export type ThermoModel = {
+  program: string
+  /** RRHO (Gaussian), qRRHO (ORCA, Grimme's entropy), mRRHO (xTB); null for another program. */
+  model: string | null
+  model_text: string | null
+  /** The scale factor the program's own thermochemistry used (1 when the file names none). */
+  scale: number
+  /** The printed frequencies already carry it (ORCA), so G_qh is computed from them scaled. */
+  frequencies_scaled: boolean
+  qh_scale: number
+}
+
+/** D163: a scale factor as few decimals as it needs: 0.97, 1. */
+export function scaleText(scale: number): string {
+  return String(Number(scale.toFixed(4)))
+}
+
+/** D163: what "G" is at a level or in a profile, from the printed G's models there ("Gaussian's
+ * RRHO"): the badge text (the models alone) and its tooltip; null when there is none. */
+export function gModelBadge(models: string[] | undefined): { text: string; title: string } | null {
+  if (!models || models.length === 0) return null
+  const short = models.map((m) => m.split("'s ").pop() ?? m)
+  const mixed = models.length > 1
+  return {
+    text: mixed ? `${short.join(' + ')} ⚠` : short[0],
+    title:
+      `G is each frequency job's printed G: ${models.join(', ')}. ` +
+      'Gaussian prints pure RRHO, ORCA Grimme\'s quasi-RRHO entropy, xTB its modified RRHO' +
+      (mixed ? '; this level mixes them (W-G-MODEL).' : '.') +
+      ' G_qh is computed the same way for every program.',
+  }
 }
 
 /** D162: the spin expectation value a calculation printed (Gaussian's before annihilation,
@@ -1259,8 +1298,16 @@ export type TurnoverResult = {
 /** FR-EN-01: a composite level and the energy types that have at least one value there. */
 export type EnergyOptions = {
   /** D161: `bsse` when a node has a counterpoise job's BSSE at the level. D160: `job_temperatures`,
-   * those of the frequency jobs H and G at the level are read at. */
-  levels: { key: string; label: string; types: EnergyType[]; bsse?: boolean; job_temperatures?: number[] }[]
+   * those of the frequency jobs H and G at the level are read at. D163: `g_models`, the printed
+   * G's models at the level ("Gaussian's RRHO"). */
+  levels: {
+    key: string
+    label: string
+    types: EnergyType[]
+    bsse?: boolean
+    job_temperatures?: number[]
+    g_models?: string[]
+  }[]
   temperature: number
   cutoff: number
   standard_state: StandardState
@@ -1342,6 +1389,8 @@ export type Profiles = {
   /** D160: the temperatures of the frequency jobs H and G are read from, and the view's notes. */
   job_temperatures?: number[]
   notes?: EnergyNote[]
+  /** D163: the printed G's models behind the points ("Gaussian's RRHO"). */
+  g_models?: string[]
   profiles: {
     points: ProfilePoint[]
     segments: { transition_id: string; forward: boolean; status: string; direct: boolean }[]

@@ -19,6 +19,8 @@ import re
 from collections.abc import Callable
 
 from chembook3d.parsers.common import (
+    FREQUENCY_SCALE,
+    G_MODEL,
     S2,
     S2_IDEAL,
     SPIN_KEYS,
@@ -30,6 +32,7 @@ from chembook3d.parsers.common import (
     Route,
     add_constraint,
     coordinate_name,
+    set_thermo_model,
 )
 from chembook3d.xyz import Atom, element_of
 
@@ -325,9 +328,15 @@ def _parse_block(lines: list[str], step: ParsedStep, geometries: bool = True) ->
                 step.converged_geometries.append(len(step.geometries) - 1)
         elif "The optimization did not converge" in line:
             step.optimization_converged = False
+        elif (match := _QUASI_RRHO.match(line)) is not None:
+            step.printed[G_MODEL] = "qRRHO" if match.group(1).lower() == "true" else "RRHO"
+        elif line.startswith("Vibrational entropy computed according to the QRRHO"):
+            step.printed.setdefault(G_MODEL, "qRRHO")
         elif stripped == "VIBRATIONAL FREQUENCIES" and not frequencies:
             header = i
             while i < len(lines) and i < header + 20 and not _FREQUENCY.match(lines[i]):
+                if (match := _SCALING.match(lines[i])) is not None:
+                    step.printed[FREQUENCY_SCALE] = match.group(1)  # D163: "(already applied!)"
                 i += 1
             while i < len(lines) and (match := _FREQUENCY.match(lines[i])):
                 frequencies.append((int(match.group(1)), float(match.group(2))))
@@ -366,6 +375,23 @@ def _parse_block(lines: list[str], step: ParsedStep, geometries: bool = True) ->
         step.geometry_points = list(range(1, len(step.geometries) + 1))
         step.converged_geometries = list(range(len(step.geometries)))
     return {"frequencies": frequencies, "first": first_vibration, "modes": modes}
+
+
+# D163: ORCA prints its frequencies already scaled by this factor (`%freq ScalFreq`), and says
+# whether its entropy is Grimme's quasi-RRHO.
+_SCALING = re.compile(r"^Scaling factor for frequencies =\s+(\d*\.?\d+)")
+_QUASI_RRHO = re.compile(r"^Quasi RRHO\s+\.\.\.\s+(True|False)", re.IGNORECASE)
+_SCALFREQ = re.compile(r"\bscalfreq\s*=?\s*(\d*\.?\d+)")
+
+
+def _thermo_model(step: ParsedStep, echoed: list[str]) -> None:
+    """D163: the model of the printed G (qRRHO unless ORCA says Quasi RRHO False) and the scale
+    factor ORCA printed, else the input's ScalFreq, else 1."""
+    scale = step.printed.pop(FREQUENCY_SCALE, None)
+    if scale is None:
+        scale = next((m.group(1) for line in echoed if (m := _SCALFREQ.search(line))), None)
+    model = step.printed.pop(G_MODEL, None) or "qRRHO"
+    set_thermo_model(step, model, scale)
 
 
 def _finish_frequencies(step: ParsedStep, raw: dict) -> None:
@@ -623,6 +649,7 @@ def parse(text: str, companion: Companion | None = None) -> ParsedFile:
                             step.printed[key] = previous.printed[key]
         if step.charge is None:
             step.charge, step.multiplicity = _charge_from_input(echoed)
+        _thermo_model(step, echoed)
         _read_solvation(lines, step)
         if step.job_type in ("optimization", "ts_optimization"):
             step.optimization_converged = bool(step.optimization_converged)

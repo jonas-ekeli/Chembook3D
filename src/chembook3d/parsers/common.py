@@ -23,6 +23,7 @@ class Route:
     solvent: str | None = None
     irc: list[str] | None = None  # D131: an IRC job's options as written (upper case)
     counterpoise: int | None = None  # D161: Counterpoise=N, the number of fragments
+    frequency_scale: str | None = None  # D163: Scale=…, the thermochemistry's scale factor
 
 
 # D158: the key in `ParsedStep.printed` (and the stored result's `printed`) of a frequency
@@ -44,6 +45,24 @@ SPIN_KEYS = (S2, S2_AFTER, S2_IDEAL)
 # energy is then the counterpoise-corrected total; the complex's uncorrected energy is that
 # total minus the BSSE (the BSSE is positive: the borrowed basis functions lower the energy).
 BSSE = "bsse"
+
+# D163: the keys in `ParsedStep.printed` (and the stored result's `printed`) of a step with
+# frequencies or printed thermochemistry: the model its printed G comes from ("RRHO" for
+# Gaussian, "qRRHO" for ORCA's Grimme entropy, "RRHO" for ORCA when it says Quasi RRHO False,
+# "mRRHO" for xTB) and the frequency scale factor the program used for its thermochemistry, as
+# printed or written in the input ("1" when the file names none: the programs' default).
+G_MODEL = "g_model"
+FREQUENCY_SCALE = "frequency_scale"
+THERMO_MODEL_KEYS = (G_MODEL, FREQUENCY_SCALE)
+
+
+def set_thermo_model(step: "ParsedStep", model: str, scale: str | None) -> None:
+    """D163: note a step's G model and frequency scale factor, when it has frequencies or a
+    printed free energy."""
+    if not step.frequencies and "g" not in step.thermo and "g_corr" not in step.thermo:
+        return
+    step.printed[G_MODEL] = model
+    step.printed[FREQUENCY_SCALE] = scale or "1"
 
 
 @dataclass

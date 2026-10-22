@@ -837,6 +837,7 @@ def test_energy_table_and_csv_show_the_same_values(open_client, energetic):
         "H (hartree)",
         "G 1 atm (298.15 K) (hartree)",
         "G_qh 298.15 K 100 cm-1 1 atm (hartree)",
+        "Thermochemistry",  # D163
         "Free species",
         "ΔG 1 atm (kcal/mol)",
         "Check",
@@ -845,7 +846,7 @@ def test_energy_table_and_csv_show_the_same_values(open_client, energetic):
     a1s2 = next(row for row in table["rows"] if row[0] == "A1-S2")
     assert a1s2[1:4] == ["[2+2] TS", "A1", "Gaussian B3LYP/def2SVP"]
     assert a1s2[4] == "-99.98400000" and a1s2[6] == "-99.96400000"
-    assert a1s2[8] == "" and a1s2[9] == f"{(0.024 - 0.008) * KCAL:.2f}"
+    assert a1s2[9] == "" and a1s2[10] == f"{(0.024 - 0.008) * KCAL:.2f}"
 
     response = open_client.post("/api/energies/table.csv", json=body)
     assert response.status_code == 200

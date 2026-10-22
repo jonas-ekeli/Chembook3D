@@ -27,6 +27,7 @@ class EnergyOptionOut(BaseModel):
     bsse: bool = False  # D161: a node has a counterpoise BSSE at this level
     # D160: the temperatures of the frequency jobs H and G at this level are read at
     job_temperatures: list[float] = []
+    g_models: list[str] = []  # D163: the printed G's models there ("Gaussian's RRHO")
 
 
 class EnergyOptionsOut(BaseModel):
