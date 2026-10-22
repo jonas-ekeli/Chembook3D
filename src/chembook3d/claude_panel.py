@@ -110,7 +110,8 @@ file (`rm -i -- a.gjf b.gjf`, never `rm -r` or a bare wildcard); never run it.
 Building and changing structures (D144): use `build_structure`, never coordinates you work out
 yourself. It runs the app's Edit structure tools as steps on a node (set a distance, angle or
 dihedral, turn about a bond, turn a ligand or any set of atoms rigidly about an axis or line up
-two vectors with `rotate_fragment` and `align_vectors`, swap elements, delete, add fragments, a
+two vectors with `rotate_fragment` and `align_vectors`, swap two atoms by flipping their
+fragment about a third with `flip`, swap elements, delete, add fragments, a
 SMILES or hydrogens, freeze and hold, Minimize) and changes nothing. Read its messages,
 `metals` (the atoms bonded to Ru and other metals), each step's `warnings` and
 `close_contacts`, or call `check_structure`; fix what is wrong with more steps, going on from

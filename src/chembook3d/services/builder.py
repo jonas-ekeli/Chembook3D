@@ -13,6 +13,7 @@ ring, a chelate, a metallacycle), only the end atom and the atoms bonded to noth
 
 import math
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -1395,6 +1396,116 @@ def align_vectors(
     if abs(reached - target) > REACHED:
         what += f" (the closest this axis allows to {target:g}°)"
     return _rigid_done(structure, turned, moving, what)
+
+
+# ---------- flipping (D166) ----------
+
+# Degrees: an atom bonded to the third atom within this of the line towards the middle of the
+# first two is on the fragment's side (an aryl's ipso C seen from its N); the others stay.
+FRAGMENT_SIDE = 60.0
+
+
+@dataclass
+class FlipPlan:
+    moving: list[int]  # the atoms that turn
+    coords: np.ndarray  # all atoms after the turn
+    tie: list[Pair]  # when tied: the bonds of the shortest way round to the rest, else []
+    tied: list[int]  # atoms bonded to the third atom on the rest's side that would turn too
+
+
+def _ignoring(structure: Structure, ignore: Sequence[Pair]) -> list[set[int]]:
+    graph = neighbours(structure)
+    for i, j in ignore:
+        if not (0 <= i < len(graph) and 0 <= j < len(graph)) or j not in graph[i]:
+            raise BuildError(f"Atoms {i + 1} and {j + 1} are not bonded: no bond to ignore")
+        graph[i].discard(j)
+        graph[j].discard(i)
+    return graph
+
+
+def _way(graph: list[set[int]], starts: list[int], ends: set[int], blocked: int) -> list[Pair]:
+    """The bonds of a shortest way from `starts` to one of `ends`, not passing `blocked`."""
+    before: dict[int, int | None] = dict.fromkeys(starts)
+    queue = list(starts)
+    for atom in queue:
+        if atom in ends:
+            way = []
+            while before[atom] is not None:
+                came = before[atom]
+                assert came is not None
+                way.append(_pair(came, atom))
+                atom = came
+            return way[::-1]
+        for other in sorted(graph[atom]):
+            if other != blocked and other not in before:
+                before[other] = atom
+                queue.append(other)
+    return []
+
+
+def flip_plan(structure: Structure, picks: list[int], ignore: Sequence[Pair] = ()) -> FlipPlan:
+    """D166: what flipping the first two picked atoms about the third would do. The turn is 180°
+    about the line from the middle of atoms 1 and 2 towards atom 3, made square to 1–2, so 1 and
+    2 swap places and atom 3 stays. The atoms that turn are those reached from 1 or 2 without
+    passing 3, with the `ignore` bonds left out. Atom 3 is on the line (or close), so its bonds
+    keep their lengths whatever turns; the fragment is tied to the rest some other way (a chelate
+    or a ring) when an atom bonded to 3 that is not on the fragment's side (FRAGMENT_SIDE) would
+    turn too, and `tie` gives the bonds of the shortest way round, to ignore one of them."""
+    _check_picks(structure, picks, 3)
+    a, b, c = picks
+    graph = _ignoring(structure, ignore)
+    coords = structure.coords
+    along = coords[b] - coords[a]
+    if np.linalg.norm(along) < 1e-6:
+        raise BuildError(f"Atoms {a + 1} and {b + 1} are on top of each other")
+    middle = (coords[a] + coords[b]) / 2
+    towards = coords[c] - middle
+    across = towards - (towards @ _unit(along)) * _unit(along)
+    if np.linalg.norm(across) < 1e-3:
+        raise BuildError(
+            f"Atom {c + 1} is on the line through atoms {a + 1} and {b + 1}, so it gives no "
+            "direction to turn about: pick another third atom"
+        )
+    moving = sorted(_reach(graph, a, {c}) | _reach(graph, b, {c}))
+    turned = _turned(coords, moving, middle, _unit(across), 180.0)
+    inside = set(moving)
+    tied = [
+        n
+        for n in sorted(graph[c] & inside - {a, b})
+        if _angle(coords[n] - coords[c], middle - coords[c]) > FRAGMENT_SIDE
+    ]
+    tie = _way(graph, [a, b], set(tied), c) if tied else []
+    return FlipPlan(moving, turned, tie, tied)
+
+
+def _bond_name(structure: Structure, pair: Pair) -> str:
+    i, j = pair
+    return f"{structure.elements[i]} {i + 1}–{structure.elements[j]} {j + 1}"
+
+
+def flip(structure: Structure, picks: list[int], ignore: Sequence[Pair] = ()) -> Edited:
+    """D166: swap the first two picked atoms by a 180° turn about the line from their middle
+    towards the third (`flip_plan`), the atoms bonded to them following rigidly; refused when the
+    fragment is tied to the rest, saying through which bonds, unless one of them is ignored."""
+    plan = flip_plan(structure, picks, ignore)
+    names = [f"{structure.elements[i]} {i + 1}" for i in picks]
+    if plan.tied:
+        also = ", ".join(f"{structure.elements[n]} {n + 1}" for n in plan.tied)
+        way = ", ".join(_bond_name(structure, p) for p in plan.tie)
+        raise BuildError(
+            f"{names[0]} and {names[1]} are tied to the rest past {names[2]} (through {way}), so "
+            f"{also} and everything past it would turn too: ignore one of those bonds, or remove "
+            "one first"
+        )
+    what = (
+        f"Flipped {names[0]} ↔ {names[1]}: turned {_atoms(len(plan.moving))} by 180° about the "
+        f"line from their middle towards {names[2]}"
+    )
+    if ignore:
+        what += "; ignored " + ", ".join(_bond_name(structure, p) for p in ignore)
+    done = _rigid_done(structure, plan.coords, plan.moving, what)
+    done.picks = list(picks)
+    return done
 
 
 # ---------- holding for Minimize (D140) ----------
