@@ -96,6 +96,8 @@ export function StructureEditor({
   // D142: Draw… (a new molecule, the drawing kept as `drawn`); D143: Draw from this structure.
   const [drawing, setDrawing] = useState<null | 'new' | { molfile: string }>(null)
   const [drawn, setDrawn] = useState<string | null>(null)
+  // D166: bonds ticked to be left out when flipping (atom pairs from 0); cleared on a new pick.
+  const [ignore, setIgnore] = useState<[number, number][]>([])
 
   const changed = past.length > 0
   const count = structure.rows.length
@@ -109,7 +111,7 @@ export function StructureEditor({
 
   useEffect(() => {
     let current = true
-    api.builderDescribe(structure, picks, node.charge, node.multiplicity).then(
+    api.builderDescribe(structure, picks, node.charge, node.multiplicity, ignore).then(
       (d) => {
         if (!current) return
         setDescribed(d)
@@ -120,11 +122,12 @@ export function StructureEditor({
     return () => {
       current = false
     }
-  }, [structure, picks, node.charge, node.multiplicity])
+  }, [structure, picks, node.charge, node.multiplicity, ignore])
 
   const pick = (next: number[]) => {
     setPicks(next)
     setMove(null)
+    setIgnore([])
     setTyped(next.map((i) => i + 1).join(' '))
   }
 
@@ -225,6 +228,10 @@ export function StructureEditor({
   const sides = described?.sides ?? []
   const chosen = move ?? described?.default_side ?? null
   const numeric = Number(value)
+  const flip = kind === 'angle' ? (described?.flip ?? null) : null
+  const sameBond = (a: [number, number], b: [number, number]) => a[0] === b[0] && a[1] === b[1]
+  // D166: the tie's bonds and those already ticked, which stay listed to be unticked.
+  const tieBonds = flip ? [...ignore, ...flip.tie.filter((bond) => !ignore.some((i) => sameBond(i, bond)))] : []
 
   return (
     <Modal
@@ -358,6 +365,40 @@ export function StructureEditor({
                   ))}
                   {!sides[0].whole && <p className="muted small">The two sides are joined (a ring or a chelate), so only the end atom moves.</p>}
                 </fieldset>
+              )}
+              {flip && (
+                <div className="row" aria-label="Flip">
+                  <button
+                    className="small"
+                    disabled={busy || flip.error !== null || flip.tie.length > 0}
+                    title={
+                      flip.error ??
+                      (flip.tie.length
+                        ? 'Tied to the rest past the third atom: tick a bond to ignore'
+                        : `Swap ${name(picks[0])} and ${name(picks[1])} by a 180° turn about the line from their middle towards ${name(picks[2])} (${flip.count} atoms turn)`)
+                    }
+                    onClick={() => void run('flip', { ignore })}
+                  >
+                    Flip {name(picks[0])} ↔ {name(picks[1])}
+                  </button>
+                  {tieBonds.length > 0 && (
+                    <span className="flip-tie small" aria-label="Bonds to ignore">
+                      Tied; ignore
+                      {tieBonds.map((bond) => (
+                        <label key={bond.join('-')}>
+                          <input
+                            type="checkbox"
+                            checked={ignore.some((i) => sameBond(i, bond))}
+                            onChange={(event) =>
+                              setIgnore(event.target.checked ? [...ignore, bond] : ignore.filter((i) => !sameBond(i, bond)))
+                            }
+                          />
+                          {name(bond[0])}–{name(bond[1])}
+                        </label>
+                      ))}
+                    </span>
+                  )}
+                </div>
               )}
               {kind === 'distance' && (
                 <div className="row">

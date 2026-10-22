@@ -2031,8 +2031,13 @@ export const api = {
   setGeometry: (id: string, xyz: string, newNode = false) =>
     request<{ node: Node; derived: boolean }>('PUT', `/nodes/${id}/geometry`, newNode ? { xyz, new_node: true } : { xyz }),
   builderParts: () => request<BuilderParts>('GET', '/builder/parts'),
-  builderDescribe: (structure: BuilderStructure, picks: number[], charge: number | null, multiplicity: number | null) =>
-    request<BuilderDescription>('POST', '/builder/describe', { ...structure, picks, charge, multiplicity }),
+  builderDescribe: (
+    structure: BuilderStructure,
+    picks: number[],
+    charge: number | null,
+    multiplicity: number | null,
+    ignore: [number, number][] = [],
+  ) => request<BuilderDescription>('POST', '/builder/describe', { ...structure, picks, charge, multiplicity, ignore }),
   /** D143: the structure in 2D for the Ketcher drawer. */
   builderDrawing: (structure: BuilderStructure) =>
     request<{ molfile: string }>('POST', '/builder/drawing', structure),
@@ -2394,6 +2399,7 @@ export type BuilderTool =
   | 'hydrogens'
   | 'drawing'
   | 'redraw'
+  | 'flip'
 
 export type BuilderOptions = {
   value?: number
@@ -2419,6 +2425,8 @@ export type BuilderOptions = {
   molfile?: string
   /** hydrogens: until each picked atom has this many bonds; left out: its usual number. */
   bonds?: number
+  /** flip: bonds (atom pairs from 0) left out when finding what turns (D166). */
+  ignore?: [number, number][]
 }
 
 export type BuilderParts = { fragments: string[]; molecules: string[] }
@@ -2434,6 +2442,9 @@ export type BuilderDescription = {
   sides: { atom: number; count: number; whole: boolean }[]
   default_side: number | null
   electrons_note: string | null
+  /** D166, three atoms picked: how many atoms Flip would turn; when the fragment is tied to the
+   * rest, the bonds of the shortest way round (atom pairs from 0); why it cannot flip. */
+  flip?: { count: number; tie: [number, number][]; error: string | null } | null
 }
 
 export type BuilderEdited = BuilderStructure & { picks: number[]; message: string }

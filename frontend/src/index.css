@@ -3000,6 +3000,21 @@ table.scan-path-held input.drive-value {
   width: auto;
   margin: 0;
 }
+.structure-editor .flip-tie {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+.structure-editor .flip-tie label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+.structure-editor .flip-tie input {
+  width: auto;
+  margin: 0;
+}
 .structure-editor .warning {
   margin: 0;
   color: #93370d;

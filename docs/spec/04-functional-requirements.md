@@ -222,6 +222,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-3D-20 | In the Edit structure window: draw a molecule, or a fragment with an attachment point, in 2D with Ketcher (also from ChemDraw CDXML, MOL or SMILES), and convert it to 3D as a molecule beside the structure or in place of the picked atom, keeping charges, drawn stereo and which ligands are drawn trans round a metal. | D142, A87 | after 5 |
 | FR-3D-21 | In the Edit structure window: open the structure itself in the Ketcher drawer, change it in 2D, and put it back with unchanged atoms where they were in 3D and their numbers, new atoms built round them, removed atoms deleted, and the changed part minimized. | D143, A88 | after 5 |
 | FR-3D-22 | In the Edit structure window: Minimize optimizes main-group heavy atoms UFF types (Al, Tl, Sb, Bi, Te, Hg), and offers to relax metals: bonds to UFF's lengths, angles to the nearest ideal shape, saying which shape each metal took or why it was held. | D146, A91 | after 5 |
+| FR-3D-23 | In the Edit structure window, with three atoms picked: Flip swaps the first two by a 180° turn about the line from their middle towards the third, what is bonded to them following rigidly; a fragment tied to the rest past the third atom is refused with the bonds of the tie offered as tick boxes to ignore | D166, A110 | after 5 |
 
 ## FR-STER · Buried volume and steric maps (D81)
 
