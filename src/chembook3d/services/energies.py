@@ -45,7 +45,7 @@ from chembook3d.models import (
 )
 from chembook3d.parsers import joined
 from chembook3d.parsers.common import BSSE, NOT_STATIONARY
-from chembook3d.services import concentrations, levels, spin, thermo_settings
+from chembook3d.services import concentrations, levels, spin, thermo_model, thermo_settings
 from chembook3d.services.records import RecordError
 
 ENERGY_TYPES = ("E", "H", "G", "G_qh")
@@ -254,6 +254,18 @@ def frequency_issues(role: str, frequency: Calculation, where: str) -> list[dict
     return issues
 
 
+def check_of(issues: list[dict[str, str]]) -> dict[str, Any] | None:
+    """D154, D158: a value's check from its issues: the first one's code, every message joined
+    and each issue; None when there are none."""
+    if not issues:
+        return None
+    return {
+        "code": issues[0]["code"],
+        "message": "; ".join(i["message"] for i in issues),
+        "issues": issues,
+    }
+
+
 class NodeEnergies:
     """Every energy one node has, by composite level."""
 
@@ -439,13 +451,14 @@ class NodeEnergies:
                     f"{self.temperature:g} K like G_qh",
                 }
             )
-        if not issues:
+        return check_of(issues)
+
+    def thermo_of(self, key: LevelKey) -> thermo_model.Thermo | None:
+        """D163: the model and scale factor of the frequency job this node's H, G and G_qh at
+        this composite level are made from; None when it has no energy or no such job."""
+        if self.energy(key) is None:
             return None
-        return {
-            "code": issues[0]["code"],
-            "message": "; ".join(i["message"] for i in issues),
-            "issues": issues,
-        }
+        return thermo_model.of(self.thermo_source(key))
 
     def job_temperature(self, key: LevelKey) -> float | None:
         """D160: the temperature of the frequency job H and G at this level are read from."""
@@ -513,6 +526,10 @@ class NodeEnergies:
             "job_temperature": result.temperature,
             "job_pressure": result.pressure,
         }
+        model = thermo_model.of(thermo)
+        if model is not None:
+            # D163: the printed G's model and the frequency scale factor behind the value.
+            details["thermo"] = model.as_dict()
         if energy_type in ("H", "G"):
             correction = result.h_corr if energy_type == "H" else result.g_corr
             if correction is None:
@@ -605,6 +622,7 @@ class Energies:
             for n in session.scalars(query)
         }
         self.groups = {g.id: g for g in session.scalars(select(GroupNode))}
+        self._models: dict[LevelKey, dict[str, thermo_model.Thermo]] = {}  # D163
 
     def options(self) -> list[dict[str, Any]]:
         """FR-EN-01: composite levels with the energy types that have at least one value, and
@@ -627,6 +645,8 @@ class Energies:
                 "types": [t for t in ENERGY_TYPES if t in types],
                 "bsse": key in bsse,
                 "job_temperatures": distinct_temperatures(temperatures.get(key, ())),
+                # D163: the models of the printed G there, as "Gaussian's RRHO"
+                "g_models": self.g_models(key),
             }
             for key, types in found.items()
         ]
@@ -653,7 +673,8 @@ class Energies:
         if energy_type not in ENERGY_TYPES:
             raise RecordError(f"unknown energy type '{energy_type}'")
         if record_id in self.nodes:
-            return self.nodes[record_id].value(key, energy_type)
+            found = self.nodes[record_id].value(key, energy_type)
+            return self._mixed(found, record_id, key, energy_type)
         group = self.groups.get(record_id)
         if group is None:
             raise RecordError("not a node or group node")
@@ -661,4 +682,57 @@ class Energies:
             return Value(None, None, "the group has no representative (EN-7)")
         found = self.nodes[group.representative_id].value(key, energy_type)
         found.details = {**found.details, "representative_id": group.representative_id}
+        return self._mixed(found, group.representative_id, key, energy_type)
+
+    def thermo_models(self, key: LevelKey) -> dict[str, thermo_model.Thermo]:
+        """D163: per node with an energy and a frequency job at this composite level, that
+        job's G model and scale factor."""
+        if key not in self._models:
+            found = {}
+            for node_id, node in self.nodes.items():
+                model = node.thermo_of(key)
+                if model is not None:
+                    found[node_id] = model
+            self._models[key] = found
+        return self._models[key]
+
+    def mixing(self, node_id: str, key: LevelKey, energy_type: str) -> list[dict[str, str]]:
+        """D163: W-SCALE when this node's H, G or G_qh at the level comes from frequencies
+        scaled otherwise than another node's there, and W-G-MODEL when its printed G comes from
+        another thermochemistry model than another node's there. "There" is the composite level
+        across the investigation: what the energy view, a profile, the table and the analyses
+        compare at once."""
+        if energy_type == "E":
+            return []
+        models = self.thermo_models(key)
+        mine = models.get(node_id)
+        if mine is None:
+            return []
+        others = [m for other, m in models.items() if other != node_id]
+        issues = []
+        own = mine.scale_for(energy_type)
+        scales = [
+            m.scale_for(energy_type)
+            for m in others
+            if not thermo_model.same_scale(m.scale_for(energy_type), own)
+        ]
+        if scales:
+            issues.append(thermo_model.scale_issue(own, scales, energy_type))
+        if energy_type == "G":
+            different = [m for m in others if m.model != mine.model]
+            if different:
+                issues.append(thermo_model.model_issue(mine, different))
+        return issues
+
+    def g_models(self, key: LevelKey) -> list[str]:
+        """D163: the models of the printed G at this composite level, as "Gaussian's RRHO"."""
+        return sorted({m.model_label for m in self.thermo_models(key).values()})
+
+    def _mixed(self, found: Value, node_id: str, key: LevelKey, energy_type: str) -> Value:
+        """D163: the value with W-SCALE and W-G-MODEL added to its check (D154)."""
+        if found.value is None:
+            return found
+        issues = self.mixing(node_id, key, energy_type)
+        if issues:
+            found.check = check_of([*((found.check or {}).get("issues") or []), *issues])
         return found

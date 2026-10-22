@@ -138,6 +138,25 @@ test('an open-shell calculation shows its spin expectation value', async ({ page
   await expect(spin).not.toContainText('spin contaminated')
 })
 
+test('a frequency job names the model of its printed G and its scale factor', async ({ page }) => {
+  // D163, T-IMP-52: ORCA's printed G is Grimme's quasi-RRHO; the energy view says so beside G.
+  await newInvestigation(page, 'G model test')
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Upload a file').setInputFiles(join(FIXTURES, '..', 'orca', 'dvb_ir.out'))
+  await expect(dialog.getByRole('table', { name: 'Job steps' })).toContainText('ORCA B3LYP')
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  const inspector = page.getByLabel('Node inspector')
+  const calculations = inspector.getByRole('list', { name: 'Calculations' })
+  await calculations.getByRole('button', { name: /Frequency/ }).click()
+  await expect(inspector.getByLabel('Model of the printed G')).toContainText("ORCA's qRRHO")
+  await expect(inspector.getByLabel('Frequency scale factor')).toHaveText('1 (unscaled)')
+  await page.getByLabel('Energy type').selectOption('G')
+  const badge = page.getByRole('group', { name: 'Energy view' }).getByLabel('Model of the printed G')
+  await expect(badge).toHaveText('qRRHO')
+  await expect(badge).toHaveAttribute('title', /ORCA's qRRHO/)
+})
+
 test('cancelling an import writes nothing', async ({ page }) => {
   // T-IMP-07
   await newInvestigation(page, 'Cancel test')

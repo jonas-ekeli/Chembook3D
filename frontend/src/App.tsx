@@ -33,6 +33,7 @@ import { EnergyDrawer, type DrawerPath, type DrawerView } from './components/Ene
 import { download } from './util'
 import { FilterMenu } from './components/FilterMenu'
 import { FolderPicker } from './components/FolderPicker'
+import { GModelBadge } from './components/GModelBadge'
 import { HistoryList } from './components/HistoryList'
 import { NumberSetting } from './components/NumberSetting'
 import { ThermoSettings } from './components/ThermoSettings'
@@ -1375,6 +1376,7 @@ function App() {
                     </option>
                   ))}
                 </select>
+                {shownType === 'G' && <GModelBadge models={levelOption?.g_models} />}
                 {energyOptions?.standard_state === '1 M' && (shownType === 'G' || shownType === 'G_qh') && (
                   <span
                     className="badge"

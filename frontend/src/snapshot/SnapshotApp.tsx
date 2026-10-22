@@ -6,6 +6,7 @@ import type { HydrogenMode } from '../chem'
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import { CanvasPane, type CanvasEnergy } from '../components/Canvas'
 import { FilterMenu } from '../components/FilterMenu'
+import { GModelBadge } from '../components/GModelBadge'
 import { HydrogenDisplay } from '../display'
 import { NoteImageSource } from '../notes'
 import { energyView, openingView, referenceIds, rememberView, sharedSettings, type SnapshotData } from './data'
@@ -325,6 +326,7 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
                 </option>
               ))}
             </select>
+            {shownType === 'G' && <GModelBadge models={levelOption?.g_models} />}
             {options.standard_state === '1 M' && (shownType === 'G' || shownType === 'G_qh') && (
               <span
                 className="badge"

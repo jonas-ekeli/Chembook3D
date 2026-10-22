@@ -103,7 +103,7 @@ def test_profiles_tables_and_the_view_say_when_temperatures_differ(open_client, 
         "G 1 M (298.15 K, 353.15 K) (hartree)",
         "G_qh 298.15 K 100 cm-1 1 M (hartree)",
     ]
-    assert table["columns"][9] == "ΔG 1 M (kcal/mol)"
+    assert table["columns"][-2] == "ΔG 1 M (kcal/mol)"
     ts_row = next(row for row in table["rows"] if row[0] == "TS")
     assert "G is at the frequency job's 353.15 K" in ts_row[-1]
     assert [n["code"] for n in table["notes"]] == ["W-TEMP"]
@@ -132,9 +132,9 @@ def test_the_table_names_1_atm(open_client, cycle):  # noqa: F811
         "G 1 atm (298.15 K) (hartree)",
         "G_qh 298.15 K 100 cm-1 1 atm (hartree)",
     ]
-    assert table["columns"][9] == "ΔG_qh 1 atm (kcal/mol)"
+    assert table["columns"][-2] == "ΔG_qh 1 atm (kcal/mol)"
     e_table = post(open_client, "/energies/table", {**body, "type": "E"}, status=200)
-    assert e_table["columns"][9] == "ΔE (kcal/mol)"
+    assert e_table["columns"][-2] == "ΔE (kcal/mol)"
     # Without a solvation model, no W-STDSTATE.
     assert profile(open_client, [cycle.path("A", "B")], cycle.ids["A"], "G", level)["notes"] == []
 
@@ -203,7 +203,7 @@ def test_a_species_concentration_is_added_where_it_balances(open_client, cycle):
     # The table's free species column names it; node cards and edges use it too.
     body = {"paths": path, "reference_id": cycle.ids["A"], "level": level, "type": "G"}
     rows = post(open_client, "/energies/table", body, status=200)["rows"]
-    assert rows[1][8] == "− propene (neat THF, 12.3 M)"
+    assert rows[1][9] == "− propene (neat THF, 12.3 M)"  # after D163's Thermochemistry
     edges = view(open_client, level, "G")["edges"]
     assert edges[cycle.edges[("A", "B")]]["delta"] == pytest.approx(after[1], abs=1e-12)
     card = get(open_client, f"/energies/view?level={level}&type=G&reference={cycle.ids['A']}")[

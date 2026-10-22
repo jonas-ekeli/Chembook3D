@@ -18,6 +18,7 @@ from typing import Any
 
 from chembook3d.parsers.common import (
     BSSE,
+    FREQUENCY_SCALE,
     NOT_STATIONARY,
     S2,
     S2_AFTER,
@@ -29,6 +30,7 @@ from chembook3d.parsers.common import (
     Route,
     add_constraint,
     coordinate_name,
+    set_thermo_model,
 )
 from chembook3d.xyz import ELEMENTS, Atom
 
@@ -129,6 +131,22 @@ def is_oniom(method: str | None) -> bool:
     return bool(method) and bool(_ONIOM_WORD.match(method))
 
 
+def _scale_in_route(keywords: dict[str, list[str]]) -> str | None:
+    """D163: the frequency scale factor a route sets for the thermochemistry: `Scale=0.97` on
+    its own or as an option of Freq; None when it sets none (Gaussian then uses 1)."""
+    found = keywords.get("SCALE")
+    if found and _SCALE_VALUE.match(found[0]):
+        return found[0]
+    for option in keywords.get("FREQ", []):
+        key, _, value = option.partition("=")
+        if key.strip() == "SCALE" and _SCALE_VALUE.match(value.strip()):
+            return value.strip()
+    return None
+
+
+_SCALE_VALUE = re.compile(r"^\d*\.?\d+$")
+
+
 def parse_route(text: str) -> Route:
     route = Route(text=text)
     words = split_route_words(text)
@@ -164,6 +182,7 @@ def parse_route(text: str) -> Route:
     counterpoise = next((o for k, o in keywords.items() if k.startswith("COUNTERPOISE")), None)
     if counterpoise and counterpoise[0].isdigit():
         route.counterpoise = int(counterpoise[0])  # D161
+    route.frequency_scale = _scale_in_route(keywords)  # D163
 
     if "OPT" in keywords:
         opt = keywords["OPT"]
@@ -221,6 +240,9 @@ _THERMO_RE = {key: re.compile(pattern) for key, pattern in _THERMO_LINES.items()
 _TEMPERATURE_RE = re.compile(
     r"^ Temperature\s+(" + _FLOAT + r") Kelvin\.\s+Pressure\s+(" + _FLOAT + r") Atm\."
 )
+# D163: the scale factor Gaussian says its thermochemistry uses (set by Scale=, ReadIsotopes
+# or an IOp); the frequencies it prints stay unscaled.
+_SCALED_BY_RE = re.compile(r"[Ff]requencies scaled by\s+(\d*\.?\d+)")
 _CHARGE_RE = re.compile(r"^ Charge =\s*(-?\d+) Multiplicity =\s*(\d+)")
 
 # D153: the total energy of a correlated method, which Gaussian prints after the SCF energy of
@@ -803,6 +825,8 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
             frequencies += values
             i = _read_mode_block(lines, i, len(values), step)
             continue
+        elif (match := _SCALED_BY_RE.search(line)) is not None:
+            step.printed[FREQUENCY_SCALE] = match.group(1)  # D163
         elif (match := _TEMPERATURE_RE.match(line)) is not None:
             step.thermo["temperature"] = float(match.group(1))
             step.thermo["pressure"] = float(match.group(2))
@@ -967,9 +991,23 @@ def parse(text: str) -> ParsedFile:
         steps.append(step)
 
     _carry_forward(steps)
+    _thermo_models(steps)
     for step in steps:
         step.missing = _missing_fields(step)
     return ParsedFile(program=PROGRAM, version=version, steps=steps)
+
+
+def _thermo_models(steps: list[ParsedStep]) -> None:
+    """D163: Gaussian's printed G is pure RRHO; the scale factor is the one the output says the
+    thermochemistry used, else the route's (a compound job's frequency step takes the first
+    step's), else 1."""
+    for n, step in enumerate(steps):
+        scale = step.printed.pop(FREQUENCY_SCALE, None)
+        scale = scale or (step.route.frequency_scale if step.route else None)
+        before = steps[n - 1].route if n > 0 else None
+        if scale is None and before is not None and before.compound_freq:
+            scale = before.frequency_scale
+        set_thermo_model(step, "RRHO", scale)
 
 
 def _carry_forward(steps: list[ParsedStep]) -> None:

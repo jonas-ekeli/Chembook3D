@@ -48,6 +48,7 @@ from chembook3d.services import (
     levels,
     scan_edges,
     spin,
+    thermo_model,
     thermo_settings,
 )
 from chembook3d.services import files as file_service
@@ -283,6 +284,19 @@ class SpinOut(BaseModel):
     contaminated: bool
 
 
+class ThermoModelOut(BaseModel):
+    """D163: the model of the G a frequency job printed (RRHO, qRRHO, mRRHO, with what it
+    means) and the frequency scale factor the program used, with whether the stored frequencies
+    carry it (ORCA's) and so the one G_qh is computed with."""
+
+    program: str
+    model: str | None
+    model_text: str | None
+    scale: float
+    frequencies_scaled: bool
+    qh_scale: float
+
+
 class CalculationOut(BaseModel):
     id: str
     node_id: str
@@ -308,6 +322,7 @@ class CalculationOut(BaseModel):
     result: ResultOut | None
     quasi_harmonic: QuasiHarmonicOut | None
     spin: SpinOut | None = None  # D162
+    thermo: ThermoModelOut | None = None  # D163
     notes: str
     removed_points: list[int] = []  # D117: scan points left out of a scan path
     created_at: UtcDatetime
@@ -1158,6 +1173,11 @@ def _quasi_harmonic_out(calculation: Calculation) -> QuasiHarmonicOut | None:
     return out
 
 
+def _thermo_out(calculation: Calculation) -> ThermoModelOut | None:
+    found = thermo_model.of(calculation)
+    return ThermoModelOut(**found.as_dict()) if found is not None else None
+
+
 def _spin_out(calculation: Calculation) -> SpinOut | None:
     node = calculation.node
     found = spin.of(calculation, node.multiplicity if node is not None else None)
@@ -1205,6 +1225,7 @@ def _calculation_out(request: Request, calculation: Calculation) -> CalculationO
         result=ResultOut.model_validate(result, from_attributes=True) if result else None,
         quasi_harmonic=_quasi_harmonic_out(calculation),
         spin=_spin_out(calculation),
+        thermo=_thermo_out(calculation),
         notes=calculation.notes,
         removed_points=calculation.removed_points or [],
         created_at=calculation.created_at,

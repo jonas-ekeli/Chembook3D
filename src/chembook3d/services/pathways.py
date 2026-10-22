@@ -34,6 +34,7 @@ from chembook3d import units
 from chembook3d.models import Branch, GroupNode, Node, ReactionStep, Transition
 from chembook3d.services import branches as branch_service
 from chembook3d.services import species as species_service
+from chembook3d.services import thermo_model
 from chembook3d.services import transitions as transition_service
 from chembook3d.services.energies import (
     ENERGY_TYPES,
@@ -483,6 +484,15 @@ def profiles(
         "standard_state": energies.standard_state,
         "job_temperatures": job_temperatures,  # D160: of H and G
         "notes": notes,  # D160: W-TEMP, W-STDSTATE
+        # D163: the models of the printed G behind the points, as "Gaussian's RRHO"
+        "g_models": sorted(
+            {
+                thermo_model.label_of(t)
+                for profile in shown
+                for point in profile["points"]
+                if (t := point["details"].get("thermo")) is not None
+            }
+        ),
         "profiles": shown,
     }
 
@@ -510,9 +520,22 @@ def relative_text(value: float | None, unit: str) -> str:
 
 
 BSSE_COLUMN = "BSSE correction (hartree)"  # D161
+THERMO_COLUMN = "Thermochemistry"  # D163
 
 
-FREE_SPECIES = 8  # the "Free species" column, before which the BSSE column goes
+def thermo_text(found: dict[str, Any] | None) -> str:
+    """D163: the table's Thermochemistry cell, from a value's `details["thermo"]`: "Gaussian's
+    RRHO; scale 1" or "ORCA's qRRHO; scale 0.97 (in its frequencies and so in G_qh)" (no comma, so
+    the CSV cell needs no quotes)."""
+    if not found:
+        return ""
+    text = f"{thermo_model.label_of(found)}; scale {thermo_model.scale_text(found['scale'])}"
+    if found.get("frequencies_scaled") and not thermo_model.same_scale(found["scale"], 1.0):
+        text += " (in its frequencies and so in G_qh)"
+    return text
+
+
+FREE_SPECIES = 9  # the "Free species" column, before which the BSSE column goes
 
 
 def table(
@@ -555,6 +578,9 @@ def table(
             values = {t: v.value for t, v in found.items()}
             if values["G"] is not None:
                 g_temperatures.add(found["G"].details.get("job_temperature"))
+            thermo = next(
+                (v.details["thermo"] for v in found.values() if "thermo" in v.details), None
+            )
             row = [
                 name,
                 point["step_name"] or "",
@@ -564,6 +590,7 @@ def table(
                 _absolute(values["H"]),
                 _absolute(values["G"]),
                 _absolute(values["G_qh"]),
+                thermo_text(thermo),
                 species_service.text(point["species"]),
                 relative_text(point["relative"], unit),
                 point["check"]["message"] if point["check"] else "",
@@ -593,6 +620,7 @@ def table(
         "H (hartree)",
         f"{g} (hartree)",
         f"{qh} (hartree)",
+        THERMO_COLUMN,  # D163
         "Free species",
         f"Δ{shown_type} ({unit})",
         "Check",  # D154

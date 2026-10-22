@@ -15,6 +15,7 @@ import {
 import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
 import { closesCycle, download, tableCellClass } from '../util'
 import { EnergyNotes } from './EnergyNotes'
+import { GModelBadge } from './GModelBadge'
 import { ProfileChart } from './ProfileChart'
 import { ProfileStyleDialog } from './ProfileStyleDialog'
 import { CompareStericsDialog } from './Sterics'
@@ -367,6 +368,7 @@ export function EnergyDrawer({
             ? `${energyTypeName(type, settings?.qh_temperature, settings?.qh_cutoff, settings?.standard_state, shownProfiles?.job_temperatures)} at ${levelLabel}`
             : 'No energies in this investigation yet'}
         </span>
+        {type === 'G' && <GModelBadge models={shownProfiles?.g_models} />}
         <span className="spacer" />
         {tab === 'profile' ? (
           <>

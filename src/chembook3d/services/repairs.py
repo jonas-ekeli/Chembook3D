@@ -19,7 +19,13 @@ from chembook3d.models import (
     InvestigationInfo,
     Node,
 )
-from chembook3d.parsers.common import BSSE, NOT_STATIONARY, SPIN_KEYS
+from chembook3d.parsers.common import (
+    BSSE,
+    FREQUENCY_SCALE,
+    NOT_STATIONARY,
+    SPIN_KEYS,
+    THERMO_MODEL_KEYS,
+)
 from chembook3d.services import geometry, history, imports, levels, thermo_settings
 
 log = logging.getLogger(__name__)
@@ -306,6 +312,24 @@ def counterpoise_energies(session: Session, folder: Path) -> dict[str, int]:
     return counts
 
 
+def thermo_models(session: Session, folder: Path) -> dict[str, int]:
+    """D163: frequency jobs imported before the app kept the model of their printed G and the
+    frequency scale factor (W-SCALE, W-G-MODEL), read again from their copied files. One whose
+    file is gone keeps its program's model and a scale of 1."""
+    query = select(Calculation).where(Calculation.type == CalculationType.FREQUENCY)
+    counts = {"checked": 0, "scaled": 0}
+    for calculation, step in _steps_again(session, folder, query):
+        found = {key: step.printed[key] for key in THERMO_MODEL_KEYS if key in step.printed}
+        if not found:
+            continue
+        counts["checked"] += 1
+        result = calculation.result
+        result.printed = {**(result.printed or {}), **found}
+        if float(found.get(FREQUENCY_SCALE, "1")) != 1.0:
+            counts["scaled"] += 1
+    return counts
+
+
 REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "geometry_levels": geometry_levels,
     "scan_path_edges": scan_path_edges,
@@ -314,6 +338,7 @@ REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "spin_values": spin_values,
     "thermochemistry": thermochemistry,
     "counterpoise_energies": counterpoise_energies,
+    "thermo_models": thermo_models,
 }
 
 

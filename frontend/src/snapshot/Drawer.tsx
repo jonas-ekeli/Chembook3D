@@ -1,6 +1,7 @@
 import { useMemo, useRef } from 'react'
 import { energyTypeName, type EnergyType, type Settings } from '../api'
 import { EnergyNotes } from '../components/EnergyNotes'
+import { GModelBadge } from '../components/GModelBadge'
 import { ProfileChart } from '../components/ProfileChart'
 import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
 import { closesCycle, download, tableCellClass } from '../util'
@@ -90,6 +91,7 @@ export function SnapshotDrawer({
             ? `${energyTypeName(type, settings.qh_temperature, settings.qh_cutoff, settings.standard_state, shown?.profiles.job_temperatures)} at ${levelLabel}`
             : 'No energies in this investigation'}
         </span>
+        {type === 'G' && <GModelBadge models={shown?.profiles.g_models} />}
         <span className="spacer" />
         {tab === 'profile' ? (
           <>

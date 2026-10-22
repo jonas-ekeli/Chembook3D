@@ -6,7 +6,9 @@ import {
   type CustomBasisSummary,
   type Level,
   type LevelFields,
+  scaleText,
   type SourceFile,
+  type ThermoModel,
 } from '../api'
 import { hartree } from '../util'
 import { BasisSetsDialog } from './BasisSets'
@@ -151,15 +153,41 @@ function SourceFileBox({ source, onChanged }: { source: SourceFile; onChanged: (
   )
 }
 
+/** D163: the model of the printed G and the frequency scale factor of a frequency job. */
+function ThermoValues({ thermo }: { thermo: ThermoModel }) {
+  const scaled = thermo.scale !== 1
+  return (
+    <>
+      <dt>G model</dt>
+      <dd aria-label="Model of the printed G" title={thermo.model_text ?? undefined}>
+        {thermo.model ? `${thermo.program}'s ${thermo.model}` : thermo.program}
+        {thermo.model_text && <span className="muted small"> ({thermo.model_text})</span>}
+      </dd>
+      <dt>Frequency scale</dt>
+      <dd aria-label="Frequency scale factor">
+        <span className="mono">{scaleText(thermo.scale)}</span>
+        <span className="muted small">
+          {!scaled
+            ? ' (unscaled)'
+            : thermo.frequencies_scaled
+              ? ' (in the printed frequencies, so also in G_qh)'
+              : ' (in the printed H and G only; G_qh uses the unscaled frequencies)'}
+        </span>
+      </dd>
+    </>
+  )
+}
+
 /** Key results of a calculation (FR-CALC-01); also shown by the read-only copy (D79). */
 export function ResultValues({
   calculation,
 }: {
-  calculation: Pick<Calculation, 'result' | 'quasi_harmonic'> & Partial<Pick<Calculation, 'spin'>>
+  calculation: Pick<Calculation, 'result' | 'quasi_harmonic'> & Partial<Pick<Calculation, 'spin' | 'thermo'>>
 }) {
   const r = calculation.result
   if (!r) return null
   const spin = calculation.spin
+  const thermo = calculation.thermo
   return (
     <dl className="values">
       {/* D153: a correlated method's energy is its own printed total, named here. */}
@@ -218,6 +246,7 @@ export function ResultValues({
           <dd className="mono">
             {hartree(r.h)}, {hartree(r.g)}
           </dd>
+          {thermo && <ThermoValues thermo={thermo} />}
           <dt>T, P</dt>
           <dd>
             {r.temperature} K, {r.pressure} atm
