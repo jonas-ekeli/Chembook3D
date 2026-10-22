@@ -65,6 +65,7 @@ export function EnergyDrawer({
   settings,
   level,
   levelLabel,
+  bsse = false,
   type,
   referenceId,
   selectedId,
@@ -81,6 +82,8 @@ export function EnergyDrawer({
   settings: Settings | null
   level: string | null
   levelLabel: string
+  /** D161: add each node's counterpoise BSSE at the level. */
+  bsse?: boolean
   type: EnergyType
   referenceId: string | null
   selectedId: string | null
@@ -236,7 +239,14 @@ export function EnergyDrawer({
 
   const request: ProfileRequest | null =
     level && livePaths.length
-      ? { paths: livePaths.map((p) => p.ids), reference_id: reference, level, type, unit: settings?.energy_unit }
+      ? {
+          paths: livePaths.map((p) => p.ids),
+          reference_id: reference,
+          level,
+          type,
+          unit: settings?.energy_unit,
+          ...(bsse ? { bsse } : {}),
+        }
       : null
   const requestKey = JSON.stringify(request)
 

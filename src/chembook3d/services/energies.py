@@ -12,6 +12,11 @@
 - With the 1 M standard state chosen in Settings (D95), G and G_qh of every node add
   RT ln(V_m / 1 L mol⁻¹) at the G_qh temperature (or an analysis's own); E and H never do.
 - A group node's value is its representative's; with none, it has no value (EN-7).
+- D161: a counterpoise job's stored energy is its corrected total; here it counts as the
+  complex's uncorrected energy (that total minus its BSSE), like every other calculation at its
+  level. Only with "with BSSE" chosen (`bsse=True`, off by default) does a node with a
+  counterpoise job at the composite level have that job's BSSE added to E, H, G and G_qh (the
+  counterpoise correction, which raises the complex's energy).
 - Values are only read from calculation results, never typed (EN-1), and are never used to
   pick nodes, representatives or pathways (EN-10).
 """
@@ -33,7 +38,7 @@ from chembook3d.models import (
     Role,
 )
 from chembook3d.parsers import joined
-from chembook3d.parsers.common import NOT_STATIONARY
+from chembook3d.parsers.common import BSSE, NOT_STATIONARY
 from chembook3d.services import levels, spin, thermo_settings
 from chembook3d.services.records import RecordError
 
@@ -144,6 +149,16 @@ def quasi_harmonic(
     )
 
 
+def bsse_of(calculation: Calculation | None) -> float | None:
+    """D161: a counterpoise job's BSSE in hartree, as printed; None for any other job."""
+    result = calculation.result if calculation is not None else None
+    printed = (result.printed or {}).get(BSSE) if result is not None else None
+    try:
+        return float(printed) if printed is not None else None
+    except ValueError:
+        return None
+
+
 def _state(calculation: Calculation) -> tuple[int, int | None] | None:
     """D155: a calculation's charge and multiplicity, None when the file did not say."""
     if calculation.charge is None:
@@ -207,9 +222,15 @@ class NodeEnergies:
     """Every energy one node has, by composite level."""
 
     def __init__(
-        self, node: Node, temperature: float, cutoff: float, standard_state: str = "1 atm"
+        self,
+        node: Node,
+        temperature: float,
+        cutoff: float,
+        standard_state: str = "1 atm",
+        bsse: bool = False,
     ):
         self.node = node
+        self.bsse = bsse  # D161: add a counterpoise job's BSSE at the level
         self.temperature = temperature
         self.cutoff = cutoff
         self.standard_state = standard_state
@@ -241,6 +262,11 @@ class NodeEnergies:
         found = [c for c in self.by_key.get(key, []) if c.result.energy is not None]
         if len({_state(c) for c in found} - {None}) > 1:
             return None
+        return found[-1] if found else None
+
+    def counterpoise(self, key: LevelKey) -> Calculation | None:
+        """D161: the latest counterpoise job with a BSSE at this composite level."""
+        found = [c for c in self.by_key.get(key, []) if bsse_of(c) is not None]
         return found[-1] if found else None
 
     def _no_energy(self, key: LevelKey) -> Value:
@@ -379,10 +405,29 @@ class NodeEnergies:
         return found
 
     def _value(self, key: LevelKey, energy_type: str) -> Value:
+        found = self._value_before_bsse(key, energy_type)
+        counterpoise = self.counterpoise(key)
+        if counterpoise is None or found.value is None:
+            return found
+        # D161: the counterpoise job's BSSE at this level, added (the correction) only if chosen.
+        bsse = bsse_of(counterpoise)
+        found.details = {
+            **found.details,
+            "bsse": bsse,
+            "bsse_calculation_id": counterpoise.id,
+            "bsse_applied": self.bsse,
+        }
+        if self.bsse:
+            found.value += bsse
+        return found
+
+    def _value_before_bsse(self, key: LevelKey, energy_type: str) -> Value:
         source = self.energy(key)
         if source is None:
             return self._no_energy(key)
         energy = source.result.energy
+        if bsse_of(source) is not None:
+            energy -= bsse_of(source)  # D161: the complex's uncorrected energy
         if energy_type == "E":
             return Value(energy, energy_calculation_id=source.id)
         if key.geometry_level_id is None:
@@ -475,12 +520,15 @@ class Energies:
         session: Session,
         settings: app_settings.Settings | None = None,
         temperature: float | None = None,
+        bsse: bool = False,
     ):
         """`temperature` overrides the G_qh temperature setting (a selectivity's own, S4); it
         is also the temperature of the 1 M standard state (D95). The settings are the
-        investigation's (D159)."""
+        investigation's (D159). `bsse` adds each node's counterpoise BSSE at the level
+        (D161, off by default)."""
         settings = settings or thermo_settings.settings(session)
         self.session = session
+        self.bsse = bsse
         self.temperature = settings.qh_temperature if temperature is None else temperature
         self.cutoff = settings.qh_cutoff
         self.standard_state = settings.standard_state
@@ -488,7 +536,7 @@ class Energies:
             selectinload(Node.calculations).selectinload(Calculation.result)
         )
         self.nodes = {
-            n.id: NodeEnergies(n, self.temperature, self.cutoff, self.standard_state)
+            n.id: NodeEnergies(n, self.temperature, self.cutoff, self.standard_state, bsse)
             for n in session.scalars(query)
         }
         self.groups = {g.id: g for g in session.scalars(select(GroupNode))}
@@ -496,14 +544,18 @@ class Energies:
     def options(self) -> list[dict[str, Any]]:
         """FR-EN-01: composite levels with the energy types that have at least one value."""
         found: dict[LevelKey, set[str]] = {}
+        bsse: set[LevelKey] = set()  # D161: levels where a node has a counterpoise BSSE
         for node in self.nodes.values():
             for key, types in node.available().items():
                 found.setdefault(key, set()).update(types)
+                if node.counterpoise(key) is not None:
+                    bsse.add(key)
         listed = [
             {
                 "key": key.encode(),
                 "label": key_label(self.session, key),
                 "types": [t for t in ENERGY_TYPES if t in types],
+                "bsse": key in bsse,
             }
             for key, types in found.items()
         ]

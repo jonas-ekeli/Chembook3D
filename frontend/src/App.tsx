@@ -217,6 +217,8 @@ function App() {
   const [energyType, setEnergyType] = useState<EnergyType>('G')
   const [energyView, setEnergyView] = useState<EnergyView | null>(null)
   const [edgeEnergies, setEdgeEnergies] = useState(true)
+  // D161: add each node's counterpoise BSSE at the level; off by default and never remembered.
+  const [withBsse, setWithBsse] = useState(false)
   const [referenceId, setReferenceId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   // D92, D122: the side panel's tab (Claude or an SSH server), or null when it is hidden.
@@ -373,21 +375,29 @@ function App() {
         : levelOption.types[0]
     : energyType
   const levelKey = levelOption?.key ?? null
+  const bsse = withBsse && !!levelOption?.bsse
+  const levelLabel = levelOption ? levelOption.label + (bsse ? ' with BSSE' : '') : ''
   // Only a view that matches the current selection is shown (INV-5).
   const shownView =
-    energyView && levelKey && energyView.level === levelKey && energyView.type === shownType ? energyView : null
+    energyView &&
+    levelKey &&
+    energyView.level === levelKey &&
+    energyView.type === shownType &&
+    !!energyView.bsse === bsse
+      ? energyView
+      : null
 
   useEffect(() => {
     if (!levelKey) return
     let current = true
-    api.energyView(levelKey, shownType, referenceId).then(
+    api.energyView(levelKey, shownType, referenceId, bsse).then(
       (found) => current && setEnergyView(found),
       (err: unknown) => current && setError(errorText(err)),
     )
     return () => {
       current = false
     }
-  }, [levelKey, shownType, referenceId, energyOptions, refreshKey])
+  }, [levelKey, shownType, referenceId, bsse, energyOptions, refreshKey])
 
   // D91: what this tab shows, for Claude's get_selection ("this node"). The tab used last wins.
   const groupIds = useMemo(() => new Set(canvas.groups.map((g) => g.id)), [canvas.groups])
@@ -1366,6 +1376,19 @@ function App() {
                     1 M
                   </span>
                 )}
+                {levelOption?.bsse && (
+                  <label
+                    className="check"
+                    title="Add the BSSE of each node's counterpoise job at this level (the counterpoise correction, D161). Nodes without one are unchanged."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={withBsse}
+                      onChange={(event) => setWithBsse(event.target.checked)}
+                    />
+                    <span>With BSSE</span>
+                  </label>
+                )}
                 <label className="check" title="Show ΔX on transitions (FR-CAN-03)">
                   <input
                     type="checkbox"
@@ -1522,7 +1545,8 @@ function App() {
                 canvas={canvas}
                 settings={settings}
                 level={levelKey}
-                levelLabel={levelOption?.label ?? ''}
+                levelLabel={levelLabel}
+                bsse={bsse}
                 type={shownType}
                 referenceId={referenceId}
                 selectedId={selection && selection.kind !== 'edge' && selection.kind !== 'branch' ? selection.id : null}

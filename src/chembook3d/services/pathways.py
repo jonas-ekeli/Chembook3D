@@ -444,8 +444,10 @@ def profiles(
         )
     return {
         "level": key.encode(),
-        "level_label": key_label(session, key),
+        # D161: the chart title and the table's Level column say when the BSSE was added.
+        "level_label": key_label(session, key) + (" with BSSE" if energies.bsse else ""),
         "type": energy_type,
+        "bsse": energies.bsse,  # D161: counterpoise BSSE added where a node has one
         "reference_id": prepared.reference_id,
         "reference_value": reference,
         "temperature": energies.temperature,
@@ -465,6 +467,9 @@ def relative_text(value: float | None, unit: str) -> str:
         return "n/a"
     text = f"{value * units.HARTREE_IN[unit]:.{units.DECIMALS[unit]}f}"
     return text[1:] if text.startswith("-") and not text.strip("-0.") else text  # no "-0.00"
+
+
+BSSE_COLUMN = "BSSE correction (hartree)"  # D161
 
 
 def table(
@@ -505,6 +510,9 @@ def table(
         f"Δ{energy_type} ({unit})",
         "Check",  # D154
     ]
+    if energies.bsse:
+        # D161: the counterpoise BSSE each row's values have had added.
+        columns.insert(columns.index("Free species"), BSSE_COLUMN)
     rows: list[list[str]] = []
     seen: set[tuple] = set()
     for profile in data["profiles"]:
@@ -520,19 +528,23 @@ def table(
                 rep = session.get(Node, representative) if representative else None
                 name += f" (representative: {rep.label or 'Untitled node'})" if rep else ""
             values = {t: energies.value(point["id"], key, t).value for t in ("E", "H", "G", "G_qh")}
-            rows.append(
-                [
-                    name,
-                    point["step_name"] or "",
-                    branch_names.get(point["branch_id"] or "", ""),
-                    label,
-                    _absolute(values["E"]),
-                    _absolute(values["H"]),
-                    _absolute(values["G"]),
-                    _absolute(values["G_qh"]),
-                    species_service.text(point["species"]),
-                    relative_text(point["relative"], unit),
-                    point["check"]["message"] if point["check"] else "",
-                ]
-            )
+            row = [
+                name,
+                point["step_name"] or "",
+                branch_names.get(point["branch_id"] or "", ""),
+                label,
+                _absolute(values["E"]),
+                _absolute(values["H"]),
+                _absolute(values["G"]),
+                _absolute(values["G_qh"]),
+                species_service.text(point["species"]),
+                relative_text(point["relative"], unit),
+                point["check"]["message"] if point["check"] else "",
+            ]
+            if energies.bsse:
+                bsse = (
+                    point["details"].get("bsse") if point["details"].get("bsse_applied") else None
+                )
+                row.insert(columns.index(BSSE_COLUMN), "" if bsse is None else f"{bsse:.8f}")
+            rows.append(row)
     return {"columns": columns, "rows": rows}

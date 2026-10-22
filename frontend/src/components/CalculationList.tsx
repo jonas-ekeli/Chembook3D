@@ -165,6 +165,15 @@ export function ResultValues({
       {/* D153: a correlated method's energy is its own printed total, named here. */}
       <dt>{r.printed?.energy_label ?? 'E(SCF)'}</dt>
       <dd className="mono">{hartree(r.energy, 8)}</dd>
+      {r.printed?.bsse && (
+        <>
+          {/* D161: a counterpoise job's BSSE; its energy above is the corrected total. */}
+          <dt>BSSE</dt>
+          <dd className="mono" aria-label="Basis set superposition error">
+            {hartree(Number(r.printed.bsse), 8)}
+          </dd>
+        </>
+      )}
       {spin && (
         <>
           {/* D162: the spin expectation value, judged before annihilation (W-SPIN). */}

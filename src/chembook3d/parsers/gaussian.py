@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from chembook3d.parsers.common import (
+    BSSE,
     NOT_STATIONARY,
     S2,
     S2_AFTER,
@@ -112,6 +113,20 @@ _FROM_CHECKPOINT = "CHECK"
 # D153: a method written with options before the basis set, such as CCSD(T)/…, MP2(Full)/…
 # or MP4(SDQ)/… (IOp(3/174=…) has an "=" and stays a keyword).
 _METHOD_WITH_OPTIONS = re.compile(r"^(?!IOP\()[A-Z][A-Z0-9-]*\([A-Z0-9,]+\)$", re.IGNORECASE)
+# D161: an ONIOM route word, `ONIOM(B3LYP/6-31G(d):UFF)` or with options after it
+# (`ONIOM(B3LYP/6-31G(d):PM6)=EmbedCharge`).
+_ONIOM_WORD = re.compile(r"^ONIOM\s*\(", re.IGNORECASE)
+
+
+def _basis_spelling(text: str) -> str:
+    """6-31G* is 6-31G(d) and 6-31G** is 6-31G(d,p); Gaussian writes the second form in the
+    route of a compound job's frequency step, so both must name the same basis set."""
+    return text.replace("**", "(D,P)").replace("*", "(D)")
+
+
+def is_oniom(method: str | None) -> bool:
+    """D161: an ONIOM method, `ONIOM(high:low)` with each layer's method and basis set."""
+    return bool(method) and bool(_ONIOM_WORD.match(method))
 
 
 def parse_route(text: str) -> Route:
@@ -126,22 +141,29 @@ def parse_route(text: str) -> Route:
                 key, _, value = option.partition("=")
                 route.iops[key.strip()] = value.strip()
 
-    for word in words:
-        slash = word.find("/")
-        if slash > 0 and (
-            not re.search(r"[=(]", word[:slash]) or _METHOD_WITH_OPTIONS.match(word[:slash])
-        ):
-            route.method, route.basis = word[:slash].upper(), word[slash + 1 :].upper()
-            break
+    oniom = next((word for word in words if _ONIOM_WORD.match(word)), None)
+    if oniom is not None:
+        # D161: the layers as written are the method, each with its own basis set; options
+        # such as EmbedCharge change the energy and stay part of it.
+        route.method = _basis_spelling(re.sub(r"\s+", "", oniom).upper())
     else:
-        for i, word in enumerate(words):
-            if _BASIS_WORD.match(word.upper()) and i > 0 and "=" not in words[i - 1]:
-                route.method, route.basis = words[i - 1].upper(), word.upper()
+        for word in words:
+            slash = word.find("/")
+            if slash > 0 and (
+                not re.search(r"[=(]", word[:slash]) or _METHOD_WITH_OPTIONS.match(word[:slash])
+            ):
+                route.method, route.basis = word[:slash].upper(), word[slash + 1 :].upper()
                 break
+        else:
+            for i, word in enumerate(words):
+                if _BASIS_WORD.match(word.upper()) and i > 0 and "=" not in words[i - 1]:
+                    route.method, route.basis = words[i - 1].upper(), word.upper()
+                    break
     if route.basis:
-        # 6-31G* is 6-31G(d) and 6-31G** is 6-31G(d,p); Gaussian writes the second form in the
-        # route of a compound job's frequency step, so both must name the same basis set.
-        route.basis = route.basis.replace("**", "(D,P)").replace("*", "(D)")
+        route.basis = _basis_spelling(route.basis)
+    counterpoise = next((o for k, o in keywords.items() if k.startswith("COUNTERPOISE")), None)
+    if counterpoise and counterpoise[0].isdigit():
+        route.counterpoise = int(counterpoise[0])  # D161
 
     if "OPT" in keywords:
         opt = keywords["OPT"]
@@ -217,6 +239,17 @@ _CORRELATED_RE = [
 _DOUBLE_HYBRID = re.compile(r"2PLYP|^DSD|^PBE0DH$|^PBEQIDH$")
 # A written R, U or RO before one of these is a reference prefix (UMP2, RB2PLYPD3).
 _CORRELATED_NAME = re.compile(r"MP\d|CC|QCI|CID|CISD|BD|B2|MPW2|DSD|PBE0DH|PBEQ")
+# D161: a counterpoise job computes the complex, then each fragment in the complex's basis set
+# and in its own (`Counterpoise: doing DCBS calculation for fragment   1`), and prints the
+# corrected total and the BSSE: Gaussian 16 as `Counterpoise corrected energy =` and a
+# right-aligned `BSSE energy =`, earlier versions as `Counterpoise: corrected energy =` and
+# `Counterpoise: BSSE energy =`. An ONIOM job prints each layer's energy, then
+# `ONIOM: extrapolated energy =`. Both print their total after each structure of an
+# optimization.
+_COUNTERPOISE_FRAGMENT = " Counterpoise: doing "
+_COUNTERPOISE_RE = re.compile(r"^\s*Counterpoise:?\s+corrected energy\s*=\s*" + _NUMBER)
+_BSSE_RE = re.compile(r"^\s*(?:Counterpoise:\s+)?BSSE energy\s*=\s*" + _NUMBER)
+_ONIOM_RE = re.compile(r"^ ONIOM: extrapolated energy\s*=\s*" + _NUMBER)
 _ORIENTATIONS = ("Input orientation:", "Z-Matrix orientation:", "Standard orientation:")
 # D123b: Berny's convergence table after each optimization step, and its predicted change.
 _CRITERION_RE = re.compile(r"^ (Maximum|RMS)\s+(Force|Displacement)\s+(\S+)\s+(\S+)\s+(YES|NO)\s*$")
@@ -626,6 +659,13 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
     frozen_atoms = 0
     wanted = correlated_total_of(step.route.method) if step.route else None
     correlated: float | None = None
+    # D161: a counterpoise job's corrected total and whether a fragment's own calculation is
+    # being read (its structure and energies are not the complex's); an ONIOM job's total.
+    counterpoise = step.route.counterpoise if step.route else None
+    in_fragment = False
+    corrected: float | None = None
+    oniom = step.route is not None and is_oniom(step.route.method)
+    extrapolated: float | None = None
     # D158: the last convergence table printed (each line, whether it was met) and whether
     # Gaussian then said "Stationary point found": after a frequency job it judges the
     # structure with the Hessian just computed.
@@ -636,6 +676,36 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
         line = lines[i]
         if irc is not None and irc.read(lines, i, orientations, energies, points, criteria):
             pass
+        elif line.startswith(_COUNTERPOISE_FRAGMENT):
+            in_fragment = True
+            counterpoise = counterpoise or 2
+        elif in_fragment and line.strip() in _ORIENTATIONS:
+            i = _read_orientation(lines, i)[1]  # a fragment's structure, ghost atoms left out
+            continue
+        elif in_fragment and (
+            line.startswith((" SCF Done:", " <Sx>=", " S**2 before annihilation"))
+            or (wanted and _correlated_total(line, wanted))
+        ):
+            pass  # a fragment's energy and spin (D161)
+        elif (match := _COUNTERPOISE_RE.match(line)) is not None:
+            in_fragment = False
+            corrected, step.printed["energy"] = (
+                float(match.group(1).replace("D", "E")),
+                line.strip(),
+            )
+            for name in _ORIENTATIONS:
+                if energies[name]:
+                    energies[name][-1] = corrected
+        elif (match := _BSSE_RE.match(line)) is not None:
+            step.printed[BSSE] = match.group(1).replace("D", "E")
+        elif oniom and (match := _ONIOM_RE.match(line)) is not None:
+            extrapolated, step.printed["energy"] = (
+                float(match.group(1).replace("D", "E")),
+                line.strip(),
+            )
+            for name in _ORIENTATIONS:
+                if energies[name]:
+                    energies[name][-1] = extrapolated
         elif step.charge is None and (match := _CHARGE_RE.match(line)):
             step.charge, step.multiplicity = int(match.group(1)), int(match.group(2))
         elif line.strip() in _ORIENTATIONS:
@@ -648,6 +718,8 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
             continue
         elif line.startswith(" SCF Done:") and len(line.split()) > 4:
             step.scf_energy = float(line.split()[4])
+            # D161: a new structure's (or layer's) SCF: its own total is still to come.
+            corrected = extrapolated = None
             for name in _ORIENTATIONS:
                 if energies[name]:
                     energies[name][-1] = step.scf_energy
@@ -769,6 +841,27 @@ def _parse_step(lines: list[str], index: int) -> ParsedStep:
         # D153: the step's energy is the method's own total; never its SCF reference's.
         step.scf_energy = correlated
         step.correlated_missing = correlated is None
+    if counterpoise:
+        # D161: the counterpoise-corrected total, never a fragment's energy; the BSSE is kept.
+        step.scf_energy, step.correlated_missing = corrected, False
+        step.energy_label = "E(counterpoise)"
+        if corrected is None:
+            step.printed.pop(BSSE, None)
+            step.printed.pop("energy", None)
+            step.energy_missing = (
+                f"counterpoise-corrected energy (Counterpoise={counterpoise}: not printed, the "
+                "job may have been cut off; the complex and fragment energies are not used)"
+            )
+    elif oniom:
+        # D161: the ONIOM extrapolated total, never one layer's energy.
+        step.scf_energy, step.correlated_missing = extrapolated, False
+        step.energy_label = "E(ONIOM)"
+        if extrapolated is None:
+            step.printed.pop("energy", None)
+            step.energy_missing = (
+                "ONIOM extrapolated energy (not printed, the job may have been cut off; the "
+                "layer energies are not used)"
+            )
     chosen = None
     for name in _ORIENTATIONS:
         if orientations[name]:
@@ -909,7 +1002,9 @@ def _missing_fields(step: ParsedStep) -> list[str]:
     else:
         if not step.route.method:
             missing.append("method")
-        if not step.resolved_basis:
+        if is_oniom(step.route.method):
+            pass  # D161: each layer names its own basis set in the method
+        elif not step.resolved_basis:
             missing.append("basis set")
         elif step.resolved_basis in ("GEN", "GENECP") and not step.resolved_basis_definition:
             missing.append("custom basis definition")
@@ -917,7 +1012,9 @@ def _missing_fields(step: ParsedStep) -> list[str]:
         missing.append("charge and multiplicity")
     if not step.geometries:
         missing.append("geometry")
-    if step.correlated_missing:
+    if step.energy_missing:
+        missing.append(step.energy_missing)  # D161
+    elif step.correlated_missing:
         missing.append(f"correlated energy ({step.route.method})")
     elif step.scf_energy is None and step.job_type != "other":
         missing.append("SCF energy")

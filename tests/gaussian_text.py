@@ -277,6 +277,180 @@ def co2_freq(point_group="D*H", symmetry_number=2) -> str:
     )
 
 
+# ---------- counterpoise and ONIOM (D161) ----------
+
+# A hydrogen-bonded water dimer: the donor's O-H points at the acceptor's O.
+WATER_DIMER = [
+    ("O", 8, -1.551007, -0.114520, 0.000000),
+    ("H", 1, -1.934259, 0.762503, 0.000000),
+    ("H", 1, -0.599677, 0.040712, 0.000000),
+    ("O", 8, 1.350625, 0.111469, 0.000000),
+    ("H", 1, 1.680398, -0.373741, -0.758561),
+    ("H", 1, 1.680398, -0.373741, 0.758561),
+]
+DIMER_ENERGY = -152.9050  # the complex in its own basis set
+# Each fragment in the complex's basis set (DCBS, ghost atoms on the other) and in its own
+# (MCBS): BSSE = (−76.4510 + 76.4520) + (−76.4500 + 76.4515) = 0.0025 hartree.
+FRAGMENT_ENERGIES = {"DCBS": (-76.4520, -76.4515), "MCBS": (-76.4510, -76.4500)}
+DIMER_BSSE = 0.0025
+DIMER_CORRECTED = DIMER_ENERGY + DIMER_BSSE  # −152.9025
+
+
+def fragment_orientation(atoms, fragment: list[int]) -> list[str]:
+    """The structure of one counterpoise fragment, the other fragment's atoms as ghosts
+    (atomic number 0), in case Gaussian prints it."""
+    return orientation(
+        [(e, n if i in fragment else 0, x, y, z) for i, (e, n, x, y, z) in enumerate(atoms, 1)]
+    )
+
+
+def counterpoise_lines(
+    corrected=DIMER_CORRECTED,
+    bsse=DIMER_BSSE,
+    *,
+    g16=True,
+    fragment_structures=False,
+    cut_off=False,
+) -> list[str]:
+    """What a Counterpoise=2 job prints after the complex's SCF: each fragment's DCBS and MCBS
+    SCF, then the corrected total and the BSSE; Gaussian 16's layout, or the
+    `Counterpoise: corrected energy =` lines of earlier versions with `g16=False`. With
+    `cut_off` the file ends after the last fragment's SCF."""
+    lines = []
+    for kind in ("DCBS", "MCBS"):
+        for n, energy in enumerate(FRAGMENT_ENERGIES[kind], start=1):
+            lines.append(f" Counterpoise: doing {kind} calculation for fragment {n:3d}")
+            if fragment_structures:
+                lines += fragment_orientation(WATER_DIMER, [1, 2, 3] if n == 1 else [4, 5, 6])
+            lines.append(f" SCF Done:  E(RB3LYP) =  {energy:.9f}     A.U. after    9 cycles")
+    if cut_off:
+        return lines
+    if g16:
+        fragments = sum(FRAGMENT_ENERGIES["MCBS"])
+        raw = (corrected - bsse - fragments) * 627.5095
+        return lines + [
+            f" Counterpoise corrected energy = {corrected:20.12f}",
+            f"                  BSSE energy = {bsse:20.12f}",
+            f"             sum of fragments = {fragments:20.12f}",
+            f"          complexation energy = {raw:9.2f} kcal/mole (raw)",
+            f"          complexation energy = {raw + bsse * 627.5095:9.2f} kcal/mole (corrected)",
+        ]
+    return lines + [
+        f" Counterpoise: corrected energy = {corrected:20.12f}",
+        f" Counterpoise: BSSE energy = {bsse:20.12f}",
+    ]
+
+
+FRAGMENT_CHARGES = [
+    " Charge =  0 Multiplicity = 1 in supermolecule",
+    " Charge =  0 Multiplicity = 1 in fragment      1.",
+    " Charge =  0 Multiplicity = 1 in fragment      2.",
+]
+
+
+def counterpoise_sp(route="#P B3LYP/6-31G(d) Counterpoise=2", atoms=None, **options) -> str:
+    """A Counterpoise=2 single point on the water dimer (Gaussian 16 layout)."""
+    cut_off = options.get("cut_off", False)
+    return output(
+        step(
+            route,
+            [atoms or WATER_DIMER],
+            DIMER_ENERGY,
+            title="water dimer",
+            body=FRAGMENT_CHARGES[1:],
+            after=counterpoise_lines(**options),
+            terminate=not cut_off,
+        )
+    )
+
+
+# ONIOM(B3LYP/6-31G(d):UFF) on the dimer, the donor water as the model system: each layer's
+# energy, then the extrapolation E = E(high, model) − E(low, model) + E(low, real).
+ONIOM_ROUTE = "#P ONIOM(B3LYP/6-31G(d):UFF) Opt Freq"
+ONIOM_LAYERS = (-76.4089, 0.0071, 0.0115)  # high model, low model, low real
+
+
+def oniom_energy(layers=ONIOM_LAYERS) -> float:
+    return layers[0] - layers[1] + layers[2]
+
+
+def oniom_lines(layers=ONIOM_LAYERS, extrapolated=True) -> list[str]:
+    """What an ONIOM job prints for one structure, as Gaussian 16 does."""
+    high, low_model, low_real = layers
+    lines = [
+        " ONIOM: generating point  1 -- high level on model system.",
+        f" SCF Done:  E(RB3LYP) =  {high:.9f}     A.U. after   10 cycles",
+        " ONIOM: generating point  2 -- low  level on model system.",
+        f" Energy= {low_model:.12f} NIter=   0.",
+        " ONIOM: generating point  3 -- low  level on real  system.",
+        f" Energy= {low_real:.12f} NIter=   0.",
+    ]
+    if extrapolated:
+        lines += [
+            " ONIOM: Integrating ONIOM extrapolation.",
+            " ONIOM: calculating energy.",
+            f" ONIOM: gridpoint  1 method:  high   system:  model energy: {high:20.12f}",
+            f" ONIOM: gridpoint  2 method:  low    system:  model energy: {low_model:20.12f}",
+            f" ONIOM: gridpoint  3 method:  low    system:  real  energy: {low_real:20.12f}",
+            f" ONIOM: extrapolated energy = {oniom_energy(layers):20.12f}",
+        ]
+    return lines
+
+
+ONIOM_CHARGES = [
+    " Charge =  0 Multiplicity = 1 for low   level calculation on real  system.",
+    " Charge =  0 Multiplicity = 1 for high  level calculation on model system.",
+    " Charge =  0 Multiplicity = 1 for low   level calculation on model system.",
+]
+
+
+def oniom_step(route, geometries, layers, *, converged=None, frequencies=None, internal=False):
+    """One ONIOM job step: per structure its orientation and each layer's energy (`layers`
+    one tuple per structure; None for a structure whose extrapolation was cut off)."""
+    lines = [
+        " Link1:  Proceeding to internal job step number  2."
+        if internal
+        else " Entering Link 1 = /g16/l1.exe PID=     1.",
+        DASHES,
+        f" {route}",
+        DASHES,
+        " 1/18=20,19=15/1;",
+        " -----------",
+        " water dimer",
+        " -----------",
+        " Symbolic Z-matrix:",
+        *ONIOM_CHARGES,
+    ]
+    for atoms, layer in zip(geometries, layers, strict=True):
+        lines += orientation(atoms)
+        lines += oniom_lines(layer or ONIOM_LAYERS, extrapolated=layer is not None)
+    if converged:
+        lines += [" Optimization completed.", "    -- Stationary point found."]
+    if frequencies:
+        lines += frequency_block(frequencies, len(geometries[-1]))
+        lines += THERMO.splitlines()
+    if layers[-1] is not None:
+        lines.append(" Normal termination of Gaussian 16 at Tue Sep 29 12:00:00 2026.")
+    return "\n".join(lines) + "\n"
+
+
+def oniom_opt_freq() -> str:
+    """An ONIOM `opt freq`: two structures, then the frequency step, whose route Gaussian
+    writes with RB3LYP inside the layers."""
+    end = moved(WATER_DIMER, 0.01)
+    second = (-76.4100, 0.0070, 0.0110)
+    return output(
+        oniom_step(ONIOM_ROUTE, [WATER_DIMER, end], [ONIOM_LAYERS, second], converged=True),
+        oniom_step(
+            "#P Geom=AllCheck Guess=TCheck SCRTyp=Grad ONIOM(RB3LYP/6-31G(d):UFF) Freq",
+            [end],
+            [second],
+            frequencies=[60.0, 1650.0, 3700.0],
+            internal=True,
+        ),
+    )
+
+
 # ---------- custom basis sets and IOp dispersion (D59) ----------
 
 METHYL_IODIDE = [

@@ -22,6 +22,7 @@ class Route:
     solvation_model: str | None = None
     solvent: str | None = None
     irc: list[str] | None = None  # D131: an IRC job's options as written (upper case)
+    counterpoise: int | None = None  # D161: Counterpoise=N, the number of fragments
 
 
 # D158: the key in `ParsedStep.printed` (and the stored result's `printed`) of a frequency
@@ -37,6 +38,12 @@ S2 = "s2"
 S2_AFTER = "s2_after"
 S2_IDEAL = "s2_ideal"
 SPIN_KEYS = (S2, S2_AFTER, S2_IDEAL)
+
+# D161: the key in `ParsedStep.printed` (and the stored result's `printed`) of a counterpoise
+# job's basis set superposition error in hartree, as printed ("BSSE energy ="). The step's
+# energy is then the counterpoise-corrected total; the complex's uncorrected energy is that
+# total minus the BSSE (the BSSE is positive: the borrowed basis functions lower the energy).
+BSSE = "bsse"
 
 
 @dataclass
@@ -115,6 +122,9 @@ class ParsedStep:
     # for an SCF energy. `correlated_missing`: a correlated method whose total was not read.
     energy_label: str | None = None
     correlated_missing: bool = False
+    # D161: a counterpoise or ONIOM step whose own total (the counterpoise-corrected or the
+    # ONIOM extrapolated energy) was not read: what is missing, for W-PARSE; it has no energy.
+    energy_missing: str | None = None
     optimization_converged: bool | None = None  # None when the step is not an optimization
     termination: str = "abnormal"  # normal | abnormal (05 §3.1: missing means abnormal)
     # GEN/GENECP basis read from the input: {element: definition text}, and its header.
