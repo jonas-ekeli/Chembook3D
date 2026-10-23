@@ -26,7 +26,8 @@ class EquilibriumOut(BaseModel):
     level: str | None
     energy_type: str
     temperature: float | None  # None: the G_qh temperature setting
-    start_id: str | None  # None: the lowest conformer
+    start_id: str | None  # None: the slowest start
+    next_ids: list[str]  # D173: TSs of the next step, for the Curtin–Hammett check
     notes: str
 
 
@@ -42,6 +43,7 @@ class EquilibriumIn(BaseModel):
     energy_type: str | None = None
     temperature: float | None = None
     start_id: str | None = None
+    next_ids: list[str] | None = None
     notes: str | None = None
 
 

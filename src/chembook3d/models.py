@@ -722,6 +722,9 @@ class ConformerEquilibrium(Base):
     # D171f: the conformer the populations start from over time; None: the start that takes
     # longest to reach equilibrium (A112).
     start_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    # D173: TS nodes and groups of the step that follows, for the Curtin–Hammett check; each is
+    # balanced by the free species along its route from the lowest conformer.
+    next_ids: Mapped[list[Any]] = mapped_column(default=list)
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 

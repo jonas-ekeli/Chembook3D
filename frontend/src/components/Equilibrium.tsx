@@ -9,8 +9,10 @@ import {
   type Equilibrium,
   type EquilibriumFields,
   type EquilibriumMember,
+  type EquilibriumNextStep,
   type EquilibriumResult,
   type EquilibriumSet,
+  type Selectivity,
   type Settings,
 } from '../api'
 import { errorText, scientific } from '../util'
@@ -138,6 +140,86 @@ function PopulationChart({
         ))}
       </figcaption>
     </figure>
+  )
+}
+
+/** D173: the next step's TSs from the pool of the lowest conformer's set (Curtin–Hammett). */
+function NextStepView({
+  found,
+  lowest,
+  settings,
+  onSelectNode,
+}: {
+  found: EquilibriumNextStep
+  lowest: string
+  settings: Settings | null
+  onSelectNode: (id: string) => void
+}) {
+  const unit = settings?.energy_unit ?? 'kcal/mol'
+  return (
+    <section aria-label="Next step">
+      <h3>Next step (Curtin–Hammett)</h3>
+      {found.members.length > 0 && (
+        <table className="energy-table" aria-label="Next step TSs">
+          <thead>
+            <tr>
+              <th>TS</th>
+              <th>Free species</th>
+              <th>ΔG‡ from {lowest} ({unit})</th>
+            </tr>
+          </thead>
+          <tbody>
+            {found.members.map((m) => (
+              <tr key={m.id} className={m.barrier === null ? 'muted' : undefined}>
+                <td>
+                  <button className="link" onClick={() => onSelectNode(m.id)}>
+                    {m.label}
+                  </button>
+                </td>
+                <td>
+                  {m.species
+                    .map((s) => `${s.count > 0 ? '+' : '−'}${Math.abs(s.count) > 1 ? `${Math.abs(s.count)} ` : ''}${s.label}`)
+                    .join(', ')}
+                </td>
+                <td className="num">{m.barrier === null ? m.message : formatDelta(m.barrier, settings)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {found.effective_barrier !== null && (
+        <p>
+          <strong>
+            Next step: effective barrier {formatDelta(found.effective_barrier, settings)} {unit}, k ={' '}
+            {scientific(found.rate ?? 0)} s⁻¹, 1/k = {duration(found.time)}
+          </strong>
+          {found.interconversion_time !== null && (
+            <>
+              {' '}
+              <span className="muted">
+                against interconversion of the conformers in {duration(found.interconversion_time)} (slowest relaxation
+                time)
+              </span>
+            </>
+          )}
+        </p>
+      )}
+      {found.faster !== null && found.ratio !== null && found.ddg !== null && (
+        <p className="notice" role="status" aria-label="Curtin–Hammett check">
+          {found.faster === 'interconversion'
+            ? `The conformers interconvert ${scientific(found.ratio)} times faster than the next step (ΔΔG‡ ${formatDelta(found.ddg, settings)} ${unit}): the Curtin–Hammett condition holds, so the next step's selectivity follows its TSs alone.`
+            : `The next step is ${scientific(1 / found.ratio)} times faster than the conformers interconvert (ΔΔG‡ ${formatDelta(-found.ddg, settings)} ${unit}): Curtin–Hammett does not hold, and each conformer reacts mostly before it exchanges.`}
+        </p>
+      )}
+      {found.message && <p className="muted">{found.message}</p>}
+      {found.notes.length > 0 && (
+        <ul className="warnings" aria-label="Next step notes">
+          {found.notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
@@ -274,6 +356,14 @@ function EquilibriumResultView({
               </div>
             ),
           )}
+          {result.next_step && (
+            <NextStepView
+              found={result.next_step}
+              lowest={labels.get(result.lowest_id ?? '') ?? 'the lowest conformer'}
+              settings={settings}
+              onSelectNode={onSelectNode}
+            />
+          )}
         </>
       )}
       {result.notes.length > 0 && (
@@ -342,6 +432,69 @@ function AddMembers({ canvas, members, onAdd }: { canvas: Canvas; members: Equil
   )
 }
 
+/** D173: the next step's TSs: a node, a group, a branch's TS nodes or a selectivity's TSs. */
+function AddNext({
+  canvas,
+  have,
+  selectivities,
+  onAdd,
+}: {
+  canvas: Canvas
+  have: string[]
+  selectivities: Selectivity[]
+  onAdd: (ids: string[]) => void
+}) {
+  const taken = new Set(have)
+  const ts = canvas.nodes.filter((n) => n.kind === 'node' && n.role === 'transition_state')
+  const add = (choice: string) => {
+    const [kind, id] = [choice.slice(0, choice.indexOf(':')), choice.slice(choice.indexOf(':') + 1)]
+    const ids =
+      kind === 'branch'
+        ? ts.filter((n) => n.branch_id === id).map((n) => n.id)
+        : kind === 'selectivity'
+          ? (selectivities.find((s) => s.id === id)?.outcomes.flatMap((o) => o.members) ?? [])
+          : [id]
+    onAdd([...new Set(ids)].filter((i) => !taken.has(i)))
+  }
+  return (
+    <select aria-label="Add next step TSs" value="" onChange={(event) => add(event.target.value)}>
+      <option value="" disabled>
+        Add TSs of the next step…
+      </option>
+      {selectivities.length > 0 && (
+        <optgroup label="A selectivity’s TSs">
+          {selectivities.map((s) => (
+            <option key={s.id} value={`selectivity:${s.id}`}>
+              {s.name}
+            </option>
+          ))}
+        </optgroup>
+      )}
+      <optgroup label="A branch’s TS nodes">
+        {canvas.branches.map((b) => (
+          <option key={b.id} value={`branch:${b.id}`}>
+            {b.name || 'Unnamed branch'}
+          </option>
+        ))}
+      </optgroup>
+      <optgroup label="A group">
+        {canvas.groups.map((g) => (
+          <option key={g.id} value={`group:${g.id}`} disabled={taken.has(g.id)}>
+            {g.label || 'Group'}
+          </option>
+        ))}
+      </optgroup>
+      <optgroup label="A TS node">
+        {ts.map((n) => (
+          <option key={n.id} value={`node:${n.id}`} disabled={taken.has(n.id)}>
+            {n.label || 'Untitled node'}
+          </option>
+        ))}
+      </optgroup>
+    </select>
+  )
+}
+
 export function EquilibriumEditor({
   equilibrium,
   canvas,
@@ -364,6 +517,18 @@ export function EquilibriumEditor({
   const [result, setResult] = useState<EquilibriumResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [selectivities, setSelectivities] = useState<Selectivity[]>([])
+
+  useEffect(() => {
+    let current = true
+    api.selectivities().then(
+      (found) => current && setSelectivities(found),
+      () => undefined,
+    )
+    return () => {
+      current = false
+    }
+  }, [refreshKey])
 
   useEffect(() => {
     let current = true
@@ -477,6 +642,40 @@ export function EquilibriumEditor({
         <p className="muted small">
           A TS node joins the two conformers it has edges to; a direct edge between two conformers (no TS) joins
           nothing. Every other node counts as a conformer, so take out scans and other nodes without a value.
+        </p>
+      </section>
+      <section aria-label="Next step TSs">
+        <h3>Next step</h3>
+        {equilibrium.next_ids.length > 0 && (
+          <ul className="plain">
+            {equilibrium.next_ids.map((id) => {
+              const [label] = describe(id)
+              return (
+                <li key={id}>
+                  <button className="link" onClick={() => onSelectNode(id)}>
+                    {label}
+                  </button>{' '}
+                  <button
+                    className="small"
+                    aria-label={`Remove ${label} from the next step`}
+                    onClick={() => save({ next_ids: equilibrium.next_ids.filter((o) => o !== id) })}
+                  >
+                    Remove
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+        <AddNext
+          canvas={canvas}
+          have={equilibrium.next_ids}
+          selectivities={selectivities}
+          onAdd={(ids) => ids.length && save({ next_ids: [...equilibrium.next_ids, ...ids] })}
+        />
+        <p className="muted small">
+          The TSs of the step that follows, balanced by the free species from the lowest conformer. Their effective
+          barrier is set beside how fast the conformers interconvert (Curtin–Hammett).
         </p>
       </section>
       <section className="fields" aria-label="Conformer equilibrium settings">

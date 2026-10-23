@@ -3,7 +3,8 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { forgetView } from './demoView.ts'
 
 // T-UI-49, FR-EQ-01…06, D171: a conformer equilibrium from two minima selected on the canvas,
-// a count, members added from a branch, the history, and deleting it.
+// a count, members added from a branch, the history, and deleting it. T-UI-50, FR-EQ-07, D173:
+// a TS of the next step.
 const E2E_DIR = process.env.E2E_DIR!
 
 async function openDemo(page: Page) {
@@ -55,11 +56,19 @@ test('conformer equilibrium from two minima', async ({ page }) => {
   await editor.getByRole('button', { name: 'Remove A-S2' }).click()
   await expect(populations.getByRole('row', { name: /A-S1/ })).toContainText('0.0261 %')
 
+  // D173: the demo's TSs are placeholder water, so the next step's TS is named and left out.
+  await editor.getByLabel('Add next step TSs').selectOption({ label: 'A-S2' })
+  const next = result.getByRole('region', { name: 'Next step' })
+  await expect(next.getByRole('table', { name: 'Next step TSs' })).toContainText('A-S2')
+  await expect(next).toContainText("not the conformers' atoms with its free species")
+  await expect(next).toContainText('No TS of the next step has a value here.')
+
   // In the history.
   await page.getByRole('button', { name: 'History' }).click()
   const history = page.getByRole('list', { name: 'History' })
   await expect(history).toContainText('Created conformer equilibrium “Conformer equilibrium 1”')
   await expect(history).toContainText('Conformers and TSs: A-S1, A-S3 → A-S1 ×2, A-S3')
+  await expect(history).toContainText('Next step TSs')
 
   // Deleting it leaves the nodes as they are.
   await page.getByRole('button', { name: 'Analyses' }).click()

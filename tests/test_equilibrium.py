@@ -21,7 +21,7 @@ from chembook3d.services.equilibrium import (
 from tests.test_energies import add_energies, level_key
 from tests.test_mcp import _app_bridge, _json
 from tests.test_pathway import edge, get, history, node, patch, post
-from tests.test_species import delete, xyz
+from tests.test_species import delete, put, xyz
 
 KCAL = 627.5094740631
 LEVEL = "Gaussian B3LYP/def2SVP"
@@ -312,6 +312,76 @@ def test_history_records_each_change(open_client):
     delete(open_client, path, status=204)
     assert get(open_client, "/equilibria") == []
     assert history(open_client, created["id"])[0]["action"] == "delete"
+
+
+def test_curtin_hammett_against_the_next_step(open_client):
+    # T-EQ-07, D173: A (0) and B (1.0) joined by a rotation TS; the next step goes over N1 from
+    # A (15.0) and N2 from B with ethylene joining (14.0 with it); N3 is joined to neither and
+    # N4 has no value.
+    a = conformer(open_client, "A", 0.0)
+    b = conformer(open_client, "B", 1.0)
+    rotation = conformer(open_client, "R", 10.0, role="transition_state")
+    edge(open_client, a, rotation)
+    edge(open_client, rotation, b)
+    ethylene = node(open_client, label="ethylene", kind="species", charge=0, xyz=xyz(*"CCHHHH"))
+    add_energies(open_client, ethylene["id"], -78.0)
+    n1 = conformer(open_client, "N1", 15.0, role="transition_state")
+    edge(open_client, a, n1)
+    n2 = node(
+        open_client, label="N2", role="transition_state", charge=0, xyz=xyz(*ATOMS, *"CCHHHH")
+    )["id"]
+    add_energies(open_client, n2, E0 - 78.0 + 14.0 / KCAL)
+    joined = edge(open_client, b, n2)["id"]
+    body = {"species_id": ethylene["id"], "direction": "joins", "count": 1}
+    put(open_client, f"/transitions/{joined}/species", body, 200)
+    n3 = conformer(open_client, "N3", 5.0, role="transition_state")
+    n4 = conformer(open_client, "N4", None, role="transition_state")
+    edge(open_client, a, n4)
+    created = equilibrium(open_client, [a, rotation, b], next_ids=[n1, n2, n3, n4])
+    assert created["next_ids"] == [n1, n2, n3, n4]
+    found = result(open_client, created["id"])["next_step"]
+    shown = {r["label"]: r for r in found["members"]}
+    assert shown["N1"]["barrier"] * KCAL == pytest.approx(15.0, abs=1e-6)
+    assert shown["N2"]["barrier"] * KCAL == pytest.approx(14.0, abs=1e-6)
+    assert [s["label"] for s in shown["N2"]["species"]] == ["ethylene"]
+    assert shown["N3"]["barrier"] is None and "not joined" in shown["N3"]["message"]
+    assert shown["N4"]["barrier"] is None and shown["N4"]["message"]
+    pool = -rt() * math.log(1 + math.exp(-1.0 / rt()))
+    expected = -rt() * math.log(math.exp(-15.0 / rt()) + math.exp(-14.0 / rt())) - pool
+    assert found["pool"] * KCAL == pytest.approx(pool, abs=1e-6)
+    assert found["effective_barrier"] * KCAL == pytest.approx(expected, abs=1e-6)
+    assert found["rate"] == pytest.approx(k(expected), rel=1e-6)
+    interconversion = 1 / (k(10.0) + k(9.0))
+    assert found["interconversion_time"] == pytest.approx(interconversion, rel=1e-6)
+    assert found["interconversion_barrier"] * KCAL == pytest.approx(10.0, abs=1e-6)
+    ratio = 1 / k(expected) / interconversion
+    assert found["ratio"] == pytest.approx(ratio, rel=1e-5)
+    assert found["ddg"] * KCAL == pytest.approx(rt() * math.log(ratio), abs=1e-6)
+    assert found["faster"] == "interconversion"
+    assert any("pseudo-first-order" in n for n in found["notes"])
+
+    # The rotation made slower than the next step flips it.
+    slow = conformer(open_client, "R slow", 20.0, role="transition_state")
+    edge(open_client, a, slow)
+    edge(open_client, slow, b)
+    patch(open_client, f"/equilibria/{created['id']}", {"members": [a, slow, b]})
+    found = result(open_client, created["id"])["next_step"]
+    assert found["faster"] == "next step" and found["ratio"] < 1 and found["ddg"] < 0
+
+    # Without a TS between the conformers, how fast they interconvert is not known.
+    patch(open_client, f"/equilibria/{created['id']}", {"members": [a, b]})
+    found = result(open_client, created["id"])["next_step"]
+    assert found["effective_barrier"] is not None and found["ratio"] is None
+    assert "interconvert is not known" in found["message"]
+
+    response = open_client.patch(
+        f"/api/equilibria/{created['id']}", json={"next_ids": [ethylene["id"]]}
+    )
+    assert response.status_code == 422 and "free species" in response.text
+    assert (
+        result(open_client, equilibrium(open_client, [a, b], name="None")["id"])["next_step"]
+        is None
+    )
 
 
 def test_claudes_tools(tmp_path):

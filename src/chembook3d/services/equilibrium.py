@@ -17,6 +17,9 @@ the rates of the TSs between them, and how long the set takes to reach equilibri
   relaxation times, the time from the start conformer (unless chosen, the start that takes
   longest) until every population is within 1 percentage point of equilibrium, and the
   populations against time from it (D171f, A112).
+- D173, Curtin–Hammett: the TSs of the step that follows, each balanced by the free species
+  along its route from the lowest conformer (D72, as D103), are summed from the pool of the
+  lowest conformer's set; their rate is set beside that set's slowest relaxation.
 - The result says what was computed, not whether the chemistry is right (X6).
 """
 
@@ -39,6 +42,7 @@ from chembook3d.models import (
     Role,
 )
 from chembook3d.services import geometry, history, thermo_settings
+from chembook3d.services import species as species_service
 from chembook3d.services import transitions as transition_service
 from chembook3d.services.energies import (
     ENERGY_TYPES,
@@ -57,7 +61,16 @@ from chembook3d.units import BOLTZMANN, GAS_CONSTANT, J_PER_MOL_HARTREE, PLANCK
 R_HARTREE = GAS_CONSTANT / J_PER_MOL_HARTREE  # hartree/K
 K_OVER_H = BOLTZMANN / PLANCK  # 1/(K s)
 KCAL = 1 / 627.5094740631  # hartree per kcal/mol
-FIELDS = ("name", "members", "level", "energy_type", "temperature", "start_id", "notes")
+FIELDS = (
+    "name",
+    "members",
+    "level",
+    "energy_type",
+    "temperature",
+    "start_id",
+    "next_ids",
+    "notes",
+)
 MAX_COUNT = 100  # A112
 WITHIN = 0.01  # A112: every population within 1 percentage point of equilibrium
 RESOLVED = 1e-12  # A112: slower relaxation rates than this share of the fastest are not resolved
@@ -140,9 +153,26 @@ def _field(session: Session, equilibrium: ConformerEquilibrium, field: str, valu
             return None
         node = get(session, Node, text_value("start", value), "Start conformer")
         return node.id
+    if field == "next_ids":
+        return _next_ids(session, value)
     if field == "notes":
         return text_value("notes", value)
     raise RecordError(f"'{field}' cannot be edited")
+
+
+def _next_ids(session: Session, value: Any) -> list[str]:
+    """D173: TS nodes and groups of the next step, each once, no free species."""
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise RecordError("the next step must be a list of node and group ids")
+    if len(set(value)) != len(value):
+        raise RecordError("the same TS of the next step is listed twice")
+    for record_id in value:
+        node = session.get(Node, record_id)
+        if node is None:
+            get(session, GroupNode, record_id, "Node or group")
+        elif node.kind != NodeKind.NODE:
+            raise RecordError("a free species cannot be a TS of the next step")
+    return list(value)
 
 
 def create(session: Session, fields: dict[str, Any]) -> ConformerEquilibrium:
@@ -390,6 +420,154 @@ def _drop_duplicates(rows: list[dict[str, Any]], nodes: dict[str, Node], toleran
     return kept, twins, notes
 
 
+def _atoms(session: Session, node: Node, balance: species_service.Balance) -> Counter | None:
+    """The atoms of a node with the free species of its balance, or None without structures."""
+    if not node.geometry:
+        return None
+    atoms = Counter(row[0] for row in node.geometry)
+    for species_id, count in balance.items():
+        species = session.get(Node, species_id)
+        if not species.geometry:
+            return None
+        for element, n in Counter(row[0] for row in species.geometry).items():
+            atoms[element] += count * n
+    return +atoms
+
+
+def _next_step(
+    session: Session,
+    equilibrium: ConformerEquilibrium,
+    energies: Energies,
+    key: LevelKey,
+    states: list[dict[str, Any]],
+    pool: list[int],
+    interconversion: dict[str, Any] | None,
+    temperature: float,
+) -> dict[str, Any]:
+    """D173: the next step's TSs from the pool of the lowest conformer's set, beside how fast
+    that set interconverts. Energies in hartree, rates in 1/s, times in s."""
+    found: dict[str, Any] = {
+        "members": [],
+        "pool": None,  # G of the pool from the lowest conformer (≤ 0)
+        "effective_barrier": None,
+        "rate": None,
+        "time": None,  # 1/rate, to set beside the slowest relaxation time
+        "interconversion_time": None,
+        "interconversion_barrier": None,
+        "ratio": None,  # time / interconversion_time
+        "ddg": None,  # RT ln ratio
+        "faster": None,  # "interconversion" or "next step"
+        "message": None,
+        "notes": [],
+    }
+    notes = found["notes"]
+    rt = R_HARTREE * temperature
+    lowest = states[pool[0]]
+    base = lowest["value"]
+    reference = session.get(Node, lowest["id"])
+    atoms = Counter(row[0] for row in reference.geometry)
+    graph = species_service.balances_from(session, lowest["id"])
+    seen: set[str] = set()
+    balances = []
+    for record_id in equilibrium.next_ids:
+        node = session.get(Node, record_id)
+        if node is not None:
+            nodes = [node]
+        else:
+            group = session.get(GroupNode, record_id)
+            if group is None:
+                notes.append("A TS of the next step was deleted and is left out.")
+                continue
+            nodes = list(
+                session.scalars(select(Node).where(Node.group_id == group.id).order_by(Node.seq))
+            )
+        for node in nodes:
+            if node.id in seen:
+                continue
+            seen.add(node.id)
+            row: dict[str, Any] = {
+                "id": node.id,
+                "label": _name_of(node),
+                "value": None,
+                "species": [],
+                "barrier": None,
+                "message": None,
+            }
+            found["members"].append(row)
+            if node.status in LEFT_OUT:
+                row["message"] = f"{node.status}, left out"
+                continue
+            if node.role != Role.TRANSITION_STATE:
+                notes.append(f"“{row['label']}” is not marked as a transition state.")
+            if node.id not in graph:
+                row["message"] = f"not joined to “{lowest['label']}” by transitions"
+                continue
+            balance = graph[node.id]
+            row["species"] = species_service.describe(session, balance)
+            if _atoms(session, node, balance) != atoms:
+                row["message"] = "not the conformers' atoms with its free species"
+                continue
+            value = energies.value(node.id, key, equilibrium.energy_type)
+            shown = check_text(value.check, ("W-TEMP",))
+            if shown is not None:
+                notes.append(f"“{row['label']}”: {shown}.")
+            if value.value is None:
+                row["message"] = value.message
+                continue
+            added, message = species_service.energy(
+                session, energies, balance, key, equilibrium.energy_type
+            )
+            if message is not None:
+                row["message"] = message
+                continue
+            row["value"] = value.value + added
+            row["barrier"] = row["value"] - base
+            balances.append(balance)
+    note = species_service.standard_state_note(
+        session, energies, balances, key, equilibrium.energy_type
+    )
+    if note is not None:
+        notes.append(note["message"])
+    if any(balances):
+        notes.append(
+            "Free species join or leave on the way to the next step, so its rate is at the "
+            "standard state of the joining species (pseudo-first-order)."
+        )
+    counted = [r for r in found["members"] if r["barrier"] is not None]
+    if not counted:
+        found["message"] = (
+            "No TS of the next step has a value here."
+            if found["members"]
+            else "Choose the TSs of the step that follows."
+        )
+        return found
+    # The pool: the conformers of the lowest one's set, weighted as their populations.
+    found["pool"] = -rt * math.log(
+        sum(states[i]["count"] * math.exp(-(states[i]["value"] - base) / rt) for i in pool)
+    )
+    # Curtin–Hammett: every TS reached from the pool counts, as a Boltzmann sum.
+    low = min(r["barrier"] for r in counted)
+    total = sum(math.exp(-(r["barrier"] - low) / rt) for r in counted)
+    found["effective_barrier"] = low - rt * math.log(total) - found["pool"]
+    found["rate"] = eyring(found["effective_barrier"], temperature)
+    found["time"] = 1 / found["rate"]
+    if interconversion is None or interconversion["slowest"] is None:
+        found["message"] = (
+            f"No conformer is joined to “{lowest['label']}” by a computed TS, so how fast they "
+            "interconvert is not known."
+        )
+        return found
+    found["interconversion_time"] = interconversion["slowest"]
+    found["interconversion_barrier"] = max(
+        (states[i]["effective_barrier"] for i in pool if states[i]["effective_barrier"]),
+        default=None,
+    )
+    found["ratio"] = found["time"] / found["interconversion_time"]
+    found["ddg"] = rt * math.log(found["ratio"])
+    found["faster"] = "interconversion" if found["ratio"] > 1 else "next step"
+    return found
+
+
 def result(
     session: Session,
     equilibrium: ConformerEquilibrium,
@@ -414,6 +592,7 @@ def result(
         "conformers": [],
         "barriers": [],
         "sets": [],
+        "next_step": None,  # D173
         "notes": [],
     }
     notes: list[str] = found["notes"]
@@ -670,6 +849,18 @@ def result(
         f"An error of 1 kcal/mol in a ΔG changes a ratio by a factor of {factor:.1f} at "
         f"{temperature:g} K, and a rate by the same factor."
     )
+    if equilibrium.next_ids:
+        pool = sorted(ordered[0], key=lambda i: values[i])  # the lowest conformer's set
+        found["next_step"] = _next_step(
+            session,
+            equilibrium,
+            energies,
+            key,
+            states,
+            pool,
+            found["sets"][0] if len(pool) > 1 else None,
+            temperature,
+        )
     found["conformers"] = states
     found["barriers"] = tops
     return found

@@ -86,6 +86,7 @@ const ID_FIELDS = new Set([
   'reference_id',
   'path_edge_id',
   'start_id',
+  'next_ids',
 ])
 
 const STRUCTURE_FIELDS: Record<string, string> = {
@@ -113,6 +114,7 @@ const STRUCTURE_FIELDS: Record<string, string> = {
   reference_id: 'Free species balanced from',
   members: 'Conformers and TSs',
   start_id: 'Start from',
+  next_ids: 'Next step TSs',
 }
 
 const STRUCTURE_TYPES: Record<string, string> = {
