@@ -18,6 +18,7 @@ async function openDemo(page: Page) {
   await dialog.getByRole('button', { name: 'Go' }).click()
   await dialog.getByRole('button', { name: 'Open', exact: true }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('group', { name: 'Node T-S0', exact: true })).toBeVisible()
 }
 
 type Canvas = {

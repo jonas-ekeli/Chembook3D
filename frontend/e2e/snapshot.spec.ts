@@ -95,7 +95,7 @@ test('a read-only copy opens from disk with no server and changes nothing', asyn
   await drawer.getByRole('button', { name: 'Energy table' }).click()
   // Branch A's pathway stops where it forks (EN-10), so only branch B reaches B-S3.
   const table = drawer.getByRole('table', { name: 'Energy table' })
-  await expect(table.getByRole('row').filter({ hasText: 'B-S3' })).toContainText('-6.00')
+  await expect(table.getByRole('row').filter({ hasText: 'B-S3' })).toContainText('−6.00') // D177: a real minus
   const csv = shared.waitForEvent('download')
   await drawer.getByRole('button', { name: 'Export CSV' }).click()
   expect(readFileSync(await (await csv).path(), 'utf8')).toContain('B-S3')

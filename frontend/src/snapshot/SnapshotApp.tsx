@@ -423,6 +423,7 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
               tab={drawerTab}
               onTab={setDrawerTab}
               onSelectNode={selectPoint}
+              selectedId={selection && selection.kind !== 'edge' && selection.kind !== 'branch' ? selection.id : null}
             />
           </div>
         </div>

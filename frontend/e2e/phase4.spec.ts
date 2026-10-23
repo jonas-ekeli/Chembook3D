@@ -223,25 +223,45 @@ test('profile along branches with a "no TS" connection, the energy table and exp
 
   await drawer.getByRole('button', { name: 'Energy table' }).click()
   const table = drawer.getByRole('table', { name: 'Energy table' })
-  await expect(table.getByRole('row')).toHaveCount(7) // header + 6 nodes, each once
-  const shown = await table.getByRole('row').evaluateAll((rows) =>
-    rows.map((row) => Array.from(row.querySelectorAll('th, td')).map((cell) => cell.textContent ?? '')),
+  await expect(table.locator('tbody tr')).toHaveCount(6) // 6 nodes, each once
+  // D177: the screen puts the relative energies first, so cells are read by column name.
+  const heads = await table.locator('thead tr').last().locator('th').evaluateAll((cells) =>
+    cells.map((cell) => cell.getAttribute('title') ?? cell.textContent ?? ''),
   )
-  expect(shown[0].at(-2)).toBe('ΔG 1 atm (kcal/mol)') // D160: the standard state is named
-  expect(shown[0].at(-1)).toBe('Check') // D154
-  expect(shown.find((row) => row[0] === 'A-S3')?.at(-2)).toBe('-8.50')
+  const shown = await table.locator('tbody tr').evaluateAll((rows) =>
+    rows.map((row) =>
+      Array.from(row.querySelectorAll('td')).map((cell) => {
+        const text = cell.cloneNode(true) as HTMLElement
+        text.querySelector('.ts-mark')?.remove() // the TS tag beside the label
+        return text.textContent ?? ''
+      }),
+    ),
+  )
+  const caption = (await drawer.locator('.energy-caption').textContent()) ?? ''
+  expect(heads[3]).toBe('ΔG 1 atm (kcal/mol)') // D160: the standard state is named
+  expect(heads.at(-1)).toBe('Check') // D154
+  expect(shown.find((row) => row[0] === 'A-S3')?.[3]).toBe('−8.50')
 
-  // T-EN-08: the CSV holds the same text as the table on screen.
+  // T-EN-08: the CSV holds the same values as the table on screen, in its own column order
+  // (D177), with an ASCII minus; a constant Level and Thermochemistry are the screen's caption.
   const download = page.waitForEvent('download')
   await drawer.getByRole('button', { name: 'Export CSV' }).click()
   const file = await download
   expect(file.suggestedFilename()).toBe('energy-table.csv')
   const text = readFileSync(await file.path(), 'utf8').replace(/^﻿/, '')
-  const rows = text
+  const [columns, ...rows] = text
     .trim()
     .split('\r\n')
     .map((line) => line.split(','))
-  expect(rows).toEqual(shown)
+  expect(columns.slice(0, 4)).toEqual(['Label', 'Step', 'Branch', 'Level'])
+  expect(columns.slice(-3)).toEqual(['Free species', 'ΔG 1 atm (kcal/mol)', 'Check'])
+  expect(rows.length).toBe(shown.length)
+  rows.forEach((row, i) =>
+    columns.forEach((name, j) => {
+      if (name === 'Level' || name === 'Thermochemistry') expect(caption).toContain(row[j])
+      else expect(shown[i][heads.indexOf(name)].replace('−', '-')).toBe(row[j])
+    }),
+  )
 })
 
 test('a catalytic cycle closes at the resting state', async ({ page }) => {
@@ -267,7 +287,7 @@ test('a catalytic cycle closes at the resting state', async ({ page }) => {
     await expect(chart).toContainText('T-S0 ↻')
 
     await drawer.getByRole('button', { name: 'Energy table' }).click()
-    await expect(drawer.getByRole('table', { name: 'Energy table' }).getByRole('row')).toHaveCount(5)
+    await expect(drawer.getByRole('table', { name: 'Energy table' }).locator('tbody tr')).toHaveCount(4) // each node once
   } finally {
     await page.request.delete(`/api/transitions/${closing.id}`)
   }
