@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import { api, type LaunchQuestion as Question } from '../api'
+import { colourToken } from '../util'
 
 // D93, A40: a `claude --cloud` launch of a calculation job that stops at a question (whether
 // Claude Code may trust the investigation folder, for one). The app answers none itself; this
@@ -40,7 +41,7 @@ export function LaunchQuestion({ question, onDone }: { question: Question; onDon
           fontFamily: "ui-monospace, 'Cascadia Mono', Consolas, Menlo, 'DejaVu Sans Mono', monospace",
           fontSize: 12,
           rows: 16,
-          theme: { background: '#1e1e1e' },
+          theme: { background: colourToken('--terminal-bg') },
         })
         const fit = new FitAddon()
         term.loadAddon(fit)

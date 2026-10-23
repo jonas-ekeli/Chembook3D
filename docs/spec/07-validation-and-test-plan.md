@@ -431,6 +431,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-48 | Ethane in the Edit structure window: pick H3 H4, then H3 H4 C1 and Flip; add a bond H3–H6 and pick H3 H4 C1 again; tick H3–H6 and Flip | No Flip with two picked; flipped with no tick boxes; tick boxes H3–H6 and C2–H6 with Flip disabled; enabled once ticked, and the message names the ignored bond (D166) |
 | T-UI-49 | Select two demo minima and a TS between them, choose "Conformer equilibrium…"; change a count; add members from a branch | The Analyses view opens on it with populations, rates, the time to equilibrium and the chart; the count changes the populations; the branch's nodes are added (FR-EQ-06) |
 | T-UI-50 | On a conformer equilibrium of two demo minima, add a demo TS (another molecule) as the next step | The result lists it under the next step with why it is left out; the change is in the history (FR-EQ-07; the numbers are T-EQ-07's) |
+| T-UI-51 | In a 1280 px window, select the demo TS A-S2; then Tab onto the canvas's Fit button | Its panel's actions and the canvas tools are one line high (30 px) and the name A-S2 is whole; the canvas tools read "Fit" and "Export ▾" with the full names as tooltip and accessible name; Delete node has the border of the other buttons; the focused button shows the 3 px accent ring (D174) |
 
 ## 8. Performance observation (no targets)
 

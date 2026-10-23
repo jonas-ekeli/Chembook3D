@@ -375,13 +375,14 @@ export function BranchInspector({
       <div className="inspector-head">
         <span className="swatch large" style={{ background: branch.colour }} />
         <h2>{branchName(branch)}</h2>
-        <span className="spacer" />
-        <button onClick={() => api.arrangeBranch(branch.id).then(onArranged, (err: unknown) => setError(errorText(err)))}>
-          Arrange branch
-        </button>
-        <button className="danger" onClick={() => setConfirm(true)}>
-          Delete branch
-        </button>
+        <div className="inspector-actions">
+          <button onClick={() => api.arrangeBranch(branch.id).then(onArranged, (err: unknown) => setError(errorText(err)))}>
+            Arrange branch
+          </button>
+          <button className="danger" onClick={() => setConfirm(true)}>
+            Delete branch
+          </button>
+        </div>
       </div>
       {error && <p role="alert">{error}</p>}
       <section aria-label="Lineage" className="lineage">

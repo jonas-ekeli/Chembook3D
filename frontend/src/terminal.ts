@@ -1,5 +1,6 @@
 import type { FitAddon } from '@xterm/addon-fit'
 import type { Terminal } from '@xterm/xterm'
+import { colourToken } from './util'
 
 // The xterm.js terminals of the side panel: Claude Code (D92) and a server's shell (D122).
 
@@ -39,7 +40,7 @@ export async function openXterm(element: HTMLElement): Promise<Xterm> {
     fontSize: 13,
     cursorBlink: true,
     scrollback: 5000,
-    theme: { background: '#1e1e1e' },
+    theme: { background: colourToken('--terminal-bg') },
   })
   const fit = new FitAddon()
   term.loadAddon(fit)
