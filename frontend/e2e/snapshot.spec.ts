@@ -63,7 +63,7 @@ test('a read-only copy opens from disk with no server and changes nothing', asyn
   await expect(shared.locator('.edge-energy', { hasText: 'ΔG‡ 18.00' })).toBeVisible()
 
   // Nothing edits: no add, import, delete or save buttons, no editable fields.
-  for (const name of ['+ Add node', 'Import file…', 'Settings', 'Share read-only copy…']) {
+  for (const name of ['Add node', 'Import file…', 'Settings', 'Share read-only copy…']) {
     await expect(shared.getByRole('button', { name })).toHaveCount(0)
   }
   await canvasNode(shared, 'A-S2').click()

@@ -358,7 +358,8 @@ textarea {
   max-width: 960px;
 }
 
-/* Outline (P6): steps, branches, node search */
+/* Outline (P6): steps, branches, node search. D178: quiet section heads with a count and icon
+   buttons; rows read as text, with their actions only under the pointer or the keyboard. */
 .outline {
   width: 270px;
   flex-shrink: 0;
@@ -369,19 +370,94 @@ textarea {
   overflow: auto;
 }
 .outline-actions {
-  padding: 0.75rem;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
+  gap: 6px;
 }
 .outline-section {
-  padding: 0.6rem 0.75rem;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   display: grid;
-  gap: 0.4rem;
+  gap: 6px;
+}
+.outline-section [hidden] {
+  display: none;
 }
 .outline-section.grow {
   flex: 1;
   min-height: 160px;
   align-content: start;
+}
+.outline-section > h3,
+.outline-head h3 {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+}
+.section-head.outline-head {
+  margin: 0;
+  min-height: var(--ctl-h-sm);
+}
+.section-toggle {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  min-height: 0;
+  padding: 2px 4px 2px 0;
+  border: none;
+  background: none;
+  gap: 6px;
+}
+.section-toggle:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+.section-toggle .ic {
+  width: 12px;
+  height: 12px;
+  color: var(--muted);
+  transition: transform 0.1s;
+}
+.section-toggle[aria-expanded='false'] .ic {
+  transform: rotate(-90deg);
+}
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.section-actions button {
+  color: var(--muted);
+  padding: 2px 6px;
+  gap: 4px;
+}
+.section-actions button.icon {
+  padding: 0;
+}
+.section-actions .ic,
+.row-actions .ic {
+  width: 14px;
+  height: 14px;
+}
+.count-pill {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 16px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--quiet-hover);
+  color: var(--text-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.section-toggle .count-pill {
+  color: var(--muted);
+  padding: 0 6px;
 }
 .outline-section ul,
 .outline-section ol {
@@ -389,7 +465,7 @@ textarea {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.15rem;
+  gap: 1px;
 }
 .node-results {
   overflow: auto;
@@ -422,6 +498,114 @@ button.icon {
   gap: 0.35rem;
   margin: 0.2rem 0;
 }
+/* D178: a step reads as text; its field shows on hover and focus, its actions on the row under
+   the pointer or holding the keyboard focus (and the notes button while it has notes). */
+.outline .step-row {
+  gap: 2px;
+  padding: 1px 2px 1px 0;
+  border-radius: var(--radius);
+  min-height: 28px;
+}
+.outline .step-row:hover,
+.outline .step-row:focus-within {
+  background: var(--panel-alt);
+}
+.outline .step-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 4px;
+  font-size: 13.5px;
+  border-color: transparent;
+  background: transparent;
+  text-overflow: ellipsis;
+}
+.outline .step-row input:hover {
+  border-color: var(--border);
+  background: var(--field-bg);
+}
+.outline .step-row input:focus {
+  background: var(--field-bg);
+}
+.outline .step-number {
+  width: 1rem;
+}
+.grip {
+  display: inline-flex;
+  width: 12px;
+  color: var(--border-strong);
+  cursor: grab;
+  visibility: hidden;
+  flex-shrink: 0;
+}
+.grip .ic {
+  width: 12px;
+  height: 14px;
+}
+.row-actions {
+  display: none;
+  align-items: center;
+  gap: 1px;
+}
+.row-actions button.icon {
+  min-width: 22px;
+  min-height: 22px;
+  color: var(--muted);
+}
+.outline .step-row:hover .grip,
+.outline .step-row:focus-within .grip {
+  visibility: visible;
+}
+.outline .step-row:hover .row-actions,
+.outline .step-row:focus-within .row-actions,
+.outline .step-row.has-notes .row-actions {
+  display: flex;
+}
+/* With notes and away from the pointer, only the notes button shows. */
+.outline .step-row.has-notes:not(:hover, :focus-within) .row-actions button:not(.notes-button) {
+  display: none;
+}
+.outline .step-row .row-actions button.danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: transparent;
+}
+.steps li.dragging {
+  opacity: 0.5;
+}
+.steps li.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.steps li.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.outline .steps textarea {
+  margin: 2px 0 4px 1.9rem;
+  width: calc(100% - 1.9rem);
+}
+input.add-step {
+  border-style: dashed;
+  font-size: 13px;
+  padding: 3px 8px;
+  margin-top: 2px;
+}
+/* The node search field carries its icon inside, on the left. */
+.search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.search-field .ic {
+  position: absolute;
+  left: 9px;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.search-field input {
+  padding-left: 28px;
+}
 /* Buttons that are list rows (UI5): left-aligned, may wrap, as low as their content */
 .branch-item,
 .node-item,
@@ -440,11 +624,19 @@ button.icon {
   gap: 0.4rem;
   text-align: left;
   border: 1px solid transparent;
-  padding: 0.2rem 0.4rem;
+  padding: 3px 6px;
+  font-size: 13.5px;
 }
 button.branch-item.selected {
   background: var(--accent-soft);
   border-color: var(--accent);
+}
+.branch-item .status {
+  font-size: 12px;
+  font-weight: 400;
+}
+.branch-item .status-planned {
+  color: var(--muted);
 }
 .branch-name {
   flex: 1;
@@ -465,27 +657,71 @@ button.branch-item.selected {
   width: 18px;
   height: 18px;
 }
+/* D178: one line per node: branch bar, status dot, label and tags, formula at the right. */
 .node-item {
   width: 100%;
+  min-height: 30px;
   text-align: left;
   border: 1px solid transparent;
-  display: grid;
-  justify-content: stretch;
-  align-items: start;
-  gap: 0.1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  white-space: nowrap;
 }
 button.node-item.selected {
   background: var(--accent-soft);
   border-color: var(--accent);
 }
 .node-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13.5px;
   font-weight: 500;
 }
-.node-meta {
-  display: flex;
-  gap: 0.5rem;
-  font-size: 12px;
+.node-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-formula {
+  font-size: 11.5px;
   color: var(--muted);
+  flex-shrink: 0;
+}
+.node-item .count-pill,
+.node-item .chip {
+  font-size: 11px;
+}
+.branch-bar {
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  background: var(--branch, var(--border-strong));
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--idle-dot);
+}
+.status-dot.status-done {
+  background: var(--ok-dot);
+}
+.status-dot.status-failed {
+  background: var(--danger);
+}
+.status-dot.status-running_externally {
+  background: var(--warn-dot);
+}
+.status-dot.status-rejected,
+.status-dot.status-superseded {
+  background: transparent;
+  border: 1.5px solid var(--idle-dot);
 }
 .status {
   font-weight: 500;
