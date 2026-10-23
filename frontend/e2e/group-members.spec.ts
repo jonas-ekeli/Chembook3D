@@ -151,11 +151,14 @@ test('an edge on the same side of two lined-up members bows out from that side',
   const edge = transitions.find((t) => t.source_id === members[0] && t.target_id === members[1])!
   const made = await page.request.post('/api/groups/reconnect', { data: { member_ids: members, label: 'GB' } })
   expect(made.ok()).toBe(true)
-  const group = (await made.json()) as { id: string }
+  const group = (await made.json()) as { id: string; pos_x: number }
   try {
     // One column, the edge leaving and arriving on the right: before D147 a straight line
     // along the cards' right sides.
-    expect((await page.request.patch(`/api/groups/${group.id}`, { data: { layout: 'vertical' } })).ok()).toBe(true)
+    // Right of A-S3: a new group is placed 260 px right of its members, where the 188 px cards
+    // of D175 put A-S3 over its expand button.
+    const place = { layout: 'vertical', pos_x: 1000 }
+    expect((await page.request.patch(`/api/groups/${group.id}`, { data: place })).ok()).toBe(true)
     const sides = { source_side: 'right', target_side: 'right' }
     expect((await page.request.patch(`/api/transitions/${edge.id}`, { data: sides })).ok()).toBe(true)
     await page.reload()
@@ -172,6 +175,8 @@ test('an edge on the same side of two lined-up members bows out from that side',
     await expect.poll(reach).toBeGreaterThan(10)
   } finally {
     await page.request.patch(`/api/transitions/${edge.id}`, { data: { source_side: 'right', target_side: 'left' } })
+    // Back where it was made, so dissolving puts the members where they went before.
+    await page.request.patch(`/api/groups/${group.id}`, { data: { pos_x: group.pos_x } })
     await page.request.post(`/api/groups/${group.id}/dissolve`, { data: { restore_branches: true } })
   }
 })

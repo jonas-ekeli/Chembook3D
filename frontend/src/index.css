@@ -45,6 +45,9 @@
   --ok-dot: #12b76a;
   --live: #16a34a; /* a connected server */
   --idle-dot: #98a2b3;
+  --text-faint: #98a2b3; /* a value that is missing ("—" on a node card) */
+  --card-planned: #fafbfc; /* a planned node's card (D175) */
+  --select-halo: rgb(36 89 198 / 12%); /* round a selected node card (D175) */
   --info: #1570ef;
   --info-text: #175cd3;
   --info-bg: #eff8ff;
@@ -1222,37 +1225,54 @@ legend {
   margin-left: 1.5rem;
 }
 
-/* Canvas nodes: branch colour on the left edge (D33), status badge, warning icon */
+/* Canvas nodes: branch colour on the left edge (D33). D175: readable at the zoom the canvas
+   opens at: label 14 px, the energy in the title row at 15 px, status as a dot and a word. */
 .cnode {
-  width: 176px;
+  width: 188px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-left: 5px solid var(--branch);
-  border-radius: var(--radius);
-  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  padding: 6px 8px 6px 9px;
   display: grid;
-  gap: 0.2rem;
+  gap: 2px;
   font-size: 12.5px;
-  box-shadow: 0 1px 2px rgb(var(--shadow-rgb) / 6%);
+  box-shadow:
+    0 1px 2px rgb(var(--shadow-rgb) / 8%),
+    0 1px 3px rgb(var(--shadow-rgb) / 6%);
 }
-.cnode.selected {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.cnode.faded {
-  opacity: 0.45;
+/* D175: a planned node is dashed on a faint fill; the branch colour stays on the left edge. */
+.cnode.planned {
+  background: var(--card-planned);
+  border-style: dashed;
+  border-left-style: solid;
+  border-color: var(--border-strong);
+  border-left-color: var(--branch);
+  box-shadow: none;
 }
 .cnode.representative {
   border-color: var(--rep);
   border-left-color: var(--rep);
 }
+.cnode.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--select-halo);
+}
+.cnode.faded {
+  opacity: 0.45;
+}
 .cnode-head {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 6px;
+  min-height: 20px;
+  min-width: 0; /* a long label gives way to the energy */
 }
 .cnode-label {
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1260,19 +1280,57 @@ legend {
 }
 .cnode-meta {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 0.4rem;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
+}
+.cnode-meta .status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.cnode-meta .status::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--idle-dot);
+}
+.cnode-meta .status-done::before {
+  background: var(--ok-dot);
+}
+.cnode-meta .status-failed::before {
+  background: var(--danger);
+}
+.cnode-meta .status-running_externally::before {
+  background: var(--warn-dot);
 }
 .cnode-step {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 105px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--tag-bg);
+  color: var(--text-2);
 }
+/* D175: a transition state is tagged "TS" in amber, easier to spot than a bare ‡. */
 .ts-mark {
+  flex: none;
+  font-size: 10px;
   font-weight: 700;
-  color: var(--warn);
+  line-height: 15px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid var(--warn-strong);
+  background: var(--warn-soft);
+  color: var(--warn-text);
 }
 .rep-mark {
   color: var(--rep);
@@ -1349,7 +1407,8 @@ legend {
   border: none;
   background: none;
 }
-/* D76: a handle on every side; they grow on hover so a side is easy to hit */
+/* D76: a handle on every side; they grow on hover so a side is easy to hit. D175: they show
+   only on a hovered or selected box, and on every box while an arrow is being drawn. */
 .cnode .react-flow__handle,
 .cgroup .react-flow__handle {
   width: 7px;
@@ -1358,6 +1417,15 @@ legend {
   min-height: 0;
   background: var(--muted);
   border: 1px solid var(--panel);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.react-flow__node:hover > .cnode > .react-flow__handle,
+.react-flow__node:hover > .cgroup > .react-flow__handle,
+.cnode.selected > .react-flow__handle,
+.cgroup.selected > .react-flow__handle,
+.canvas.connecting .react-flow__handle {
+  opacity: 1;
 }
 .react-flow__node:hover > .cnode > .react-flow__handle,
 .react-flow__node:hover > .cgroup > .react-flow__handle,
@@ -1504,15 +1572,38 @@ table.overlay-legend td {
   font-size: 12px;
   white-space: nowrap;
 }
+/* D175: the energy at the right of the title row, the number bold and tabular. */
 .cnode-energy {
+  margin-left: auto;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  font-weight: 600;
-  margin: 0.15rem 0;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--text);
+}
+.cnode-energy-type {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.cnode-energy.na {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+.cnode-energy.na.note {
+  font-size: 11.5px;
+}
+/* A collapsed group's energy has a row of its own. */
+.cgroup > .cnode-energy {
+  display: block;
+  margin: 2px 0;
 }
 
 /* D73: ΔX centred under the structure, as in a figure. */
 .cnode-energy.below-structure {
+  display: block;
+  margin: 2px 0 0;
   text-align: center;
 }
 .edge-energy,

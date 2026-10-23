@@ -59,7 +59,7 @@ test('a read-only copy opens from disk with no server and changes nothing', asyn
   await expect(shared.getByText('Read-only copy', { exact: true })).toBeVisible()
   // The reference and the energy mode chosen when exporting are kept (D128): ΔG from it.
   await expect(canvasNode(shared, 'A-S2')).toContainText('ΔG 14.80')
-  await expect(canvasNode(shared, 'B-S3')).toContainText('ΔG -6.00')
+  await expect(canvasNode(shared, 'B-S3')).toContainText('ΔG −6.00')
   await expect(shared.locator('.edge-energy', { hasText: 'ΔG 18.00' })).toBeVisible()
 
   // Nothing edits: no add, import, delete or save buttons, no editable fields.
