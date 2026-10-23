@@ -51,7 +51,7 @@ test('energy view: one level and type, ΔG on edges, energy mode', async ({ page
   await expect(view.locator('.badge.warn')).toHaveCount(0)
 
   // FR-EN-02: ΔG = G(target) − G(source) on each edge; A-S1 → A-S2 is 14.8 − (−3.2).
-  await expect(page.locator('.edge-energy', { hasText: 'ΔG 18.00' })).toBeVisible()
+  await expect(page.locator('.edge-energy', { hasText: 'ΔG‡ 18.00' })).toBeVisible()
   await view.getByLabel('Energies on edges').uncheck()
   await expect(page.locator('.edge-energy')).toHaveCount(0)
   await view.getByLabel('Energies on edges').check()
@@ -83,7 +83,7 @@ test('energy view: one level and type, ΔG on edges, energy mode', async ({ page
   await expect(canvasNode(page, 'A-S2')).toContainText('ΔG 14.80')
 
   await view.getByLabel('Energy type').selectOption('E')
-  await expect(page.locator('.edge-energy', { hasText: 'ΔE 18.00' })).toBeVisible()
+  await expect(page.locator('.edge-energy', { hasText: 'ΔE‡ 18.00' })).toBeVisible()
   expect(await (await page.request.get('/api/canvas')).json()).toEqual(before)
 })
 
@@ -170,7 +170,7 @@ test('a line between collapsed groups shows the energy of the edge between their
     await expect(between.locator('.edge-energy')).toHaveCount(0) // S2 has none yet
     await page.request.patch(`/api/groups/${groups[1]}`, { data: { representative_id: id('A-S2') } })
     await page.reload()
-    await expect(between.locator('.edge-energy')).toHaveText('ΔG 18.00')
+    await expect(between.locator('.edge-energy')).toHaveText('ΔG‡ 18.00')
     await expect(between).toContainText('2 edges')
   } finally {
     // Leave the demo as it was: members keep their branches.
@@ -298,7 +298,7 @@ test('the 1 M standard state is an investigation setting the energy view names',
     ])
     await expect(view.locator('.badge', { hasText: '1 M' })).toBeVisible()
     // One molecule on each side: the correction cancels on the edge.
-    await expect(page.locator('.edge-energy', { hasText: 'ΔG 18.00' })).toBeVisible()
+    await expect(page.locator('.edge-energy', { hasText: 'ΔG‡ 18.00' })).toBeVisible()
     await view.getByLabel('Energy type').selectOption('E')
     await expect(view.locator('.badge', { hasText: '1 M' })).toHaveCount(0)
     await view.getByLabel('Energy type').selectOption('G')

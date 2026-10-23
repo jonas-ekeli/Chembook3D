@@ -115,8 +115,9 @@ export type CanvasEnergy = {
   settings: Settings | null
 }
 
-/** An edge's "ΔG 12.34", or "n/a" with its reason as a tooltip. */
-type EnergyText = { text: string; title: string }
+/** D176: an edge's ΔX, "ΔG" (or "ΔG‡" for a barrier) and the number apart; no number is "n/a"
+ * with its reason as a tooltip. */
+type EdgeEnergy = { type: string; value: string | null; title: string; barrier: boolean }
 /** D175: a card's energy, "ΔG" and the number apart. No number is a quiet "—", or a short
  * `missing` note when every card lacks one for the same reason (no reference chosen). */
 type CardEnergy = { type: string; value: string | null; title: string; missing?: string }
@@ -189,7 +190,10 @@ type TransitionData = {
   crossBranch: boolean
   status: string
   faded: boolean
-  energy: EnergyText | null
+  energy: EdgeEnergy | null
+  /** D176: of `ids`, those that end at a transition state (a TS node, or a group whose
+   * representative is one, D111): their ΔX is a barrier. */
+  intoTs: string[]
   /** D69: free species joining ("+ propene") or leaving ("− C₂H₄") on the edge. */
   species: { text: string; direction: string; title: string }[]
   /** W-BALANCE messages, when the atoms or charge do not balance. */
@@ -430,6 +434,40 @@ function bowedOut(sx: number, sy: number, tx: number, ty: number, side: Position
   ]
 }
 
+/**
+ * D176: one pill per arrow: ΔX (amber "ΔG‡" when the arrow ends at a TS), the W-BALANCE warning
+ * as a small "!" badge and "no TS" (D53) as an italic tag inside it; its outline is the
+ * transition's status (solid done, dashed planned), which is also its tooltip and spoken name.
+ * With none of these shown it is a small empty pill, where the status dot used to be.
+ */
+function EdgePill({ data }: { data: TransitionData }) {
+  const { energy, warnings, direct, status } = data
+  const empty = !energy && !warnings.length && !direct
+  return (
+    <span
+      className={`edge-pill status-${status}${energy?.barrier ? ' barrier' : ''}${empty ? ' empty' : ''}`}
+      title={`Transition: ${STATUS_LABEL[status] ?? status}`}
+    >
+      {energy && (
+        <span className={`edge-energy${energy.value === null ? ' na' : ''}`} title={energy.title}>
+          <span className="edge-energy-type">{energy.type}</span> {energy.value ?? 'n/a'}
+        </span>
+      )}
+      {direct && (
+        <span className="no-ts" title="Neither end is a transition-state node (D53)">
+          no TS
+        </span>
+      )}
+      {warnings.length > 0 && (
+        <span className="warn-badge" role="img" aria-label="Does not balance" title={warnings.join('\n')}>
+          !
+        </span>
+      )}
+      <span className="visually-hidden">{STATUS_LABEL[status] ?? status}</span>
+    </span>
+  )
+}
+
 function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
   const { id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd, selected } =
     props
@@ -503,11 +541,7 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
           data-edge={id}
           style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, zIndex: level || undefined }}
         >
-          {data.energy && (
-            <span className="edge-energy" title={data.energy.title}>
-              {data.energy.text}
-            </span>
-          )}
+          <EdgePill data={data} />
           {data.ids.length > 1 && (
             <span className="edge-count" title="Parallel transitions between these two boxes; filter by branch to see each">
               {data.ids.length} edges
@@ -535,13 +569,6 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
               {data.paths.text}
             </button>
           )}
-          {data.warnings.length > 0 && (
-            <span className="warn-icon" role="img" aria-label="Does not balance" title={data.warnings.join('\n')}>
-              ⚠
-            </span>
-          )}
-          {data.direct && <span className="no-ts">no TS</span>}
-          <span className={`status-dot status-${data.status}`} title={STATUS_LABEL[data.status]} />
         </div>
       </EdgeLabelRenderer>
     </>
@@ -855,6 +882,14 @@ function CanvasView({
     // A24: edges joining the same two drawn boxes (e.g. one per conformer between two
     // collapsed groups) are drawn as one line.
     const between = new Map<string, Edge<TransitionData>>()
+    // D176: the role the app knows, not where the card sits: a TS node, or a group standing
+    // for a TS representative (D111), as the "no TS" rule (D53) counts them.
+    const isTs = (id: string) => {
+      const node = byId.get(id)
+      if (node) return node.role === 'transition_state'
+      const representative = groupsById.get(id)?.representative_id
+      return !!representative && byId.get(representative)?.role === 'transition_state'
+    }
     for (const t of data.transitions) {
       if (hidden.statuses.has(t.status)) continue
       const source = drawnAs.get(t.source_id)
@@ -870,6 +905,7 @@ function CanvasView({
       if (same?.data) {
         const merged = same.data
         merged.ids.push(t.id)
+        if (isTs(t.target_id)) merged.intoTs.push(t.id)
         merged.colour = merged.colour === colour ? colour : NO_BRANCH
         merged.direct &&= t.direct
         merged.crossBranch &&= t.cross_branch
@@ -902,6 +938,7 @@ function CanvasView({
           status: t.status,
           faded: FADED_STATUSES.has(t.status),
           energy: null,
+          intoTs: isTs(t.target_id) ? [t.id] : [],
           species: speciesChips(t),
           warnings: t.warnings.map((w) => `${w.code}: ${w.message}`),
           scanPaths: [...(t.scan_paths ?? [])],
@@ -937,18 +974,31 @@ function CanvasView({
     const showEnergy = energy.showEdges && !!view
     if (!showEnergy && !plainEdges.some((e) => e.data?.scanPaths.length)) return plainEdges
     const chip = (d: TransitionData) => (d.scanPaths.length ? pathChip(d.scanPaths, energy.settings) : null)
-    const edgeEnergy = ({ ids, representative }: TransitionData): EnergyText | null => {
+    const edgeEnergy = ({ ids, representative, intoTs }: TransitionData): EdgeEnergy | null => {
       if (!view) return null
       // A24, D70: a line standing for several edges shows the representatives' edge, if any.
       const id = ids.length === 1 ? ids[0] : representative
       const found = id ? view.edges[id] : undefined
-      if (!found) return null
-      const note = ids.length > 1 ? ' (the transition between the representatives)' : ''
+      if (!id || !found) return null
+      // D176: ΔX into a transition state is that step's barrier, ΔG‡.
+      const barrier = intoTs.includes(id)
+      const type = `Δ${energy.type}${barrier ? '‡' : ''}`
+      const note =
+        (barrier ? ', the barrier into a transition state' : '') +
+        (ids.length > 1 ? ' (the transition between the representatives)' : '')
       return found.delta === null
-        ? { text: 'n/a', title: (found.message ?? 'one end has no value at this level and type') + note }
+        ? {
+            type,
+            value: null,
+            title: (found.message ?? 'one end has no value at this level and type') + note,
+            barrier,
+          }
         : {
-            text: `Δ${energy.type} ${formatDelta(found.delta, energy.settings)}`,
+            type,
+            // D175, D176: a real minus sign, as on the cards.
+            value: formatDelta(found.delta, energy.settings).replace(/^-/, '−'),
             title: (energy.settings?.energy_unit ?? 'kcal/mol') + note,
+            barrier,
           }
     }
     return plainEdges.map((e) => ({
