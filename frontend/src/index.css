@@ -36,6 +36,8 @@
   --warn-strong: #fdb022;
   --warn-dot: #f79009;
   --no-ts-bg: #fff4e5;
+  --on-warn: #ffffff; /* text on --warn-strong (an arrow's "!" badge) */
+  --pill-border: #c9ced6; /* an arrow's label pill (D176) */
   --rep: #f59f00; /* a group's representative */
   --ok: #067647;
   --ok-text: #05603a;
@@ -1367,7 +1369,7 @@ legend {
   align-items: center;
   gap: 0.25rem;
   pointer-events: none;
-  font-size: 10.5px;
+  font-size: 12px;
 }
 .edge-label.faded {
   opacity: 0.4;
@@ -1381,25 +1383,101 @@ legend {
   font-size: 11px;
   margin-left: 0.3rem;
 }
-.edge-label .no-ts {
+/* D176: one pill per arrow. ΔX 12 px semibold after a small muted symbol; a barrier (an arrow
+   into a TS) amber as ΔG‡; the warning a "!" badge and "no TS" an italic tag inside it. The
+   outline is the transition's status: solid done, dashed planned, dotted running, red failed. */
+.edge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  line-height: 16px;
+  padding: 2px 8px;
+  border: 1px solid var(--pill-border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 2px rgb(var(--shadow-rgb) / 6%);
+}
+.edge-pill.status-planned {
+  border-style: dashed;
+}
+.edge-pill.status-running_externally {
+  border-style: dotted;
+}
+.edge-pill.status-failed {
+  border-color: var(--danger-border);
+}
+.edge-pill.barrier {
+  background: var(--warn-bg);
+  border-color: var(--warn-strong);
+  color: var(--warn-text);
+}
+/* Nothing to show but the status: a small empty pill where the status dot used to be. */
+.edge-pill.empty {
+  width: 16px;
+  height: 10px;
+  padding: 0;
+}
+.edge-energy-type {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.edge-pill.barrier .edge-energy-type {
+  color: var(--warn);
+}
+.edge-energy.na {
+  font-weight: 500;
+  color: var(--muted);
+}
+.edge-pill .no-ts {
   margin: 0;
+  padding: 0 0 0 5px;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+  color: var(--warn-text);
+  font-size: 10px;
+  font-weight: 500;
+  font-style: italic;
 }
-.status-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
+.warn-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 1px;
   border-radius: 50%;
-  background: var(--idle-dot);
-  border: 1px solid var(--panel);
+  background: var(--warn-strong);
+  color: var(--on-warn);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
 }
-.status-dot.status-done {
-  background: var(--ok-dot);
+/* The count and the chips beside the pill take its height and shape. */
+.edge-label .edge-count,
+.edge-label .chip {
+  border-radius: 999px;
+  line-height: 16px;
+  padding: 2px 7px;
 }
-.status-dot.status-failed {
-  background: var(--danger);
+.edge-pill .no-ts:first-child {
+  padding-left: 0;
+  border-left: none;
 }
-.status-dot.status-running_externally {
-  background: var(--warn-dot);
+/* Read by a screen reader (and tests), not shown. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .react-flow__node-structure,
 .react-flow__node-cgroup {
@@ -1606,7 +1684,6 @@ table.overlay-legend td {
   margin: 2px 0 0;
   text-align: center;
 }
-.edge-energy,
 .edge-count {
   background: var(--panel);
   border: 1px solid var(--border);

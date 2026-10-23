@@ -60,7 +60,7 @@ test('a read-only copy opens from disk with no server and changes nothing', asyn
   // The reference and the energy mode chosen when exporting are kept (D128): ΔG from it.
   await expect(canvasNode(shared, 'A-S2')).toContainText('ΔG 14.80')
   await expect(canvasNode(shared, 'B-S3')).toContainText('ΔG −6.00')
-  await expect(shared.locator('.edge-energy', { hasText: 'ΔG 18.00' })).toBeVisible()
+  await expect(shared.locator('.edge-energy', { hasText: 'ΔG‡ 18.00' })).toBeVisible()
 
   // Nothing edits: no add, import, delete or save buttons, no editable fields.
   for (const name of ['+ Add node', 'Import file…', 'Settings', 'Share read-only copy…']) {
@@ -86,7 +86,7 @@ test('a read-only copy opens from disk with no server and changes nothing', asyn
   // Energy type and the profile of each branch, computed when exporting.
   const view = shared.getByRole('group', { name: 'Energy view' })
   await view.getByLabel('Energy type').selectOption('E')
-  await expect(shared.locator('.edge-energy', { hasText: 'ΔE 18.00' })).toBeVisible()
+  await expect(shared.locator('.edge-energy', { hasText: 'ΔE‡ 18.00' })).toBeVisible()
   await view.getByLabel('Energy type').selectOption('G')
   await shared.getByRole('button', { name: 'Profile and table' }).click()
   const drawer = shared.getByLabel('Energy drawer')
