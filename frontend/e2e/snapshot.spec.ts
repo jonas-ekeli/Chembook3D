@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { investigationCommand, startPage } from './appBar.ts'
 import { forgetView } from './demoView.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
@@ -9,7 +10,7 @@ const E2E_DIR = process.env.E2E_DIR!
 async function openDemo(page: Page) {
   await forgetView(page.request, join(E2E_DIR, 'demo'))
   await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^Open/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
@@ -33,7 +34,7 @@ test('a read-only copy opens from disk with no server and changes nothing', asyn
   await page.getByRole('button', { name: 'Energy', exact: true }).click()
 
   // With no pathway in the drawer, the copy has one per branch.
-  await page.getByRole('button', { name: 'Share read-only copy…' }).click()
+  await investigationCommand(page, 'Share read-only copy…')
   const dialog = page.getByRole('dialog', { name: 'Share a read-only copy' })
   await expect(dialog).toContainText('one pathway per branch')
   const download = page.waitForEvent('download')
@@ -117,7 +118,7 @@ test('the copy holds the pathways in the drawer', async ({ page }) => {
   const drawer = page.getByLabel('Energy drawer')
   await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
   await expect(drawer.getByRole('group', { name: 'Pathway B' })).toContainText('T-S0 → B-S1 → B-S2 → B-S3')
-  await page.getByRole('button', { name: 'Share read-only copy…' }).click()
+  await investigationCommand(page, 'Share read-only copy…')
   const dialog = page.getByRole('dialog', { name: 'Share a read-only copy' })
   await expect(dialog).toContainText('the pathway in “Profile and table”')
   const download = page.waitForEvent('download')
@@ -144,10 +145,10 @@ test('the copy opens on the view the app showed, then on the reader\'s own choic
   await page.getByRole('button', { name: 'Structure', exact: true }).click()
   const view = page.getByRole('group', { name: 'Energy view' })
   await view.getByLabel('Energy type').selectOption('E')
-  await view.getByLabel('Energies on edges').uncheck()
+  await view.getByLabel('Show on arrows').uncheck()
   await page.getByRole('button', { name: 'Profile and table' }).click()
   await page.getByLabel('Energy drawer').getByRole('button', { name: 'Energy table' }).click()
-  await page.getByRole('button', { name: 'Share read-only copy…' }).click()
+  await investigationCommand(page, 'Share read-only copy…')
   const dialog = page.getByRole('dialog', { name: 'Share a read-only copy' })
   const download = page.waitForEvent('download')
   await dialog.getByRole('button', { name: 'Save file' }).click()

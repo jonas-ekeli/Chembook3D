@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 
 // T-UI-18, D114: a scan path between two nodes joined by an edge, one of them a TS guess.
 const E2E_DIR = process.env.E2E_DIR!
@@ -33,7 +34,7 @@ function canvasNode(page: Page, label: string): Locator {
 }
 
 async function newInvestigation(page: Page, name: string) {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

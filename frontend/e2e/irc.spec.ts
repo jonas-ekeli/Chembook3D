@@ -1,12 +1,13 @@
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
 // A TS with its IRC both ways and a job on the forward end point, written by global-setup.ts
 const IRC = join(E2E_DIR, 'irc')
 
 async function newInvestigation(page: Page, name: string) {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

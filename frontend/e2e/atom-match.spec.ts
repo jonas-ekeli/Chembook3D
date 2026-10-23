@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 
 // T-UI-17, D113: two structures of the same atoms numbered differently are matched, reviewed
 // side by side, and the end is saved in the start's order.
@@ -35,7 +36,7 @@ function canvasNode(page: Page, label: string): Locator {
 }
 
 async function newInvestigation(page: Page, name: string) {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

@@ -10,11 +10,45 @@ export type MenuItem = {
   danger?: boolean
   disabled?: boolean
   title?: string
+  /** D180: a line above the item, setting it apart from the ones before. */
+  separated?: boolean
 }
 
-/** D179: a "⋯" button with the rare actions of a panel. Enter, Space or ↓ opens it on the first
- * item, ↑ and ↓ move, Escape closes it back onto the button; Tab or a click outside closes it. */
+/** D179: a "⋯" button with the rare actions of a panel. */
 export function MoreMenu({ label, items }: { label: string; items: MenuItem[] }) {
+  return (
+    <Menu label={label} items={items} className="more-menu" buttonClass="icon" buttonLabel={label} title={label}>
+      <Icon name="more" />
+    </Menu>
+  )
+}
+
+/** A button that opens a list of actions (D179; D180: also the investigation menu and the
+ * canvas's Export). Enter, Space or ↓ opens it on the first item, ↑ and ↓ move, Escape closes it
+ * back onto the button; Tab or a click outside closes it. */
+export function Menu({
+  label,
+  items,
+  children,
+  className,
+  buttonClass,
+  buttonLabel,
+  title,
+  heading,
+}: {
+  /** The list's name. */
+  label: string
+  items: MenuItem[]
+  /** What the button shows. */
+  children: ReactNode
+  className?: string
+  buttonClass?: string
+  /** The button's accessible name, when its text is not enough. */
+  buttonLabel?: string
+  title?: string
+  /** A small heading at the top of the list (D180: the investigation's name). */
+  heading?: string
+}) {
   const [open, setOpen] = useState(false)
   const wrap = useRef<HTMLDivElement>(null)
   const button = useRef<HTMLButtonElement>(null)
@@ -55,12 +89,12 @@ export function MoreMenu({ label, items }: { label: string; items: MenuItem[] })
   }
 
   return (
-    <div className="menu more-menu" ref={wrap}>
+    <div className={className ? `menu ${className}` : 'menu'} ref={wrap}>
       <button
         ref={button}
-        className="icon"
-        aria-label={label}
-        title={label}
+        className={buttonClass}
+        aria-label={buttonLabel}
+        title={title}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -71,32 +105,45 @@ export function MoreMenu({ label, items }: { label: string; items: MenuItem[] })
           }
         }}
       >
-        <Icon name="more" />
+        {children}
       </button>
       {open && (
         <div role="menu" aria-label={label} className="menu-list" onKeyDown={onMenuKey}>
+          {heading && (
+            <div className="menu-heading" aria-hidden="true">
+              {heading}
+            </div>
+          )}
           {items.map((item) => (
-            <button
-              key={item.label}
-              role="menuitem"
-              className={item.danger ? 'danger' : undefined}
-              aria-label={item.label}
-              disabled={item.disabled}
-              title={item.title}
-              onClick={() => {
-                setOpen(false)
-                item.onSelect()
-              }}
-            >
-              {item.icon && <Icon name={item.icon} />}
-              <span className="menu-item-text">
-                {item.label}
-                {item.detail && <small className="muted">{item.detail}</small>}
-              </span>
-            </button>
+            <MenuEntry key={item.label} item={item} onChosen={() => setOpen(false)} />
           ))}
         </div>
       )}
     </div>
+  )
+}
+
+function MenuEntry({ item, onChosen }: { item: MenuItem; onChosen: () => void }) {
+  return (
+    <>
+      {item.separated && <div role="separator" className="menu-separator" />}
+      <button
+        role="menuitem"
+        className={item.danger ? 'danger' : undefined}
+        aria-label={item.label}
+        disabled={item.disabled}
+        title={item.title}
+        onClick={() => {
+          onChosen()
+          item.onSelect()
+        }}
+      >
+        {item.icon && <Icon name={item.icon} />}
+        <span className="menu-item-text">
+          {item.label}
+          {item.detail && <small className="muted">{item.detail}</small>}
+        </span>
+      </button>
+    </>
   )
 }

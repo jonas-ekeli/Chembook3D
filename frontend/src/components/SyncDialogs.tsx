@@ -34,18 +34,44 @@ function SignInHelp() {
   )
 }
 
-/** The header button: pushes now and shows the last known state (FR-SYNC-05). */
-export function SyncButton({ status, busy, onSync }: { status: SyncStatus | null; busy: boolean; onSync: () => void }) {
+/** The last known state, as the sync chip and the investigation menu show it (D180). */
+export function SyncState({ status, busy }: { status: SyncStatus | null; busy: boolean }) {
+  return busy ? 'Syncing…' : status ? LABELS[status.state] : 'Sync'
+}
+
+/** The app bar's sync chip (D180): a dot and the last known state; a click pushes now
+ * (FR-SYNC-05), or offers to link an investigation that is not linked yet (FR-SYNC-02). */
+export function SyncChip({
+  linked,
+  status,
+  busy,
+  onSync,
+  onLink,
+}: {
+  linked: boolean
+  status: SyncStatus | null
+  busy: boolean
+  onSync: () => void
+  onLink: () => void
+}) {
+  if (!linked)
+    return (
+      <button className="sync-chip" title="Not linked to GitHub. Sync with GitHub… (D71)" onClick={onLink}>
+        <i aria-hidden="true" />
+        Not synced
+      </button>
+    )
   const state = status?.state
   return (
     <button
-      className={`sync-button${state ? ` ${state}` : ''}`}
+      className={`sync-chip${state ? ` ${state}` : ''}`}
       title={status ? `${status.message}${status.remote ? ` (${status.remote})` : ''}` : 'Commit and push now'}
       aria-label="Sync with GitHub"
       disabled={busy}
       onClick={onSync}
     >
-      {busy ? 'Syncing…' : state ? `Sync · ${LABELS[state]}` : 'Sync'}
+      <i aria-hidden="true" />
+      <SyncState status={status} busy={busy} />
     </button>
   )
 }

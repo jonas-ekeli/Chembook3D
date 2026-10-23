@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 import { forgetView } from './demoView.ts'
 
 // T-UI-08, FR-NOTE-01…05, D85: a note pinned to a node's card, with formatted text, an SVG
@@ -25,7 +26,7 @@ const PNG = Buffer.from(
 async function openDemo(page: Page) {
   await forgetView(page.request, join(E2E_DIR, 'demo'))
   await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^Open/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

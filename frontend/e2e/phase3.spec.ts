@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 import { forgetView } from './demoView.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
@@ -23,7 +24,7 @@ async function openDemo(page: Page) {
 }
 
 async function newInvestigation(page: Page, name: string) {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
@@ -369,7 +370,7 @@ test('view modes and filters never change stored data', async ({ page }) => {
   await filters.getByRole('group', { name: 'Status' }).getByLabel('Planned').uncheck()
   await expect(canvasNode(page, 'B-S2')).toHaveCount(0)
   await expect(canvasNode(page, 'B-S1')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Filters (2 hidden) ▾' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Filters (2 hidden)' })).toBeVisible()
 
   expect(await canvasRecords(page)).toEqual(before)
   await filters.getByRole('button', { name: 'Show all' }).click()

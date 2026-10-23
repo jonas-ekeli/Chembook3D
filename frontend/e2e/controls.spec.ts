@@ -43,7 +43,7 @@ test('buttons keep one line, the canvas tools are short, focus shows a ring', as
   const fit = page.getByRole('button', { name: 'Fit to selection' })
   await expect(fit).toHaveText('Fit')
   await expect(fit).toHaveAttribute('title', 'Fit to selection')
-  await expect(page.getByRole('button', { name: 'Export image ▾' })).toHaveText('Export ▾')
+  await expect(page.getByRole('button', { name: 'Export image ▾' })).toHaveText('Export')
 
   // Destructive: red text on the border every button has (D179: Delete node is in the ⋯ menu,
   // and its confirmation has the destructive button beside Cancel).

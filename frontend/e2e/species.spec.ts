@@ -1,9 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
 
 async function newInvestigation(page: Page, name: string) {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

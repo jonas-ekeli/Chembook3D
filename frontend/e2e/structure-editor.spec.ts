@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 
 // T-UI-41, D139: change a structure in the Edit structure window, undo and redo, put another
 // node's structure beside it, and save in place, as a new node, or not at all.
@@ -28,7 +29,7 @@ function canvasNode(page: Page, label: string): Locator {
 }
 
 async function newInvestigation(page: Page, name: string) {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

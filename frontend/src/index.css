@@ -330,6 +330,271 @@ textarea {
 .spacer {
   flex: 1;
 }
+
+/* D180 (UI2): one calm app bar of 44 px and, in the canvas view, a 40 px canvas toolbar under it.
+   Neither wraps: at narrow widths the quiet buttons keep their icons and hide their labels (the
+   name stays for screen readers and in the tooltip). */
+.appbar {
+  flex-wrap: nowrap;
+  height: 44px;
+  padding: 0 10px;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.appbar .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+.appbar .brand .ic {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+.appbar .investigation-menu {
+  min-width: 0;
+}
+.appbar .investigation {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  border-color: transparent;
+  background: transparent;
+  padding: 4px 8px;
+  max-width: 22rem;
+  margin: 0;
+}
+.appbar .investigation:hover:not(:disabled),
+.appbar button.quiet:hover:not(:disabled) {
+  background: var(--quiet-hover);
+  border-color: transparent;
+}
+.appbar .investigation .ic {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+/* The name truncates before anything else gives way; the folder is in the tooltip. */
+.appbar .investigation-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vsep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+.appbar .tabs {
+  align-self: stretch;
+  align-items: stretch;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.appbar .tabs button {
+  border: none;
+  border-radius: 0;
+  background: none;
+  padding: 0 12px;
+  color: var(--muted);
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+}
+.appbar .tabs button:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+.appbar .tabs button[aria-pressed='true'] {
+  color: var(--text);
+  background: none;
+  border-bottom-color: var(--accent);
+}
+.appbar > button.quiet,
+.canvasbar button.quiet {
+  color: var(--quiet-text);
+  padding: 4px 8px;
+}
+.appbar > button.quiet[aria-pressed='true'],
+.canvasbar button.quiet[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.appbar > button.icon-only {
+  width: var(--ctl-h);
+  padding: 0;
+}
+.appbar .menu-list {
+  min-width: 260px;
+}
+.menu-heading {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 4px 10px 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+.menu-separator {
+  height: 1px;
+  background: var(--divider);
+  margin: 2px 0;
+}
+.menu-list > button .ic {
+  color: var(--muted);
+}
+/* The sync chip: a dot in the colour of the last known state (D71). */
+.sync-chip {
+  min-height: 24px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin: 0 2px;
+}
+.sync-chip i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--idle-dot);
+  flex-shrink: 0;
+}
+.sync-chip.up_to_date i {
+  background: var(--ok-dot);
+}
+.sync-chip.not_pushed i,
+.sync-chip.behind i {
+  background: var(--warn-dot);
+}
+.sync-chip.diverged i,
+.sync-chip.unreachable i,
+.sync-chip.error i,
+.sync-chip.no_git i {
+  background: var(--danger);
+}
+.canvasbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-width: 0;
+}
+.canvasbar button,
+.canvasbar select {
+  min-height: 28px;
+  height: 28px;
+  padding: 0 10px;
+}
+.canvasbar .segmented {
+  flex-shrink: 0;
+}
+.canvasbar .menu {
+  flex-shrink: 0;
+}
+.canvasbar .menu-list.filters {
+  left: 0;
+  right: auto;
+}
+.canvasbar .energy-select {
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.canvasbar .energy-select select {
+  min-width: 7rem;
+  flex: 0 1 auto;
+  padding: 0 6px;
+  max-width: 20rem;
+}
+.canvasbar .energy-select .badge {
+  margin-left: 0;
+  flex-shrink: 0;
+}
+.canvasbar .lbl {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.canvasbar .check {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.canvasbar-tools {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.canvasbar > button,
+.canvasbar-tools > * {
+  flex-shrink: 0;
+}
+/* Narrower windows: labels give way to icons, the least needed first (Fit and Export, then
+   Filters, then the drawer toggle); the level select shrinks last. */
+@media (max-width: 1360px) {
+  .canvasbar .lbl,
+  .canvasbar-tools .tb-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .canvasbar-tools button {
+    padding: 0 7px;
+  }
+}
+@media (max-width: 1280px) {
+  .canvasbar .menu .tb-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .canvasbar .menu > button {
+    padding: 0 7px;
+  }
+}
+@media (max-width: 1100px) {
+  .canvasbar .tb-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .canvasbar > button.quiet {
+    padding: 0 7px;
+  }
+}
+@media (max-width: 1150px) {
+  .appbar .tb-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .appbar .investigation {
+    max-width: 12rem;
+  }
+}
 .banner {
   display: flex;
   gap: 1rem;

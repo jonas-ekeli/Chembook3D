@@ -55,7 +55,9 @@ import { AnalysesView } from './components/Analyses'
 import { ClaudeRequestDialog } from './components/ClaudeRequestDialog'
 import { SidePanel, type SideTab } from './components/SidePanel'
 import { HPC, hpcLabel } from './hpc'
-import { LaunchNotices, ShutDownButton } from './components/ShutDown'
+import { LaunchNotices, ShutDownButton, ShutDownDialog } from './components/ShutDown'
+import { Menu } from './components/MoreMenu'
+import { Icon } from './icons'
 import { useLive } from './live'
 import type { HydrogenMode } from './chem'
 import { recordNames } from './names'
@@ -66,7 +68,8 @@ import {
   CloneDialog,
   ConflictDialog,
   LinkDialog,
-  SyncButton,
+  SyncChip,
+  SyncState,
   UpgradeDialog,
 } from './components/SyncDialogs'
 import {
@@ -165,6 +168,8 @@ function App() {
   const [sync, setSync] = useState<SyncStatus | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [linking, setLinking] = useState(false)
+  const [shuttingDown, setShuttingDown] = useState(false) // D180: asked from the investigation menu
+  const [canvasTools, setCanvasTools] = useState<HTMLDivElement | null>(null) // D180: Fit and Export
   const [cloning, setCloning] = useState<{ url: string; name: string } | 'address' | null>(null)
   const [conflict, setConflict] = useState<SyncConflict | null>(null)
   const [upgrade, setUpgrade] = useState<{ folder: string } | null>(null)
@@ -1324,11 +1329,63 @@ function App() {
   return (
     <Displays hydrogens={settings?.hydrogens ?? 'all'} sterics={stericColours} scanEditor={openScanEditor}>
       <div className="app">
-        <header className="topbar">
-          <strong className="brand">Chembook3D</strong>
-          <span className="investigation" title={investigation.folder}>
-            {investigation.name}
-          </span>
+        {/* D180 (UI2): one app bar. The investigation's commands are in the menu on its name;
+            the view tabs; then tools, the side-panel toggles, the sync chip and Settings. */}
+        <header className="topbar appbar">
+          <strong className="brand">
+            <Icon name="hexagon" />
+            Chembook3D
+          </strong>
+          <Menu
+            label="Investigation"
+            heading={investigation.name}
+            className="investigation-menu"
+            buttonClass="investigation"
+            buttonLabel={`${investigation.name}, investigation menu`}
+            title={investigation.folder}
+            items={[
+              { label: 'New investigation…', icon: 'plus', onSelect: () => setPicker('create') },
+              { label: 'Open investigation…', icon: 'folder', onSelect: () => setPicker('open') },
+              { label: 'Close investigation', icon: 'x', onSelect: close },
+              investigation.linked
+                ? {
+                    label: 'Sync with GitHub',
+                    icon: 'branch',
+                    detail: <SyncState status={sync} busy={syncing} />,
+                    disabled: syncing,
+                    onSelect: syncNow,
+                    separated: true,
+                  }
+                : { label: 'Sync with GitHub…', icon: 'branch', onSelect: () => setLinking(true), separated: true },
+              {
+                label: 'Share read-only copy…',
+                icon: 'share',
+                title: 'Save a read-only HTML file to send to others (D79)',
+                onSelect: () => {
+                  setShareError(null)
+                  setSharing('ask')
+                },
+              },
+              {
+                label: 'Basis sets',
+                icon: 'book',
+                title: 'The saved custom basis sets, to inspect and download (D94)',
+                onSelect: () => setShowBases(true),
+              },
+              {
+                label: 'Shut down Chembook3D',
+                icon: 'power',
+                danger: true,
+                separated: true,
+                title: 'Close the investigation and stop Chembook3D',
+                onSelect: () => setShuttingDown(true),
+              },
+            ]}
+          >
+            <span className="investigation-name">{investigation.name}</span>
+            <Icon name="chevron" />
+          </Menu>
+          <span className="vsep" />
           <nav className="tabs" aria-label="Views">
             <button aria-pressed={view === 'canvas'} onClick={() => setView('canvas')}>
               Canvas
@@ -1343,111 +1400,37 @@ function App() {
             >
               Analyses
             </button>
-            <button
-              aria-pressed={view === 'canvas' && selection === null && multi.length === 0}
-              title="Where the investigation stands: branches, open items, recent changes, step notes"
-              onClick={() => {
-                choose(null)
-                setView('canvas')
-              }}
-            >
-              Overview
-            </button>
           </nav>
-          {view === 'canvas' && (
-            <>
-              <div className="segmented" role="group" aria-label="Node view">
-                <button aria-pressed={mode === 'compact'} onClick={() => chooseMode('compact')}>
-                  Compact
-                </button>
-                <button aria-pressed={mode === 'energy'} onClick={() => chooseMode('energy')}>
-                  Energy
-                </button>
-                <button aria-pressed={mode === 'structure'} onClick={() => chooseMode('structure')}>
-                  Structure
-                </button>
-              </div>
-              <FilterMenu canvas={canvas} filters={filters} onChange={setFilters} />
-              <div className="energy-select" role="group" aria-label="Energy view">
-                <select
-                  aria-label="Level of theory"
-                  value={levelKey ?? ''}
-                  disabled={!levelOption}
-                  onChange={(event) => setEnergyLevel(event.target.value)}
-                >
-                  {!levelOption && <option value="">No energies yet</option>}
-                  {energyOptions?.levels.map((l) => (
-                    <option key={l.key} value={l.key}>
-                      {l.label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label="Energy type"
-                  value={shownType}
-                  disabled={!levelOption}
-                  onChange={(event) => setEnergyType(event.target.value as EnergyType)}
-                >
-                  {(levelOption?.types ?? []).map((t) => (
-                    <option key={t} value={t}>
-                      {energyTypeName(
-                        t,
-                        energyOptions?.temperature,
-                        energyOptions?.cutoff,
-                        energyOptions?.standard_state,
-                        levelOption?.job_temperatures,
-                      )}
-                    </option>
-                  ))}
-                </select>
-                {shownType === 'G' && <GModelBadge models={levelOption?.g_models} />}
-                {energyOptions?.standard_state === '1 M' && (shownType === 'G' || shownType === 'G_qh') && (
-                  <span
-                    className="badge"
-                    title="Free energies are at the 1 M standard state: each node and free species includes RT ln(V_m / 1 L mol⁻¹) (Settings)"
-                  >
-                    1 M
-                  </span>
-                )}
-                {levelOption?.bsse && (
-                  <label
-                    className="check"
-                    title="Add the BSSE of each node's counterpoise job at this level (the counterpoise correction, D161). Nodes without one are unchanged."
-                  >
-                    <input
-                      type="checkbox"
-                      checked={withBsse}
-                      onChange={(event) => setWithBsse(event.target.checked)}
-                    />
-                    <span>With BSSE</span>
-                  </label>
-                )}
-                {/* D160: W-TEMP and W-STDSTATE of the values shown */}
-                <EnergyNotes notes={shownView?.notes} badges />
-                <label className="check" title="Show ΔX on transitions (FR-CAN-03)">
-                  <input
-                    type="checkbox"
-                    checked={edgeEnergies}
-                    onChange={(event) => setEdgeEnergies(event.target.checked)}
-                  />
-                  <span>Energies on edges</span>
-                </label>
-              </div>
-              <button aria-pressed={drawerOpen} onClick={() => setDrawerOpen(!drawerOpen)}>
-                Profile and table
-              </button>
-            </>
-          )}
           <span className="spacer" />
           <button
+            className="quiet"
+            onClick={() => openScanEditor([])}
+            title="Put several scans together into one path, without importing them (D135)"
+          >
+            <Icon name="wave" />
+            <span className="tb-label">Scan editor</span>
+          </button>
+          <button
+            className="quiet"
+            onClick={() => setShowJobs(true)}
+            title="Calculations handed to Claude Code cloud sessions (D93, D115)"
+          >
+            <Icon name="cloud" />
+            <span className="tb-label">Cloud jobs</span>
+          </button>
+          <span className="vsep" />
+          <button
+            className="quiet"
             aria-pressed={sideTab === 'claude'}
             onClick={() => setSideTab(sideTab === 'claude' ? null : 'claude')}
             title="Claude Code in a panel beside the notebook (D92)"
           >
-            Claude
+            <Icon name="spark" />
+            <span className="tb-label">Claude</span>
           </button>
           {remote?.enabled && (
             <button
+              className="quiet"
               aria-pressed={sideTab !== null && sideTab !== 'claude'}
               onClick={() => {
                 const first = remote.servers.find((s) => s.connected)
@@ -1455,41 +1438,111 @@ function App() {
               }}
               title="Log in to a cluster such as Saga: a terminal there, with files to and from its current directory (D122, D127)"
             >
-              {hpcLabel(remote.servers)}
+              <Icon name="terminal" />
+              <span className="tb-label">{hpcLabel(remote.servers)}</span>
             </button>
           )}
-          <button
-            onClick={() => openScanEditor([])}
-            title="Put several scans together into one path, without importing them (D135)"
-          >
-            Scan editor
+          <span className="vsep" />
+          <SyncChip
+            linked={investigation.linked}
+            status={sync}
+            busy={syncing}
+            onSync={syncNow}
+            onLink={() => setLinking(true)}
+          />
+          <button className="quiet icon-only" aria-label="Settings" title="Settings" onClick={() => setShowSettings(true)}>
+            <Icon name="sliders" />
           </button>
-          <button onClick={() => setShowJobs(true)} title="Calculations handed to Claude Code cloud sessions (D93, D115)">
-            Cloud jobs
-          </button>
-          {investigation.linked ? (
-            <SyncButton status={sync} busy={syncing} onSync={syncNow} />
-          ) : (
-            <button onClick={() => setLinking(true)}>Sync with GitHub…</button>
-          )}
-          <button onClick={() => setPicker('open')}>Open…</button>
-          <button onClick={() => setPicker('create')}>New…</button>
-          <button onClick={close}>Close</button>
-          <button
-            onClick={() => {
-              setShareError(null)
-              setSharing('ask')
-            }}
-            title="Save a read-only HTML file to send to others (D79)"
-          >
-            Share read-only copy…
-          </button>
-          <button onClick={() => setShowBases(true)} title="The saved custom basis sets, to inspect and download (D94)">
-            Basis sets
-          </button>
-          <button onClick={() => setShowSettings(true)}>Settings</button>
-          <ShutDownButton />
         </header>
+        {view === 'canvas' && (
+          // D180: the canvas's own controls, in one row under the app bar.
+          <div className="canvasbar">
+            <div className="segmented" role="group" aria-label="Node view">
+              <button aria-pressed={mode === 'compact'} onClick={() => chooseMode('compact')}>
+                Compact
+              </button>
+              <button aria-pressed={mode === 'energy'} onClick={() => chooseMode('energy')}>
+                Energy
+              </button>
+              <button aria-pressed={mode === 'structure'} onClick={() => chooseMode('structure')}>
+                Structure
+              </button>
+            </div>
+            <FilterMenu canvas={canvas} filters={filters} onChange={setFilters} />
+            <span className="vsep" />
+            <div className="energy-select" role="group" aria-label="Energy view">
+              <span className="lbl">Energies</span>
+              <select
+                aria-label="Level of theory"
+                value={levelKey ?? ''}
+                disabled={!levelOption}
+                onChange={(event) => setEnergyLevel(event.target.value)}
+              >
+                {!levelOption && <option value="">No energies yet</option>}
+                {energyOptions?.levels.map((l) => (
+                  <option key={l.key} value={l.key}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Energy type"
+                value={shownType}
+                disabled={!levelOption}
+                onChange={(event) => setEnergyType(event.target.value as EnergyType)}
+              >
+                {(levelOption?.types ?? []).map((t) => (
+                  <option key={t} value={t}>
+                    {energyTypeName(
+                      t,
+                      energyOptions?.temperature,
+                      energyOptions?.cutoff,
+                      energyOptions?.standard_state,
+                      levelOption?.job_temperatures,
+                    )}
+                  </option>
+                ))}
+              </select>
+              {shownType === 'G' && <GModelBadge models={levelOption?.g_models} />}
+              {energyOptions?.standard_state === '1 M' && (shownType === 'G' || shownType === 'G_qh') && (
+                <span
+                  className="badge"
+                  title="Free energies are at the 1 M standard state: each node and free species includes RT ln(V_m / 1 L mol⁻¹) (Settings)"
+                >
+                  1 M
+                </span>
+              )}
+              {levelOption?.bsse && (
+                <label
+                  className="check"
+                  title="Add the BSSE of each node's counterpoise job at this level (the counterpoise correction, D161). Nodes without one are unchanged."
+                >
+                  <input type="checkbox" checked={withBsse} onChange={(event) => setWithBsse(event.target.checked)} />
+                  <span>With BSSE</span>
+                </label>
+              )}
+              {/* D160: W-TEMP and W-STDSTATE of the values shown */}
+              <EnergyNotes notes={shownView?.notes} badges />
+              <label className="check" title="Show ΔX on the arrows between nodes (FR-CAN-03)">
+                <input
+                  type="checkbox"
+                  checked={edgeEnergies}
+                  onChange={(event) => setEdgeEnergies(event.target.checked)}
+                />
+                <span>Show on arrows</span>
+              </label>
+            </div>
+            <span className="spacer" />
+            {/* Fit and Export: drawn here by the canvas (CanvasPane's tools) */}
+            <div className="canvasbar-tools" ref={setCanvasTools} />
+            <span className="vsep" />
+            <button className="quiet" aria-pressed={drawerOpen} onClick={() => setDrawerOpen(!drawerOpen)}>
+              <Icon name="bottompanel" />
+              <span className="tb-label">Profile and table</span>
+            </button>
+          </div>
+        )}
+        {shuttingDown && <ShutDownDialog onClose={() => setShuttingDown(false)} />}
         <LaunchNotices />
         {(error || notice) && (
           <div className={error ? 'banner error' : 'banner'} role={error ? 'alert' : 'status'}>
@@ -1553,6 +1606,7 @@ function App() {
                   onError={setError}
                   onOpenNote={openNote}
                   onLayoutNote={layoutNote}
+                  tools={canvasTools}
                 />
               </ReactFlowProvider>
               <div

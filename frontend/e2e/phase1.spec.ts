@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 import { forgetView } from './demoView.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
@@ -30,7 +31,7 @@ async function openInvestigation(page: Page, folder: string) {
 }
 
 test('create an investigation, add a node by hand and edit its coordinates', async ({ page }) => {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: 'New investigation…' }).click()
   await browseTo(page, E2E_DIR)
   await page.getByLabel('Investigation name').fill('UI test')

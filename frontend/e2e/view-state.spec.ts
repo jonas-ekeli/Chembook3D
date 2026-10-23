@@ -1,12 +1,13 @@
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 import { forgetView } from './demoView.ts'
 
 // T-UI-10, FR-CAN-08, D105: the demo opens on what it showed when it was last used.
 const E2E_DIR = process.env.E2E_DIR!
 
 async function openDemo(page: Page) {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^Open/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
@@ -44,7 +45,7 @@ test('the energy view, filters, groups and drawer are back after a reload and af
     const before = await historyLength()
     const view = page.getByRole('group', { name: 'Energy view' })
     await view.getByLabel('Energy type').selectOption('G_qh')
-    await view.getByLabel('Energies on edges').uncheck()
+    await view.getByLabel('Show on arrows').uncheck()
     await page.getByRole('button', { name: 'Energy', exact: true }).click()
     await canvasNode(page, 'T-S0').click()
     await page.getByLabel('Node inspector').getByRole('button', { name: 'Use as energy reference' }).click()
@@ -61,9 +62,9 @@ test('the energy view, filters, groups and drawer are back after a reload and af
     await expect(drawer.getByRole('table', { name: 'Energy table' })).toBeVisible()
     const shown = async () => {
       await expect(view.getByLabel('Energy type')).toHaveValue('G_qh')
-      await expect(view.getByLabel('Energies on edges')).not.toBeChecked()
+      await expect(view.getByLabel('Show on arrows')).not.toBeChecked()
       await expect(canvasNode(page, 'A-S1')).toContainText('ΔG_qh')
-      await expect(page.getByRole('button', { name: 'Filters (1 hidden) ▾' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Filters (1 hidden)' })).toBeVisible()
       await expect(page.getByRole('group', { name: 'Group GV' }).getByRole('button', { name: 'Collapse group' })).toBeVisible()
       await expect(canvasNode(page, 'A-S2')).toBeVisible()
       await expect(drawer.getByRole('group', { name: 'Pathway B' })).toContainText('T-S0 → B-S1')

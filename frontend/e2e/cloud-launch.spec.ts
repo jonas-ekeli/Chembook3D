@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
+import { startPage } from './appBar.ts'
 
 // D93, A40: a cloud job's `claude --cloud` launch stops at a question (here the stand-in's
 // folder trust question, see playwright.config.ts). The app answers nothing itself: the Claude
@@ -19,7 +20,7 @@ test('a question before a cloud job starts is answered in the Claude panel', asy
   execFileSync('git', ['init', '-q', '--bare'], { cwd: remote })
   execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: remote })
 
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
