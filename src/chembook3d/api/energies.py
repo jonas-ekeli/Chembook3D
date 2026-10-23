@@ -133,9 +133,19 @@ class ProfileIn(BaseModel):
     bsse: bool = False  # D161: add each node's counterpoise BSSE at the level
 
 
+class TableRowOut(BaseModel):
+    """D177: what the screen shows beside a table row; the CSV leaves it out."""
+
+    id: str
+    branch_id: str | None
+    is_ts: bool
+    barrier: str | None  # ΔX‡ of the step, in the table's unit, on a TS row
+
+
 class TableOut(BaseModel):
     columns: list[str]
     rows: list[list[str]]
+    points: list[TableRowOut] = []  # D177: one per row
     notes: list[IssueOut] = []  # D160: the profile's W-TEMP and W-STDSTATE
 
 

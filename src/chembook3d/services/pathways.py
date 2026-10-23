@@ -538,6 +538,28 @@ def thermo_text(found: dict[str, Any] | None) -> str:
 FREE_SPECIES = 9  # the "Free species" column, before which the BSSE column goes
 
 
+def step_barriers(points: list[dict[str, Any]]) -> list[float | None]:
+    """D177: ΔX‡ of the step for each TS point of a pathway, in hartree: the TS less the lowest
+    point before it since the previous TS (the state the step starts from), not the reference.
+    None for every other point, and for a TS with no point before it since the previous TS or
+    with one of those (or itself) lacking a value. Points are balanced alike (D69), so the
+    difference of their relative values is the step's own."""
+    found: list[float | None] = []
+    since: list[float | None] = []
+    for point in points:
+        if not point["is_ts"]:
+            found.append(None)
+            since.append(point["relative"])
+            continue
+        known = [v for v in since if v is not None]
+        value = point["relative"]
+        found.append(
+            value - min(known) if value is not None and known and len(known) == len(since) else None
+        )
+        since = []
+    return found
+
+
 def table(
     session: Session,
     paths: list[list[str]],
@@ -560,10 +582,14 @@ def table(
     branch_names = {b.id: b.name or "Unnamed branch" for b in session.scalars(select(Branch))}
     label = data["level_label"]
     rows: list[list[str]] = []
+    # D177: what the screen needs beside each row (its point, branch, TS role and the step's
+    # barrier); not in the CSV, whose columns stay as they are.
+    shown: list[dict[str, Any]] = []
     seen: set[tuple] = set()
     g_temperatures: set[float] = set()
     for profile in data["profiles"]:
-        for point in profile["points"]:
+        barriers = step_barriers(profile["points"])
+        for point, barrier in zip(profile["points"], barriers, strict=True):
             # A point balanced with other free species (a closed cycle) gets its own row.
             balance = tuple((s["species_id"], s["count"]) for s in point["species"])
             if (point["id"], balance) in seen:
@@ -601,6 +627,14 @@ def table(
                 )
                 row.insert(FREE_SPECIES, "" if bsse is None else f"{bsse:.8f}")
             rows.append(row)
+            shown.append(
+                {
+                    "id": point["id"],
+                    "branch_id": point["branch_id"],
+                    "is_ts": point["is_ts"],
+                    "barrier": None if barrier is None else relative_text(barrier, unit),
+                }
+            )
     # D95, D160: the free energies name their standard state and their own temperatures.
     g, qh = column_names(
         data["temperature"],
@@ -628,4 +662,4 @@ def table(
     if energies.bsse:
         # D161: the counterpoise BSSE each row's values have had added.
         columns.insert(FREE_SPECIES, BSSE_COLUMN)
-    return {"columns": columns, "rows": rows, "notes": data.get("notes", [])}
+    return {"columns": columns, "rows": rows, "points": shown, "notes": data.get("notes", [])}

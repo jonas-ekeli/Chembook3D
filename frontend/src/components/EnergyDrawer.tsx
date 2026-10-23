@@ -13,8 +13,9 @@ import {
   type ViewState,
 } from '../api'
 import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
-import { closesCycle, download, tableCellClass } from '../util'
+import { closesCycle, csvTitle, download } from '../util'
 import { EnergyNotes } from './EnergyNotes'
+import { EnergyTableView } from './EnergyTableView'
 import { GModelBadge } from './GModelBadge'
 import { ProfileChart } from './ProfileChart'
 import { ProfileStyleDialog } from './ProfileStyleDialog'
@@ -420,7 +421,7 @@ export function EnergyDrawer({
             </button>
           </>
         ) : (
-          <button className="small" onClick={exportCsv} disabled={!shownTable}>
+          <button className="small" onClick={exportCsv} disabled={!shownTable} title={csvTitle(type)}>
             Export CSV
           </button>
         )}
@@ -578,26 +579,13 @@ export function EnergyDrawer({
             )
           ) : (
             shownTable && (
-              <table className="energy-table" aria-label="Energy table">
-                <thead>
-                  <tr>
-                    {shownTable.columns.map((c) => (
-                      <th key={c}>{c}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {shownTable.rows.map((row, i) => (
-                    <tr key={i}>
-                      {row.map((cell, j) => (
-                        <td key={j} className={tableCellClass(j, row.length)}>
-                          {cell}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <EnergyTableView
+                table={shownTable}
+                type={type}
+                reference={reference ? (labels.get(reference) ?? null) : null}
+                colourOf={(id) => branches.get(id)?.colour}
+                selectedId={selectedId}
+              />
             )
           )}
         </div>

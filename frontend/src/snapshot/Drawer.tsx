@@ -1,10 +1,11 @@
 import { useMemo, useRef } from 'react'
 import { energyTypeName, type EnergyType, type Settings } from '../api'
 import { EnergyNotes } from '../components/EnergyNotes'
+import { EnergyTableView } from '../components/EnergyTableView'
 import { GModelBadge } from '../components/GModelBadge'
 import { ProfileChart } from '../components/ProfileChart'
 import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
-import { closesCycle, download, tableCellClass } from '../util'
+import { closesCycle, csvTitle, download } from '../util'
 import { tableCsv, type SnapshotData } from './data'
 
 const NO_BRANCH = '#98a2b3'
@@ -23,6 +24,7 @@ export function SnapshotDrawer({
   tab,
   onTab,
   onSelectNode,
+  selectedId,
 }: {
   data: SnapshotData
   settings: Settings
@@ -34,6 +36,8 @@ export function SnapshotDrawer({
   tab: 'profile' | 'table'
   onTab: (tab: 'profile' | 'table') => void
   onSelectNode: (id: string) => void
+  /** D177: the node or group selected on the canvas, whose table row is highlighted. */
+  selectedId: string | null
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const canvas = data.canvas
@@ -103,7 +107,7 @@ export function SnapshotDrawer({
             </button>
           </>
         ) : (
-          <button className="small" onClick={exportCsv} disabled={!shown}>
+          <button className="small" onClick={exportCsv} disabled={!shown} title={csvTitle(type)}>
             Export CSV
           </button>
         )}
@@ -162,26 +166,13 @@ export function SnapshotDrawer({
               <ProfileChart data={shown.profiles} colours={colours} names={names} settings={settings} svgRef={svgRef} />
             </>
           ) : (
-            <table className="energy-table" aria-label="Energy table">
-              <thead>
-                <tr>
-                  {shown.table.columns.map((c) => (
-                    <th key={c}>{c}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {shown.table.rows.map((row, i) => (
-                  <tr key={i}>
-                    {row.map((cell, j) => (
-                      <td key={j} className={tableCellClass(j, row.length)}>
-                        {cell}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <EnergyTableView
+              table={shown.table}
+              type={type}
+              reference={reference ? (labels.get(reference) ?? null) : null}
+              colourOf={(id) => branches.get(id)?.colour}
+              selectedId={selectedId}
+            />
           )}
         </div>
       </div>

@@ -73,9 +73,12 @@ export function nameFilter(text: string): (name: string) => boolean {
 
 /** The energy table's cell class (FR-EN-06): the energies are numbers; the last column holds
  * what the frequency job says against the point's role (D154). */
-export function tableCellClass(column: number, columns: number): string | undefined {
-  if (column === columns - 1) return 'check'
-  return column >= 4 ? 'num' : undefined
+/** D177: the energy table's Export CSV tooltip, since the file keeps its own column order. */
+export function csvTitle(type: string): string {
+  return (
+    `The file keeps its own column order (Label, Step, Branch, Level, E, H, G, G_qh, Thermochemistry, ` +
+    `Free species, Δ${type}, Check) and has no Δ${type}‡ of step column`
+  )
 }
 
 // D83, D86, D171: shared by the analyses in the Analyses view.

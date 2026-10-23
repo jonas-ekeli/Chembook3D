@@ -1540,7 +1540,10 @@ export type ProfileRequest = {
   bsse?: boolean
 }
 
-export type EnergyTable = { columns: string[]; rows: string[][]; notes?: EnergyNote[] }
+/** D177: beside a table row, its point, branch, role and a TS row's ΔX‡ of the step (not in the CSV). */
+export type EnergyTableRow = { id: string; branch_id: string | null; is_ts: boolean; barrier: string | null }
+
+export type EnergyTable = { columns: string[]; rows: string[][]; points?: EnergyTableRow[]; notes?: EnergyNote[] }
 
 export type StepPlan = {
   index: number

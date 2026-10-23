@@ -1019,11 +1019,6 @@ fieldset.choice {
   display: grid;
   gap: 0.3rem;
 }
-.check {
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
-}
 dl.values {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -1215,7 +1210,8 @@ legend {
   margin-bottom: 0.2rem;
   padding: 0;
 }
-.check {
+/* A tick box with its label. Only labels: the energy table's td.check is a table cell (D177). */
+label.check {
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -1872,6 +1868,83 @@ table.energy-table td.num {
 .check-mark,
 table.energy-table td.check {
   color: var(--warn);
+}
+
+/* D177: the drawer's energy table, relative energies first, the absolute values grouped and
+   quieter, a header that stays while the rows scroll, the selected node's row highlighted. */
+.energy-caption {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 0.4rem 2px;
+}
+table.drawer-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+table.drawer-table thead {
+  position: sticky;
+  top: -0.5rem; /* the drawer's top padding */
+  z-index: 1;
+}
+table.drawer-table th,
+table.drawer-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--divider);
+  font-variant-numeric: tabular-nums;
+}
+table.drawer-table thead th,
+table.drawer-table thead td {
+  background: var(--hover);
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+table.drawer-table thead th.text {
+  text-align: left;
+}
+table.drawer-table thead tr.group-row > * {
+  background: var(--panel);
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 11px;
+  text-align: center;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+table.drawer-table thead tr.group-row th.abs-group {
+  border-bottom: 1px solid var(--border);
+}
+table.drawer-table tbody tr:hover td {
+  background: var(--hover);
+}
+table.drawer-table tbody tr.selected td {
+  background: var(--accent-soft);
+}
+table.drawer-table td.rel {
+  font-weight: 700;
+  font-size: 14px;
+  text-align: right;
+}
+table.drawer-table td.num {
+  color: var(--text-2);
+}
+table.drawer-table td.abs {
+  color: var(--text-2);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  text-align: right;
+}
+table.drawer-table .ts-mark {
+  margin-left: 6px;
+}
+table.drawer-table .swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: 0;
 }
 
 /* A13: a node that closes a catalytic cycle */

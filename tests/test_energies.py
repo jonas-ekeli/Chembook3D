@@ -16,7 +16,7 @@ import pytest
 from chembook3d import thermochem
 from chembook3d.models import Calculation, CalculationResult
 from chembook3d.parsers import gaussian
-from chembook3d.services import levels
+from chembook3d.services import levels, pathways
 from tests import gaussian_text as g
 from tests.test_gaussian_parser import FIXTURES, MINIMUM, TS, TS_SP
 from tests.test_import import calculations, commit, fixture, import_ts, named, upload
@@ -847,12 +847,41 @@ def test_energy_table_and_csv_show_the_same_values(open_client, energetic):
     assert a1s2[1:4] == ["[2+2] TS", "A1", "Gaussian B3LYP/def2SVP"]
     assert a1s2[4] == "-99.98400000" and a1s2[6] == "-99.96400000"
     assert a1s2[9] == "" and a1s2[10] == f"{(0.024 - 0.008) * KCAL:.2f}"
+    # D177: beside each row its point, branch and role, and a TS row's barrier of its step:
+    # the TS less the lowest point before it since the previous TS, not the reference.
+    assert len(table["points"]) == len(table["rows"])
+    points = dict(zip([row[0] for row in table["rows"]], table["points"], strict=True))
+    assert points["A1-S2"]["id"] == ex.nodes["A1-S2"] and points["A1-S2"]["is_ts"] is True
+    assert points["A1-S2"]["branch_id"] == ex.branches["A1"]
+    before = [
+        float(row[10]) for row in table["rows"][: [r[0] for r in table["rows"]].index("A1-S2")]
+    ]
+    assert points["A1-S2"]["barrier"] == f"{float(a1s2[10]) - min(before):.2f}"
+    assert points["A1-S1"]["is_ts"] is False and points["A1-S1"]["barrier"] is None
 
     response = open_client.post("/api/energies/table.csv", json=body)
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
     rows = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
     assert rows == [table["columns"], *table["rows"]]
+
+
+def test_the_barrier_of_a_step_starts_from_the_lowest_point_since_the_previous_ts():
+    # D177: from the lowest point since the previous TS; unknown when one of them has no value.
+    def points(*values):
+        return [{"is_ts": ts, "relative": v} for ts, v in values]
+
+    found = pathways.step_barriers(
+        points((False, 0.0), (False, -2.0), (True, 17.0), (False, -6.0), (True, 4.0), (True, 9.0))
+    )
+    assert found == [None, None, 19.0, None, 10.0, None]
+    assert pathways.step_barriers(points((True, 5.0), (False, 0.0))) == [None, None]
+    assert pathways.step_barriers(points((False, None), (False, 1.0), (True, 5.0))) == [
+        None,
+        None,
+        None,
+    ]
+    assert pathways.step_barriers(points((False, 1.0), (True, None))) == [None, None]
 
 
 def test_overlaid_profiles_share_one_reference(open_client, energetic):
