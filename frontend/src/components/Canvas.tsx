@@ -14,6 +14,7 @@ import {
   Panel,
   Position,
   ReactFlow,
+  useConnection,
   useReactFlow,
   useStore,
   useStoreApi,
@@ -101,8 +102,9 @@ function SideHandles() {
   )
 }
 
-const NODE_WIDTH = 176
-const MEMBER_CELL = { compact: { w: 196, h: 86 }, energy: { w: 196, h: 86 }, structure: { w: 196, h: 196 } }
+/** D175: wide enough for the label and the energy in one row at 14 and 15 px. */
+const NODE_WIDTH = 188
+const MEMBER_CELL = { compact: { w: 208, h: 86 }, energy: { w: 208, h: 86 }, structure: { w: 208, h: 196 } }
 
 /** What the canvas shows of the energy view (FR-CAN-03, FR-CAN-04 energy mode). */
 export type CanvasEnergy = {
@@ -113,8 +115,29 @@ export type CanvasEnergy = {
   settings: Settings | null
 }
 
-/** "ΔG 12.34", or "n/a" with its reason as a tooltip. */
+/** An edge's "ΔG 12.34", or "n/a" with its reason as a tooltip. */
 type EnergyText = { text: string; title: string }
+/** D175: a card's energy, "ΔG" and the number apart. No number is a quiet "—", or a short
+ * `missing` note when every card lacks one for the same reason (no reference chosen). */
+type CardEnergy = { type: string; value: string | null; title: string; missing?: string }
+
+/** D175: the energy on a card: a small muted "ΔG", the number bold with a real minus sign. */
+function CardEnergyText({ energy, below }: { energy: CardEnergy; below: boolean }) {
+  return (
+    <span
+      className={`cnode-energy${energy.value === null ? ' na' : ''}${energy.missing ? ' note' : ''}${below ? ' below-structure' : ''}`}
+      title={energy.title}
+    >
+      {energy.value === null ? (
+        (energy.missing ?? '—')
+      ) : (
+        <>
+          <span className="cnode-energy-type">{energy.type}</span> {energy.value.replace(/^-/, '−')}
+        </>
+      )}
+    </span>
+  )
+}
 const GROUP_HEADER = 48
 
 type StructureData = {
@@ -124,7 +147,7 @@ type StructureData = {
   mode: ViewMode
   faded: boolean
   representative: boolean
-  energy: EnergyText | null
+  energy: CardEnergy | null
   /** The group this node is drawn in place of, when the filters leave it alone (A23). */
   standsFor?: string
   /** D85, D87: the notes on the card, on its corners or floating. */
@@ -150,7 +173,7 @@ type GroupData = {
   onLayout: (id: string, layout: GroupLayout) => void
   /** D89: opens the member order list; none in the read-only copy. */
   onOrder?: (id: string) => void
-  energy: EnergyText | null
+  energy: CardEnergy | null
   /** D85: the notes on its members, shown as a count while it is collapsed. */
   memberNotes: Note[]
   /** D158: each member's warnings, "label: code: message", marked on the group's head. */
@@ -182,19 +205,16 @@ const PathChipClick = createContext<((transitionId: string) => void) | null>(nul
 const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<FlowNode<StructureData>>) {
   const { node, colour, stepName, mode, faded, representative, energy } = data
   const warnings = node.warnings.map((w) => `${w.code}: ${w.message}`).join('\n')
+  // D175: a planned node's card is dashed, so it reads apart from a computed one at a glance.
+  const planned = node.status === 'planned'
   return (
     <div
-      className={`cnode${selected ? ' selected' : ''}${faded ? ' faded' : ''}${representative ? ' representative' : ''}`}
+      className={`cnode${selected ? ' selected' : ''}${faded ? ' faded' : ''}${planned ? ' planned' : ''}${representative ? ' representative' : ''}`}
       style={{ ['--branch' as string]: colour }}
       data-testid="canvas-node"
     >
       <SideHandles />
       <div className="cnode-head">
-        {node.role === 'transition_state' && (
-          <span className="ts-mark" title="Transition state">
-            ‡
-          </span>
-        )}
         <span className="cnode-label">{node.label || <em>Untitled node</em>}</span>
         {representative && (
           <span className="rep-mark" title="Representative of its group">
@@ -206,15 +226,17 @@ const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<
             ⚠
           </span>
         )}
+        {node.role === 'transition_state' && (
+          <span className="ts-mark" title="Transition state">
+            TS
+          </span>
+        )}
+        {energy && mode !== 'structure' && <CardEnergyText energy={energy} below={false} />}
       </div>
       {mode === 'structure' && (
-        <MoleculeSketch xyz={node.xyz} rotation={node.view_rotation} width={NODE_WIDTH - 16} height={120} />
+        <MoleculeSketch xyz={node.xyz} rotation={node.view_rotation} width={NODE_WIDTH - 24} height={120} />
       )}
-      {energy && (
-        <div className={`cnode-energy${mode === 'structure' ? ' below-structure' : ''}`} title={energy.title}>
-          {energy.text}
-        </div>
-      )}
+      {energy && mode === 'structure' && <CardEnergyText energy={energy} below />}
       <div className="cnode-meta">
         <span className={`status status-${node.status}`}>{STATUS_LABEL[node.status]}</span>
         {stepName && <span className="cnode-step">{stepName}</span>}
@@ -247,12 +269,12 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
     >
       <SideHandles />
       <div className="cgroup-head">
+        <span className="cnode-label">{group.label || <em>Group</em>}</span>
         {ts && (
           <span className="ts-mark" title="Transition states">
-            ‡
+            TS
           </span>
         )}
-        <span className="cnode-label">{group.label || <em>Group</em>}</span>
         <span className="muted small">
           {memberCount} member{memberCount === 1 ? '' : 's'}
         </span>
@@ -314,13 +336,9 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
         </button>
       </div>
       {!expanded && mode === 'structure' && representativeXyz && (
-        <MoleculeSketch xyz={representativeXyz} rotation={representativeRotation} width={NODE_WIDTH - 16} height={120} />
+        <MoleculeSketch xyz={representativeXyz} rotation={representativeRotation} width={NODE_WIDTH - 24} height={120} />
       )}
-      {!expanded && energy && (
-        <div className={`cnode-energy${mode === 'structure' ? ' below-structure' : ''}`} title={energy.title}>
-          {energy.text}
-        </div>
-      )}
+      {!expanded && energy && <CardEnergyText energy={energy} below={mode === 'structure'} />}
       {!expanded && (
         <div className="cnode-meta">
           <span className="small">
@@ -621,6 +639,8 @@ function CanvasView({
   )
   const wrapper = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState(false)
+  // D175: handles show only on a hovered or selected card, and on every card while an arrow is drawn.
+  const connecting = useConnection((connection) => connection.inProgress)
   const [exportOpen, setExportOpen] = useState(false)
 
   const colours = useMemo(() => new Map(data.branches.map((b) => [b.id, b.colour])), [data.branches])
@@ -647,20 +667,21 @@ function CanvasView({
     // D43: in energy mode a node shows ΔX from the reference node, never an absolute value.
     // D72: the server balances it with every free species that joined or left between the
     // reference and the node, so it matches the profile along that route.
-    const nodeEnergy = (id: string): EnergyText | null => {
+    const nodeEnergy = (id: string): CardEnergy | null => {
       const energy = nodeEnergySource
       if (!energy?.view) return null
-      if (!energy.referenceId) return { text: `Δ${energy.type}: no reference`, title: 'Choose a reference node' }
-      if (energy.view.reference_id !== energy.referenceId) return { text: `Δ${energy.type} …`, title: 'Updating' }
+      const type = `Δ${energy.type}`
+      if (!energy.referenceId) return { type, value: null, title: 'Choose a reference node', missing: 'no reference' }
+      if (energy.view.reference_id !== energy.referenceId) return { type, value: '…', title: 'Updating' }
       const own = energy.view.relative[id]
-      if (own?.value == null) return { text: `Δ${energy.type} n/a`, title: own?.message ?? 'no value' }
+      if (own?.value == null) return { type, value: null, title: `${type} n/a: ${own?.message ?? 'no value'}` }
       const unit = energy.settings?.energy_unit ?? 'kcal/mol'
       const title = own.species.length
         ? `${unit}, balanced with ${balanceText(own.species)}`
         : own.joined
           ? unit
           : `${unit}; not joined to the reference by transitions, so no free species are counted`
-      return { text: `Δ${energy.type} ${formatDelta(own.value, energy.settings)}`, title }
+      return { type, value: formatDelta(own.value, energy.settings), title }
     }
     const hidden = {
       branches: new Set(filters.branches),
@@ -1022,7 +1043,7 @@ function CanvasView({
   return (
     <div
       ref={wrapper}
-      className={`canvas${dragging ? ' dragging' : ''}${readOnly ? ' read-only' : ''}`}
+      className={`canvas${dragging ? ' dragging' : ''}${connecting ? ' connecting' : ''}${readOnly ? ' read-only' : ''}`}
       aria-label="Canvas"
       onDoubleClick={(event: MouseEvent) => {
         if (readOnly) return
