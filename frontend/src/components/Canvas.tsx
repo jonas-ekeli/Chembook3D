@@ -28,6 +28,7 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { createPortal } from 'react-dom'
 import { toPng, toSvg } from 'html-to-image'
 import {
   createContext,
@@ -66,6 +67,7 @@ import { MoleculeSketch } from './MoleculeSketch'
 import { CardNotes, type NoteActions } from './CanvasNotes'
 import { noteTitle } from '../notes'
 import { Icon } from '../icons'
+import { Menu } from './MoreMenu'
 import { cardEnergy, minus, type CanvasEnergy, type CardEnergy } from '../cardEnergy'
 import { curveOf, LabelPlacer, leaderEnd, pointAt, type Curve, type Rect } from '../labelLayout'
 
@@ -605,6 +607,7 @@ function CanvasView({
   onLayoutNote,
   onOpenPaths,
   readOnly = false,
+  tools,
 }: {
   data: CanvasData
   mode: ViewMode
@@ -634,6 +637,9 @@ function CanvasView({
   onOpenPaths?: (transitionId: string) => void
   /** The shared read-only copy (D79): nothing can be moved, connected, added or dropped. */
   readOnly?: boolean
+  /** D180: where Fit and Export go (the app's canvas toolbar); null until it is there. Without
+   * it they float in the canvas's top-right corner (the read-only copy). */
+  tools?: HTMLElement | null
 }) {
   const flow = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
@@ -655,7 +661,6 @@ function CanvasView({
   const [dragging, setDragging] = useState(false)
   // D175: handles show only on a hovered or selected card, and on every card while an arrow is drawn.
   const connecting = useConnection((connection) => connection.inProgress)
-  const [exportOpen, setExportOpen] = useState(false)
 
   const colours = useMemo(() => new Map(data.branches.map((b) => [b.id, b.colour])), [data.branches])
   // D85: one list per node, kept while the notes do not change, so a collapsed note stays so.
@@ -1023,7 +1028,6 @@ function CanvasView({
     flow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
 
   const exportImage = async (what: 'viewport' | 'full', format: 'png' | 'svg') => {
-    setExportOpen(false)
     const viewport = wrapper.current?.querySelector<HTMLElement>('.react-flow__viewport')
     if (!viewport || !wrapper.current) return
     let width = wrapper.current.clientWidth
@@ -1053,6 +1057,39 @@ function CanvasView({
       onError(`Could not export the image: ${String(err)}`)
     }
   }
+
+  // UI5 (D174): icon and short label, the full name in the tooltip. D180: in the app they sit in
+  // the canvas toolbar above, drawn there through a portal so they keep this canvas's view.
+  const toolClass = tools === undefined ? undefined : 'quiet'
+  const canvasTools = (
+    <>
+      <button
+        className={toolClass}
+        title="Fit to selection"
+        aria-label="Fit to selection"
+        onClick={() => flow.fitView({ nodes: flow.getNodes().filter((n) => n.selected), duration: 300, maxZoom: 1.5 })}
+      >
+        <Icon name="fit" />
+        <span className="tb-label">Fit</span>
+      </button>
+      <Menu
+        label="Export image"
+        buttonClass={toolClass}
+        buttonLabel="Export image ▾"
+        title="Export image"
+        items={[
+          { label: 'Visible area as PNG', onSelect: () => exportImage('viewport', 'png') },
+          { label: 'Whole canvas as PNG', onSelect: () => exportImage('full', 'png') },
+          { label: 'Visible area as SVG', onSelect: () => exportImage('viewport', 'svg') },
+          { label: 'Whole canvas as SVG', onSelect: () => exportImage('full', 'svg') },
+        ]}
+      >
+        <Icon name="download" />
+        <span className="tb-label">Export</span>
+        <Icon name="chevron" />
+      </Menu>
+    </>
+  )
 
   const dropTarget = (event: DragEvent) => {
     const element = (event.target as HTMLElement).closest('.react-flow__node')
@@ -1148,45 +1185,11 @@ function CanvasView({
         <Background gap={24} size={1} />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable style={{ width: 150, height: 100 }} nodeColor={(n) => ((n.data as { colour?: string }).colour ?? NO_BRANCH)} />
-        <Panel position="top-right" className="canvas-tools">
-          {/* UI5 (D174): icon and short label on the canvas, the full name in the tooltip */}
-          <button
-            title="Fit to selection"
-            aria-label="Fit to selection"
-            onClick={() => flow.fitView({ nodes: flow.getNodes().filter((n) => n.selected), duration: 300, maxZoom: 1.5 })}
-          >
-            <Icon name="fit" />
-            Fit
-          </button>
-          <div className="menu">
-            <button
-              title="Export image"
-              aria-label="Export image ▾"
-              aria-haspopup="menu"
-              aria-expanded={exportOpen}
-              onClick={() => setExportOpen(!exportOpen)}
-            >
-              <Icon name="download" />
-              Export ▾
-            </button>
-            {exportOpen && (
-              <div role="menu" className="menu-list">
-                <button role="menuitem" onClick={() => exportImage('viewport', 'png')}>
-                  Visible area as PNG
-                </button>
-                <button role="menuitem" onClick={() => exportImage('full', 'png')}>
-                  Whole canvas as PNG
-                </button>
-                <button role="menuitem" onClick={() => exportImage('viewport', 'svg')}>
-                  Visible area as SVG
-                </button>
-                <button role="menuitem" onClick={() => exportImage('full', 'svg')}>
-                  Whole canvas as SVG
-                </button>
-              </div>
-            )}
-          </div>
-        </Panel>
+        {tools === undefined && (
+          <Panel position="top-right" className="canvas-tools">
+            {canvasTools}
+          </Panel>
+        )}
         {data.nodes.length === 0 && data.groups.length === 0 && (
           <Panel position="top-center" className="canvas-empty muted">
             {readOnly ? 'This investigation has no nodes.' : 'Double-click to add a node, or drop output files here.'}
@@ -1194,6 +1197,7 @@ function CanvasView({
         )}
       </ReactFlow>
       </PathChipClick.Provider>
+      {tools && createPortal(canvasTools, tools)}
     </div>
   )
 }

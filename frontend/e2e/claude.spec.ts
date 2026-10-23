@@ -19,7 +19,7 @@ test('Claude works in the open investigation, and deletes only when confirmed', 
   const folder = join(E2E_DIR, `claude-${Date.now()}`)
   await page.request.post('/api/investigations', { data: { folder, name: 'Claude' } })
   await page.goto('/')
-  await expect(page.getByRole('button', { name: 'Close' })).toBeVisible()
+  await expect(page.locator('header .investigation')).toHaveText('Claude')
 
   // A change made elsewhere appears without reloading the page.
   const made = await page.request.post('/api/nodes', { data: { label: 'From Claude', pos_x: 0, pos_y: 0 }, headers: CLAUDE })

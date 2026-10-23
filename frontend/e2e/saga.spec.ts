@@ -1,6 +1,7 @@
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 import { forgetView } from './demoView.ts'
 
 // D122, T-SSH-06: log in to Saga (here tests/fake_ssh_server.py on port 8767, see
@@ -135,7 +136,7 @@ test('log in to Saga with password and code, and come back to the same shell', a
 })
 
 async function newInvestigation(page: Page, name: string) {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

@@ -1,5 +1,6 @@
 import { join, resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { showOverview, startPage } from './appBar.ts'
 import { forgetView } from './demoView.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
@@ -18,7 +19,7 @@ async function openDemo(page: Page) {
 }
 
 async function newInvestigation(page: Page, name: string) {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
@@ -56,16 +57,16 @@ test('the resume overview lists where the investigation stands and opens each it
   await planned.getByRole('button', { name: 'A-S2', exact: true }).click()
   await expect(page.getByLabel('Node inspector').getByRole('heading', { name: 'A-S2' })).toBeVisible()
 
-  await page.getByRole('navigation', { name: 'Views' }).getByRole('button', { name: 'Overview' }).click()
+  await showOverview(page)
   await direct.getByRole('button', { name: 'A-S1 → A-S3' }).click()
   await expect(page.getByLabel('Transition inspector')).toBeVisible()
 
-  await page.getByRole('navigation', { name: 'Views' }).getByRole('button', { name: 'Overview' }).click()
+  await showOverview(page)
   await branches.getByRole('button', { name: 'B', exact: true }).click()
   await expect(page.getByLabel('Branch inspector').getByRole('heading', { name: 'B' })).toBeVisible()
 
   // Recent changes filter by date.
-  await page.getByRole('navigation', { name: 'Views' }).getByRole('button', { name: 'Overview' }).click()
+  await showOverview(page)
   await overview.getByLabel('Changes since').fill('2999-01-01')
   await expect(overview.getByText('No changes recorded yet.')).toBeVisible()
 })

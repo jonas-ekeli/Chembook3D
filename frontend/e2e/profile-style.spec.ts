@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 import { forgetView } from './demoView.ts'
 
 // T-UI-11, FR-EN-10, FR-EN-11, D106: the profile style with its presets and preview, the saved
@@ -10,7 +11,7 @@ const E2E_DIR = process.env.E2E_DIR!
 async function openDemo(page: Page) {
   await forgetView(page.request, join(E2E_DIR, 'demo'))
   await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^Open/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

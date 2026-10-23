@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 
 // T-UI-03, FR-3D-04, FR-3D-07, D80: overlays on typed atoms, saved as an alignment set.
 const E2E_DIR = process.env.E2E_DIR!
@@ -24,7 +25,7 @@ function canvasNode(page: Page, label: string): Locator {
 }
 
 async function newInvestigation(page: Page, name: string) {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

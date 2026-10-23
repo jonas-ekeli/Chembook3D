@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { investigationCommand, startPage } from './appBar.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
 const FIXTURES = resolve(import.meta.dirname, '..', '..', 'tests', 'fixtures', 'gaussian')
@@ -8,7 +9,7 @@ const FIXTURES = resolve(import.meta.dirname, '..', '..', 'tests', 'fixtures', '
 const CUSTOM = join(E2E_DIR, 'gaussian')
 
 async function newInvestigation(page: Page, name: string) {
-  await page.goto('/')
+  await startPage(page)
   const button = page.getByRole('button', { name: /^New/ }).first()
   await button.click()
   const dialog = page.getByRole('dialog')
@@ -97,8 +98,8 @@ test('a saved basis set can be inspected and downloaded', async ({ page }) => {
   await expect(elements.getByRole('row').nth(3)).toContainText('28 core electrons')
   await dialog.getByRole('button', { name: 'Close' }).click()
 
-  // from the top bar, with every function and the file
-  await page.getByRole('button', { name: 'Basis sets' }).click()
+  // from the investigation menu, with every function and the file
+  await investigationCommand(page, 'Basis sets')
   dialog = page.getByRole('dialog', { name: 'Custom basis sets' })
   await expect(dialog.getByRole('list', { name: 'Saved basis sets' })).toContainText('H C I')
   await elementsRow(dialog, 'I').getByRole('button', { name: 'Show functions' }).click()

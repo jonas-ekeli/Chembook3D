@@ -1,20 +1,33 @@
 // D107 (FR-RUN-04): the Shut down button, the page a tab shows once the server has stopped, and
 // the launcher's notices.
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { api, type ShutdownInfo } from '../api'
 import { shutDown, useLifecycle, type Stopped } from '../lifecycle'
 import { Modal } from './Modal'
 
+/** The start page's button (D180: with an investigation open, the investigation menu's last item). */
 export function ShutDownButton() {
+  const [asking, setAsking] = useState(false)
+  return (
+    <>
+      <button onClick={() => setAsking(true)} title="Close the investigation and stop Chembook3D">
+        Shut down
+      </button>
+      {asking && <ShutDownDialog onClose={() => setAsking(false)} />}
+    </>
+  )
+}
+
+/** Asks before shutting down, saying what happens to the investigation and the Claude panel. */
+export function ShutDownDialog({ onClose }: { onClose: () => void }) {
   const [info, setInfo] = useState<ShutdownInfo | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const ask = () => {
-    setError(null)
+  useEffect(() => {
     api.shutdownInfo().then(setInfo, (err: unknown) => setError(String(err)))
-  }
+  }, [])
   const confirm = () => {
     setBusy(true)
     shutDown().catch((err: unknown) => {
@@ -23,70 +36,56 @@ export function ShutDownButton() {
     })
   }
 
+  if (!info && !error) return null
   return (
-    <>
-      <button onClick={ask} title="Close the investigation and stop Chembook3D">
-        Shut down
-      </button>
-      {(info || error) && (
-        <Modal
-          title="Shut down Chembook3D?"
-          onClose={() => {
-            if (busy) return
-            setInfo(null)
-            setError(null)
-          }}
-          actions={
-            <>
-              <button
-                onClick={() => {
-                  setInfo(null)
-                  setError(null)
-                }}
-                disabled={busy}
-              >
-                Cancel
-              </button>
-              <button className="danger" onClick={confirm} disabled={busy || !info}>
-                {busy ? (info?.linked ? 'Pushing and shutting down…' : 'Shutting down…') : 'Shut down'}
-              </button>
-            </>
-          }
-        >
-          {info && (
-            <>
-              <p>
-                {info.investigation
-                  ? info.linked
-                    ? 'The investigation is closed and pushed to GitHub, then Chembook3D stops.'
-                    : 'The investigation is closed, then Chembook3D stops.'
-                  : 'Chembook3D stops.'}
-              </p>
-              {info.claude_panel && (
-                <p>
-                  The conversation in the Claude panel stops too. “Continue last conversation” picks it up
-                  next time.
-                </p>
-              )}
-              <p className="muted">
-                {info.launched ? (
-                  'Start it again with the Chembook3D shortcut.'
-                ) : (
-                  <>
-                    Start it again with <code>uv run chembook3d</code>.
-                  </>
-                )}
-              </p>
-            </>
-          )}
-          {error && (
-            <p role="alert" className="error">
-              {error}
+    <Modal
+      title="Shut down Chembook3D?"
+      onClose={() => {
+        if (!busy) onClose()
+      }}
+      actions={
+        <>
+          <button onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button className="danger" onClick={confirm} disabled={busy || !info}>
+            {busy ? (info?.linked ? 'Pushing and shutting down…' : 'Shutting down…') : 'Shut down'}
+          </button>
+        </>
+      }
+    >
+      {info && (
+        <>
+          <p>
+            {info.investigation
+              ? info.linked
+                ? 'The investigation is closed and pushed to GitHub, then Chembook3D stops.'
+                : 'The investigation is closed, then Chembook3D stops.'
+              : 'Chembook3D stops.'}
+          </p>
+          {info.claude_panel && (
+            <p>
+              The conversation in the Claude panel stops too. “Continue last conversation” picks it up
+              next time.
             </p>
           )}
-        </Modal>
+          <p className="muted">
+            {info.launched ? (
+              'Start it again with the Chembook3D shortcut.'
+            ) : (
+              <>
+                Start it again with <code>uv run chembook3d</code>.
+              </>
+            )}
+          </p>
+        </>
       )}
-    </>
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+    </Modal>
   )
 }
 

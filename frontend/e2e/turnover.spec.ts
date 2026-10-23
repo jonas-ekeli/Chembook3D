@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 import { forgetView } from './demoView.ts'
 
 // T-UI-07, FR-TOF-01…05, D86: a turnover from a closed pathway in the energy drawer, its TDTS
@@ -9,7 +10,7 @@ const E2E_DIR = process.env.E2E_DIR!
 async function openDemo(page: Page) {
   await forgetView(page.request, join(E2E_DIR, 'demo'))
   await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^Open/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

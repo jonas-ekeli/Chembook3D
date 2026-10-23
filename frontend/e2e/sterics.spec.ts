@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 
 // T-UI-05, FR-STER-01…05, D81: a steric profile set up on one node, shared with a copy of it,
 // and compared with maps, a difference map and a CSV.
@@ -43,7 +44,7 @@ async function near(colour: Promise<number[]>, expected: number[]): Promise<bool
 }
 
 async function newInvestigation(page: Page, name: string) {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

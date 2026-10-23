@@ -9,6 +9,8 @@ test('Shut down asks first, then the tab says Chembook3D has shut down', async (
       ? route.fulfill({ json: { launched: true, investigation: true, linked: true, claude_panel: true } })
       : route.fulfill({ json: { sync: 'Pushed to GitHub.' } }),
   )
+  // The start page has the button; with an investigation open it is in the investigation menu (D180).
+  await page.request.post('/api/investigations/close')
   await page.goto('/')
   const button = page.getByRole('button', { name: 'Shut down', exact: true })
   await button.click()

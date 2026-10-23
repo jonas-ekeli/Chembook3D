@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 import { forgetView } from './demoView.ts'
 
 // T-UI-54, D177 (UI4): the drawer's energy table puts the relative energies first: Label (with a
@@ -13,7 +14,7 @@ async function openDemo(page: Page) {
   await forgetView(page.request, join(E2E_DIR, 'demo'))
   // Values below are in kcal/mol; an earlier test may have left another unit set.
   await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^Open/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 import { forgetView } from './demoView.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
@@ -9,7 +10,7 @@ async function openDemo(page: Page) {
   await forgetView(page.request, join(E2E_DIR, 'demo'))
   // Values below are in kcal/mol; an earlier test may have left another unit set.
   await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^Open/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
@@ -52,9 +53,9 @@ test('energy view: one level and type, ΔG on edges, energy mode', async ({ page
 
   // FR-EN-02: ΔG = G(target) − G(source) on each edge; A-S1 → A-S2 is 14.8 − (−3.2).
   await expect(page.locator('.edge-energy', { hasText: 'ΔG‡ 18.00' })).toBeVisible()
-  await view.getByLabel('Energies on edges').uncheck()
+  await view.getByLabel('Show on arrows').uncheck()
   await expect(page.locator('.edge-energy')).toHaveCount(0)
-  await view.getByLabel('Energies on edges').check()
+  await view.getByLabel('Show on arrows').check()
 
   // D43: energy mode shows ΔX from the reference node the user picks.
   // Without a reference, structure mode shows no energies at all.

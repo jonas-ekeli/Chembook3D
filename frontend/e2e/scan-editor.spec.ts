@@ -1,12 +1,13 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 
 const E2E_DIR = process.env.E2E_DIR!
 const FIXTURES = resolve(import.meta.dirname, '..', '..', 'tests', 'fixtures')
 
 async function newInvestigation(page: Page, name: string) {
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
@@ -22,7 +23,7 @@ test('the scan editor reverses, trims, splits and saves a scan, with undo', asyn
   // D135, T-UI-37
   test.slow()
   await newInvestigation(page, 'Scan editor')
-  await page.getByRole('button', { name: 'Scan editor' }).click()
+  await page.getByRole('button', { name: 'Scan editor', exact: true }).click()
   const editor = page.getByRole('dialog', { name: 'Scan editor' })
   await expect(editor.getByText('No scans yet')).toBeVisible()
 
@@ -88,7 +89,7 @@ test('the scan editor reverses, trims, splits and saves a scan, with undo', asyn
 
   // Opened again, the saved file is one scan with the same seven points.
   await editor.getByRole('button', { name: 'Close' }).click()
-  await page.getByRole('button', { name: 'Scan editor' }).click()
+  await page.getByRole('button', { name: 'Scan editor', exact: true }).click()
   const again = page.getByRole('dialog', { name: 'Scan editor' })
   await again.getByRole('button', { name: 'Add files…' }).click()
   await expect(again.getByLabel('Folder path')).not.toHaveValue('')
@@ -145,7 +146,7 @@ test('a finer scan replaces the coarse points, and scans are compared at one coo
   // D136, T-UI-38
   test.slow()
   await newInvestigation(page, 'Finer scan')
-  await page.getByRole('button', { name: 'Scan editor' }).click()
+  await page.getByRole('button', { name: 'Scan editor', exact: true }).click()
   const editor = page.getByRole('dialog', { name: 'Scan editor' })
   await editor.getByRole('button', { name: 'Add files…' }).click()
   await expect(editor.getByLabel('Folder path')).not.toHaveValue('')
@@ -175,7 +176,7 @@ test('a finer scan replaces the coarse points, and scans are compared at one coo
   writeFileSync(join(folder, 'coarse.xyz'), [0, 2, 4, 6].flatMap((k) => blocks[k]).join('\n') + '\n')
   await editor.getByRole('button', { name: 'Close' }).click()
 
-  await page.getByRole('button', { name: 'Scan editor' }).click()
+  await page.getByRole('button', { name: 'Scan editor', exact: true }).click()
   const again = page.getByRole('dialog', { name: 'Scan editor' })
   await again.getByRole('button', { name: 'Add files…' }).click()
   await expect(again.getByLabel('Folder path')).not.toHaveValue('')
@@ -224,7 +225,7 @@ test('a joined scan is imported and shown on an edge, naming its program', async
   await page.reload()
   await expect(page.locator('.react-flow__node')).toHaveCount(2)
 
-  await page.getByRole('button', { name: 'Scan editor' }).click()
+  await page.getByRole('button', { name: 'Scan editor', exact: true }).click()
   const editor = page.getByRole('dialog', { name: 'Scan editor' })
   await editor.getByRole('button', { name: 'Add files…' }).click()
   await expect(editor.getByLabel('Folder path')).not.toHaveValue('')

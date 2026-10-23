@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
+import { startPage } from './appBar.ts'
 
 // T-UI-19, D115: a scan path that came back from its cloud session is imported by itself as a
 // node between its two ends, shown as its edge's chip (D121), and the Cloud jobs list shows where each job stands.
@@ -46,7 +47,7 @@ test('a finished scan path is imported by itself and listed under Cloud jobs', a
   git(remote, 'init', '-q', '--bare')
   git(remote, 'symbolic-ref', 'HEAD', 'refs/heads/main')
 
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()

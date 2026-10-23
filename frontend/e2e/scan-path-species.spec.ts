@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { startPage } from './appBar.ts'
 
 // T-UI-23, T-UI-24, D120: a scan path along an edge where a free species joins, shown apart and
 // sent as a job. The complex is made up: a ruthenium alkylidene with two chlorides, and ethylene
@@ -46,7 +47,7 @@ function canvasNode(page: Page, label: string): Locator {
 
 test('a species that joins is shown apart and can be set farther out', async ({ page }) => {
   test.slow() // software WebGL is slow on the Windows runners
-  await page.goto('/')
+  await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const created = page.getByRole('dialog')
   await created.getByLabel('Folder path').fill(E2E_DIR)
