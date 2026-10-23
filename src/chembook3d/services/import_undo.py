@@ -34,6 +34,7 @@ from chembook3d.models import (
     AlignmentSetAtoms,
     Calculation,
     CalculationType,
+    ConformerEquilibrium,
     GroupNode,
     HistoryEntry,
     Node,
@@ -410,6 +411,11 @@ def _depends_on_created(
         blockers.append("A selectivity counts what this import made")
     if any(set(t.path or []) & set(ends) for t in session.scalars(select(Turnover))):
         blockers.append("A turnover's pathway goes through what this import made")
+    if any(
+        {m["id"] for m in e.members or []} & set(ends)
+        for e in session.scalars(select(ConformerEquilibrium))
+    ):
+        blockers.append("A conformer equilibrium counts what this import made")  # D171
     if session.scalars(
         select(StericProfileAtoms).where(StericProfileAtoms.node_id.in_(ids))
     ).first():

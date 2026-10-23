@@ -5,6 +5,7 @@ import {
   energyTypeName,
   formatDelta,
   type Canvas,
+  type Equilibrium,
   type EnergyOptions,
   type EnergyType,
   type Selectivity,
@@ -16,62 +17,23 @@ import {
   type TurnoverFields,
   type TurnoverResult,
 } from '../api'
-import { closesCycle, download } from '../util'
+import { closesCycle, download, errorText, scientific } from '../util'
 import { ProfileChart } from './ProfileChart'
 import { Notes, TextField } from './Fields'
 import { Modal } from './Modal'
+import { NumberInput } from './AnalysisParts'
+import { EquilibriumEditor } from './Equilibrium'
 
 // D83: the Analyses view lists the saved selectivities (S7); each one compares outcomes
 // realised by TS nodes or groups at one level and energy type (S1–S6).
 // D86: it also lists the turnovers, each the TOF of one closed cycle (T1–T5).
+// D171: and the conformer equilibria, each the populations and rates of a set of conformers.
 
 const ENERGY_TYPES: EnergyType[] = ['E', 'H', 'G', 'G_qh']
 const METHODS = { boltzmann: 'Boltzmann sum', lowest: 'Lowest TS only' } as const
 
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
 function percent(value: number | null): string {
   return value === null ? 'n/a' : `${value.toFixed(1)} %`
-}
-
-/** A number that saves when it loses focus; empty means null. */
-function NumberInput({
-  label,
-  value,
-  placeholder,
-  positive = false,
-  onCommit,
-}: {
-  label: string
-  value: number | null
-  placeholder?: string
-  positive?: boolean
-  onCommit: (value: number | null) => void
-}) {
-  const [draft, setDraft] = useState(value === null ? '' : String(value))
-  const parsed = Number(draft)
-  const valid = draft.trim() === '' || (Number.isFinite(parsed) && (positive ? parsed > 0 : parsed >= 0))
-  const commit = () => {
-    if (!valid) return
-    const next = draft.trim() === '' ? null : parsed
-    if (next !== value) onCommit(next)
-  }
-  return (
-    <input
-      aria-label={label}
-      inputMode="decimal"
-      value={draft}
-      placeholder={placeholder}
-      aria-invalid={!valid}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') commit()
-      }}
-    />
-  )
 }
 
 /** S1: an outcome is one or more TS nodes, or groups whose members all count. */
@@ -591,35 +553,6 @@ function SelectivityEditor({
   )
 }
 
-const SUPERSCRIPT: Record<string, string> = {
-  '-': '⁻',
-  '0': '⁰',
-  '1': '¹',
-  '2': '²',
-  '3': '³',
-  '4': '⁴',
-  '5': '⁵',
-  '6': '⁶',
-  '7': '⁷',
-  '8': '⁸',
-  '9': '⁹',
-}
-
-/** 1234 as "1.23 × 10³"; between 0.01 and 1000 as a plain number. */
-function scientific(value: number | null): string {
-  if (value === null) return 'n/a'
-  if (!Number.isFinite(value)) return value > 0 ? '∞' : '−∞'
-  if (value === 0) return '0'
-  const size = Math.abs(value)
-  if (size >= 0.01 && size < 1000) return value.toPrecision(3)
-  const [mantissa, exponent] = value.toExponential(2).split('e')
-  const power = String(Number(exponent))
-    .split('')
-    .map((c) => SUPERSCRIPT[c] ?? c)
-    .join('')
-  return `${mantissa} × 10${power}`
-}
-
 function TurnoverResultView({
   turnover,
   result,
@@ -1010,15 +943,17 @@ export function AnalysesView({
 }) {
   const [list, setList] = useState<Selectivity[] | null>(null)
   const [turnovers, setTurnovers] = useState<Turnover[] | null>(null)
+  const [equilibria, setEquilibria] = useState<Equilibrium[] | null>(null)
   const [chosen, setChosen] = useState<string | null>(openId)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(
     () =>
-      Promise.all([api.selectivities(), api.turnovers()]).then(
-        ([selectivities, cycles]) => {
+      Promise.all([api.selectivities(), api.turnovers(), api.equilibria()]).then(
+        ([selectivities, cycles, sets]) => {
           setList(selectivities)
           setTurnovers(cycles)
+          setEquilibria(sets)
         },
         (err: unknown) => setError(errorText(err)),
       ),
@@ -1067,11 +1002,30 @@ export function AnalysesView({
     )
   }
 
-  const shownTurnover = turnovers?.find((t) => t.id === chosen) ?? null
-  const shown = shownTurnover ? null : (list?.find((s) => s.id === chosen) ?? list?.[0] ?? null)
-  const fallbackTurnover = shown || shownTurnover ? null : (turnovers?.[0] ?? null)
+  const createEquilibrium = () => {
+    const name = freeName(
+      new Set((equilibria ?? []).map((e) => e.name)),
+      'Conformer equilibrium',
+      (equilibria?.length ?? 0) + 1,
+    )
+    api.createEquilibrium({ name, level: defaultLevel }).then(
+      (created) => {
+        setEquilibria((current) => [...(current ?? []), created])
+        setChosen(created.id)
+        onChanged()
+      },
+      (err: unknown) => setError(errorText(err)),
+    )
+  }
+
+  const shownEquilibrium = equilibria?.find((e) => e.id === chosen) ?? null
+  const shownTurnover = shownEquilibrium ? null : (turnovers?.find((t) => t.id === chosen) ?? null)
+  const shown =
+    shownTurnover || shownEquilibrium ? null : (list?.find((s) => s.id === chosen) ?? list?.[0] ?? null)
+  const fallbackTurnover = shown || shownTurnover || shownEquilibrium ? null : (turnovers?.[0] ?? null)
   const turnover = shownTurnover ?? fallbackTurnover
-  const loaded = list !== null && turnovers !== null
+  const equilibrium = shownEquilibrium ?? (shown || turnover ? null : (equilibria?.[0] ?? null))
+  const loaded = list !== null && turnovers !== null && equilibria !== null
   return (
     <div className="workspace analyses">
       <nav className="outline" aria-label="Analyses">
@@ -1121,6 +1075,29 @@ export function AnalysesView({
             ))}
           </ul>
         </div>
+        <div className="outline-section">
+          <div className="section-head">
+            <h3>Conformer equilibrium</h3>
+            <button className="small" onClick={createEquilibrium} aria-label="New conformer equilibrium">
+              New
+            </button>
+          </div>
+          {equilibria && equilibria.length === 0 && (
+            <p className="muted small">
+              Populations of conformers, the rates of the TSs between them and the time to reach equilibrium. Select
+              the conformers and TSs on the canvas and choose “Conformer equilibrium…”, or start a new one here.
+            </p>
+          )}
+          <ul className="plain">
+            {equilibria?.map((e) => (
+              <li key={e.id}>
+                <button className="link" aria-current={equilibrium?.id === e.id} onClick={() => setChosen(e.id)}>
+                  {e.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
         {error && <p role="alert">{error}</p>}
       </nav>
       <main className="main">
@@ -1160,6 +1137,25 @@ export function AnalysesView({
               // Deleting a turnover clears comparisons with it (D86).
               setChosen(null)
               load()
+              onChanged()
+            }}
+            onSelectNode={onSelectNode}
+          />
+        ) : equilibrium ? (
+          <EquilibriumEditor
+            key={equilibrium.id}
+            equilibrium={equilibrium}
+            canvas={canvas}
+            settings={settings}
+            energyOptions={energyOptions}
+            refreshKey={refreshKey}
+            onSaved={(saved) => {
+              setEquilibria((current) => (current ?? []).map((e) => (e.id === saved.id ? saved : e)))
+              onChanged()
+            }}
+            onDeleted={() => {
+              setEquilibria((current) => (current ?? []).filter((e) => e.id !== equilibrium.id))
+              setChosen(null)
               onChanged()
             }}
             onSelectNode={onSelectNode}

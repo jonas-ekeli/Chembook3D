@@ -1054,6 +1054,7 @@ export function SelectionInspector({
   onChanged,
   onGroupCreated,
   onSelectivity,
+  onEquilibrium,
 }: {
   nodes: Node[]
   groups: Group[]
@@ -1062,6 +1063,8 @@ export function SelectionInspector({
   onGroupCreated: (group: Group) => void
   /** D83: compare the selected items as the outcomes of a new selectivity. */
   onSelectivity: () => void
+  /** D171: a conformer equilibrium of the selection. */
+  onEquilibrium: () => void
 }) {
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -1184,6 +1187,12 @@ export function SelectionInspector({
           title="ΔΔG‡ and the predicted ratio, with each selected TS or group as one outcome (D83)"
         >
           Selectivity…
+        </button>
+        <button
+          onClick={onEquilibrium}
+          title="Populations of the selected conformers and the rates of the TSs between them (D171)"
+        >
+          Conformer equilibrium…
         </button>
       </div>
       {groups.length === 0 && free.length !== nodes.length && (

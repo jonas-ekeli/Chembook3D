@@ -31,6 +31,7 @@ from chembook3d.api.routes import DbSession
 from chembook3d.models import (
     AlignmentSet,
     Branch,
+    ConformerEquilibrium,
     GroupNode,
     Node,
     NodeNote,
@@ -522,6 +523,11 @@ ACTIONS: dict[str, Action] = {
         "DELETE",
         "/api/turnovers/{turnover_id}",
         _describe_named(Turnover, "Turnover", "turnover_id"),
+    ),
+    "delete_conformer_equilibrium": Action(
+        "DELETE",
+        "/api/equilibria/{equilibrium_id}",
+        _describe_named(ConformerEquilibrium, "Conformer equilibrium", "equilibrium_id"),
     ),
     "delete_steric_profile": Action(
         "DELETE",

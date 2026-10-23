@@ -59,6 +59,13 @@ function show(field: string | null, value: unknown, names: Names = new Map()): s
     return ids.length ? ids.map((id) => named(names, id)).join(' → ') : 'none'
   }
   if (field === 'compare_id') return 'another turnover'
+  if (field === 'members') {
+    // D171: a conformer equilibrium's members, with their counts
+    const members = value as { id: string; count: number }[]
+    return members.length
+      ? members.map((m) => named(names, m.id) + (m.count > 1 ? ` ×${m.count}` : '')).join(', ')
+      : 'none'
+  }
   if (field === 'conformers') return value === 'lowest' ? 'lowest TS only' : 'Boltzmann sum'
   if (field === 'temperature') return `${String(value)} K`
   if (field === 'notes') {
@@ -78,6 +85,7 @@ const ID_FIELDS = new Set([
   'incoming_branch_ids',
   'reference_id',
   'path_edge_id',
+  'start_id',
 ])
 
 const STRUCTURE_FIELDS: Record<string, string> = {
@@ -103,6 +111,8 @@ const STRUCTURE_FIELDS: Record<string, string> = {
   path: 'Pathway',
   compare_id: 'Compared with',
   reference_id: 'Free species balanced from',
+  members: 'Conformers and TSs',
+  start_id: 'Start from',
 }
 
 const STRUCTURE_TYPES: Record<string, string> = {
@@ -112,6 +122,7 @@ const STRUCTURE_TYPES: Record<string, string> = {
   group: 'group',
   selectivity: 'selectivity',
   turnover: 'turnover',
+  equilibrium: 'conformer equilibrium',
 }
 
 function describeStructure(entry: HistoryEntry, names: Names): string | null {

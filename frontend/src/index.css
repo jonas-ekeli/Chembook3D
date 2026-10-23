@@ -2063,6 +2063,35 @@ table.selectivity-table {
   font-weight: 600;
 }
 
+/* D171: conformer equilibria in the Analyses view */
+.equilibrium-chart {
+  overflow-x: auto;
+  margin: 0.4rem 0 0.8rem;
+}
+.equilibrium-chart svg {
+  max-width: 100%;
+  height: auto;
+}
+.equilibrium-chart .legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.9rem;
+  font-size: 0.85rem;
+}
+.analyses .swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.analyses input.count {
+  width: 4rem;
+}
+.analyses table.energy-table + table.energy-table {
+  margin-top: 1rem;
+}
+
 /* D89: the member order dialog */
 .member-order {
   list-style: none;

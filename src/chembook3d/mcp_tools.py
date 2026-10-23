@@ -52,6 +52,7 @@ FIELD_HELP = {
     "note_id": "Id of a note pinned to a node.",
     "selectivity_id": "Id of a saved selectivity.",
     "turnover_id": "Id of a saved turnover.",
+    "equilibrium_id": "Id of a saved conformer equilibrium.",
     "profile_id": "Id of a steric profile.",
     "set_id": "Id of an alignment set.",
     "source_id": "Id of the edge's start: a node or a group.",
@@ -333,6 +334,23 @@ TOOLS: list[ToolSpec] = [
         "/api/turnovers/{turnover_id}/result",
         "A turnover's energetic-span result: TOF, δE, TDTS, TDI, ΔG_r and each point's degree "
         "of TOF control, or why it is n/a.",
+    ),
+    T(
+        "list_conformer_equilibria",
+        "read",
+        "GET",
+        "/api/equilibria",
+        "The saved conformer equilibria (conformers and the TSs between them, D171).",
+    ),
+    T(
+        "get_conformer_equilibrium_result",
+        "read",
+        "GET",
+        "/api/equilibria/{equilibrium_id}/result",
+        "A conformer equilibrium's result: each conformer's ΔG and population, each TS's "
+        "barriers, Eyring rates (1/s) and half-lives from both sides, each set of joined "
+        "conformers' relaxation times and time to equilibrium (s), or why it is n/a. Energies "
+        "are in hartree.",
     ),
     T(
         "list_steric_profiles",
@@ -942,6 +960,33 @@ TOOLS: list[ToolSpec] = [
         help={"compare_id": "Another turnover to compare with (optional)."},
     ),
     T(
+        "create_conformer_equilibrium",
+        "write",
+        "POST",
+        "/api/equilibria",
+        "Save a conformer equilibrium (D171): populations of conformers the user chose and the "
+        "rates of the TSs between them.",
+        help={
+            "members": "Each {id: node or group id, count: equivalent structures it stands "
+            "for, 1 unless given}. TS nodes are the barriers; they join the two conformers "
+            "they have edges to.",
+            "start_id": "The conformer the populations start from over time; null for the lowest.",
+        },
+    ),
+    T(
+        "update_conformer_equilibrium",
+        "write",
+        "PATCH",
+        "/api/equilibria/{equilibrium_id}",
+        "Change a saved conformer equilibrium; only the fields given change.",
+        help={
+            "members": "Each {id: node or group id, count: equivalent structures it stands "
+            "for, 1 unless given}. TS nodes are the barriers; they join the two conformers "
+            "they have edges to.",
+            "start_id": "The conformer the populations start from over time; null for the lowest.",
+        },
+    ),
+    T(
         "create_steric_profile",
         "write",
         "POST",
@@ -1009,6 +1054,7 @@ CONFIRM_DESCRIPTIONS = {
     "delete_note": "Delete a note pinned to a node.",
     "delete_selectivity": "Delete a saved selectivity.",
     "delete_turnover": "Delete a saved turnover.",
+    "delete_conformer_equilibrium": "Delete a saved conformer equilibrium.",
     "delete_steric_profile": "Delete a steric profile with its results.",
     "delete_alignment_set": "Delete an alignment set.",
 }

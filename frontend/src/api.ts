@@ -1236,6 +1236,100 @@ export type SelectivityResult = {
   notes: string[]
 }
 
+/** D171: a saved conformer equilibrium: populations of conformers, the rates of the TSs
+ * between them and the time the set takes to reach equilibrium. */
+export type EquilibriumMember = {
+  /** A node or group; TS nodes are the barriers, a group counts with its members. */
+  id: string
+  /** The number of equivalent structures it stands for (D171d). */
+  count: number
+}
+
+export type Equilibrium = {
+  id: string
+  name: string
+  members: EquilibriumMember[]
+  level: string | null
+  energy_type: EnergyType
+  /** K; null follows the G_qh temperature setting. */
+  temperature: number | null
+  /** The conformer the populations start from over time; null: the slowest start. */
+  start_id: string | null
+  notes: string
+}
+
+export type EquilibriumFields = Partial<Omit<Equilibrium, 'id'>>
+
+export type EquilibriumConformer = {
+  id: string
+  label: string
+  count: number
+  /** Hartree; `relative` from the lowest conformer. */
+  value: number
+  relative: number
+  /** Percent of all conformers. */
+  population: number
+  /** Index into `sets`. */
+  set: number
+  /** D171g: the highest point on the lowest way from `barrier_from_id`, hartree. */
+  effective_barrier: number | null
+  barrier_from_id: string | null
+}
+
+export type EquilibriumDirection = {
+  from_id: string
+  to_id: string
+  /** Hartree; rate in 1/s, half-life in s. */
+  barrier: number
+  rate: number
+  half_life: number
+}
+
+export type EquilibriumBarrier = {
+  id: string
+  label: string
+  count: number
+  value: number
+  relative: number
+  /** The conformers it joins (two), or those it has edges to when it joins none. */
+  joins: string[]
+  directions: EquilibriumDirection[]
+}
+
+export type EquilibriumSet = {
+  conformer_ids: string[]
+  start_id: string | null
+  start_chosen: boolean
+  /** Seconds, fastest first; `slowest` is the largest. */
+  relaxation_times: number[]
+  unresolved: number
+  slowest: number | null
+  /** Seconds until every population is within 1 percentage point of equilibrium. */
+  equilibrium_time: number | null
+  /** Times in s; populations (0–1, within the set) per conformer, in `conformer_ids` order. */
+  curve: { times: number[]; populations: number[][] } | null
+}
+
+export type EquilibriumResult = {
+  status: 'ok' | 'n/a' | 'refused' | 'incomplete'
+  message: string | null
+  level: string | null
+  level_label: string | null
+  energy_type: EnergyType
+  temperature: number
+  temperature_from_settings: boolean
+  cutoff: number
+  standard_state: StandardState
+  job_temperatures?: number[]
+  unit: string
+  lowest_id: string | null
+  start_id: string | null
+  conformers: EquilibriumConformer[]
+  barriers: EquilibriumBarrier[]
+  sets: EquilibriumSet[]
+  notes: string[]
+}
+
 /** D86: a saved turnover, the TOF of one closed cycle (A13) from the energetic-span model. */
 export type Turnover = {
   id: string
@@ -2278,6 +2372,13 @@ export const api = {
   updateTurnover: (id: string, fields: TurnoverFields) => request<Turnover>('PATCH', `/turnovers/${id}`, fields),
   deleteTurnover: (id: string) => request<void>('DELETE', `/turnovers/${id}`),
   turnoverResult: (id: string) => request<TurnoverResult>('GET', `/turnovers/${id}/result`),
+  equilibria: () => request<Equilibrium[]>('GET', '/equilibria'),
+  createEquilibrium: (fields: EquilibriumFields & { name: string }) =>
+    request<Equilibrium>('POST', '/equilibria', fields),
+  updateEquilibrium: (id: string, fields: EquilibriumFields) =>
+    request<Equilibrium>('PATCH', `/equilibria/${id}`, fields),
+  deleteEquilibrium: (id: string) => request<void>('DELETE', `/equilibria/${id}`),
+  equilibriumResult: (id: string) => request<EquilibriumResult>('GET', `/equilibria/${id}/result`),
   stericProfiles: () => request<StericProfile[]>('GET', '/steric-profiles'),
   createStericProfile: (fields: StericProfileFields) => request<StericProfile>('POST', '/steric-profiles', fields),
   updateStericProfile: (id: string, fields: StericProfileFields) =>
