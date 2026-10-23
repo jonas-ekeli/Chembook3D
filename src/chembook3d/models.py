@@ -261,6 +261,9 @@ class Calculation(Base):
     multiplicity: Mapped[int | None] = mapped_column(Integer, default=None)
     # The geometry this calculation ended on, [[element, x, y, z], ...] (W-GEOM, INV-6).
     geometry: Mapped[list[Any] | None] = mapped_column(default=None)
+    # D168: the geometry an optimization started from, so a later optimization that started
+    # where an earlier one ended shows that one as its pre-optimization (D100, D165).
+    start_geometry: Mapped[list[Any] | None] = mapped_column(default=None)
     parse_warnings: Mapped[list[Any]] = mapped_column(default=list)  # W-PARSE fields
     # D157: what held the structure (a scan, frozen coordinates or atoms), as the parser
     # describes it; such an optimization is never a geometry level (W-CONSTRAINED).

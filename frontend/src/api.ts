@@ -1080,6 +1080,9 @@ export type Calculation = {
   charge: number | null
   multiplicity: number | null
   parse_warnings: string[]
+  /** D168: a later free optimization on the node started where this one ended (absent in a
+   * read-only copy made before it). */
+  pre_optimization?: boolean
   warnings: Finding[]
   source_file: SourceFile | null
   result: CalculationResult | null

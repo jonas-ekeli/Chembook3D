@@ -330,6 +330,34 @@ def thermo_models(session: Session, folder: Path) -> dict[str, int]:
     return counts
 
 
+def start_geometries(session: Session, folder: Path) -> dict[str, int]:
+    """D168: optimizations imported before they kept their start geometry. It matters only on
+    a node with an optimization that did not end on the node's geometry (a pre-optimization a
+    later optimization may have continued), so only those nodes' files are read again."""
+    tolerance = app_settings.load().geometry_tolerance
+    nodes = session.scalars(
+        select(Node).options(selectinload(Node.calculations).selectinload(Calculation.source_file))
+    ).all()
+    counts = {"nodes": 0, "optimizations": 0}
+    for node in nodes:
+        optimizations = [
+            c
+            for c in node.calculations
+            if c.type in levels.OPTIMIZATION_TYPES and c.start_geometry is None
+        ]
+        if len(optimizations) < 2 or all(
+            geometry.matches(c.geometry, node.geometry, tolerance) for c in optimizations
+        ):
+            continue
+        starts = _start_geometries(folder, optimizations)
+        for calculation in optimizations:
+            if calculation.id in starts:
+                calculation.start_geometry = starts[calculation.id]
+                counts["optimizations"] += 1
+        counts["nodes"] += 1
+    return counts
+
+
 REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "geometry_levels": geometry_levels,
     "scan_path_edges": scan_path_edges,
@@ -339,6 +367,7 @@ REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "thermochemistry": thermochemistry,
     "counterpoise_energies": counterpoise_energies,
     "thermo_models": thermo_models,
+    "start_geometries": start_geometries,
 }
 
 
