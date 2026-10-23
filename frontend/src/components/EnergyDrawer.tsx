@@ -12,12 +12,15 @@ import {
   type Settings,
   type ViewState,
 } from '../api'
+import { Icon } from '../icons'
+import { figureOf } from '../profileFigure'
 import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
 import { closesCycle, csvTitle, download } from '../util'
 import { EnergyNotes } from './EnergyNotes'
 import { EnergyTableView } from './EnergyTableView'
 import { GModelBadge } from './GModelBadge'
-import { ProfileChart } from './ProfileChart'
+import { Menu } from './MoreMenu'
+import { ProfileChart, SCREEN_TEXT } from './ProfileChart'
 import { ProfileStyleDialog } from './ProfileStyleDialog'
 import { CompareStericsDialog } from './Sterics'
 
@@ -112,14 +115,13 @@ export function EnergyDrawer({
   const [table, setTable] = useState<EnergyTable | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [sterics, setSterics] = useState<string[] | null>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
   // D106: drawer height, pathways list, zoom (null fits the profile to the drawer), style dialog.
   const [layout, setLayout] = useState(loadLayout)
   const [zoom, setZoom] = useState<number | null>(null)
   const [styling, setStyling] = useState(false)
   const mainRef = useRef<HTMLDivElement>(null)
   const resizing = useRef<{ y: number; height: number } | null>(null)
-  const panning = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
+  const panning = useRef<{ x: number; y: number; left: number; top: number; moved: boolean } | null>(null)
   const anchor = useRef<{ fx: number; fy: number; px: number; py: number } | null>(null)
   const wheelZoom = useRef<(event: WheelEvent) => void>(() => undefined)
   const style = styleOf(settings)
@@ -298,12 +300,18 @@ export function EnergyDrawer({
   const shownProfiles = request ? profiles : null
   const shownTable = request ? table : null
 
+  // D181: the saved figure is drawn afresh in the style alone, without the screen's text scale,
+  // zoom or pointer marks.
+  const figure = () => shownProfiles && figureOf({ data: shownProfiles, colours, names, settings })
+
   const exportSvg = () => {
-    if (svgRef.current) saveProfileSvg(svgRef.current)
+    const svg = figure()
+    if (svg) saveProfileSvg(svg)
   }
 
   const exportPng = () => {
-    if (svgRef.current) saveProfilePng(svgRef.current, style, () => setError('Could not export the profile image'))
+    const svg = figure()
+    if (svg) saveProfilePng(svg, style, () => setError('Could not export the profile image'))
   }
 
   const exportCsv = () => {
@@ -354,14 +362,15 @@ export function EnergyDrawer({
           onClick={() => setLayout((l) => ({ ...l, pathways: !l.pathways }))}
           title="Show or hide the pathways list, so the profile can take the drawer's full width"
         >
+          <Icon name="panel" />
           Pathways
         </button>
         <div className="segmented" role="group" aria-label="Drawer tab">
-          <button aria-pressed={tab === 'profile'} onClick={() => setTab('profile')}>
-            Energy profile
+          <button aria-pressed={tab === 'profile'} onClick={() => setTab('profile')} title="Energy profile">
+            Profile
           </button>
-          <button aria-pressed={tab === 'table'} onClick={() => setTab('table')}>
-            Energy table
+          <button aria-pressed={tab === 'table'} onClick={() => setTab('table')} title="Energy table">
+            Table
           </button>
         </div>
         <span className="muted small">
@@ -371,60 +380,67 @@ export function EnergyDrawer({
         </span>
         {type === 'G' && <GModelBadge models={shownProfiles?.g_models} />}
         <span className="spacer" />
-        {tab === 'profile' ? (
-          <>
-            <div className="zoom" role="group" aria-label="Zoom">
-              <button
-                className="small"
-                onClick={zoomOut}
-                disabled={!shownProfiles}
-                aria-label="Zoom out"
-                title="Zoom out (Ctrl + wheel)"
-              >
-                −
-              </button>
-              <span className="muted small zoom-level" aria-label="Zoom level">
-                {zoom === null ? 'Fit' : `${Math.round(zoom * 100)} %`}
-              </span>
-              <button
-                className="small"
-                onClick={zoomIn}
-                disabled={!shownProfiles}
-                aria-label="Zoom in"
-                title="Zoom in (Ctrl + wheel)"
-              >
-                +
-              </button>
-              <button
-                className="small"
-                aria-pressed={zoom === null}
-                onClick={() => setZoom(null)}
-                disabled={!shownProfiles}
-                title="Fit the profile to the drawer"
-              >
-                Fit
-              </button>
-            </div>
+        {tab === 'profile' && (
+          // D181: one group: out, the level (Fit, or the zoom, which goes back to Fit), in.
+          <div className="zoom" role="group" aria-label="Zoom">
             <button
               className="small"
-              onClick={() => setStyling(true)}
-              disabled={!settings}
-              title="Size, font, colours, connectors and labels of the profile and its saved images (D106)"
+              onClick={zoomOut}
+              disabled={!shownProfiles}
+              aria-label="Zoom out"
+              title="Zoom out (Ctrl + wheel)"
             >
-              Style…
+              −
             </button>
-            <button className="small" onClick={exportPng} disabled={!shownProfiles}>
-              Save profile as PNG
+            <button
+              className="small zoom-level"
+              onClick={() => (zoom === null ? zoomTo(1) : setZoom(null))}
+              disabled={!shownProfiles}
+              title={zoom === null ? 'Fitted to the drawer; click for 100 %' : 'Fit the profile to the drawer'}
+            >
+              {zoom === null ? 'Fit' : `${Math.round(zoom * 100)} %`}
             </button>
-            <button className="small" onClick={exportSvg} disabled={!shownProfiles}>
-              Save profile as SVG
+            <button
+              className="small"
+              onClick={zoomIn}
+              disabled={!shownProfiles}
+              aria-label="Zoom in"
+              title="Zoom in (Ctrl + wheel)"
+            >
+              +
             </button>
-          </>
-        ) : (
-          <button className="small" onClick={exportCsv} disabled={!shownTable} title={csvTitle(type)}>
-            Export CSV
+          </div>
+        )}
+        {tab === 'profile' && (
+          <button
+            className="small"
+            onClick={() => setStyling(true)}
+            disabled={!settings}
+            title="Size, font, colours, connectors and labels of the profile and its saved images (D106)"
+          >
+            Style…
           </button>
         )}
+        <Menu
+          label="Export"
+          buttonClass="small"
+          buttonLabel="Export ▾"
+          title="The profile as PNG or SVG, the table as CSV"
+          items={[
+            {
+              label: 'Profile as PNG',
+              onSelect: exportPng,
+              disabled: !shownProfiles,
+              title: 'At the size and resolution of the profile style (Style…)',
+            },
+            { label: 'Profile as SVG', onSelect: exportSvg, disabled: !shownProfiles },
+            { label: 'Table as CSV', onSelect: exportCsv, disabled: !shownTable, title: csvTitle(type) },
+          ]}
+        >
+          <Icon name="download" />
+          Export
+          <Icon name="chevron" />
+        </Menu>
       </div>
       <div className="drawer-body">
         {layout.pathways && (
@@ -547,13 +563,16 @@ export function EnergyDrawer({
           onPointerDown={(event) => {
             const el = mainRef.current
             if (!el || zoom === null || tab !== 'profile' || event.button !== 0) return
-            panning.current = { x: event.clientX, y: event.clientY, left: el.scrollLeft, top: el.scrollTop }
-            event.currentTarget.setPointerCapture(event.pointerId)
+            panning.current = { x: event.clientX, y: event.clientY, left: el.scrollLeft, top: el.scrollTop, moved: false }
           }}
           onPointerMove={(event) => {
             const el = mainRef.current
             const start = panning.current
             if (!el || !start) return
+            // Held only once it moves, so a click still reaches a level on the chart (D181).
+            if (!start.moved && Math.hypot(event.clientX - start.x, event.clientY - start.y) < 4) return
+            if (!start.moved) event.currentTarget.setPointerCapture(event.pointerId)
+            start.moved = true
             el.scrollLeft = start.left - (event.clientX - start.x)
             el.scrollTop = start.top - (event.clientY - start.y)
           }}
@@ -573,8 +592,16 @@ export function EnergyDrawer({
                 colours={colours}
                 names={names}
                 settings={settings}
-                svgRef={svgRef}
                 size={zoom === null ? undefined : { width: style.width * zoom, height: style.height * zoom }}
+                textScale={SCREEN_TEXT}
+                pointing={{
+                  selectedId,
+                  onSelect: onSelectNode,
+                  branchName: (id) => {
+                    const branch = branches.get(id)
+                    return branch && (branch.name || 'Unnamed branch')
+                  },
+                }}
               />
             )
           ) : (

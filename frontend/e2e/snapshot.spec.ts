@@ -93,12 +93,18 @@ test('a read-only copy opens from disk with no server and changes nothing', asyn
   const drawer = shared.getByLabel('Energy drawer')
   await expect(drawer.getByRole('group', { name: 'Pathway B' })).toContainText('T-S0 → B-S1 → B-S2 → B-S3')
   await expect(drawer.getByRole('img', { name: 'Energy profile' })).toContainText('-6.00')
-  await drawer.getByRole('button', { name: 'Energy table' }).click()
+  // D181: the copy's profile can be pointed at too; a click selects in the copy.
+  await drawer.getByRole('img', { name: 'Energy profile' }).locator('text', { hasText: /^B-S3$/ }).hover()
+  await expect(shared.getByRole('tooltip')).toContainText('−6.00 kcal/mol')
+  await drawer.getByRole('img', { name: 'Energy profile' }).locator('text', { hasText: /^B-S3$/ }).click()
+  await expect(drawer.locator('.profile-selected')).toHaveCount(1)
+  await drawer.getByRole('button', { name: 'Table', exact: true }).click()
   // Branch A's pathway stops where it forks (EN-10), so only branch B reaches B-S3.
   const table = drawer.getByRole('table', { name: 'Energy table' })
   await expect(table.getByRole('row').filter({ hasText: 'B-S3' })).toContainText('−6.00') // D177: a real minus
   const csv = shared.waitForEvent('download')
-  await drawer.getByRole('button', { name: 'Export CSV' }).click()
+  await drawer.getByRole('button', { name: 'Export ▾' }).click()
+  await shared.getByRole('menuitem', { name: 'Table as CSV' }).click()
   expect(readFileSync(await (await csv).path(), 'utf8')).toContain('B-S3')
 
   // Structure mode draws every card from the copy.
@@ -147,7 +153,7 @@ test('the copy opens on the view the app showed, then on the reader\'s own choic
   await view.getByLabel('Energy type').selectOption('E')
   await view.getByLabel('Show on arrows').uncheck()
   await page.getByRole('button', { name: 'Profile and table' }).click()
-  await page.getByLabel('Energy drawer').getByRole('button', { name: 'Energy table' }).click()
+  await page.getByLabel('Energy drawer').getByRole('button', { name: 'Table', exact: true }).click()
   await investigationCommand(page, 'Share read-only copy…')
   const dialog = page.getByRole('dialog', { name: 'Share a read-only copy' })
   const download = page.waitForEvent('download')
@@ -167,7 +173,7 @@ test('the copy opens on the view the app showed, then on the reader\'s own choic
   // What the reader chooses in the copy is remembered in their browser, for this copy.
   await page.getByRole('button', { name: 'Compact', exact: true }).click()
   await shared.getByLabel('Energy type').selectOption('G')
-  await drawer.getByRole('button', { name: 'Energy profile' }).click()
+  await drawer.getByRole('button', { name: 'Profile', exact: true }).click()
   await page.reload()
   await expect(page.getByRole('button', { name: 'Compact', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await expect(shared.getByLabel('Energy type')).toHaveValue('G')

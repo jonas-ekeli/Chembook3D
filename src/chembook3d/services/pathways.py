@@ -438,6 +438,11 @@ def profiles(
                 else None
             )
             points.append(point)
+        # D181: the step's barrier of each TS point and the point it is measured from, for the
+        # profile's tooltip (the same values as the table's D177 column).
+        for point, (barrier, start) in zip(points, step_starts(points), strict=True):
+            point["step_barrier"] = barrier
+            point["step_barrier_from"] = start
         shown.append(
             {
                 "points": points,
@@ -544,18 +549,26 @@ def step_barriers(points: list[dict[str, Any]]) -> list[float | None]:
     None for every other point, and for a TS with no point before it since the previous TS or
     with one of those (or itself) lacking a value. Points are balanced alike (D69), so the
     difference of their relative values is the step's own."""
-    found: list[float | None] = []
-    since: list[float | None] = []
-    for point in points:
+    return [barrier for barrier, _ in step_starts(points)]
+
+
+def step_starts(points: list[dict[str, Any]]) -> list[tuple[float | None, int | None]]:
+    """D177, D181: each point's `step_barriers` value with the index of the point it is measured
+    from (the first of the lowest, when two are equal); (None, None) where there is none."""
+    found: list[tuple[float | None, int | None]] = []
+    since: list[int] = []
+    for index, point in enumerate(points):
         if not point["is_ts"]:
-            found.append(None)
-            since.append(point["relative"])
+            found.append((None, None))
+            since.append(index)
             continue
-        known = [v for v in since if v is not None]
         value = point["relative"]
-        found.append(
-            value - min(known) if value is not None and known and len(known) == len(since) else None
-        )
+        known = [i for i in since if points[i]["relative"] is not None]
+        if value is not None and known and len(known) == len(since):
+            start = min(known, key=lambda i: points[i]["relative"])
+            found.append((value - points[start]["relative"], start))
+        else:
+            found.append((None, None))
         since = []
     return found
 

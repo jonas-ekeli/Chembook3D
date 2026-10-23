@@ -58,7 +58,7 @@ test('the energy view, filters, groups and drawer are back after a reload and af
     const drawer = page.getByLabel('Energy drawer')
     await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
     await expect(drawer.getByRole('group', { name: 'Pathway B' })).toContainText('T-S0 → B-S1')
-    await drawer.getByRole('button', { name: 'Energy table' }).click()
+    await drawer.getByRole('button', { name: 'Table', exact: true }).click()
     await expect(drawer.getByRole('table', { name: 'Energy table' })).toBeVisible()
     const shown = async () => {
       await expect(view.getByLabel('Energy type')).toHaveValue('G_qh')

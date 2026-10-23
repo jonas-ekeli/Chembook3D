@@ -1,5 +1,23 @@
-import type { CSSProperties, RefObject } from 'react'
-import { balanceText, energyTypeName, formatDelta, type ProfileStyle, type Profiles, type Settings } from '../api'
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react'
+import { createPortal } from 'react-dom'
+import {
+  balanceText,
+  energyTypeName,
+  formatDelta,
+  type ProfilePoint,
+  type ProfileStyle,
+  type Profiles,
+  type Settings,
+} from '../api'
+import { minus } from '../cardEnergy'
 import { closesCycle } from '../util'
 import { dashOf, FONTS, pathwayColours, styleOf } from '../profileStyle'
 
@@ -40,6 +58,34 @@ function textWidth(text: string, size: number, family: string, weight = 400): nu
   return measure.measureText(text).width
 }
 
+/** D181: the drawer's text on screen, larger than the figure's own, since a figure fitted to the
+ * drawer is drawn smaller than its size; never in a saved PNG or SVG (`profileFigure.figureOf`). */
+export const SCREEN_TEXT = 1.25
+
+/** D181: what pointing at the chart does: hovering a level shows its numbers, a click selects
+ * its node or group on the canvas, and the canvas selection is marked. Never in a saved figure. */
+export type Pointing = {
+  selectedId: string | null
+  onSelect: (id: string) => void
+  /** A branch's name, for the tooltip. */
+  branchName: (id: string) => string | undefined
+}
+
+export type ChartProps = {
+  data: Profiles
+  colours: string[]
+  names: string[]
+  settings: Settings | null
+  svgRef?: RefObject<SVGSVGElement | null>
+  /** Short tags after a point's name, keyed `profile:point`, such as the TDTS and TDI (D86). */
+  marks?: Map<string, string>
+  style?: ProfileStyle
+  size?: { width: number; height: number }
+  /** D181: the text's size on screen as a share of the style's (`SCREEN_TEXT`). */
+  textScale?: number
+  pointing?: Pointing
+}
+
 /** FR-EN-05, FR-EN-09: X(n) − X(ref) along each pathway, overlaid in branch colours. A direct
  * connection is a dotted connector, never a barrier (D53, INV-8), tagged "no TS" unless the style
  * hides the tags (D108). Drawn in the
@@ -54,24 +100,19 @@ export function ProfileChart({
   marks,
   style: given,
   size,
-}: {
-  data: Profiles
-  colours: string[]
-  names: string[]
-  settings: Settings | null
-  svgRef?: RefObject<SVGSVGElement | null>
-  /** Short tags after a point's name, keyed `profile:point`, such as the TDTS and TDI (D86). */
-  marks?: Map<string, string>
-  style?: ProfileStyle
-  size?: { width: number; height: number }
-}) {
+  textScale = 1,
+  pointing,
+}: ChartProps) {
+  // D181: the level under the pointer and where its line is on the screen.
+  const [pointed, setPointed] = useState<{ pi: number; i: number; box: DOMRect; data: Profiles } | null>(null)
+  const hover = pointed?.data === data ? pointed : null // forgotten when the profile changes
   const style = given ?? styleOf(settings)
   const colours = pathwayColours(branchColours, style)
   const unit = settings?.energy_unit ?? 'kcal/mol'
   const factor = settings?.energy_factors[unit] ?? 1
   const W = style.width
   const H = style.height
-  const f = style.font_size
+  const f = style.font_size * textScale
   const s = f / 11 // every distance that goes with the text scales with it
   const nameSize = (f * 10) / 11
   const row = f + 3
@@ -269,7 +310,21 @@ export function ProfileChart({
     height: size.height,
   }
 
-  return (
+  const tipPoint = hover && data.profiles[hover.pi]?.points[hover.i]
+  const tip = pointing && tipPoint && tipPoint.relative !== null && (
+    <ProfileTip anchor={hover.box}>
+      <PointTip
+        point={tipPoint}
+        points={data.profiles[hover.pi].points}
+        data={data}
+        settings={settings}
+        reference={reference?.label ?? '—'}
+        branchName={pointing.branchName}
+      />
+    </ProfileTip>
+  )
+
+  const chart = (
     <svg
       ref={svgRef}
       xmlns="http://www.w3.org/2000/svg"
@@ -457,18 +512,53 @@ export function ProfileChart({
                 </text>
               ))
             const hidden = !above.includes(markOn) && !below.includes(markOn)
+            const ly = y(point.relative)
+            const hovered = hover?.pi === pi && hover.i === i
+            // D181: on screen only, a wider target than the line, the selection's halo and the
+            // hovered level drawn thicker.
+            const handlers = pointing && {
+              className: 'profile-level',
+              onPointerEnter: (event: PointerEvent<SVGGElement>) => {
+                const line = event.currentTarget.querySelector('.profile-level-line')
+                if (line) setPointed({ pi, i, box: line.getBoundingClientRect(), data })
+              },
+              onPointerLeave: () => setPointed(null),
+              onClick: () => pointing.onSelect(point.id),
+            }
             return (
-              <g key={i}>
+              <g key={i} {...handlers}>
+                {pointing && (
+                  <rect
+                    className="profile-hit"
+                    x={cx - half - 4 * s}
+                    y={ly - 9 * s}
+                    width={2 * half + 8 * s}
+                    height={18 * s}
+                    fill="transparent"
+                  />
+                )}
+                {pointing?.selectedId === point.id && (
+                  <line
+                    className="profile-selected"
+                    x1={cx - half}
+                    x2={cx + half}
+                    y1={ly}
+                    y2={ly}
+                    strokeWidth={style.level_thickness + 9 * s}
+                    strokeLinecap="round"
+                  />
+                )}
                 <line
+                  className={pointing ? `profile-level-line${hovered ? ' hovered' : ''}` : undefined}
                   x1={cx - half}
                   x2={cx + half}
-                  y1={y(point.relative)}
-                  y2={y(point.relative)}
+                  y1={ly}
+                  y2={ly}
                   stroke={colourAt(pi, i)}
-                  strokeWidth={style.level_thickness}
+                  strokeWidth={hovered ? style.level_thickness * 1.6 + 1 : style.level_thickness}
                   strokeLinecap="round"
                 >
-                  {point.species.length > 0 && (
+                  {point.species.length > 0 && !pointing && (
                     <title>
                       {/* D69: the free species added or subtracted to balance this point */}
                       {`${point.label} ${balanceText(point.species)}`}
@@ -492,5 +582,102 @@ export function ProfileChart({
         </g>
       ))}
     </svg>
+  )
+  return tip ? (
+    <>
+      {chart}
+      {tip}
+    </>
+  ) : (
+    chart
+  )
+}
+
+/** D181: a dark tooltip beside a level, on its right unless the window ends there. */
+function ProfileTip({ anchor, children }: { anchor: DOMRect; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [place, setPlace] = useState<{ left: number; top: number; flipped: boolean } | null>(null)
+  useLayoutEffect(() => {
+    const box = ref.current?.getBoundingClientRect()
+    if (!box) return
+    const flipped = anchor.right + 14 + box.width > window.innerWidth - 8
+    const left = flipped ? Math.max(8, anchor.left - 14 - box.width) : anchor.right + 14
+    const top = Math.min(Math.max(8, anchor.top + anchor.height / 2 - 18), window.innerHeight - box.height - 8)
+    setPlace({ left, top, flipped })
+  }, [anchor])
+  return createPortal(
+    <div
+      ref={ref}
+      role="tooltip"
+      className={`profile-tip${place?.flipped ? ' flipped' : ''}`}
+      style={place ? { left: place.left, top: place.top } : { left: 0, top: 0, visibility: 'hidden' }}
+    >
+      {children}
+    </div>,
+    document.body,
+  )
+}
+
+/** D181: what the tooltip says about a level: what it is, ΔX from the reference, a TS's barrier
+ * of its step (D177) and the frequency check (D154). */
+function PointTip({
+  point,
+  points,
+  data,
+  settings,
+  reference,
+  branchName,
+}: {
+  point: ProfilePoint
+  points: ProfilePoint[]
+  data: Profiles
+  settings: Settings | null
+  reference: string
+  branchName: (id: string) => string | undefined
+}) {
+  const unit = settings?.energy_unit ?? 'kcal/mol'
+  const value = (hartree: number) => `${minus(formatDelta(hartree, settings))} ${unit}`
+  const branch = point.branch_id ? branchName(point.branch_id) : undefined
+  const what = [
+    point.is_ts ? 'TS' : null,
+    point.kind === 'group' ? 'group' : null,
+    point.step_name,
+    branch ? `branch ${branch}` : null,
+  ].filter(Boolean)
+  const from = point.step_barrier_from == null ? undefined : points[point.step_barrier_from]
+  const issues = point.check ? (point.check.issues ?? [point.check]) : []
+  return (
+    <>
+      <div className="profile-tip-head">
+        <b>{point.label}</b>
+        {what.length > 0 && <span>{what.join(' · ')}</span>}
+      </div>
+      <div className="profile-tip-row">
+        <span>
+          Δ{data.type} (rel. {reference})
+        </span>
+        <span>{value(point.relative!)}</span>
+      </div>
+      {point.is_ts && point.step_barrier != null && from && (
+        <div className="profile-tip-row">
+          <span>
+            Δ{data.type}‡ from {from.label}
+          </span>
+          <span>{value(point.step_barrier)}</span>
+        </div>
+      )}
+      {point.species.length > 0 && (
+        <div className="profile-tip-row">
+          <span>Balanced with</span>
+          <span>{balanceText(point.species)}</span>
+        </div>
+      )}
+      {issues.map((issue) => (
+        <div key={issue.code + issue.message} className="profile-tip-warn">
+          ⚠ {issue.message}
+        </div>
+      ))}
+      <div className="profile-tip-hint">Click to select it on the canvas</div>
+    </>
   )
 }

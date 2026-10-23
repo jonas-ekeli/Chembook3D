@@ -1506,6 +1506,10 @@ export type ProfilePoint = EnergyValue & {
   /** D69: free species added (count > 0) or subtracted (count < 0) to balance this point. */
   species: SpeciesCount[]
   species_message: string | null
+  /** D181: a TS point's ΔX‡ of its step in hartree (D177), and the index of the point on the
+   * pathway it is measured from; absent from copies made before D181. */
+  step_barrier?: number | null
+  step_barrier_from?: number | null
 }
 
 export type Profiles = {

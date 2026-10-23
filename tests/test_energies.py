@@ -858,6 +858,18 @@ def test_energy_table_and_csv_show_the_same_values(open_client, energetic):
     ]
     assert points["A1-S2"]["barrier"] == f"{float(a1s2[10]) - min(before):.2f}"
     assert points["A1-S1"]["is_ts"] is False and points["A1-S1"]["barrier"] is None
+    # D181: the profile carries the same barrier, in hartree, and the point it starts from.
+    profile = post(open_client, "/energies/profile", body, status=200)["profiles"][0]["points"]
+    ts = next(p for p in profile if p["label"] == "A1-S2")
+    start = profile[ts["step_barrier_from"]]
+    assert ts["step_barrier"] == pytest.approx(ts["relative"] - start["relative"])
+    assert f"{ts['step_barrier'] * KCAL:.2f}" == points["A1-S2"]["barrier"]
+    assert start["relative"] == min(p["relative"] for p in profile[: profile.index(ts)])
+    assert all(
+        p["step_barrier"] is None and p["step_barrier_from"] is None
+        for p in profile
+        if not p["is_ts"]
+    )
 
     response = open_client.post("/api/energies/table.csv", json=body)
     assert response.status_code == 200
@@ -882,6 +894,13 @@ def test_the_barrier_of_a_step_starts_from_the_lowest_point_since_the_previous_t
         None,
     ]
     assert pathways.step_barriers(points((False, 1.0), (True, None))) == [None, None]
+    # D181: and the point each one starts from.
+    assert pathways.step_starts(points((False, 0.0), (False, -2.0), (True, 17.0), (True, 9.0))) == [
+        (None, None),
+        (None, None),
+        (19.0, 1),
+        (None, None),
+    ]
 
 
 def test_overlaid_profiles_share_one_reference(open_client, energetic):
