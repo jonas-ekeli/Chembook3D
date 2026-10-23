@@ -165,14 +165,16 @@ test('deleting a node asks first and lists what goes', async ({ page }) => {
   // NFR-UX-01
   await openInvestigation(page, join(E2E_DIR, 'demo'))
   await page.getByRole('button', { name: /ethylene opt/ }).first().click()
-  await page.getByRole('button', { name: 'Delete node' }).click()
+  await page.getByRole('button', { name: 'More node actions' }).click()
+  await page.getByRole('menuitem', { name: 'Delete node' }).click()
   const dialog = page.getByRole('dialog', { name: 'Delete node?' })
   await expect(dialog).toContainText('1 calculation on it')
   await dialog.getByRole('button', { name: 'Cancel' }).click()
   await expect(page.getByLabel('Node inspector')).toBeVisible()
 
   await page.getByRole('button', { name: /empty planned node/ }).click()
-  await page.getByRole('button', { name: 'Delete node' }).click()
+  await page.getByRole('button', { name: 'More node actions' }).click()
+  await page.getByRole('menuitem', { name: 'Delete node' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click()
   await expect(page.getByRole('button', { name: /empty planned node/ })).toHaveCount(0)
 })

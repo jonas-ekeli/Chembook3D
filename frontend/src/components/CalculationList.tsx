@@ -366,22 +366,36 @@ export function CalculationList({
   nodeId,
   refreshKey,
   onChanged,
+  onLoaded,
 }: {
   nodeId: string
   refreshKey: number
   onChanged: () => void
+  /** D179: the list as loaded, for the node panel's stat strip (imaginary frequencies). */
+  onLoaded?: (calculations: Calculation[]) => void
 }) {
   const [calculations, setCalculations] = useState<Calculation[]>([])
   const [levels, setLevels] = useState<Level[]>([])
   const [bases, setBases] = useState<CustomBasisSummary[]>([])
   const [open, setOpen] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
-    api.calculations(nodeId).then(setCalculations, (err: unknown) => setError(errorText(err)))
+    api.calculations(nodeId).then(
+      (found) => {
+        setCalculations(found)
+        setLoaded(true)
+      },
+      (err: unknown) => setError(errorText(err)),
+    )
     api.levels().then(setLevels, () => undefined)
     api.customBases().then(setBases, () => undefined)
   }, [nodeId, refreshKey])
+
+  useEffect(() => {
+    if (loaded) onLoaded?.(calculations)
+  }, [loaded, calculations, onLoaded])
 
   const saved = (updated: Calculation) => {
     setCalculations((list) => list.map((c) => (c.id === updated.id ? updated : c)))

@@ -25,14 +25,14 @@ async function openDemo(page: Page) {
 test('buttons keep one line, the canvas tools are short, focus shows a ring', async ({ page }) => {
   await openDemo(page)
   await page.getByRole('group', { name: 'Node A-S2', exact: true }).click()
-  const head = page.locator('.inspector-head')
+  const head = page.locator('.node-head')
   await expect(head.getByRole('heading', { name: 'A-S2' })).toBeVisible()
 
   // One line each: as high as a control (30 px), however long the label.
   const buttons = [
     head.getByRole('button', { name: 'Use as energy reference' }),
     head.getByRole('button', { name: 'Import onto node…' }),
-    head.getByRole('button', { name: 'Delete node' }),
+    head.getByRole('button', { name: 'More node actions' }),
     page.getByRole('button', { name: 'Fit to selection' }),
     page.getByRole('button', { name: 'Export image ▾' }),
   ]
@@ -45,10 +45,15 @@ test('buttons keep one line, the canvas tools are short, focus shows a ring', as
   await expect(fit).toHaveAttribute('title', 'Fit to selection')
   await expect(page.getByRole('button', { name: 'Export image ▾' })).toHaveText('Export ▾')
 
-  // Destructive: red text on the border every button has.
+  // Destructive: red text on the border every button has (D179: Delete node is in the ⋯ menu,
+  // and its confirmation has the destructive button beside Cancel).
+  await head.getByRole('button', { name: 'More node actions' }).click()
+  await page.getByRole('menuitem', { name: 'Delete node' }).click()
+  const confirm = page.getByRole('dialog', { name: 'Delete node?' })
   const border = (name: string) =>
-    head.getByRole('button', { name }).evaluate((element) => getComputedStyle(element).borderTopColor)
-  expect(await border('Delete node')).toBe(await border('Import onto node…'))
+    confirm.getByRole('button', { name, exact: true }).evaluate((element) => getComputedStyle(element).borderTopColor)
+  expect(await border('Delete')).toBe(await border('Cancel'))
+  await confirm.getByRole('button', { name: 'Cancel' }).click()
 
   // Keyboard focus: the accent ring.
   await fit.focus()
