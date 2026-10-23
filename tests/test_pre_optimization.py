@@ -1,13 +1,13 @@
 """Pre-optimizations and the geometry level of single points (D100, FR-CALC-04): T-IMP-15,
-T-IMP-16, T-IMP-17, T-IMP-54."""
+T-IMP-16, T-IMP-17, T-IMP-54, T-IMP-56."""
 
 from chembook3d import investigation as inv
 from chembook3d.models import Calculation, HistoryEntry, InvestigationInfo, Node
-from chembook3d.services import history, repairs
+from chembook3d.services import history, levels, repairs, warnings
 from tests import gaussian_text as g
 from tests.test_batch_import import nodes, preview, row, run, scan
 from tests.test_constrained import MODREDUNDANT
-from tests.test_import import calculations, commit, upload
+from tests.test_import import calculations, commit, node, upload
 
 GUESS = g.moved(g.WATER, 0.05)
 PRE_END = g.moved(g.WATER, 0.02)  # where the low-level pre-optimization ended
@@ -201,6 +201,76 @@ def test_a_free_optimization_at_the_constrained_level_continues_it_too(open_clie
     assert plan["continues_from"]["level_label"] == f"{PRE} with constraints"
     assert not plan["derived_offered"]
     assert [s["assignment"] for s in plan["steps"]] == ["node"]
+
+
+# ---------- T-IMP-56: a continued pre-optimization warns on its own row only ----------
+
+
+def codes(warnings: list[dict]) -> set[str]:
+    return {w["code"] for w in warnings}
+
+
+def test_a_continued_pre_optimization_does_not_warn_about_the_node_geometry(open_client):
+    node_id = pre_optimized_node(open_client)
+    plan = upload(open_client, "A_dft.log", g.opt_freq(PRE_END, DFT_END), node_id)
+    commit(open_client, plan, target_node_id=node_id)
+    pre, dft, freq = calculations(open_client, node_id)
+    assert pre["pre_optimization"] and not dft["pre_optimization"]
+    assert "W-GEOM" not in codes(pre["warnings"])
+    assert "W-GEOM" not in codes(node(open_client, node_id)["warnings"])
+
+
+def test_a_continued_constrained_pre_optimization_warns_on_its_row_only(open_client):
+    node_id = held_pre_optimized_node(open_client)
+    assert "W-CONSTRAINED" in codes(node(open_client, node_id)["warnings"])  # nothing follows
+
+    plan = upload(open_client, "A_dft.log", g.opt_freq(PRE_END, DFT_END), node_id)
+    commit(open_client, plan, target_node_id=node_id)
+    pre = calculations(open_client, node_id)[0]
+    assert pre["pre_optimization"]
+    assert codes(pre["warnings"]) == {"W-CONSTRAINED"}
+    found = codes(node(open_client, node_id)["warnings"])
+    assert "W-CONSTRAINED" not in found and "W-GEOM" not in found
+    overview = open_client.get("/api/overview").json()
+    assert not [i for i in overview["open_items"] if i["status"] == "warning"]
+
+
+def test_an_optimization_from_elsewhere_is_no_pre_optimization(open_client):
+    node_id = held_pre_optimized_node(open_client)
+    # A free optimization from another structure goes to a derived node (D100).
+    plan = upload(open_client, "A_dft.log", g.opt_freq(OTHER, DFT_END), node_id)
+    derived = commit(open_client, plan, target_node_id=node_id)["derived_node_id"]
+    assert derived is not None
+    [pre] = calculations(open_client, node_id)
+    assert not pre["pre_optimization"]
+    assert "W-CONSTRAINED" in codes(node(open_client, node_id)["warnings"])
+
+
+def test_opening_an_old_notebook_finds_its_pre_optimizations(open_client):
+    node_id = held_pre_optimized_node(open_client)
+    plan = upload(open_client, "A_dft.log", g.opt_freq(PRE_END, DFT_END), node_id)
+    commit(open_client, plan, target_node_id=node_id)
+    investigation = open_client.app.state.investigation
+    with investigation.sessions.begin() as session:
+        for calculation in session.get(Node, node_id).calculations:
+            calculation.start_geometry = None  # as imported before D168
+        info = session.get(InvestigationInfo, 1)
+        info.repairs = [n for n in info.repairs if n != "start_geometries"]
+    assert "W-CONSTRAINED" in codes(node(open_client, node_id)["warnings"])
+    open_client.post("/api/investigations/close")
+
+    opened = inv.open_investigation(investigation.folder)
+    try:
+        with opened.sessions() as session:
+            pre, dft, _ = sorted(
+                session.get(Node, node_id).calculations, key=lambda c: c.created_at
+            )
+            assert dft.start_geometry == [[e, x, y, z] for e, _, x, y, z in PRE_END]
+            assert levels.continued_by(pre) is dft
+            found = {f.code for f in warnings.node_warnings(session.get(Node, node_id))}
+            assert "W-CONSTRAINED" not in found and "W-GEOM" not in found
+    finally:
+        opened.close()
 
 
 # ---------- T-IMP-17: notebooks imported before D100 are repaired once ----------

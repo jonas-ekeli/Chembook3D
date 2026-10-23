@@ -399,6 +399,14 @@ export function CalculationList({
             <span className="calc-level">
               {c.composite_label}
               {c.level_edited && <span className="badge">edited</span>}
+              {c.pre_optimization && (
+                <span
+                  className="badge"
+                  title="A later optimization on this node started where this one ended, so it is the node's pre-optimization (D168)"
+                >
+                  pre-optimization
+                </span>
+              )}
               {!!c.parsed_level?.basis_given && (
                 <span className="badge" title="The file names no basis set; it was given at import (D104)">
                   basis given

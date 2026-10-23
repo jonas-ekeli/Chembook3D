@@ -1873,6 +1873,11 @@ def _create_calculation(
         charge=step.charge,
         multiplicity=step.multiplicity,
         geometry=_rows(step.final_geometry),
+        start_geometry=(  # D168
+            _rows(step.geometries[0])
+            if step.job_type in OPTIMIZATION_TYPES and step.geometries
+            else None
+        ),
         parse_warnings=list(step_plan.missing),
         constraints=list(step.constraints),  # D157
         source_file_id=source.id,

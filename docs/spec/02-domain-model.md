@@ -99,9 +99,9 @@ Notes:
 | W-LINEAR | No longer raised: linear molecules get G_qh from the linear rigid rotor (D164; was D58, A14) |
 | W-QH | G_qh cannot be computed at the chosen temperature or cutoff (A14) |
 | W-CHG | Calculations on one node disagree on charge or multiplicity; those for another state than the node's give none of its energies (D155) |
-| W-GEOM | A calculation's geometry does not match its node's geometry |
+| W-GEOM | A calculation's geometry does not match its node's geometry; never on a pre-optimization a later free optimization on the node started from (D168) |
 | W-PARSE | A file was only partly parsed; the missing fields are listed |
-| W-CONSTRAINED | A calculation is a scan or an optimization held by frozen coordinates or atoms; what held it is listed, and it gives no geometry level (D157) |
+| W-CONSTRAINED | A calculation is a scan or an optimization held by frozen coordinates or atoms; what held it is listed, and it gives no geometry level (D157); a held pre-optimization that a free optimization continued shows it on its own row, not on the node (D168) |
 | W-SPIN | A calculation's ⟨S²⟩ (Gaussian's before annihilation) is further from S(S+1) of its multiplicity than 10 % of S(S+1); for a singlet, above 0.1 (D162) |
 | W-SCALE | The frequency jobs behind one composite level's H, G or G_qh use different frequency scale factors (for G_qh: the frequencies as stored, which ORCA prints already scaled and Gaussian and xTB unscaled) (D163) |
 | W-G-MODEL | The printed G of one composite level comes from different thermochemistry models (RRHO, qRRHO, mRRHO) (D163) |

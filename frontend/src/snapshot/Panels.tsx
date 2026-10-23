@@ -153,6 +153,14 @@ function Calculations({ calculations }: { calculations: SharedCalculation[] }) {
             <span className="calc-level">
               {c.composite_label}
               {c.level_edited && <span className="badge">edited</span>}
+              {c.pre_optimization && (
+                <span
+                  className="badge"
+                  title="A later optimization on this node started where this one ended, so it is the node's pre-optimization (D168)"
+                >
+                  pre-optimization
+                </span>
+              )}
             </span>
             <span className="mono">{hartree(c.result?.energy, 8)}</span>
             {c.result?.g !== null && c.result?.g !== undefined && <span className="mono">G {hartree(c.result.g)}</span>}

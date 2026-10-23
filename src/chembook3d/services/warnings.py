@@ -24,15 +24,21 @@ class Finding:
 
 
 def calculation_warnings(
-    calculation: Calculation, node: Node, tolerance: float | None = None
+    calculation: Calculation, node: Node, tolerance: float | None = None, on_node: bool = False
 ) -> list[Finding]:
+    """The calculation's own findings; `on_node` leaves out those its node does not show
+    (D168: the W-CONSTRAINED of a held pre-optimization a free optimization continued)."""
     found = []
+    if tolerance is None:
+        tolerance = app_settings.load().geometry_tolerance
+    # D168: a pre-optimization ended where a later optimization started, not on the node.
+    continued = levels.continued_by(calculation, tolerance) is not None
     if calculation.termination == "abnormal":
         found.append(Finding("W-TERM", "did not terminate normally", calculation.id))
     if calculation.parse_warnings:
         missing = ", ".join(calculation.parse_warnings)
         found.append(Finding("W-PARSE", f"not read from the file: {missing}", calculation.id))
-    if calculation.constraints:
+    if calculation.constraints and not (on_node and continued):
         # D157: a scan or an optimization held by frozen coordinates or atoms.
         held = ", ".join(calculation.constraints)
         found.append(
@@ -58,9 +64,7 @@ def calculation_warnings(
     if contaminated is not None:
         # D162: ⟨S²⟩ far from S(S+1) of the calculation's multiplicity.
         found.append(Finding("W-SPIN", spin.message(contaminated), calculation.id))
-    if calculation.geometry and node.geometry:
-        if tolerance is None:
-            tolerance = app_settings.load().geometry_tolerance
+    if calculation.geometry and node.geometry and not continued:
         if not geometry.matches(calculation.geometry, node.geometry, tolerance):
             found.append(
                 Finding("W-GEOM", "geometry does not match the node's geometry", calculation.id)
@@ -132,5 +136,5 @@ def node_warnings(node: Node) -> list[Finding]:
 
     tolerance = app_settings.load().geometry_tolerance if calculations else None
     for calculation in calculations:
-        found += calculation_warnings(calculation, node, tolerance)
+        found += calculation_warnings(calculation, node, tolerance, on_node=True)
     return found

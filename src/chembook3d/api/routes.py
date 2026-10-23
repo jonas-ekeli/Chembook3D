@@ -317,6 +317,8 @@ class CalculationOut(BaseModel):
     multiplicity: int | None
     parse_warnings: list[str]
     constraints: list[str] = []  # D157: a scan, frozen coordinates or atoms
+    # D168: a later free optimization on the node started where this one ended.
+    pre_optimization: bool = False
     warnings: list[WarningOut]
     source_file: SourceFileOut | None
     result: ResultOut | None
@@ -1217,6 +1219,7 @@ def _calculation_out(request: Request, calculation: Calculation) -> CalculationO
         multiplicity=calculation.multiplicity,
         parse_warnings=list(calculation.parse_warnings),
         constraints=list(calculation.constraints or []),
+        pre_optimization=levels.continued_by(calculation) is not None,
         warnings=[
             WarningOut(**w.as_dict())
             for w in warning_service.calculation_warnings(calculation, calculation.node)

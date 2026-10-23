@@ -162,6 +162,32 @@ def pre_optimization_at(node: Node, rows: list[Any] | None, tolerance: float) ->
     return found[-1] if found else None
 
 
+def continued_by(calculation: Calculation, tolerance: float | None = None) -> Calculation | None:
+    """D168: the free optimization on the calculation's node that started where this
+    optimization ended, which makes this one the node's pre-optimization (D100; a held one,
+    D165). None for anything else."""
+    node = calculation.node
+    if node is None or calculation.type not in OPTIMIZATION_TYPES or not calculation.geometry:
+        return None
+    following = [
+        c
+        for c in node.calculations
+        if c.id != calculation.id and c.start_geometry and is_geometry_source(c)
+    ]
+    if not following:
+        return None
+    if tolerance is None:
+        tolerance = app_settings.load().geometry_tolerance
+    return next(
+        (
+            c
+            for c in following
+            if geometry.matches(c.start_geometry, calculation.geometry, tolerance)
+        ),
+        None,
+    )
+
+
 def node_geometry_optimization(
     node: Node | None, tolerance: float | None = None
 ) -> Calculation | None:
