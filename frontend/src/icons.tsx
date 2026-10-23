@@ -77,6 +77,8 @@ const SHAPES = {
     </>
   ),
   plus: <path d="M12 5v14M5 12h14" />,
+  arrowup: <path d="m5 12 7-7 7 7M12 19V5" />,
+  arrowdown: <path d="M12 5v14m7-7-7 7-7-7" />,
   search: (
     <>
       <circle cx="11" cy="11" r="8" />

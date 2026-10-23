@@ -1,31 +1,89 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { api, STATUS_LABEL, type Canvas, type Node, type Step } from '../api'
+import { Icon } from '../icons'
 import { Modal } from './Modal'
+import { NodeRow } from './NodeRow'
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-/** FR-STEP-01…03: an ordered list of reaction steps with notes. */
-function Steps({ steps, onChanged }: { steps: Step[]; onChanged: () => void }) {
+// D178: which outline sections are collapsed, remembered by the browser.
+const COLLAPSED = 'chembook3d.outline.collapsed'
+
+function loadCollapsed(): Set<string> {
+  try {
+    const stored = JSON.parse(localStorage.getItem(COLLAPSED) ?? '[]') as unknown
+    return new Set(Array.isArray(stored) ? stored.filter((s): s is string => typeof s === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+type Fold = { collapsed: boolean; onToggle: () => void }
+
+/** D178: a section's head: a small label that folds the section, its count, and its add buttons
+ * (icons, with the old button names as their accessible names). */
+function SectionHead({ title, count, fold, children }: { title: string; count: ReactNode; fold: Fold; children?: ReactNode }) {
+  return (
+    <div className="section-head outline-head">
+      <h3>
+        <button className="section-toggle" aria-expanded={!fold.collapsed} onClick={fold.onToggle}>
+          <Icon name="chevron" />
+          {title}
+          <span className="count-pill">{count}</span>
+        </button>
+      </h3>
+      {children && <span className="section-actions">{children}</span>}
+    </div>
+  )
+}
+
+/** FR-STEP-01…03: an ordered list of reaction steps with notes. D178: a step reads as text, its
+actions show on the row under the pointer or with the keyboard in it; a step moves by its grip,
+by ↑ and ↓, or by Alt+↑ and Alt+↓. */
+function Steps({ steps, fold, onChanged }: { steps: Step[]; fold: Fold; onChanged: () => void }) {
   const [draft, setDraft] = useState('')
   const [open, setOpen] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<Step | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [dragging, setDragging] = useState<number | null>(null)
+  const dragged = useRef<number | null>(null)
+  // Where a dragged step goes: before the step at this index (the length: after the last).
+  const [over, setOver] = useState<number | null>(null)
+  const rows = useRef(new Map<string, HTMLDivElement>())
+  const newStep = useRef<HTMLInputElement>(null)
+  // The control that moved a step with the keyboard, focused again once the list has its new order.
+  const refocus = useRef<{ id: string; control: string } | null>(null)
   const run = (promise: Promise<unknown>) =>
     promise.then(
       () => {
         setError(null)
         onChanged()
       },
-      (err: unknown) => setError(errorText(err)),
+      (err: unknown) => {
+        refocus.current = null
+        setError(errorText(err))
+      },
     )
-  const move = (index: number, by: number) => {
+  const reorder = (from: number, to: number) => {
+    if (to < 0 || to >= steps.length || to === from) {
+      refocus.current = null
+      return
+    }
     const ids = steps.map((s) => s.id)
-    const [moved] = ids.splice(index, 1)
-    ids.splice(index + by, 0, moved)
+    const [moved] = ids.splice(from, 1)
+    ids.splice(to, 0, moved)
     run(api.reorderSteps(ids))
   }
+  useEffect(() => {
+    const wanted = refocus.current
+    const row = wanted && rows.current.get(wanted.id)
+    if (!wanted || !row) return
+    refocus.current = null
+    const control = row.querySelector<HTMLElement>(`[data-control="${wanted.control}"]:not(:disabled)`)
+    ;(control ?? row.querySelector('input'))?.focus()
+  }, [steps])
   // Steps added in quick succession are created one after another, so they keep their order.
   const adding = useRef<Promise<unknown>>(Promise.resolve())
   const add = () => {
@@ -34,73 +92,167 @@ function Steps({ steps, onChanged }: { steps: Step[]; onChanged: () => void }) {
     adding.current = adding.current.then(() => run(api.createStep(name)))
     setDraft('')
   }
+  // Where a step dragged over this row goes: before it in its upper half, after it in its lower.
+  const target = (event: DragEvent<HTMLElement>, index: number) => {
+    const box = event.currentTarget.getBoundingClientRect()
+    return event.clientY < box.top + box.height / 2 ? index : index + 1
+  }
+  const endDrag = () => {
+    dragged.current = null
+    setDragging(null)
+    setOver(null)
+  }
 
   return (
     <section className="outline-section" aria-label="Reaction steps">
-      <h3>Reaction steps</h3>
-      <ol className="steps">
-        {steps.map((step, index) => (
-          <li key={step.id}>
-            <div className="step-row">
-              <span className="step-number">{index + 1}</span>
-              <input
-                key={step.name}
-                aria-label={`Name of step ${index + 1}`}
-                defaultValue={step.name}
-                onBlur={(event) => event.target.value !== step.name && run(api.updateStep(step.id, { name: event.target.value }))}
-                onKeyDown={(event) => event.key === 'Enter' && (event.target as HTMLInputElement).blur()}
-              />
-              <span className="muted small" title="Nodes at this step">
-                {step.node_count}
-              </span>
-              <button className="small icon" aria-label={`Move ${step.name || 'step'} up`} disabled={index === 0} onClick={() => move(index, -1)}>
-                ↑
-              </button>
-              <button
-                className="small icon"
-                aria-label={`Move ${step.name || 'step'} down`}
-                disabled={index === steps.length - 1}
-                onClick={() => move(index, 1)}
-              >
-                ↓
-              </button>
-              <button
-                className="small icon"
-                aria-label={`Notes for ${step.name || 'step'}`}
-                aria-expanded={open === step.id}
-                onClick={() => setOpen(open === step.id ? null : step.id)}
-              >
-                ✎
-              </button>
-              <button className="small icon danger" aria-label={`Delete ${step.name || 'step'}`} onClick={() => setConfirm(step)}>
-                ×
-              </button>
-            </div>
-            {open === step.id && (
-              <textarea
-                key={step.notes}
-                aria-label={`Notes for step ${step.name}`}
-                rows={3}
-                defaultValue={step.notes}
-                placeholder="Notes on this step"
-                onBlur={(event) => event.target.value !== step.notes && run(api.updateStep(step.id, { notes: event.target.value }))}
-              />
-            )}
-          </li>
-        ))}
-      </ol>
-      <div className="add-row">
-        <input
-          aria-label="New step name"
-          placeholder="Add a step"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => event.key === 'Enter' && add()}
-        />
-        <button onClick={add} disabled={!draft.trim()}>
-          Add
+      <SectionHead title="Reaction steps" count={steps.length} fold={fold}>
+        <button
+          className="small quiet icon"
+          aria-label="Add a step"
+          title="Add a step: type its name and press Enter"
+          onClick={() => {
+            if (draft.trim()) add()
+            else if (fold.collapsed) fold.onToggle()
+            setTimeout(() => newStep.current?.focus())
+          }}
+        >
+          <Icon name="plus" />
         </button>
-      </div>
+      </SectionHead>
+      {!fold.collapsed && (
+        <>
+          <ol className="steps">
+            {steps.map((step, index) => {
+              const name = step.name || 'step'
+              const notesOpen = open === step.id
+              return (
+                <li
+                  key={step.id}
+                  className={`${dragging === index ? 'dragging' : ''}${over === index ? ' drop-before' : ''}${over === steps.length && index === steps.length - 1 ? ' drop-after' : ''}`}
+                  onDragOver={(event) => {
+                    if (dragged.current === null) return
+                    event.preventDefault()
+                    setOver(target(event, index))
+                  }}
+                  onDrop={(event) => {
+                    const from = dragged.current
+                    if (from === null) return
+                    event.preventDefault()
+                    const to = target(event, index)
+                    reorder(from, to > from ? to - 1 : to)
+                    endDrag()
+                  }}
+                >
+                  <div
+                    className={`step-row${notesOpen || step.notes ? ' has-notes' : ''}`}
+                    ref={(element) => {
+                      if (element) rows.current.set(step.id, element)
+                      else rows.current.delete(step.id)
+                    }}
+                    onKeyDown={(event) => {
+                      if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return
+                      event.preventDefault()
+                      const control = (document.activeElement as HTMLElement | null)?.dataset.control ?? 'name'
+                      refocus.current = { id: step.id, control }
+                      reorder(index, index + (event.key === 'ArrowUp' ? -1 : 1))
+                    }}
+                  >
+                    <span
+                      className="grip"
+                      draggable
+                      aria-hidden="true"
+                      title="Drag to move (or Alt+↑ and Alt+↓)"
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = 'move'
+                        event.dataTransfer.setData('text/plain', step.name)
+                        const row = rows.current.get(step.id)
+                        if (row) event.dataTransfer.setDragImage(row, 12, 12)
+                        dragged.current = index
+                        setDragging(index)
+                      }}
+                      onDragEnd={endDrag}
+                    >
+                      <Icon name="grip" />
+                    </span>
+                    <span className="step-number">{index + 1}</span>
+                    <input
+                      key={step.name}
+                      data-control="name"
+                      aria-label={`Name of step ${index + 1}`}
+                      title={step.name}
+                      defaultValue={step.name}
+                      onBlur={(event) => event.target.value !== step.name && run(api.updateStep(step.id, { name: event.target.value }))}
+                      onKeyDown={(event) => event.key === 'Enter' && (event.target as HTMLInputElement).blur()}
+                    />
+                    <span className="count-pill" title="Nodes at this step">
+                      {step.node_count}
+                    </span>
+                    <span className="row-actions">
+                      <button
+                        className="small quiet icon"
+                        data-control="up"
+                        aria-label={`Move ${name} up`}
+                        title="Move up (Alt+↑)"
+                        disabled={index === 0}
+                        onClick={() => {
+                          refocus.current = { id: step.id, control: 'up' }
+                          reorder(index, index - 1)
+                        }}
+                      >
+                        <Icon name="arrowup" />
+                      </button>
+                      <button
+                        className="small quiet icon"
+                        data-control="down"
+                        aria-label={`Move ${name} down`}
+                        title="Move down (Alt+↓)"
+                        disabled={index === steps.length - 1}
+                        onClick={() => {
+                          refocus.current = { id: step.id, control: 'down' }
+                          reorder(index, index + 1)
+                        }}
+                      >
+                        <Icon name="arrowdown" />
+                      </button>
+                      <button
+                        className="small quiet icon notes-button"
+                        aria-label={`Notes for ${name}`}
+                        title={step.notes ? 'Notes (this step has notes)' : 'Notes'}
+                        aria-expanded={notesOpen}
+                        onClick={() => setOpen(notesOpen ? null : step.id)}
+                      >
+                        <Icon name="note" />
+                      </button>
+                      <button className="small quiet icon danger" aria-label={`Delete ${name}`} title="Delete step" onClick={() => setConfirm(step)}>
+                        <Icon name="trash" />
+                      </button>
+                    </span>
+                  </div>
+                  {notesOpen && (
+                    <textarea
+                      key={step.notes}
+                      aria-label={`Notes for step ${step.name}`}
+                      rows={3}
+                      defaultValue={step.notes}
+                      placeholder="Notes on this step"
+                      onBlur={(event) => event.target.value !== step.notes && run(api.updateStep(step.id, { notes: event.target.value }))}
+                    />
+                  )}
+                </li>
+              )
+            })}
+          </ol>
+          <input
+            ref={newStep}
+            className="add-step"
+            aria-label="New step name"
+            placeholder="+ Add a step (Enter)"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => event.key === 'Enter' && add()}
+          />
+        </>
+      )}
       {error && <p role="alert">{error}</p>}
       {confirm && (
         <Modal
@@ -135,11 +287,13 @@ function Steps({ steps, onChanged }: { steps: Step[]; onChanged: () => void }) {
 function Branches({
   canvas,
   selectedId,
+  fold,
   onSelect,
   onChanged,
 }: {
   canvas: Canvas
   selectedId: string | null
+  fold: Fold
   onSelect: (id: string) => void
   onChanged: (selectId?: string) => void
 }) {
@@ -156,10 +310,11 @@ function Branches({
   }
   return (
     <section className="outline-section" aria-label="Branches">
-      <div className="section-head">
-        <h3>Branches</h3>
+      <SectionHead title="Branches" count={canvas.branches.length} fold={fold}>
         <button
-          className="small"
+          className="small quiet"
+          aria-label="+ Branch"
+          title="Add a branch"
           onClick={() =>
             api.createBranch({ name: `Branch ${canvas.branches.length + 1}` }).then(
               (b) => onChanged(b.id),
@@ -167,10 +322,11 @@ function Branches({
             )
           }
         >
-          + Branch
+          <Icon name="plus" />
+          Branch
         </button>
-      </div>
-      <ul className="branches" aria-label="Branch list">
+      </SectionHead>
+      <ul className="branches" aria-label="Branch list" hidden={fold.collapsed}>
         {canvas.branches.map((branch) => (
           <li key={branch.id} style={{ paddingLeft: `${Math.min(levelOf(branch.id), 6) * 12}px` }}>
             <button
@@ -180,8 +336,10 @@ function Branches({
             >
               <span className="swatch" style={{ background: branch.colour }} />
               <span className="branch-name">{branch.name || <em>Unnamed branch</em>}</span>
-              <span className="muted small">{branch.node_count}</span>
               <span className={`status status-${branch.status}`}>{STATUS_LABEL[branch.status]}</span>
+              <span className="count-pill" title="Nodes on this branch">
+                {branch.node_count}
+              </span>
             </button>
           </li>
         ))}
@@ -197,12 +355,14 @@ in the inspector; transitions list the ones that join or leave on them. */
 function FreeSpecies({
   canvas,
   selectedId,
+  fold,
   onSelect,
   onAdd,
   onImport,
 }: {
   canvas: Canvas
   selectedId: string | null
+  fold: Fold
   onSelect: (id: string) => void
   onAdd: () => void
   onImport: () => void
@@ -210,18 +370,20 @@ function FreeSpecies({
   const uses = (id: string) => canvas.transitions.filter((t) => t.species.some((s) => s.species_id === id)).length
   return (
     <section className="outline-section" aria-label="Free species">
-      <div className="section-head">
-        <h3>Free species</h3>
-        <span className="buttons">
-          <button className="small" onClick={onAdd} title="A substrate or fragment that joins or leaves on a transition">
-            + Species
-          </button>
-          <button className="small" onClick={onImport} title="Import an output file as a new free species">
-            Import…
-          </button>
-        </span>
-      </div>
-      <ul aria-label="Free species list" className="node-results">
+      <SectionHead title="Free species" count={canvas.species.length} fold={fold}>
+        <button
+          className="small quiet icon"
+          aria-label="+ Species"
+          title="Add a species: a substrate or fragment that joins or leaves on a transition"
+          onClick={onAdd}
+        >
+          <Icon name="plus" />
+        </button>
+        <button className="small quiet icon" aria-label="Import…" title="Import an output file as a new free species" onClick={onImport}>
+          <Icon name="upload" />
+        </button>
+      </SectionHead>
+      <ul aria-label="Free species list" className="node-results" hidden={fold.collapsed}>
         {canvas.species.map((species) => (
           <li key={species.id}>
             <button
@@ -230,7 +392,7 @@ function FreeSpecies({
               onClick={() => onSelect(species.id)}
             >
               <span className="node-label">
-                {species.label || <em>Untitled species</em>}
+                <span className="node-name">{species.label || <em>Untitled species</em>}</span>
                 {species.warnings.length > 0 && (
                   <span
                     className="warn-icon"
@@ -242,11 +404,9 @@ function FreeSpecies({
                   </span>
                 )}
               </span>
-              <span className="node-meta">
-                {species.formula && <span>{species.formula}</span>}
-                <span className="muted small" title="Transitions it joins or leaves on">
-                  on {uses(species.id)} {uses(species.id) === 1 ? 'edge' : 'edges'}
-                </span>
+              {species.formula && <span className="node-formula">{species.formula}</span>}
+              <span className="count-pill" title="Transitions it joins or leaves on">
+                on {uses(species.id)} {uses(species.id) === 1 ? 'edge' : 'edges'}
               </span>
             </button>
           </li>
@@ -262,13 +422,17 @@ function FreeSpecies({
 /** Search by label, tag or note text (P10); choosing a node selects it and centres the canvas. */
 function NodeSearch({
   nodes,
+  colours,
   selectedId,
   selectedIds,
+  fold,
   onSelect,
   onToggle,
 }: {
   nodes: Node[]
+  colours: Map<string, string>
   selectedId: string | null
+  fold: Fold
   selectedIds: string[]
   onSelect: (id: string) => void
   onToggle: (id: string) => void
@@ -285,16 +449,19 @@ function NodeSearch({
       )
     : nodes
   return (
-    <section className="outline-section grow" aria-label="Node search">
-      <h3>Nodes</h3>
-      <input
-        type="search"
-        aria-label="Search nodes"
-        placeholder="Search label, tag, notes"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-      />
-      <ul aria-label="Nodes" className="node-results">
+    <section className={`outline-section${fold.collapsed ? '' : ' grow'}`} aria-label="Node search">
+      <SectionHead title="Nodes" count={q ? `${shown.length}/${nodes.length}` : nodes.length} fold={fold} />
+      <div className="search-field" hidden={fold.collapsed}>
+        <Icon name="search" />
+        <input
+          type="search"
+          aria-label="Search nodes"
+          placeholder="Search label, tag, notes"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </div>
+      <ul aria-label="Nodes" className="node-results" hidden={fold.collapsed}>
         {shown.map((node) => (
           <li key={node.id}>
             <button
@@ -306,29 +473,13 @@ function NodeSearch({
                 event.ctrlKey || event.metaKey || event.shiftKey ? onToggle(node.id) : onSelect(node.id)
               }
             >
-              <span className="node-label">
-                {node.derived_from_id && <span title="Derived node">↳ </span>}
-                {node.label || <em>Untitled node</em>}
-                {node.warnings.length > 0 && (
-                  <span
-                    className="warn-icon"
-                    role="img"
-                    aria-label="Has warnings"
-                    title={node.warnings.map((w) => `${w.code}: ${w.message}`).join('\n')}
-                  >
-                    ⚠
-                  </span>
-                )}
-              </span>
-              <span className="node-meta">
-                <span className={`status status-${node.status}`}>{STATUS_LABEL[node.status]}</span>
+              <NodeRow node={node} colour={node.branch_id ? colours.get(node.branch_id) : undefined}>
                 {node.on_edge && (
                   <span className="chip scan-path-chip" title="Shown on its edge only, as a chip (D121)">
                     on edge
                   </span>
                 )}
-                {node.formula && <span>{node.formula}</span>}
-              </span>
+              </NodeRow>
             </button>
           </li>
         ))}
@@ -367,29 +518,57 @@ export function Outline({
   onImportSpecies: () => void
   onChanged: (selectBranchId?: string) => void
 }) {
+  const [collapsed, setCollapsed] = useState(loadCollapsed)
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSED, JSON.stringify([...collapsed]))
+    } catch {
+      // the browser keeps nothing; the sections still fold
+    }
+  }, [collapsed])
+  const fold = (name: string): Fold => ({
+    collapsed: collapsed.has(name),
+    onToggle: () =>
+      setCollapsed((now) => {
+        const next = new Set(now)
+        if (!next.delete(name)) next.add(name)
+        return next
+      }),
+  })
+  const colours = new Map(canvas.branches.map((b) => [b.id, b.colour]))
   return (
     <aside className="outline" aria-label="Outline">
       <div className="buttons outline-actions">
         <button className="primary" onClick={onAdd}>
-          + Add node
+          <Icon name="plus" />
+          Add node
         </button>
-        <button onClick={onImport} title="Import a Gaussian, ORCA or xTB output as a new node, or a CREST ensemble as a group; or drop files on the canvas">
-          Import file…
+        {/* D178: the short label, the full name as accessible name (as the canvas tools, D174) */}
+        <button
+          aria-label="Import file…"
+          onClick={onImport}
+          title="Import a Gaussian, ORCA or xTB output as a new node, or a CREST ensemble as a group; or drop files on the canvas"
+        >
+          <Icon name="upload" />
+          Import…
         </button>
       </div>
-      <Steps steps={canvas.steps} onChanged={() => onChanged()} />
-      <Branches canvas={canvas} selectedId={selectedBranchId} onSelect={onSelectBranch} onChanged={onChanged} />
+      <Steps steps={canvas.steps} fold={fold('steps')} onChanged={() => onChanged()} />
+      <Branches canvas={canvas} selectedId={selectedBranchId} fold={fold('branches')} onSelect={onSelectBranch} onChanged={onChanged} />
       <FreeSpecies
         canvas={canvas}
         selectedId={selectedNodeId}
+        fold={fold('species')}
         onSelect={onSelectNode}
         onAdd={onAddSpecies}
         onImport={onImportSpecies}
       />
       <NodeSearch
         nodes={canvas.nodes}
+        colours={colours}
         selectedId={selectedNodeId}
         selectedIds={selectedNodeIds}
+        fold={fold('nodes')}
         onSelect={onSelectNode}
         onToggle={onToggleNode}
       />

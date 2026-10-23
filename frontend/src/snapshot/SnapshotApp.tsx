@@ -1,13 +1,15 @@
 import { ReactFlowProvider } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { energyTypeName, STATUS_LABEL, type Canvas, type EnergyType, type GroupLayout } from '../api'
+import { energyTypeName, type Canvas, type EnergyType, type GroupLayout } from '../api'
 import { EnergyNotes } from '../components/EnergyNotes'
 import type { HydrogenMode } from '../chem'
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import { CanvasPane, type CanvasEnergy } from '../components/Canvas'
 import { FilterMenu } from '../components/FilterMenu'
 import { GModelBadge } from '../components/GModelBadge'
+import { NodeRow } from '../components/NodeRow'
 import { HydrogenDisplay } from '../display'
+import { Icon } from '../icons'
 import { NoteImageSource } from '../notes'
 import { energyView, openingView, referenceIds, rememberView, sharedSettings, type SnapshotData } from './data'
 import { SnapshotDrawer } from './Drawer'
@@ -38,6 +40,7 @@ function SharedOutline({
           n.tags.some((t) => t.toLowerCase().includes(q)),
       )
     : canvas.nodes
+  const colours = new Map(canvas.branches.map((b) => [b.id, b.colour]))
   return (
     <aside className="outline" aria-label="Outline">
       <section className="outline-section" aria-label="Reaction steps">
@@ -82,13 +85,16 @@ function SharedOutline({
       )}
       <section className="outline-section grow" aria-label="Node search">
         <h3>Nodes</h3>
-        <input
-          type="search"
-          aria-label="Search nodes"
-          placeholder="Search label, tag, notes"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
+        <div className="search-field">
+          <Icon name="search" />
+          <input
+            type="search"
+            aria-label="Search nodes"
+            placeholder="Search label, tag, notes"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
         <ul aria-label="Nodes" className="node-results">
           {nodes.map((node) => (
             <li key={node.id}>
@@ -97,11 +103,7 @@ function SharedOutline({
                 aria-current={node.id === selectedId}
                 onClick={() => onSelectNode(node.id)}
               >
-                <span className="node-label">{node.label || <em>Untitled node</em>}</span>
-                <span className="node-meta">
-                  <span className={`status status-${node.status}`}>{STATUS_LABEL[node.status]}</span>
-                  {node.formula && <span>{node.formula}</span>}
-                </span>
+                <NodeRow node={node} colour={colours.get(node.branch_id ?? '')} />
               </button>
             </li>
           ))}

@@ -38,7 +38,7 @@ test('create an investigation, add a node by hand and edit its coordinates', asy
   await expect(page.locator('.investigation')).toHaveText('UI test')
 
   // FR-NODE-01: a node needs no fields.
-  await page.getByRole('button', { name: '+ Add node' }).click()
+  await page.getByRole('button', { name: 'Add node', exact: true }).click()
   const inspector = page.getByLabel('Node inspector')
   await expect(inspector.getByRole('heading', { name: 'Untitled node' })).toBeVisible()
   await inspector.getByLabel('Label').fill('INT1')

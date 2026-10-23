@@ -50,7 +50,7 @@ test('build steps, branches and transitions on the canvas', async ({ page }) => 
   const steps = page.getByRole('region', { name: 'Reaction steps' })
   for (const name of ['S0 alkylidene', 'S1 π-complex']) {
     await steps.getByLabel('New step name').fill(name)
-    await steps.getByRole('button', { name: 'Add' }).click()
+    await steps.getByLabel('New step name').press('Enter')
   }
   await expect(steps.getByLabel('Name of step 2')).toHaveValue('S1 π-complex')
 
@@ -406,8 +406,8 @@ test('a late canvas answer does not drop the node just added', async ({ page }) 
     await route.fulfill({ response })
     delivered()
   })
-  await page.getByRole('button', { name: '+ Add node' }).click()
-  await page.getByRole('button', { name: '+ Add node' }).click()
+  await page.getByRole('button', { name: 'Add node', exact: true }).click()
+  await page.getByRole('button', { name: 'Add node', exact: true }).click()
   await late
   await page.waitForTimeout(500) // let the app handle the late answer
   await expect(page.getByLabel('Node inspector')).toBeVisible({ timeout: 1000 })
@@ -490,7 +490,7 @@ test('3D: measure atoms, animate the imaginary mode, overlay two nodes', async (
 
   // FR-3D-04: a copy of the node with coordinates edited by hand, overlaid on the original.
   const xyz = await inspector.getByLabel('xyz text').inputValue()
-  await page.getByRole('button', { name: '+ Add node' }).click()
+  await page.getByRole('button', { name: 'Add node', exact: true }).click()
   // Wait for the new node's inspector, or the label would rename MeI_TS instead.
   await expect(inspector.getByRole('heading', { name: 'Untitled node' })).toBeVisible()
   await inspector.getByLabel('Label').fill('copy')
