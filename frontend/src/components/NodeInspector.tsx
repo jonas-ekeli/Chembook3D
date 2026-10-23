@@ -265,30 +265,32 @@ export function NodeInspector({
       <div className="inspector-head">
         <h2>{name(node)}</h2>
         {isSpecies && <span className="badge species">Free species</span>}
-        <span className="spacer" />
-        {!isSpecies && (
-          <button
-            onClick={onUseAsReference}
-            disabled={isReference}
-            title="Energy mode and profiles show values relative to this node (EN-8)"
-          >
-            {isReference ? 'Energy reference' : 'Use as energy reference'}
+        {/* UI5 (D174): the actions wrap as a group; the name keeps its line */}
+        <div className="inspector-actions">
+          {!isSpecies && (
+            <button
+              onClick={onUseAsReference}
+              disabled={isReference}
+              title="Energy mode and profiles show values relative to this node (EN-8)"
+            >
+              {isReference ? 'Energy reference' : 'Use as energy reference'}
+            </button>
+          )}
+          <button onClick={onImport} title="Import an output file onto this record; or drop it here">
+            {isSpecies ? 'Import onto species…' : 'Import onto node…'}
           </button>
-        )}
-        <button onClick={onImport} title="Import an output file onto this record; or drop it here">
-          {isSpecies ? 'Import onto species…' : 'Import onto node…'}
-        </button>
-        <button
-          className="danger"
-          onClick={() =>
-            api.deletePreview(node.id).then(
-              (preview) => setConfirmDelete(preview),
-              (err: unknown) => setError(String(err)),
-            )
-          }
-        >
-          {isSpecies ? 'Delete species' : 'Delete node'}
-        </button>
+          <button
+            className="danger"
+            onClick={() =>
+              api.deletePreview(node.id).then(
+                (preview) => setConfirmDelete(preview),
+                (err: unknown) => setError(String(err)),
+              )
+            }
+          >
+            {isSpecies ? 'Delete species' : 'Delete node'}
+          </button>
+        </div>
       </div>
       {error && (
         <p role="alert" className="error">

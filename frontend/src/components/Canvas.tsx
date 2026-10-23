@@ -67,6 +67,7 @@ import {
 import { MoleculeSketch } from './MoleculeSketch'
 import { CardNotes, type NoteActions } from './CanvasNotes'
 import { noteTitle } from '../notes'
+import { Icon } from '../icons'
 import { curveOf, LabelPlacer, leaderEnd, pointAt, type Curve, type Rect } from '../labelLayout'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
@@ -1107,12 +1108,25 @@ function CanvasView({
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable style={{ width: 150, height: 100 }} nodeColor={(n) => ((n.data as { colour?: string }).colour ?? NO_BRANCH)} />
         <Panel position="top-right" className="canvas-tools">
-          <button onClick={() => flow.fitView({ nodes: flow.getNodes().filter((n) => n.selected), duration: 300, maxZoom: 1.5 })}>
-            Fit to selection
+          {/* UI5 (D174): icon and short label on the canvas, the full name in the tooltip */}
+          <button
+            title="Fit to selection"
+            aria-label="Fit to selection"
+            onClick={() => flow.fitView({ nodes: flow.getNodes().filter((n) => n.selected), duration: 300, maxZoom: 1.5 })}
+          >
+            <Icon name="fit" />
+            Fit
           </button>
           <div className="menu">
-            <button aria-haspopup="menu" aria-expanded={exportOpen} onClick={() => setExportOpen(!exportOpen)}>
-              Export image ▾
+            <button
+              title="Export image"
+              aria-label="Export image ▾"
+              aria-haspopup="menu"
+              aria-expanded={exportOpen}
+              onClick={() => setExportOpen(!exportOpen)}
+            >
+              <Icon name="download" />
+              Export ▾
             </button>
             {exportOpen && (
               <div role="menu" className="menu-list">

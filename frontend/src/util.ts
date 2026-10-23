@@ -14,6 +14,12 @@ export function fileName(text: string, fallback: string): string {
   return name || fallback
 }
 
+/** A colour token from index.css's :root (UI12 step 1, D174), for what paints outside CSS: the 3D
+ * view, the terminals. Exported figures keep their own colours. */
+export function colourToken(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}
+
 export function download(url: string, name: string) {
   const link = document.createElement('a')
   link.href = url

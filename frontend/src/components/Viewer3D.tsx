@@ -1,6 +1,7 @@
 import { useContext, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { defaultRotation, hiddenAtoms, measure, parseXyz, type HydrogenMode, type Rotation } from '../chem'
 import { HydrogenDisplay } from '../display'
+import { colourToken } from '../util'
 
 type Viewer = import('3dmol').GLViewer
 
@@ -112,7 +113,7 @@ export function Viewer3D({
     import('3dmol')
       .then(($3Dmol) => {
         if (cancelled || !host.current) return
-        if (!viewer.current) viewer.current = $3Dmol.createViewer(host.current, { backgroundColor: 'white' })
+        if (!viewer.current) viewer.current = $3Dmol.createViewer(host.current, { backgroundColor: colourToken('--viewer-bg') })
         const v = viewer.current
         // Showing or hiding a structure, or starting or stopping a movie of it (D101), keeps
         // the user's view; new structures are zoomed to.

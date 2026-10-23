@@ -30,6 +30,23 @@ The built interface bundles npm packages under the MIT, ISC and BSD-3-Clause lic
 `frontend/dist/third-party-licenses.md`, and the read-only HTML copy carries the same texts in a
 comment at its top.
 
+## Icons
+
+The icon shapes in `frontend/src/icons.tsx` are copied from [Lucide](https://lucide.dev) (ISC
+License; copyright Lucide Contributors 2022, and Cole Bemis 2013–2022 for the parts that come
+from Feather, MIT License):
+
+> Permission to use, copy, modify, and/or distribute this software for any purpose with or
+> without fee is hereby granted, provided that the above copyright notice and this permission
+> notice appear in all copies.
+>
+> THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS
+> SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE
+> AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+> WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+> NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
+> OF THIS SOFTWARE.
+
 ## Python packages
 
 The backend's dependencies are installed by uv, not copied into this repository. They are under
