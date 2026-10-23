@@ -101,7 +101,8 @@ test('build steps, branches and transitions on the canvas', async ({ page }) => 
 
   // FR-BR-02: split T at T-S0 into two child branches; FR-BR-04: the lineage shows it.
   await canvasNode(page, 'T-S0').click()
-  await inspector.getByRole('button', { name: 'Split into branches…' }).click()
+  await inspector.getByRole('button', { name: 'More node actions' }).click()
+  await page.getByRole('menuitem', { name: 'Split into branches…' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Create 2 branches' }).click()
   const branchList = page.getByRole('list', { name: 'Branch list' })
   await expect(branchList.getByRole('button')).toHaveCount(3)
@@ -444,7 +445,8 @@ test('arrange a branch and inspect a transition', async ({ page }) => {
   await expect(page.getByLabel('Transition inspector')).toContainText('Through a transition-state node')
 
   await canvasNode(page, 'A-S2').click()
-  await inspector.getByRole('button', { name: 'Delete node' }).click()
+  await inspector.getByRole('button', { name: 'More node actions' }).click()
+  await page.getByRole('menuitem', { name: 'Delete node' }).click()
   const confirm = page.getByRole('dialog', { name: 'Delete node?' })
   await expect(confirm.getByRole('list', { name: 'Transitions deleted with the node' }).getByRole('listitem')).toHaveText([
     'A-S1 → A-S2',
@@ -498,7 +500,7 @@ test('3D: measure atoms, animate the imaginary mode, overlay two nodes', async (
   await expect(inspector.getByRole('heading', { name: 'copy' })).toBeVisible()
   await inspector.getByLabel('xyz text').fill(xyz)
   await inspector.getByRole('button', { name: 'Save coordinates' }).click()
-  await expect(inspector.getByText(/^Formula:/)).toContainText('CH3I')
+  await expect(inspector.getByText('Formula: CH3I')).toBeVisible()
   await canvasNode(page, 'MeI_TS').click({ modifiers: ['Control'] })
   await page.getByLabel('Selection inspector').getByRole('button', { name: 'Overlay in 3D' }).click()
   const overlay = page.getByRole('dialog', { name: 'Overlay in 3D' })

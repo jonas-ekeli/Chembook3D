@@ -44,21 +44,18 @@ import {
   type MouseEvent,
 } from 'react'
 import {
-  balanceText,
   FADED_STATUSES,
   formatDelta,
   pathChip,
   speciesChip,
   STATUS_LABEL,
   type Canvas as CanvasData,
-  type EnergyView,
   type Group,
   type GroupLayout,
   type Node,
   type Note,
   type NoteLayout,
   type PathOnEdge,
-  type Settings,
   SIDES,
   isSide,
   type Side,
@@ -69,6 +66,7 @@ import { MoleculeSketch } from './MoleculeSketch'
 import { CardNotes, type NoteActions } from './CanvasNotes'
 import { noteTitle } from '../notes'
 import { Icon } from '../icons'
+import { cardEnergy, minus, type CanvasEnergy, type CardEnergy } from '../cardEnergy'
 import { curveOf, LabelPlacer, leaderEnd, pointAt, type Curve, type Rect } from '../labelLayout'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
@@ -106,22 +104,11 @@ function SideHandles() {
 const NODE_WIDTH = 188
 const MEMBER_CELL = { compact: { w: 208, h: 86 }, energy: { w: 208, h: 86 }, structure: { w: 208, h: 196 } }
 
-/** What the canvas shows of the energy view (FR-CAN-03, FR-CAN-04 energy mode). */
-export type CanvasEnergy = {
-  view: EnergyView | null
-  type: string
-  showEdges: boolean
-  referenceId: string | null
-  settings: Settings | null
-}
+export type { CanvasEnergy } from '../cardEnergy'
 
 /** D176: an edge's ΔX, "ΔG" (or "ΔG‡" for a barrier) and the number apart; no number is "n/a"
  * with its reason as a tooltip. */
 type EdgeEnergy = { type: string; value: string | null; title: string; barrier: boolean }
-/** D175: a card's energy, "ΔG" and the number apart. No number is a quiet "—", or a short
- * `missing` note when every card lacks one for the same reason (no reference chosen). */
-type CardEnergy = { type: string; value: string | null; title: string; missing?: string }
-
 /** D175: the energy on a card: a small muted "ΔG", the number bold with a real minus sign. */
 function CardEnergyText({ energy, below }: { energy: CardEnergy; below: boolean }) {
   return (
@@ -133,7 +120,7 @@ function CardEnergyText({ energy, below }: { energy: CardEnergy; below: boolean 
         (energy.missing ?? '—')
       ) : (
         <>
-          <span className="cnode-energy-type">{energy.type}</span> {energy.value.replace(/^-/, '−')}
+          <span className="cnode-energy-type">{energy.type}</span> {minus(energy.value)}
         </>
       )}
     </span>
@@ -691,25 +678,8 @@ function CanvasView({
     mode === 'energy' || (mode === 'structure' && energy.referenceId) ? energy : null
 
   const { flowNodes, flowEdges: plainEdges } = useMemo(() => {
-    // D43: in energy mode a node shows ΔX from the reference node, never an absolute value.
-    // D72: the server balances it with every free species that joined or left between the
-    // reference and the node, so it matches the profile along that route.
-    const nodeEnergy = (id: string): CardEnergy | null => {
-      const energy = nodeEnergySource
-      if (!energy?.view) return null
-      const type = `Δ${energy.type}`
-      if (!energy.referenceId) return { type, value: null, title: 'Choose a reference node', missing: 'no reference' }
-      if (energy.view.reference_id !== energy.referenceId) return { type, value: '…', title: 'Updating' }
-      const own = energy.view.relative[id]
-      if (own?.value == null) return { type, value: null, title: `${type} n/a: ${own?.message ?? 'no value'}` }
-      const unit = energy.settings?.energy_unit ?? 'kcal/mol'
-      const title = own.species.length
-        ? `${unit}, balanced with ${balanceText(own.species)}`
-        : own.joined
-          ? unit
-          : `${unit}; not joined to the reference by transitions, so no free species are counted`
-      return { type, value: formatDelta(own.value, energy.settings), title }
-    }
+    // D43, D72: ΔX from the reference node (`cardEnergy`).
+    const nodeEnergy = (id: string) => cardEnergy(nodeEnergySource, id)
     const hidden = {
       branches: new Set(filters.branches),
       statuses: new Set(filters.statuses),

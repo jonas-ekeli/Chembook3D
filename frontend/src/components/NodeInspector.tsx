@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   api,
   geometryToXyz,
   speciesChip,
   ROLES,
+  STATUS_LABEL,
   STATUSES,
+  type Calculation,
   type Canvas,
   type GeometryRows,
   type HistoryEntry,
@@ -32,8 +34,26 @@ import { StepMovie, type Movie } from './StepMovie'
 import { Viewer3D } from './Viewer3D'
 import { XyzEditor } from './XyzEditor'
 import { PathEdgeSection } from './ScanPathsOnEdge'
+import { MoreMenu, type MenuItem } from './MoreMenu'
+import { Icon } from '../icons'
+import { cardEnergy, minus, type CanvasEnergy } from '../cardEnergy'
+import { hartree } from '../util'
 
 const SYSTEM_TAGS = new Set(['optimization-incomplete'])
+
+/** D154, D158: the backend's warnings that a frequency job's imaginary count is wrong for the role. */
+const IMAGINARY_WARNINGS = new Set(['W-IMAG-TS', 'W-IMAG-MIN'])
+
+/** D179: the sections the header's jump bar scrolls to, in the panel's order. */
+type JumpKey = 'details' | 'structure' | 'calculations' | 'transitions' | 'notes' | 'history'
+
+/** The nearest ancestor that scrolls (the side panel). */
+function scrollParent(element: HTMLElement | null): HTMLElement | null {
+  for (let at = element?.parentElement ?? null; at; at = at.parentElement) {
+    if (/(auto|scroll)/.test(getComputedStyle(at).overflowY)) return at
+  }
+  return null
+}
 
 function IntField({
   label,
@@ -137,6 +157,8 @@ export function NodeInspector({
   servers = [],
   onIrc,
   onEditStructure,
+  energy,
+  levelLabel,
 }: {
   node: Node
   canvas: Canvas
@@ -162,6 +184,10 @@ export function NodeInspector({
   onIrc?: () => void
   /** D139: open the Edit structure window. */
   onEditStructure?: () => void
+  /** D179: the energy view as the canvas has it (level, type, reference), for the stat strip. */
+  energy: CanvasEnergy
+  /** The composite level's label, as the energy view's selector shows it. */
+  levelLabel: string
 }) {
   const nodes = [...canvas.nodes, ...canvas.species]
   // D69: a free species has no step, branch, group or edges; transitions list it instead.
@@ -178,6 +204,53 @@ export function NodeInspector({
   const [vibrationPicker, setVibrationPicker] = useState(0)
   const [poppedOut, setPoppedOut] = usePopOut()
   const [undoing, setUndoing] = useState<HistoryEntry | null>(null)
+  // D179: the calculations as the list below loaded them (null until then).
+  const [calculations, setCalculations] = useState<Calculation[] | null>(null)
+  const root = useRef<HTMLDivElement>(null)
+  const head = useRef<HTMLElement>(null)
+  const targets = useRef<Partial<Record<JumpKey, HTMLElement | null>>>({})
+  const [active, setActive] = useState<JumpKey>('details')
+  // The section last jumped to, shown as current while the panel scrolls there and at the end of
+  // the scroll when it cannot reach the top; forgotten once the panel is scrolled back up.
+  const jumped = useRef<{ key: JumpKey; top: number } | null>(null)
+
+  // D179: the jump bar marks the section under the header as the panel scrolls.
+  useEffect(() => {
+    const scroller = scrollParent(root.current)
+    if (!scroller) return
+    const order: JumpKey[] = ['details', 'structure', 'calculations', 'transitions', 'notes', 'history']
+    let previous = scroller.scrollTop
+    const spy = () => {
+      const line = (head.current?.getBoundingClientRect().bottom ?? 0) + 16
+      let current: JumpKey = 'details'
+      for (const key of order) {
+        const element = targets.current[key]
+        if (element && element.getBoundingClientRect().top <= line) current = key
+      }
+      const last = jumped.current
+      if (last && scroller.scrollTop < previous && previous >= last.top - 1) jumped.current = null
+      else if (last && order.indexOf(last.key) > order.indexOf(current)) current = last.key
+      previous = scroller.scrollTop
+      setActive(current)
+    }
+    spy()
+    scroller.addEventListener('scroll', spy, { passive: true })
+    return () => scroller.removeEventListener('scroll', spy)
+  }, [])
+
+  const jump = (key: JumpKey) => {
+    const element = targets.current[key]
+    const scroller = scrollParent(root.current)
+    if (!element || !scroller) return
+    const offset = element.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+    const wanted = key === 'details' ? 0 : scroller.scrollTop + offset - (head.current?.offsetHeight ?? 0) - 12
+    const top = Math.max(0, Math.min(wanted, scroller.scrollHeight - scroller.clientHeight))
+    jumped.current = { key, top }
+    setActive(key)
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    scroller.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' })
+    element.focus({ preventScroll: true })
+  }
 
   useEffect(() => {
     api.history(node.id).then(setHistory, (err: unknown) => setError(String(err)))
@@ -231,6 +304,7 @@ export function NodeInspector({
   const children = nodes.filter((n) => n.derived_from_id === node.id)
   const name = (n: Node) => n.label || (n.kind === 'species' ? 'Untitled species' : 'Untitled node')
   const branch = canvas.branches.find((b) => b.id === node.branch_id)
+  const step = canvas.steps.find((s) => s.id === node.step_id)
   const group = canvas.groups.find((g) => g.id === node.group_id)
   const originBranch = canvas.branches.find((b) => b.id === node.origin_branch_id)
   const endName = (id: string) => {
@@ -243,9 +317,72 @@ export function NodeInspector({
   const outgoing = canvas.transitions.filter((t) => t.source_id === node.id)
   const carriedBy = canvas.transitions.filter((t) => t.species.some((s) => s.species_id === node.id))
 
+  // D179: the stat strip. The frequency job is the one the energy view's value comes from, else
+  // the node's latest; whether its count is wrong for the role is the backend's warning on it
+  // (W-IMAG-TS, W-IMAG-MIN, D154, D158), or W-TS-NOFREQ when there is none.
+  const value = energy.view?.values[node.id] ?? null
+  const frequencyJob = calculations
+    ? (calculations.find((c) => c.id === value?.thermo_calculation_id && c.result?.imaginary_count != null) ??
+      calculations.findLast((c) => c.type === 'frequency' && c.result?.imaginary_count != null) ??
+      null)
+    : null
+  const frequencyWarning = frequencyJob
+    ? node.warnings.find((w) => IMAGINARY_WARNINGS.has(w.code) && w.calculation_id === frequencyJob.id)
+    : node.warnings.find((w) => w.code === 'W-TS-NOFREQ')
+  const relative = cardEnergy(energy, node.id)
+  const referenceNode = nodes.find((n) => n.id === energy.referenceId)
+  const referenceGroup = canvas.groups.find((g) => g.id === energy.referenceId)
+  const referenceName = referenceNode ? name(referenceNode) : referenceGroup ? referenceGroup.label || 'Group' : null
+  const unit = settings?.energy_unit ?? 'kcal/mol'
+
+  const transitionCount = isSpecies ? carriedBy.length : incoming.length + outgoing.length
+  const jumps: { key: JumpKey; label: string; count?: number }[] = [
+    { key: 'details', label: 'Details' },
+    { key: 'structure', label: '3D & xyz' },
+    { key: 'calculations', label: 'Calculations', count: node.calculation_count },
+    { key: 'transitions', label: 'Transitions', count: transitionCount },
+    { key: 'notes', label: 'Notes' },
+    { key: 'history', label: 'History' },
+  ]
+  const target = (key: JumpKey) => (element: HTMLElement | null) => {
+    targets.current[key] = element
+  }
+
+  const moreItems: MenuItem[] = []
+  if (!isSpecies && irc && (irc.is_ts || irc.count > 0) && onIrc) {
+    moreItems.push({
+      label: 'IRC…',
+      icon: 'wave',
+      detail: ircLine(irc),
+      title: 'The IRC’s files, path and end points, in a window of their own',
+      onSelect: onIrc,
+    })
+  }
+  if (!isSpecies) {
+    moreItems.push({
+      label: 'Split into branches…',
+      icon: 'branch',
+      disabled: !branch,
+      detail: branch ? undefined : 'Assign a branch first',
+      title: 'Create child branches of this node’s branch (FR-BR-02)',
+      onSelect: () => setSplitting(true),
+    })
+  }
+  moreItems.push({
+    label: isSpecies ? 'Delete species' : 'Delete node',
+    icon: 'trash',
+    danger: true,
+    onSelect: () =>
+      api.deletePreview(node.id).then(
+        (preview) => setConfirmDelete(preview),
+        (err: unknown) => setError(String(err)),
+      ),
+  })
+
   return (
     <div
-      className={`inspector${dragging ? ' dragging' : ''}`}
+      ref={root}
+      className={`inspector node-inspector${dragging ? ' dragging' : ''}`}
       aria-label="Node inspector"
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes('Files')) return
@@ -262,36 +399,141 @@ export function NodeInspector({
         if (files.length) onDropFiles(files)
       }}
     >
-      <div className="inspector-head">
-        <h2>{name(node)}</h2>
-        {isSpecies && <span className="badge species">Free species</span>}
-        {/* UI5 (D174): the actions wrap as a group; the name keeps its line */}
-        <div className="inspector-actions">
+      {/* D179: a sticky header that says what the node is, with its numbers first */}
+      <header className="node-head" ref={head}>
+        <div className="node-title">
+          {node.role === 'transition_state' && !isSpecies && (
+            <span className="ts-mark" title="Transition state">
+              TS
+            </span>
+          )}
+          <h2 title={name(node)}>{name(node)}</h2>
+          {isSpecies && <span className="badge species">Free species</span>}
+          <span className="spacer" />
           {!isSpecies && (
             <button
               onClick={onUseAsReference}
               disabled={isReference}
+              aria-label={isReference ? 'Energy reference' : 'Use as energy reference'}
               title="Energy mode and profiles show values relative to this node (EN-8)"
             >
-              {isReference ? 'Energy reference' : 'Use as energy reference'}
+              <Icon name="target" />
+              <span className="node-action-label">{isReference ? 'Reference' : 'Set as reference'}</span>
             </button>
           )}
-          <button onClick={onImport} title="Import an output file onto this record; or drop it here">
-            {isSpecies ? 'Import onto species…' : 'Import onto node…'}
-          </button>
           <button
-            className="danger"
-            onClick={() =>
-              api.deletePreview(node.id).then(
-                (preview) => setConfirmDelete(preview),
-                (err: unknown) => setError(String(err)),
-              )
+            onClick={onImport}
+            aria-label={isSpecies ? 'Import onto species…' : 'Import onto node…'}
+            title="Import an output file onto this record; or drop it here"
+          >
+            <Icon name="upload" />
+            <span className="node-action-label">Import…</span>
+          </button>
+          <MoreMenu label={isSpecies ? 'More species actions' : 'More node actions'} items={moreItems} />
+        </div>
+        <div className="node-meta">
+          <span>
+            <span className={`status-dot status-${node.status}`} aria-hidden="true" />
+            <b>{STATUS_LABEL[node.status]}</b>
+          </span>
+          {!isSpecies && (
+            <span>
+              <span className="swatch" style={{ background: branch?.colour ?? 'var(--idle-dot)' }} aria-hidden="true" />
+              Branch <b>{branch ? branch.name || 'Unnamed branch' : 'none'}</b>
+            </span>
+          )}
+          {!isSpecies && step && (
+            <span>
+              Step <b>{step.name || 'Unnamed step'}</b>
+            </span>
+          )}
+          <span>
+            <span>
+              <span className="visually-hidden">Formula: </span>
+              <b>{node.formula ?? 'No formula'}</b>
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>{node.atom_count} atoms</span>
+            <span aria-hidden="true">·</span>
+            <span>
+              {node.calculation_count} calculation{node.calculation_count === 1 ? '' : 's'}
+            </span>
+          </span>
+        </div>
+        <dl className={`node-stats${isSpecies ? ' species' : ''}`} aria-label="Energies">
+          {!isSpecies && (
+            <div title={relative?.title ?? 'No energies yet'}>
+              <dt>
+                {relative?.type ?? `Δ${energy.type}`}{' '}
+                {isReference ? '(reference)' : referenceName ? `(rel. ${referenceName})` : '(no reference)'}
+              </dt>
+              <dd className="stat-value">
+                {relative?.value != null ? (
+                  <>
+                    {minus(relative.value)} <span className="stat-unit">{unit}</span>
+                  </>
+                ) : (
+                  <span className="stat-missing">—</span>
+                )}
+              </dd>
+            </div>
+          )}
+          <div
+            title={
+              frequencyWarning?.message ??
+              (frequencyJob ? `From the frequency job at ${frequencyJob.composite_label}` : 'No frequency job on this node')
             }
           >
-            {isSpecies ? 'Delete species' : 'Delete node'}
-          </button>
-        </div>
-      </div>
+            <dt>Imaginary freq.</dt>
+            <dd className={`stat-value small-value${frequencyWarning ? ' warn' : ''}`}>
+              {frequencyJob?.result?.imaginary_count ?? <span className="stat-missing">—</span>}
+              {frequencyWarning && (
+                <>
+                  {' '}
+                  ⚠{' '}
+                  <span className="stat-note">
+                    {frequencyWarning.code === 'W-IMAG-MIN'
+                      ? 'minimum expects 0'
+                      : frequencyWarning.code === 'W-TS-NOFREQ'
+                        ? 'no frequency job'
+                        : 'TS expects 1'}
+                  </span>
+                </>
+              )}
+            </dd>
+          </div>
+          <div className="stat-wide" title={value ? (value.message ?? levelLabel) : 'No energies yet'}>
+            <dt>
+              {energy.view ? (
+                <>
+                  {energy.type} ({levelLabel})
+                </>
+              ) : (
+                'Energy'
+              )}
+            </dt>
+            <dd className="stat-value small-value mono">
+              {value?.value != null ? minus(hartree(value.value, 8)) : <span className="stat-missing">—</span>}
+            </dd>
+          </div>
+        </dl>
+        <nav className="jump-bar" aria-label="Sections">
+          {jumps.map((j) => (
+            <a
+              key={j.key}
+              href={`#node-${j.key}`}
+              aria-current={active === j.key ? 'location' : undefined}
+              onClick={(event) => {
+                event.preventDefault()
+                jump(j.key)
+              }}
+            >
+              {j.label}
+              {j.count !== undefined && <span className="count">{j.count}</span>}
+            </a>
+          ))}
+        </nav>
+      </header>
       {error && (
         <p role="alert" className="error">
           {error}
@@ -308,281 +550,259 @@ export function NodeInspector({
         </ul>
       )}
 
-      <div className="facts">
-        <span>
-          Formula: <strong>{node.formula ?? '—'}</strong>
-        </span>
-        <span>{node.atom_count} atoms</span>
-        <span>
-          {node.calculation_count} calculation{node.calculation_count === 1 ? '' : 's'}
-        </span>
-        {node.derived_from_id && (
-          <span>
-            Derived from{' '}
-            {parent ? (
-              <button className="link" onClick={() => onSelect(parent.id)}>
-                {name(parent)}
-              </button>
-            ) : (
-              <em>a deleted node</em>
-            )}
-          </span>
-        )}
-        {children.length > 0 && (
-          <span>
-            Derived nodes:{' '}
-            {children.map((child, i) => (
-              <span key={child.id}>
-                {i > 0 && ', '}
-                <button className="link" onClick={() => onSelect(child.id)}>
-                  {name(child)}
-                </button>
+      <div className="jump-target" id="node-details" ref={target('details')} tabIndex={-1}>
+        {(node.derived_from_id || children.length > 0 || group) && (
+          <div className="facts">
+            {node.derived_from_id && (
+              <span>
+                Derived from{' '}
+                {parent ? (
+                  <button className="link" onClick={() => onSelect(parent.id)}>
+                    {name(parent)}
+                  </button>
+                ) : (
+                  <em>a deleted node</em>
+                )}
               </span>
-            ))}
-          </span>
+            )}
+            {children.length > 0 && (
+              <span>
+                Derived nodes:{' '}
+                {children.map((child, i) => (
+                  <span key={child.id}>
+                    {i > 0 && ', '}
+                    <button className="link" onClick={() => onSelect(child.id)}>
+                      {name(child)}
+                    </button>
+                  </span>
+                ))}
+              </span>
+            )}
+            {group && (
+              <span>
+                Member of{' '}
+                <button className="link" onClick={() => onSelectGroup(group.id)}>
+                  {group.label || 'a group'}
+                </button>
+                {group.representative_id === node.id && <strong> (representative)</strong>}
+                {originBranch && originBranch.id !== node.branch_id && <> · came from {originBranch.name || 'a branch'}</>}
+              </span>
+            )}
+          </div>
         )}
-        {group && (
-          <span>
-            Member of{' '}
-            <button className="link" onClick={() => onSelectGroup(group.id)}>
-              {group.label || 'a group'}
-            </button>
-            {group.representative_id === node.id && <strong> (representative)</strong>}
-            {originBranch && originBranch.id !== node.branch_id && <> · came from {originBranch.name || 'a branch'}</>}
-          </span>
-        )}
-      </div>
-      {irc && !isSpecies && (irc.is_ts || irc.count > 0) && onIrc && (
-        <div className="irc-line row" aria-label="IRC">
-          <span className="small">{ircLine(irc)}</span>
-          <button className="small" onClick={onIrc} title="The IRC's files, path and end points, in a window of their own">
-            IRC…
-          </button>
-        </div>
-      )}
-
-      <div className="inspector-grid">
-        <div className="column">
-          <section className="fields" aria-label="Details">
+        {/* D179: two columns: Status|Role, Step|Branch, Charge|Multiplicity */}
+        <section className="fields two-column" aria-label="Details">
+          <div className="wide">
             <TextField key={node.label} label="Label" value={node.label} onCommit={(label) => update({ label })} />
+          </div>
+          <label className={`field${isSpecies ? ' wide' : ''}`}>
+            <span>Status</span>
+            <select value={node.status} onChange={(event) => update({ status: event.target.value as Node['status'] })}>
+              {STATUSES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {!isSpecies && (
             <label className="field">
-              <span>Status</span>
-              <select
-                value={node.status}
-                onChange={(event) => update({ status: event.target.value as Node['status'] })}
-              >
-                {STATUSES.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
+              <span>Role</span>
+              <select value={node.role} onChange={(event) => update({ role: event.target.value as Node['role'] })}>
+                {ROLES.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
                   </option>
                 ))}
               </select>
             </label>
-            {!isSpecies && (
-              <label className="field">
-                <span>Role</span>
+          )}
+          {!isSpecies && (
+            <label className="field">
+              <span>Step</span>
+              <select value={node.step_id ?? ''} onChange={(event) => update({ step_id: event.target.value || null })}>
+                <option value="">No step</option>
+                {canvas.steps.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name || 'Unnamed step'}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {!isSpecies && (
+            <div className="field">
+              <span>Branch</span>
+              <span className="field-with-action">
                 <select
-                  value={node.role}
-                  onChange={(event) => update({ role: event.target.value as Node['role'] })}
+                  aria-label="Branch"
+                  value={node.branch_id ?? ''}
+                  onChange={(event) => update({ branch_id: event.target.value || null })}
                 >
-                  {ROLES.map((r) => (
-                    <option key={r.value} value={r.value}>
-                      {r.label}
+                  <option value="">No branch</option>
+                  {canvas.branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name || 'Unnamed branch'}
                     </option>
                   ))}
                 </select>
-              </label>
-            )}
-            {!isSpecies && (
-              <label className="field">
-                <span>Step</span>
-                <select value={node.step_id ?? ''} onChange={(event) => update({ step_id: event.target.value || null })}>
-                  <option value="">No step</option>
-                  {canvas.steps.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name || 'Unnamed step'}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {!isSpecies && (
-              <div className="field">
-                <span>Branch</span>
-                <span className="field-with-action">
-                  <select
-                    aria-label="Branch"
-                    value={node.branch_id ?? ''}
-                    onChange={(event) => update({ branch_id: event.target.value || null })}
-                  >
-                    <option value="">No branch</option>
-                    {canvas.branches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name || 'Unnamed branch'}
-                      </option>
-                    ))}
-                  </select>
-                  {branch && (
-                    <button className="small" onClick={() => onSelectBranch(branch.id)} aria-label="Open branch">
-                      ↗
-                    </button>
-                  )}
-                </span>
-              </div>
-            )}
-            <div className="field-pair">
-              <IntField
-                key={`c${node.charge}`}
-                label="Charge"
-                value={node.charge} onCommit={(charge) => update({ charge })} />
-              <IntField
-                key={`m${node.multiplicity}`}
-                label="Multiplicity"
-                value={node.multiplicity}
-                min={1}
-                onCommit={(multiplicity) => update({ multiplicity })}
-              />
+                {branch && (
+                  <button className="small" onClick={() => onSelectBranch(branch.id)} aria-label="Open branch">
+                    ↗
+                  </button>
+                )}
+              </span>
             </div>
-            <Tags tags={node.tags} onChange={(tags) => update({ tags })} />
-          </section>
-          <Notes key={node.notes} notes={node.notes} onSave={(notes) => update({ notes })} />
-        </div>
-        <div className="column">
-          <PopOut popped={poppedOut} title={`3D view: ${name(node)}`} onDock={() => setPoppedOut(false)}>
-            <Viewer3D
-              models={node.xyz ? [{ xyz: node.xyz }] : []}
-              vibration={vibration}
-              rotation={node.view_rotation}
-              onSaveRotation={isSpecies ? undefined : (view_rotation) => update({ view_rotation })}
-              corner={<PopOutButton popped={poppedOut} onClick={() => setPoppedOut(!poppedOut)} />}
-              trajectory={movie}
-              below={
-                <StepMovie
-                  nodeId={node.id}
-                  refreshKey={refreshKey}
-                  settings={settings}
-                  vibrating={vibration !== null}
-                  onShow={setMovie}
-                  onStart={() => setVibrationPicker((n) => n + 1)}
-                  onUsed={(used, derived, structure) =>
-                    onChanged(
-                      used,
-                      derived
-                        ? `Structure ${structure} saved as a new node derived from “${name(node)}”.`
-                        : `The node's geometry is now structure ${structure}.`,
-                    )
-                  }
-                  onTrimmed={(trimmed, notice) => onChanged(trimmed, notice)}
-                />
-              }
-            />
-          </PopOut>
-          <Vibrations key={vibrationPicker} nodeId={node.id} refreshKey={refreshKey} onChange={setVibration} />
-          <XyzEditor
-            key={node.xyz ?? ''}
-            node={node}
-            servers={servers}
-            onEdit={onEditStructure}
-            onSaved={(saved, derived) =>
-              onChanged(saved, derived ? `Saved as a new node derived from “${name(node)}”.` : undefined)
-            }
+          )}
+          <IntField key={`c${node.charge}`} label="Charge" value={node.charge} onCommit={(charge) => update({ charge })} />
+          <IntField
+            key={`m${node.multiplicity}`}
+            label="Multiplicity"
+            value={node.multiplicity}
+            min={1}
+            onCommit={(multiplicity) => update({ multiplicity })}
           />
-        </div>
+          <div className="wide">
+            <Tags tags={node.tags} onChange={(tags) => update({ tags })} />
+          </div>
+        </section>
       </div>
 
-      {!isSpecies && (
-        <PinnedNotesSection
-          notes={canvas.notes.filter((n) => n.node_id === node.id)}
-          onAdd={() => onEditNote(null)}
-          onEdit={onEditNote}
+      <div className="jump-target column" id="node-structure" ref={target('structure')} tabIndex={-1}>
+        <PopOut popped={poppedOut} title={`3D view: ${name(node)}`} onDock={() => setPoppedOut(false)}>
+          <Viewer3D
+            models={node.xyz ? [{ xyz: node.xyz }] : []}
+            vibration={vibration}
+            rotation={node.view_rotation}
+            onSaveRotation={isSpecies ? undefined : (view_rotation) => update({ view_rotation })}
+            corner={<PopOutButton popped={poppedOut} onClick={() => setPoppedOut(!poppedOut)} />}
+            trajectory={movie}
+            below={
+              <StepMovie
+                nodeId={node.id}
+                refreshKey={refreshKey}
+                settings={settings}
+                vibrating={vibration !== null}
+                onShow={setMovie}
+                onStart={() => setVibrationPicker((n) => n + 1)}
+                onUsed={(used, derived, structure) =>
+                  onChanged(
+                    used,
+                    derived
+                      ? `Structure ${structure} saved as a new node derived from “${name(node)}”.`
+                      : `The node's geometry is now structure ${structure}.`,
+                  )
+                }
+                onTrimmed={(trimmed, notice) => onChanged(trimmed, notice)}
+              />
+            }
+          />
+        </PopOut>
+        <Vibrations key={vibrationPicker} nodeId={node.id} refreshKey={refreshKey} onChange={setVibration} />
+        <XyzEditor
+          key={node.xyz ?? ''}
+          node={node}
+          servers={servers}
+          onEdit={onEditStructure}
+          onSaved={(saved, derived) =>
+            onChanged(saved, derived ? `Saved as a new node derived from “${name(node)}”.` : undefined)
+          }
         />
-      )}
+        <StericsSection node={node} nodes={nodes} />
+      </div>
 
-      {isSpecies ? (
-        <section aria-label="Transitions">
-          <div className="section-head">
-            <h3>Joins or leaves on</h3>
-            <button
-              disabled={carriedBy.length > 0}
-              title={
-                carriedBy.length
-                  ? 'Remove it from its transitions first'
-                  : 'Draw it on the canvas as an ordinary node (D69)'
-              }
-              onClick={() => setKind('node')}
-            >
-              Make it a node
-            </button>
-          </div>
-          {carriedBy.length === 0 ? (
-            <p className="muted">No transition yet. Select a transition to add this species as joining or leaving.</p>
-          ) : (
-            <ul className="plain transitions">
-              {carriedBy.map((t) => {
-                const entry = t.species.find((s) => s.species_id === node.id)!
-                return (
-                  <li key={t.id}>
-                    <button className="link" onClick={() => onSelectTransition(t.id)}>
-                      {endName(t.source_id)} → {endName(t.target_id)}
-                    </button>
-                    <span className={`chip species-${entry.direction}`}>{speciesChip(entry)}</span>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-          <SpeciesConcentration node={node} settings={settings} onSave={update} />
-        </section>
-      ) : (
-        <section aria-label="Transitions">
-          <div className="section-head">
-            <h3>Transitions</h3>
-            {incoming.length + outgoing.length === 0 && !group && (
-              <button
-                title="A substrate or fragment that joins or leaves on a transition; kept off the canvas (D69)"
-                onClick={() => setKind('species')}
-              >
-                Make it a free species
-              </button>
-            )}
-            <button
-              disabled={!branch}
-              title={branch ? 'Create child branches of this node’s branch (FR-BR-02)' : 'Assign a branch first'}
-              onClick={() => setSplitting(true)}
-            >
-              Split into branches…
-            </button>
-          </div>
-          {incoming.length + outgoing.length === 0 ? (
-            <p className="muted">None. Drag from a node’s right handle to another node on the canvas.</p>
-          ) : (
-            <ul className="plain transitions">
-              {[...incoming, ...outgoing].map((t) => (
-                <li key={t.id}>
-                  <button className="link" onClick={() => onSelectTransition(t.id)}>
-                    {t.target_id === node.id ? `from ${endName(t.source_id)}` : `to ${endName(t.target_id)}`}
-                  </button>
-                  {t.direct && <span className="no-ts">no TS</span>}
-                  <span className={`status status-${t.status}`}>{STATUSES.find((x) => x.value === t.status)?.label}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
-
-      {!isSpecies && (node.path_edge_id || node.scan_path) && (
-        <PathEdgeSection node={node} canvas={canvas} onChanged={onChanged} onSelectTransition={onSelectTransition} />
-      )}
-
-      <section aria-label="Calculations section">
+      <section aria-label="Calculations section" className="jump-target" id="node-calculations" ref={target('calculations')} tabIndex={-1}>
         <h3>Calculations</h3>
-        <CalculationList nodeId={node.id} refreshKey={refreshKey} onChanged={onRefresh} />
+        {/* D131: a TS node's IRC, which never changes the node itself, is one line here (IRC… is in ⋯) */}
+        {irc && !isSpecies && (irc.is_ts || irc.count > 0) && (
+          <p className="irc-status small muted" aria-label="IRC">
+            {ircLine(irc)}
+          </p>
+        )}
+        <CalculationList nodeId={node.id} refreshKey={refreshKey} onChanged={onRefresh} onLoaded={setCalculations} />
       </section>
 
-      <StericsSection node={node} nodes={nodes} />
+      <div className="jump-target column" id="node-transitions" ref={target('transitions')} tabIndex={-1}>
+        {isSpecies ? (
+          <section aria-label="Transitions">
+            <div className="section-head">
+              <h3>Joins or leaves on</h3>
+              <button
+                disabled={carriedBy.length > 0}
+                title={
+                  carriedBy.length ? 'Remove it from its transitions first' : 'Draw it on the canvas as an ordinary node (D69)'
+                }
+                onClick={() => setKind('node')}
+              >
+                Make it a node
+              </button>
+            </div>
+            {carriedBy.length === 0 ? (
+              <p className="muted">No transition yet. Select a transition to add this species as joining or leaving.</p>
+            ) : (
+              <ul className="plain transitions">
+                {carriedBy.map((t) => {
+                  const entry = t.species.find((s) => s.species_id === node.id)!
+                  return (
+                    <li key={t.id}>
+                      <button className="link" onClick={() => onSelectTransition(t.id)}>
+                        {endName(t.source_id)} → {endName(t.target_id)}
+                      </button>
+                      <span className={`chip species-${entry.direction}`}>{speciesChip(entry)}</span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+            <SpeciesConcentration node={node} settings={settings} onSave={update} />
+          </section>
+        ) : (
+          <section aria-label="Transitions">
+            <div className="section-head">
+              <h3>Transitions</h3>
+              {incoming.length + outgoing.length === 0 && !group && (
+                <button
+                  title="A substrate or fragment that joins or leaves on a transition; kept off the canvas (D69)"
+                  onClick={() => setKind('species')}
+                >
+                  Make it a free species
+                </button>
+              )}
+            </div>
+            {incoming.length + outgoing.length === 0 ? (
+              <p className="muted">None. Drag from a node’s right handle to another node on the canvas.</p>
+            ) : (
+              <ul className="plain transitions">
+                {[...incoming, ...outgoing].map((t) => (
+                  <li key={t.id}>
+                    <button className="link" onClick={() => onSelectTransition(t.id)}>
+                      {t.target_id === node.id ? `from ${endName(t.source_id)}` : `to ${endName(t.target_id)}`}
+                    </button>
+                    {t.direct && <span className="no-ts">no TS</span>}
+                    <span className={`status status-${t.status}`}>{STATUSES.find((x) => x.value === t.status)?.label}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+        {!isSpecies && (node.path_edge_id || node.scan_path) && (
+          <PathEdgeSection node={node} canvas={canvas} onChanged={onChanged} onSelectTransition={onSelectTransition} />
+        )}
+      </div>
 
-      <section aria-label="Node history">
+      <div className="jump-target column" id="node-notes" ref={target('notes')} tabIndex={-1}>
+        <Notes key={node.notes} notes={node.notes} onSave={(notes) => update({ notes })} />
+        {!isSpecies && (
+          <PinnedNotesSection
+            notes={canvas.notes.filter((n) => n.node_id === node.id)}
+            onAdd={() => onEditNote(null)}
+            onEdit={onEditNote}
+          />
+        )}
+      </div>
+
+      <section aria-label="Node history" className="jump-target" id="node-history" ref={target('history')} tabIndex={-1}>
         <h3>History of this node</h3>
         <HistoryList entries={history} names={recordNames(canvas)} onRestore={restore} onUndo={setUndoing} />
       </section>

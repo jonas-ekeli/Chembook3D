@@ -1327,14 +1327,261 @@ pre.route {
 }
 
 /* Phase 3: canvas, inspectors beside it, 3D tools */
+/* D179: the panel gives way, down to 340 px, when the canvas has no room left (a narrow window
+   with the Claude panel open), so its header and actions stay in view. */
 .workspace .side {
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 340px;
   overflow: auto;
   padding: 1rem;
   background: var(--panel);
 }
 .side .inspector-grid {
   grid-template-columns: 1fr;
+}
+
+/* D179 (UI3): the node panel. A sticky header with what the node is (TS tag, name on one line,
+   two actions and a ⋯ menu), a meta row, the stat strip and a jump bar over one scroll. */
+/* The side panel's top padding counts for sticky, so the header sticks 1rem above it to cover
+   the panel's top edge. */
+.node-head {
+  position: sticky;
+  top: -1rem;
+  z-index: 5;
+  container-type: inline-size;
+  background: var(--panel);
+  margin: -1rem -1rem 0;
+  padding: 14px 1rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.node-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.node-title h2 {
+  font-size: 20px;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  margin: 0;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-title .ts-mark {
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 5px;
+}
+.node-title .badge {
+  flex-shrink: 0;
+  margin-left: 0;
+}
+.node-title .spacer {
+  flex: 1 0 0;
+}
+.node-title > button,
+.more-menu > button {
+  flex-shrink: 0;
+  padding: 0 10px;
+}
+.more-menu > button.icon {
+  width: var(--ctl-h);
+  padding: 0;
+}
+/* A narrow panel keeps the name readable: the actions become their icons (the name stays in
+   the tooltip and the accessible name). */
+@container (max-width: 400px) {
+  .node-action-label {
+    display: none;
+  }
+  .node-title > button {
+    width: var(--ctl-h);
+    padding: 0;
+  }
+}
+.more-menu .menu-list {
+  min-width: 220px;
+}
+.menu-item-text {
+  display: grid;
+  gap: 1px;
+}
+.menu-item-text small {
+  font-size: 11.5px;
+  font-weight: 400;
+}
+.menu-list > button.danger .ic {
+  color: var(--danger);
+}
+.node-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  color: var(--muted);
+  font-size: 12.5px;
+  margin: 6px 0 10px;
+}
+.node-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.node-meta b {
+  color: var(--text);
+  font-weight: 600;
+}
+.node-meta .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.node-stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.95fr) minmax(0, 1.75fr);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0 0 10px;
+  overflow: hidden;
+}
+.node-stats.species {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+.node-stats > div {
+  padding: 8px 10px;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+.node-stats > div:last-child {
+  border-right: none;
+}
+.node-stats dt {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-stats dd {
+  margin: 0;
+}
+.stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.stat-value.small-value {
+  font-size: 13px;
+  font-weight: 600;
+  padding-top: 4px;
+}
+.stat-value.warn {
+  color: var(--warn);
+}
+.stat-unit,
+.stat-note {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.stat-value.warn .stat-note {
+  color: var(--warn);
+  font-family: inherit;
+}
+.stat-missing {
+  color: var(--text-faint);
+  font-weight: 500;
+}
+@container (max-width: 400px) {
+  .node-stats,
+  .node-stats.species {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .node-stats .stat-wide {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--border);
+  }
+  .node-stats.species .stat-wide {
+    grid-column: auto;
+    border-top: none;
+  }
+}
+.jump-bar {
+  display: flex;
+  gap: 2px;
+  margin-bottom: -1px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.jump-bar a {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+.jump-bar a:hover {
+  color: var(--text);
+}
+.jump-bar a:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+  border-radius: 4px;
+}
+.jump-bar a[aria-current] {
+  color: var(--text);
+  font-weight: 500;
+  border-bottom-color: var(--accent);
+}
+.jump-bar .count {
+  font-size: 11px;
+  background: var(--quiet-hover);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+@container (max-width: 460px) {
+  .jump-bar {
+    gap: 0;
+  }
+  .jump-bar a {
+    padding: 6px 5px;
+    font-size: 12.5px;
+  }
+  .jump-bar .count {
+    padding: 0 5px;
+  }
+}
+.jump-target {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+.jump-target:focus {
+  outline: none;
+}
+.fields.two-column {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 12px;
+}
+.fields.two-column .wide {
+  grid-column: 1 / -1;
+}
+.fields.two-column .field-with-action select {
+  min-width: 0;
+}
+.fields.two-column .field > span:first-child {
+  font-size: 11.5px;
 }
 .splitter {
   width: 5px;
@@ -3511,11 +3758,8 @@ table.scan-path-held input.drive-value {
 }
 
 /* D131: a TS node's IRC window */
-.irc-line {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0.25rem 0 0.5rem;
+.irc-status {
+  margin: 0 0 0.5rem;
 }
 .irc-slots {
   display: grid;

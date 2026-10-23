@@ -1249,6 +1249,8 @@ function App() {
         servers={remote?.enabled ? remote.servers.filter((s) => s.connected) : []}
         onIrc={() => setIrcNode(selectedNode.id)}
         onEditStructure={() => setEditingNode(selectedNode.id)}
+        energy={canvasEnergy}
+        levelLabel={levelLabel}
       />
     )
   } else if (selectedGroup) {

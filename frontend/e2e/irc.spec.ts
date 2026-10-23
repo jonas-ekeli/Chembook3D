@@ -30,7 +30,8 @@ test("a TS node's IRC is imported, inspected and removed in its own window", asy
   await expect(inspector.getByRole('heading', { name: 'TS' })).toBeVisible()
   await expect(inspector.getByText('2 calculations', { exact: true })).toBeVisible()
   await expect(inspector.getByLabel('IRC', { exact: true })).toContainText('IRC: none yet')
-  await inspector.getByRole('button', { name: 'IRC…' }).click()
+  await inspector.getByRole('button', { name: 'More node actions' }).click()
+  await page.getByRole('menuitem', { name: 'IRC…' }).click()
 
   const window = page.getByRole('dialog', { name: 'IRC of “TS”' })
   await expect(window.getByText('Import the IRC outputs to see the path.')).toBeVisible()
@@ -90,7 +91,8 @@ test("a TS node's IRC is imported, inspected and removed in its own window", asy
   await expect(inspector.getByText('2 calculations', { exact: true })).toBeVisible()
 
   // D132, T-UI-35: the forward end point made a node of its own, then found as the same structure.
-  await inspector.getByRole('button', { name: 'IRC…' }).click()
+  await inspector.getByRole('button', { name: 'More node actions' }).click()
+  await page.getByRole('menuitem', { name: 'IRC…' }).click()
   await expect(forward.getByLabel('Where it leads')).toContainText('The TS has no edges')
   await forward.getByRole('button', { name: 'Make it a node' }).click()
   await expect(forward.getByText(/Same structure as/)).toBeVisible()
@@ -104,7 +106,8 @@ test("a TS node's IRC is imported, inspected and removed in its own window", asy
   })
   expect(made.ok()).toBeTruthy()
   await window.getByRole('button', { name: 'Close' }).click()
-  await inspector.getByRole('button', { name: 'IRC…' }).click()
+  await inspector.getByRole('button', { name: 'More node actions' }).click()
+  await page.getByRole('menuitem', { name: 'IRC…' }).click()
   await expect(forward.getByLabel('Where it leads')).toContainText('Reaches TS forward end')
   await expect(window.locator('.irc-slot').first()).toHaveAttribute('aria-label', 'Forward direction')
   await expect(window.getByRole('img', { name: 'IRC energy along the path' })).toContainText('forward ← TS → reverse')
