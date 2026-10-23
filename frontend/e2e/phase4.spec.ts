@@ -209,12 +209,13 @@ test('profile along branches with a "no TS" connection, the energy table and exp
   for (const segment of await chart.locator('[data-direct="true"]').all()) await expect(segment).toContainText('no TS')
   await page.screenshot({ path: 'test-results/phase4-profile.png' })
 
-  for (const [button, name, check] of [
-    ['Save profile as PNG', 'energy-profile.png', (b: Buffer) => b.subarray(1, 4).toString() === 'PNG'],
-    ['Save profile as SVG', 'energy-profile.svg', (b: Buffer) => b.toString('utf8').includes('<svg')],
+  for (const [item, name, check] of [
+    ['Profile as PNG', 'energy-profile.png', (b: Buffer) => b.subarray(1, 4).toString() === 'PNG'],
+    ['Profile as SVG', 'energy-profile.svg', (b: Buffer) => b.toString('utf8').includes('<svg')],
   ] as const) {
     const download = page.waitForEvent('download')
-    await drawer.getByRole('button', { name: button }).click()
+    await drawer.getByRole('button', { name: 'Export ▾' }).click()
+    await page.getByRole('menuitem', { name: item }).click()
     const file = await download
     expect(file.suggestedFilename()).toBe(name)
     const bytes = readFileSync(await file.path())
@@ -222,7 +223,7 @@ test('profile along branches with a "no TS" connection, the energy table and exp
     expect(check(bytes)).toBe(true)
   }
 
-  await drawer.getByRole('button', { name: 'Energy table' }).click()
+  await drawer.getByRole('button', { name: 'Table', exact: true }).click()
   const table = drawer.getByRole('table', { name: 'Energy table' })
   await expect(table.locator('tbody tr')).toHaveCount(6) // 6 nodes, each once
   // D177: the screen puts the relative energies first, so cells are read by column name.
@@ -246,7 +247,8 @@ test('profile along branches with a "no TS" connection, the energy table and exp
   // T-EN-08: the CSV holds the same values as the table on screen, in its own column order
   // (D177), with an ASCII minus; a constant Level and Thermochemistry are the screen's caption.
   const download = page.waitForEvent('download')
-  await drawer.getByRole('button', { name: 'Export CSV' }).click()
+  await drawer.getByRole('button', { name: 'Export ▾' }).click()
+  await page.getByRole('menuitem', { name: 'Table as CSV' }).click()
   const file = await download
   expect(file.suggestedFilename()).toBe('energy-table.csv')
   const text = readFileSync(await file.path(), 'utf8').replace(/^﻿/, '')
@@ -287,7 +289,7 @@ test('a catalytic cycle closes at the resting state', async ({ page }) => {
     const chart = drawer.getByRole('img', { name: 'Energy profile' })
     await expect(chart).toContainText('T-S0 ↻')
 
-    await drawer.getByRole('button', { name: 'Energy table' }).click()
+    await drawer.getByRole('button', { name: 'Table', exact: true }).click()
     await expect(drawer.getByRole('table', { name: 'Energy table' }).locator('tbody tr')).toHaveCount(4) // each node once
   } finally {
     await page.request.delete(`/api/transitions/${closing.id}`)

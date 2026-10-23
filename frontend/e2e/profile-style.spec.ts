@@ -22,9 +22,10 @@ async function openDemo(page: Page) {
   await expect(page.getByRole('group', { name: 'Node T-S0', exact: true })).toBeVisible()
 }
 
-async function saved(page: Page, button: string): Promise<Buffer> {
+async function saved(page: Page, item: string): Promise<Buffer> {
   const download = page.waitForEvent('download')
-  await page.getByLabel('Energy drawer').getByRole('button', { name: button }).click()
+  await page.getByLabel('Energy drawer').getByRole('button', { name: 'Export ▾' }).click()
+  await page.getByRole('menuitem', { name: item }).click()
   return readFileSync(await (await download).path())
 }
 
@@ -63,12 +64,12 @@ test('profile style, saved images and zoom', async ({ page }) => {
     await expect(chart).toHaveAttribute('width', '1200')
     await expect(chart).toContainText('(0.00)')
     await page.screenshot({ path: 'test-results/profile-publication.png' })
-    const svg = (await saved(page, 'Save profile as SVG')).toString('utf8')
+    const svg = (await saved(page, 'Profile as SVG')).toString('utf8')
     expect(svg).toContain('width="1200"')
     expect(svg).toContain('Arial')
     expect(svg).not.toContain('relative to')
     expect(svg).not.toContain('style=') // the zoom on screen is not part of the figure
-    const png = await saved(page, 'Save profile as PNG')
+    const png = await saved(page, 'Profile as PNG')
     expect(png.subarray(1, 4).toString()).toBe('PNG')
     expect(png.readUInt32BE(16)).toBe(4800) // width × 4
 
@@ -88,15 +89,17 @@ test('profile style, saved images and zoom', async ({ page }) => {
     await drawer.getByRole('button', { name: 'Pathways' }).click()
     await expect(drawer.getByLabel('Pathways', { exact: true })).toHaveCount(0)
     expect((await chart.boundingBox())!.width).toBeGreaterThan(fitWidth)
-    await expect(drawer.getByLabel('Zoom level')).toHaveText('Fit')
+    // D181: the zoom's level between − and + is a button: Fit, or the zoom, which goes back to Fit.
+    const zoomLevel = drawer.getByRole('group', { name: 'Zoom' }).getByRole('button').nth(1)
+    await expect(zoomLevel).toHaveText('Fit')
     await drawer.getByRole('button', { name: 'Zoom in' }).click()
     await drawer.getByRole('button', { name: 'Zoom in' }).click()
     await page.screenshot({ path: 'test-results/profile-zoomed.png' })
-    const level = await drawer.getByLabel('Zoom level').textContent()
+    const level = await zoomLevel.textContent()
     const zoom = Number(level!.replace(/[^\d]/g, '')) / 100
     expect((await chart.boundingBox())!.width).toBeCloseTo(1200 * zoom, 0)
-    await drawer.getByRole('button', { name: 'Fit' }).click()
-    await expect(drawer.getByLabel('Zoom level')).toHaveText('Fit')
+    await zoomLevel.click()
+    await expect(zoomLevel).toHaveText('Fit')
 
     // The drawer's height and the hidden list are remembered by the browser.
     const taller = (await drawer.boundingBox())!.height

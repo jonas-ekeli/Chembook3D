@@ -32,7 +32,7 @@ test('energy table: relative energies first, barrier of each step, selected row 
   await drawer.getByLabel('Add branch pathway').selectOption({ label: 'A' })
   await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
   await expect(drawer.getByRole('group', { name: 'Pathway B' })).toContainText('T-S0 → B-S1 → B-S2 → B-S3')
-  await drawer.getByRole('button', { name: 'Energy table' }).click()
+  await drawer.getByRole('button', { name: 'Table', exact: true }).click()
   const table = drawer.getByRole('table', { name: 'Energy table' })
   const head = table.locator('thead tr').last().locator('th')
   await expect(head).toHaveText([
@@ -72,7 +72,10 @@ test('energy table: relative energies first, barrier of each step, selected row 
   // The bug of the generic .check rule: the Check cells stay table cells.
   await expect(table.locator('tbody td.check').first()).toHaveCSS('display', 'table-cell')
   await expect(table.locator('thead')).toHaveCSS('position', 'sticky')
-  await expect(drawer.getByRole('button', { name: 'Export CSV' })).toHaveAttribute('title', /own column order/)
+  // D181: the CSV is in the drawer's one Export menu.
+  await drawer.getByRole('button', { name: 'Export ▾' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Table as CSV' })).toHaveAttribute('title', /own column order/)
+  await page.keyboard.press('Escape')
 
   // The row of the node selected on the canvas.
   await expect(table.locator('tbody tr[aria-current="true"]')).toHaveCount(0)

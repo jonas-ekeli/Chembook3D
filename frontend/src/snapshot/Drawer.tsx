@@ -1,9 +1,12 @@
-import { useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import { energyTypeName, type EnergyType, type Settings } from '../api'
 import { EnergyNotes } from '../components/EnergyNotes'
 import { EnergyTableView } from '../components/EnergyTableView'
 import { GModelBadge } from '../components/GModelBadge'
-import { ProfileChart } from '../components/ProfileChart'
+import { Menu } from '../components/MoreMenu'
+import { ProfileChart, SCREEN_TEXT } from '../components/ProfileChart'
+import { Icon } from '../icons'
+import { figureOf } from '../profileFigure'
 import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
 import { closesCycle, csvTitle, download } from '../util'
 import { tableCsv, type SnapshotData } from './data'
@@ -39,7 +42,6 @@ export function SnapshotDrawer({
   /** D177: the node or group selected on the canvas, whose table row is highlighted. */
   selectedId: string | null
 }) {
-  const svgRef = useRef<SVGSVGElement>(null)
   const canvas = data.canvas
   const paths = data.paths
 
@@ -64,12 +66,17 @@ export function SnapshotDrawer({
   })
   const shown = level && reference ? data.profiles[`${level}|${type}|${reference}`] : undefined
 
+  // D181: the saved figure is drawn afresh in the style alone, as the app saves it.
+  const figure = () => shown && figureOf({ data: shown.profiles, colours, names, settings })
+
   const exportSvg = () => {
-    if (svgRef.current) saveProfileSvg(svgRef.current)
+    const svg = figure()
+    if (svg) saveProfileSvg(svg)
   }
 
   const exportPng = () => {
-    if (svgRef.current) saveProfilePng(svgRef.current, styleOf(settings), () => undefined)
+    const svg = figure()
+    if (svg) saveProfilePng(svg, styleOf(settings), () => undefined)
   }
 
   const exportCsv = () => {
@@ -83,11 +90,11 @@ export function SnapshotDrawer({
     <section className="drawer" aria-label="Energy drawer">
       <div className="drawer-head">
         <div className="segmented" role="group" aria-label="Drawer tab">
-          <button aria-pressed={tab === 'profile'} onClick={() => onTab('profile')}>
-            Energy profile
+          <button aria-pressed={tab === 'profile'} onClick={() => onTab('profile')} title="Energy profile">
+            Profile
           </button>
-          <button aria-pressed={tab === 'table'} onClick={() => onTab('table')}>
-            Energy table
+          <button aria-pressed={tab === 'table'} onClick={() => onTab('table')} title="Energy table">
+            Table
           </button>
         </div>
         <span className="muted small">
@@ -97,20 +104,21 @@ export function SnapshotDrawer({
         </span>
         {type === 'G' && <GModelBadge models={shown?.profiles.g_models} />}
         <span className="spacer" />
-        {tab === 'profile' ? (
-          <>
-            <button className="small" onClick={exportPng} disabled={!shown}>
-              Save profile as PNG
-            </button>
-            <button className="small" onClick={exportSvg} disabled={!shown}>
-              Save profile as SVG
-            </button>
-          </>
-        ) : (
-          <button className="small" onClick={exportCsv} disabled={!shown} title={csvTitle(type)}>
-            Export CSV
-          </button>
-        )}
+        <Menu
+          label="Export"
+          buttonClass="small"
+          buttonLabel="Export ▾"
+          title="The profile as PNG or SVG, the table as CSV"
+          items={[
+            { label: 'Profile as PNG', onSelect: exportPng, disabled: !shown },
+            { label: 'Profile as SVG', onSelect: exportSvg, disabled: !shown },
+            { label: 'Table as CSV', onSelect: exportCsv, disabled: !shown, title: csvTitle(type) },
+          ]}
+        >
+          <Icon name="download" />
+          Export
+          <Icon name="chevron" />
+        </Menu>
       </div>
       <div className="drawer-body">
         <div className="pathways" aria-label="Pathways">
@@ -163,7 +171,21 @@ export function SnapshotDrawer({
           ) : tab === 'profile' ? (
             <>
               <EnergyNotes notes={shown.profiles.notes} />
-              <ProfileChart data={shown.profiles} colours={colours} names={names} settings={settings} svgRef={svgRef} />
+              <ProfileChart
+                data={shown.profiles}
+                colours={colours}
+                names={names}
+                settings={settings}
+                textScale={SCREEN_TEXT}
+                pointing={{
+                  selectedId,
+                  onSelect: onSelectNode,
+                  branchName: (id) => {
+                    const branch = branches.get(id)
+                    return branch && (branch.name || 'Unnamed branch')
+                  },
+                }}
+              />
             </>
           ) : (
             <EnergyTableView

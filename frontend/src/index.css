@@ -65,6 +65,11 @@
   --paper-text: #333333;
   --terminal-bg: #1e1e1e; /* the Claude and server terminals (terminal.ts reads it) */
   --terminal-text: #e6e6e6;
+  --tip-bg: #1c2430; /* the energy profile's dark tooltip (D181) */
+  --tip-text: #ffffff;
+  --tip-muted: #c3cad5;
+  --tip-faint: #98a2b3;
+  --tip-warn: #fec84b;
   --shadow-rgb: 16 24 40;
   --scrim: rgb(16 24 40 / 35%); /* behind a dialog */
   /* D85: note colours */
@@ -2471,9 +2476,13 @@ table.overlay-legend td {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem 0.75rem;
+  gap: 0.4rem 0.5rem;
   padding: 0.4rem 1rem;
   border-bottom: 1px solid var(--border);
+}
+/* D181: the tabs read as the drawer's two views. */
+.drawer-head .segmented button {
+  padding: 3px 14px;
 }
 .drawer-body {
   flex: 1;
@@ -2547,15 +2556,97 @@ table.overlay-legend td {
 .drawer-main.zoomed .profile-chart {
   user-select: none;
 }
+/* D181: zoom out, the level (Fit or a percentage, a button) and zoom in, joined as one control. */
 .zoom {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
+  display: inline-flex;
 }
-.zoom-level {
-  min-width: 3.2rem;
-  text-align: center;
+.zoom button {
+  border-radius: 0;
+  min-width: 28px;
+}
+.zoom button + button {
+  margin-left: -1px;
+}
+.zoom button:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+.zoom button:last-child {
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.zoom button.zoom-level {
+  min-width: 3.6rem;
+  color: var(--muted);
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
+}
+/* D181: pointing at the drawer's profile. The hovered level is drawn thicker with a glow, the
+   canvas selection has a halo behind its level, and the tooltip is dark. */
+.profile-level {
+  cursor: pointer;
+}
+.profile-level-line.hovered {
+  filter: drop-shadow(0 0 3px var(--accent-tint));
+}
+.profile-selected {
+  stroke: var(--accent-tint);
+}
+.profile-tip {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  min-width: 210px;
+  max-width: 360px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--tip-bg);
+  color: var(--tip-text);
+  font-size: 12.5px;
+  line-height: 1.5;
+  box-shadow: 0 8px 24px rgb(var(--shadow-rgb) / 25%);
+}
+.profile-tip::after {
+  content: '';
+  position: absolute;
+  top: 12px;
+  left: -6px;
+  border: 6px solid transparent;
+  border-left: 0;
+  border-right-color: var(--tip-bg);
+}
+.profile-tip.flipped::after {
+  left: auto;
+  right: -6px;
+  border: 6px solid transparent;
+  border-right: 0;
+  border-left-color: var(--tip-bg);
+}
+.profile-tip-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  margin-bottom: 2px;
+}
+.profile-tip-head b {
+  font-size: 13.5px;
+}
+.profile-tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.profile-tip-row span:first-child,
+.profile-tip-head span {
+  color: var(--tip-muted);
+}
+.profile-tip-warn {
+  color: var(--tip-warn);
+}
+.profile-tip-hint {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--tip-faint);
 }
 .style-presets {
   display: flex;
