@@ -17,6 +17,7 @@ from chembook3d.api.builds import Builds
 from chembook3d.api.claude import Panel
 from chembook3d.api.claude import router as claude_router
 from chembook3d.api.energies import router as energy_router
+from chembook3d.api.equilibrium import router as equilibrium_router
 from chembook3d.api.import_undo import router as undo_router
 from chembook3d.api.inspect import inspections
 from chembook3d.api.inspect import router as inspect_router
@@ -137,6 +138,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(selectivity_router)
     app.include_router(note_router)
     app.include_router(turnover_router)
+    app.include_router(equilibrium_router)
     app.include_router(measurement_router)  # D151
     app.include_router(claude_router)
     app.include_router(remote_router)  # D122

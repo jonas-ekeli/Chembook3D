@@ -259,6 +259,17 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-TOF-04 | The temperature is the G_qh setting or the turnover's own, with G_qh recomputed at it. The result shows the TOF (s⁻¹, h⁻¹), δE, ΔG_r, the cycle's profile with the TDTS and TDI marked, and the degree-of-control table with a CSV export. | D86, A36 | after 5 |
 | FR-TOF-05 | A turnover can be compared with another at the same level, energy type and temperature, as percentages and an effective ΔΔG‡. Turnovers are listed in the Analyses view and made there or from a closed pathway in the energy drawer; creating, changing and deleting one is recorded in the history. | D86, A36 | after 5 |
 
+## FR-EQ · Conformer equilibrium (D171)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-EQ-01 | Saved conformer equilibria hold nodes and groups the user chose, each with a count (1 unless changed); TS nodes are barriers, every other node a conformer. Rejected, failed and superseded nodes are left out, a duplicate counts once, free species are refused, and all members need the same atoms and charge. | D171, A112 | after 5 |
+| FR-EQ-02 | A TS joins the two conformers of the set it has edges to; any other TS joins none, with a note; parallel TSs add their rates; a direct "no TS" edge joins nothing, and the result says so. | D171 | after 5 |
+| FR-EQ-03 | Every member is valued at one composite level and energy type with no fallback (a conformer without a value: n/a; a TS without one: named and joining nothing), with G_qh at the analysis's temperature. | D171 | after 5 |
+| FR-EQ-04 | The result gives each conformer's ΔG to the lowest and Boltzmann population (weighted by its count), and each TS's ΔG‡, Eyring rate and half-life from both sides, a TS below a conformer counting as 0 with a note. | D171, A112 | after 5 |
+| FR-EQ-05 | From the master equation of the joined conformers, each set joined by links gets its relaxation times, the time from the start conformer (unless chosen, the slowest) to within 1 percentage point of equilibrium, and a chart of populations against log time; each conformer gets its effective barrier from the lowest; conformers not joined are named. | D171, A112 | after 5 |
+| FR-EQ-06 | Conformer equilibria are listed in the Analyses view, made there or from a canvas selection, take members from a branch, group or tag, and are recorded in the history. | D171 | after 5 |
+
 ## FR-NOTE · Notes pinned to node cards (D85)
 
 | ID | Requirement | Trace | Phase |
@@ -329,6 +340,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-MCP-09 | A molecule or atom bound to a metal goes where it has room or is refused with what is in the way and where it fits; Minimize keeps a placed ligand at its length and angles; clashes drawn as bonds are reported; every tool shows its optional fields; the node list for Claude is brief. | D149, A94 | after 5 |
 | FR-MCP-10 | Claude can turn a set of atoms rigidly about an axis given by atoms or their middles, or by the smallest turn that lines one vector up with another at a set angle; the answer states the sign convention, the bonds to the rest before and after, and new close contacts. | D150, A95 | after 5 |
 | FR-MCP-11 | Claude can measure distances, angles, dihedrals and vector angles across nodes and groups in one call, with each row's geometry level and convergence, per-column statistics, numbering by a reference node or SMARTS, and filters by level, convergence and value. | D151, A96 | after 5 |
+| FR-MCP-12 | Claude can list, read the result of, create and change conformer equilibria; deleting one asks the user first. | D171, D91 | after 5 |
 
 **AC:** with the app open, Claude Code renames a node: the canvas shows the new name at once and the history marks it "claude". Asked to delete it, Claude waits; Refuse in the app keeps the node, Confirm deletes it.
 

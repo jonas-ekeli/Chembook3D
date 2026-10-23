@@ -1169,6 +1169,27 @@ function App() {
       )
   }
 
+  // D171: a conformer equilibrium of the selected conformers, TSs and groups.
+  const newEquilibrium = (nodes: Node[], groups: Group[]) => {
+    const members = [...groups.map((g) => g.id), ...nodes.map((n) => n.id)].map((id) => ({ id, count: 1 }))
+    api
+      .equilibria()
+      .then((existing) => {
+        const taken = new Set(existing.map((e) => e.name))
+        let n = existing.length + 1
+        while (taken.has(`Conformer equilibrium ${n}`)) n++
+        return api.createEquilibrium({ name: `Conformer equilibrium ${n}`, level: levelKey, members })
+      })
+      .then(
+        (created) => {
+          setOpenAnalysis(created.id)
+          setView('analyses')
+          reload()
+        },
+        (err: unknown) => setError(errorText(err)),
+      )
+  }
+
   // D86: a turnover of a closed pathway from the drawer, named after the pathway.
   const newTurnover = (path: string[], name: string) => {
     api
@@ -1202,6 +1223,7 @@ function App() {
           reload()
         }}
         onSelectivity={() => newSelectivity(multiNodes, multiGroups)}
+        onEquilibrium={() => newEquilibrium(multiNodes, multiGroups)}
       />
     )
   } else if (selectedNode) {
@@ -1314,7 +1336,7 @@ function App() {
             </button>
             <button
               aria-pressed={view === 'analyses'}
-              title="Selectivities: ΔΔG‡ and predicted ratios from competing transition states"
+              title="Selectivities, turnovers and conformer equilibria"
               onClick={() => setView('analyses')}
             >
               Analyses

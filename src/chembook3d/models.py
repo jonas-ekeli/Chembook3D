@@ -697,6 +697,35 @@ class Turnover(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
+class ConformerEquilibrium(Base):
+    """D171, FR-EQ-01: a saved conformer equilibrium: the populations of conformers the user
+    chose, the rates of the TSs between them and the time they take to reach equilibrium, at
+    one composite level and energy type. Like turnovers it is in the history."""
+
+    __tablename__ = "conformer_equilibria"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    seq: Mapped[int] = mapped_column(
+        Integer, default=text("(SELECT COALESCE(MAX(seq), 0) + 1 FROM conformer_equilibria)")
+    )
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    # [{"id": node or group id, "count": n}, ...] in the user's order; a TS node is a barrier,
+    # any other node a conformer, a group counts with its members (D171a). The count is the
+    # number of equivalent structures the member stands for (D171d). A deleted id stays
+    # listed, so the result can say a member was lost.
+    members: Mapped[list[Any]] = mapped_column(default=list)
+    # A composite level key `levelId~geometryLevelId`; None until one is chosen.
+    level: Mapped[str | None] = mapped_column(String(80), default=None)
+    energy_type: Mapped[str] = mapped_column(String(8), default="G_qh")
+    # K; None follows the investigation's G_qh temperature setting (D159).
+    temperature: Mapped[float | None] = mapped_column(default=None)
+    # D171f: the conformer the populations start from over time; None: the start that takes
+    # longest to reach equilibrium (A112).
+    start_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class NodeNote(Base):
     """D85, FR-NOTE-01: a note pinned to one corner of a node's card on the canvas, holding
     formatted text and pictures. `body` is the cleaned HTML of `services/notes.py`; a picture

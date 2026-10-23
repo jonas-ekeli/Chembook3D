@@ -71,3 +71,37 @@ export function tableCellClass(column: number, columns: number): string | undefi
   if (column === columns - 1) return 'check'
   return column >= 4 ? 'num' : undefined
 }
+
+// D83, D86, D171: shared by the analyses in the Analyses view.
+export function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+const SUPERSCRIPT: Record<string, string> = {
+  '-': '⁻',
+  '0': '⁰',
+  '1': '¹',
+  '2': '²',
+  '3': '³',
+  '4': '⁴',
+  '5': '⁵',
+  '6': '⁶',
+  '7': '⁷',
+  '8': '⁸',
+  '9': '⁹',
+}
+
+/** 1234 as "1.23 × 10³"; between 0.01 and 1000 as a plain number. */
+export function scientific(value: number | null): string {
+  if (value === null) return 'n/a'
+  if (!Number.isFinite(value)) return value > 0 ? '∞' : '−∞'
+  if (value === 0) return '0'
+  const size = Math.abs(value)
+  if (size >= 0.01 && size < 1000) return value.toPrecision(3)
+  const [mantissa, exponent] = value.toExponential(2).split('e')
+  const power = String(Number(exponent))
+    .split('')
+    .map((c) => SUPERSCRIPT[c] ?? c)
+    .join('')
+  return `${mantissa} × 10${power}`
+}
