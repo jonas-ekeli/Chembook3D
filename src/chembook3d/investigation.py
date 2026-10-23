@@ -22,11 +22,11 @@ from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, create_engine, event, func, select
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session, sessionmaker
 
-from chembook3d.models import InvestigationInfo, utcnow
+from chembook3d.models import Branch, InvestigationInfo, Node, NodeKind, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -153,6 +153,16 @@ class Investigation:
         with self.sessions() as session:
             info = session.get(InvestigationInfo, 1)
             return info.name if info else self.folder.name
+
+    def counts(self) -> tuple[int, int]:
+        """D182: the nodes on the canvas (free species left out) and the branches, which the
+        start page shows beside the investigation's name."""
+        with self.sessions() as session:
+            nodes = session.scalar(
+                select(func.count()).select_from(Node).where(Node.kind == NodeKind.NODE)
+            )
+            branches = session.scalar(select(func.count()).select_from(Branch))
+            return nodes or 0, branches or 0
 
     def close(self) -> None:
         self.engine.dispose()

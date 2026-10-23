@@ -279,20 +279,228 @@ textarea {
   color: var(--accent);
 }
 
-/* Start screen */
+/* Start screen (D182, UI10): the ways in as cards, then the recent investigations as rows. */
 .start {
-  max-width: 640px;
-  margin: 12vh auto;
+  max-width: 760px;
+  margin: 9vh auto;
   padding: 0 1rem;
   display: grid;
-  gap: 1rem;
+  gap: 18px;
+}
+.start-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.start-hero h1 {
+  font-size: 26px;
+  margin: 0;
+}
+.start-hero p {
+  margin: 0;
+}
+.start-logo {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  display: grid;
+  place-items: center;
+}
+.start-logo .ic {
+  width: 26px;
+  height: 26px;
+}
+.start-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+button.start-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 10px;
+  text-align: left;
+  white-space: normal;
+}
+.start-action b {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.start-action span {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+button.start-action.primary-card {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.start-action.primary-card b {
+  color: var(--accent);
+}
+.start-heading {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+  margin: 8px 0 10px;
 }
 .recent {
   list-style: none;
   padding: 0;
-  margin: 0.5rem 0 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.recent li + li {
+  border-top: 1px solid var(--divider);
+}
+button.recent-row {
   display: grid;
-  gap: 0.25rem;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  justify-content: stretch;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  font-weight: 400;
+}
+button.recent-row:hover:not(:disabled) {
+  background: var(--hover);
+}
+.recent-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--quiet-hover);
+  color: var(--text-2);
+  display: grid;
+  place-items: center;
+}
+.recent-what {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.recent-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recent-name .muted {
+  font-weight: 400;
+}
+.recent-folder {
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recent-when {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.start-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* D182 (UI10): an empty view's icon, title, explanation and ways to start. */
+.empty-state {
+  max-width: 520px;
+  margin: 12vh auto 0;
+  text-align: center;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  background: none;
+  border: none;
+  padding: 0;
+}
+.empty-state h3 {
+  font-size: 17px;
+  margin: 0;
+}
+.empty-state p {
+  margin: 0;
+  color: var(--muted);
+}
+.empty-state .buttons {
+  justify-content: center;
+  margin-top: 6px;
+}
+.empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+}
+.empty-icon .ic {
+  width: 28px;
+  height: 28px;
+}
+.empty-state .empty-tip {
+  font-size: 12px;
+  margin-top: 10px;
+}
+.empty-state.compact {
+  max-width: 680px;
+  margin: 1rem auto;
+  gap: 6px;
+}
+.empty-state.compact .empty-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+.empty-state.compact .empty-icon .ic {
+  width: 20px;
+  height: 20px;
+}
+.empty-state.compact h3 {
+  font-size: 15px;
+}
+/* On the canvas it lets every click and drop through to the pane, except on its buttons. */
+.canvas-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.canvas-empty .empty-state {
+  margin: 0 auto;
+}
+.canvas-empty button {
+  pointer-events: auto;
 }
 .loading {
   padding: 2rem;
@@ -1895,12 +2103,6 @@ pre.route {
   --xy-controls-button-background-color: var(--flow-control-bg);
   --xy-controls-button-background-color-hover: var(--flow-control-hover);
   --xy-controls-button-border-color: var(--flow-control-border);
-}
-.canvas-empty {
-  background: var(--panel);
-  padding: 0.4rem 0.8rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
 }
 .segmented {
   display: flex;

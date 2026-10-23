@@ -4,6 +4,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, type ShutdownInfo } from '../api'
 import { shutDown, useLifecycle, type Stopped } from '../lifecycle'
+import { Icon } from '../icons'
 import { Modal } from './Modal'
 
 /** The start page's button (D180: with an investigation open, the investigation menu's last item). */
@@ -12,6 +13,7 @@ export function ShutDownButton() {
   return (
     <>
       <button onClick={() => setAsking(true)} title="Close the investigation and stop Chembook3D">
+        <Icon name="power" />
         Shut down
       </button>
       {asking && <ShutDownDialog onClose={() => setAsking(false)} />}

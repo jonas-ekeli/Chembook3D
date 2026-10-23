@@ -103,7 +103,7 @@ test('turnover of a closed cycle', async ({ page }) => {
       await page.getByRole('dialog', { name: 'Delete turnover' }).getByRole('button', { name: 'Delete' }).click()
       await expect(page.getByRole('dialog')).toHaveCount(0)
     }
-    await expect(page.getByText('No analyses yet.')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'No analyses yet' })).toBeVisible()
     await page.getByRole('button', { name: 'Canvas' }).click()
     await expect(canvasNode(page, 'B-S2')).toBeVisible()
   } finally {

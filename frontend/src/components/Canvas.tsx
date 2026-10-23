@@ -67,6 +67,7 @@ import { MoleculeSketch } from './MoleculeSketch'
 import { CardNotes, type NoteActions } from './CanvasNotes'
 import { noteTitle } from '../notes'
 import { Icon } from '../icons'
+import { EmptyState } from './EmptyState'
 import { Menu } from './MoreMenu'
 import { cardEnergy, minus, type CanvasEnergy, type CardEnergy } from '../cardEnergy'
 import { curveOf, LabelPlacer, leaderEnd, pointAt, type Curve, type Rect } from '../labelLayout'
@@ -606,6 +607,7 @@ function CanvasView({
   onOpenNote,
   onLayoutNote,
   onOpenPaths,
+  onImport,
   readOnly = false,
   tools,
 }: {
@@ -635,6 +637,8 @@ function CanvasView({
   onLayoutNote?: (noteId: string, layout: Partial<NoteLayout>) => void
   /** D121: a click on an edge's scan path chip; by default it selects the edge. */
   onOpenPaths?: (transitionId: string) => void
+  /** D182: the empty canvas's "Import output files…", the outline's Import. */
+  onImport?: () => void
   /** The shared read-only copy (D79): nothing can be moved, connected, added or dropped. */
   readOnly?: boolean
   /** D180: where Fit and Export go (the app's canvas toolbar); null until it is there. Without
@@ -1191,9 +1195,43 @@ function CanvasView({
           </Panel>
         )}
         {data.nodes.length === 0 && data.groups.length === 0 && (
-          <Panel position="top-center" className="canvas-empty muted">
-            {readOnly ? 'This investigation has no nodes.' : 'Double-click to add a node, or drop output files here.'}
-          </Panel>
+          <div className="canvas-empty">
+            {readOnly ? (
+              <EmptyState icon="hexagon" title="This investigation has no nodes">
+                Nothing was drawn on its canvas when this copy was made.
+              </EmptyState>
+            ) : (
+              <EmptyState
+                icon="hexagon"
+                title="An empty canvas"
+                actions={
+                  <>
+                    <button
+                      className="primary"
+                      onClick={() => {
+                        const box = wrapper.current?.getBoundingClientRect()
+                        const middle = box ? { clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 } : null
+                        onAddNode(middle ? position(middle) : { x: 0, y: 0 })
+                      }}
+                    >
+                      <Icon name="plus" />
+                      Add the first node
+                    </button>
+                    {onImport && (
+                      <button onClick={onImport}>
+                        <Icon name="upload" />
+                        Import output files…
+                      </button>
+                    )}
+                  </>
+                }
+              >
+                Each node is one structure on the mechanism: add one by hand, or import Gaussian, ORCA, xTB or CREST
+                outputs with their energies. You can also double-click the canvas to add a node there, or drop output
+                files onto it.
+              </EmptyState>
+            )}
+          </div>
         )}
       </ReactFlow>
       </PathChipClick.Provider>

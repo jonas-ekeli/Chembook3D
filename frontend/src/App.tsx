@@ -55,7 +55,8 @@ import { AnalysesView } from './components/Analyses'
 import { ClaudeRequestDialog } from './components/ClaudeRequestDialog'
 import { SidePanel, type SideTab } from './components/SidePanel'
 import { HPC, hpcLabel } from './hpc'
-import { LaunchNotices, ShutDownButton, ShutDownDialog } from './components/ShutDown'
+import { LaunchNotices, ShutDownDialog } from './components/ShutDown'
+import { StartPage } from './components/StartPage'
 import { Menu } from './components/MoreMenu'
 import { Icon } from './icons'
 import { useLive } from './live'
@@ -1070,46 +1071,18 @@ function App() {
 
   if (investigation === null) {
     return (
-      <main className="start">
-        <h1>Chembook3D</h1>
-        <p className="muted">A notebook for computational chemistry mechanism investigations.</p>
-        {error && (
-          <p role="alert" className="error">
-            {error}
-          </p>
-        )}
-        <div className="buttons">
-          <button className="primary" onClick={() => setPicker('create')}>
-            New investigation…
-          </button>
-          <button onClick={() => setPicker('open')}>Open investigation…</button>
-          <button onClick={() => setCloning('address')}>Open from GitHub…</button>
-          <button
-            onClick={() => openScanEditor([])}
-            title="Put several scans together into one path, without an investigation (D135)"
-          >
-            Scan editor
-          </button>
-          <span className="spacer" />
-          <ShutDownButton />
-        </div>
-        <LaunchNotices />
-        {settings && settings.recent.length > 0 && (
-          <section>
-            <h2>Recently opened</h2>
-            <ul className="recent" aria-label="Recently opened">
-              {settings.recent.map((folder) => (
-                <li key={folder}>
-                  <button className="link" onClick={() => openFolder(folder)}>
-                    {folder}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
+      <StartPage
+        settings={settings}
+        error={error}
+        onNew={() => setPicker('create')}
+        onOpen={() => setPicker('open')}
+        onClone={() => setCloning('address')}
+        onScanEditor={() => openScanEditor([])}
+        onOpenFolder={openFolder}
+        notices={<LaunchNotices />}
+      >
         {dialogs}
-      </main>
+      </StartPage>
     )
   }
 
@@ -1601,6 +1574,7 @@ function App() {
                     )
                   }
                   onAddNode={addNode}
+                  onImport={() => setImportRequest({ targetId: null, files: [], position: null })}
                   onDropFiles={(files, targetId, position) => setImportRequest({ targetId, files, position })}
                   onPositions={savePositions}
                   onError={setError}

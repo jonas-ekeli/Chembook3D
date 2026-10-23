@@ -23,6 +23,8 @@ import { Notes, TextField } from './Fields'
 import { Modal } from './Modal'
 import { NumberInput } from './AnalysisParts'
 import { EquilibriumEditor } from './Equilibrium'
+import { EmptyState } from './EmptyState'
+import { Icon } from '../icons'
 
 // D83: the Analyses view lists the saved selectivities (S7); each one compares outcomes
 // realised by TS nodes or groups at one level and energy type (S1–S6).
@@ -1161,7 +1163,38 @@ export function AnalysesView({
             onSelectNode={onSelectNode}
           />
         ) : (
-          loaded && <p className="placeholder muted">No analyses yet.</p>
+          loaded && (
+            <EmptyState
+              icon="chart"
+              title="No analyses yet"
+              actions={
+                <>
+                  <button className="primary" onClick={create}>
+                    <Icon name="plus" />
+                    New selectivity
+                  </button>
+                  <button onClick={createTurnover}>
+                    <Icon name="plus" />
+                    New turnover
+                  </button>
+                  <button onClick={createEquilibrium}>
+                    <Icon name="plus" />
+                    New conformer equilibrium
+                  </button>
+                </>
+              }
+              tip={
+                <>
+                  Tip: select the competing TSs or groups on the canvas and choose “Selectivity…” in the side
+                  panel to start with one outcome for each.
+                </>
+              }
+            >
+              Analyses compare competing transition states (selectivity, ΔΔG‡ and predicted ratios), give the
+              turnover frequency of a closed catalytic cycle (energetic span) or the populations of conformers. Each
+              one is saved with the investigation and follows its energies.
+            </EmptyState>
+          )
         )}
       </main>
     </div>

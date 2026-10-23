@@ -267,6 +267,87 @@ def test_recent_list_remembers_opened_folders(tmp_path, client):
     assert recent[:2] == [str((tmp_path / "b").resolve()), str((tmp_path / "a").resolve())]
 
 
+def test_recent_list_keeps_name_time_and_counts(tmp_path, client):
+    # D182: written when an investigation is opened, refreshed when it is closed.
+    a, b = str((tmp_path / "a").resolve()), str((tmp_path / "b").resolve())
+    client.post("/api/investigations", json={"folder": a, "name": "Metathesis"})
+    info = client.get("/api/settings").json()["recent_info"]
+    assert info[a] | {"opened": None} == {
+        "name": "Metathesis",
+        "nodes": 0,
+        "branches": 0,
+        "opened": None,
+    }
+    opened = info[a]["opened"]
+    assert opened.endswith(("Z", "+00:00"))
+
+    client.post("/api/nodes", json={"label": "S1"})
+    client.post("/api/nodes", json={"label": "S2"})
+    client.post("/api/nodes", json={"kind": "species", "label": "ethene"})  # not counted
+    client.post("/api/branches", json={"name": "A"})
+    client.post("/api/investigations/close")
+    after = client.get("/api/settings").json()
+    assert after["recent"][0] == a
+    assert after["recent_info"][a] == {
+        "name": "Metathesis",
+        "nodes": 2,
+        "branches": 1,
+        "opened": opened,
+    }
+
+    # Opening another folder closes the first, which refreshes it too.
+    client.post("/api/investigations/open", json={"folder": a})
+    client.post("/api/nodes", json={"label": "S3"})
+    client.post("/api/investigations", json={"folder": b, "name": "Other"})
+    after = client.get("/api/settings").json()
+    assert after["recent"][:2] == [b, a]
+    assert after["recent_info"][a]["nodes"] == 3
+    assert after["recent_info"][b]["name"] == "Other"
+
+    # The start page reads only the settings: a folder that is gone still shows its details.
+    client.post("/api/investigations/close")
+    shutil.rmtree(a)
+    assert client.get("/api/settings").json()["recent_info"][a]["nodes"] == 3
+
+
+def test_recent_list_from_before_its_details(config_dir, client):
+    # D182: a settings file with only the folders keeps working, and bad details are dropped.
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "settings.json").write_text(
+        json.dumps(
+            {
+                "recent": ["/x/one", "/x/two", 3],
+                "recent_info": {
+                    "/x/two": {
+                        "name": "Two",
+                        "opened": "yesterday",
+                        "nodes": -1,
+                        "branches": True,
+                    },
+                    "/x/gone": {"name": "Gone"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    found = client.get("/api/settings").json()
+    assert found["recent"] == ["/x/one", "/x/two"]
+    assert found["recent_info"] == {
+        "/x/two": {"name": "Two", "opened": None, "nodes": None, "branches": None}
+    }
+    (config_dir / "settings.json").write_text(json.dumps({"recent": ["/x/one"]}), "utf-8")
+    assert client.get("/api/settings").json()["recent_info"] == {}
+    # A naive time is taken as UTC.
+    (config_dir / "settings.json").write_text(
+        json.dumps(
+            {"recent": ["/x/one"], "recent_info": {"/x/one": {"opened": "2026-10-23T08:00:00"}}}
+        ),
+        "utf-8",
+    )
+    opened = client.get("/api/settings").json()["recent_info"]["/x/one"]["opened"]
+    assert opened.startswith("2026-10-23T08:00:00") and opened.endswith(("Z", "+00:00"))
+
+
 def test_energy_unit_setting(client):
     # FR-SET-01, D28
     assert client.get("/api/settings").json()["energy_unit"] == "kcal/mol"
