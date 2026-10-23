@@ -349,8 +349,8 @@ TOOLS: list[ToolSpec] = [
         "/api/equilibria/{equilibrium_id}/result",
         "A conformer equilibrium's result: each conformer's ΔG and population, each TS's "
         "barriers, Eyring rates (1/s) and half-lives from both sides, each set of joined "
-        "conformers' relaxation times and time to equilibrium (s), or why it is n/a. Energies "
-        "are in hartree.",
+        "conformers' relaxation times and time to equilibrium (s), the Curtin–Hammett check "
+        "against the next step's TSs, or why it is n/a. Energies are in hartree.",
     ),
     T(
         "list_steric_profiles",
@@ -970,7 +970,10 @@ TOOLS: list[ToolSpec] = [
             "members": "Each {id: node or group id, count: equivalent structures it stands "
             "for, 1 unless given}. TS nodes are the barriers; they join the two conformers "
             "they have edges to.",
-            "start_id": "The conformer the populations start from over time; null for the lowest.",
+            "start_id": "The conformer the populations start from over time; null for the "
+            "slowest start.",
+            "next_ids": "TS nodes or groups of the step that follows, for the Curtin–Hammett "
+            "check; each is balanced by the free species from the lowest conformer.",
         },
     ),
     T(
@@ -983,7 +986,10 @@ TOOLS: list[ToolSpec] = [
             "members": "Each {id: node or group id, count: equivalent structures it stands "
             "for, 1 unless given}. TS nodes are the barriers; they join the two conformers "
             "they have edges to.",
-            "start_id": "The conformer the populations start from over time; null for the lowest.",
+            "start_id": "The conformer the populations start from over time; null for the "
+            "slowest start.",
+            "next_ids": "TS nodes or groups of the step that follows, for the Curtin–Hammett "
+            "check; each is balanced by the free species from the lowest conformer.",
         },
     ),
     T(

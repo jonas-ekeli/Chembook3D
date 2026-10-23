@@ -1255,6 +1255,8 @@ export type Equilibrium = {
   temperature: number | null
   /** The conformer the populations start from over time; null: the slowest start. */
   start_id: string | null
+  /** D173: TS nodes and groups of the step that follows, for the Curtin–Hammett check. */
+  next_ids: string[]
   notes: string
 }
 
@@ -1310,6 +1312,37 @@ export type EquilibriumSet = {
   curve: { times: number[]; populations: number[][] } | null
 }
 
+export type EquilibriumNextMember = {
+  id: string
+  label: string
+  /** Hartree, with its free species; `barrier` from the lowest conformer. */
+  value: number | null
+  species: { species_id: string; label: string; count: number }[]
+  barrier: number | null
+  /** Why it is left out. */
+  message: string | null
+}
+
+/** D173: the next step from the pool of the lowest conformer's set (Curtin–Hammett). */
+export type EquilibriumNextStep = {
+  members: EquilibriumNextMember[]
+  /** Hartree; G of the pool from the lowest conformer. */
+  pool: number | null
+  effective_barrier: number | null
+  /** 1/s, and its time 1/rate in s. */
+  rate: number | null
+  time: number | null
+  /** The slowest relaxation time of the pool, s, and its highest effective barrier. */
+  interconversion_time: number | null
+  interconversion_barrier: number | null
+  /** time / interconversion_time, and RT ln of it (hartree). */
+  ratio: number | null
+  ddg: number | null
+  faster: 'interconversion' | 'next step' | null
+  message: string | null
+  notes: string[]
+}
+
 export type EquilibriumResult = {
   status: 'ok' | 'n/a' | 'refused' | 'incomplete'
   message: string | null
@@ -1327,6 +1360,7 @@ export type EquilibriumResult = {
   conformers: EquilibriumConformer[]
   barriers: EquilibriumBarrier[]
   sets: EquilibriumSet[]
+  next_step: EquilibriumNextStep | null
   notes: string[]
 }
 
