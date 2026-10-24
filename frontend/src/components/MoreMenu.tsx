@@ -103,6 +103,11 @@ export function Menu({
           if (event.key === 'ArrowDown' && !open) {
             event.preventDefault()
             setOpen(true)
+          } else if (event.key === 'Escape' && open) {
+            // Before the list has taken the focus (a key pressed right after the click).
+            event.preventDefault()
+            event.stopPropagation()
+            setOpen(false)
           }
         }}
       >

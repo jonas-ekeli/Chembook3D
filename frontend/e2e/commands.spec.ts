@@ -338,7 +338,10 @@ test.describe('in an investigation of its own', () => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await card(page, 'C3').click({ button: 'right' })
     await menu(page, 'Node actions').getByRole('menuitem', { name: 'Copy xyz' }).click()
-    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(c.xyz)
+    // Windows' clipboard turns line ends into \r\n.
+    await expect
+      .poll(async () => (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n'))
+      .toBe(c.xyz)
 
     // Add node here puts a node under the pointer; Delete node… asks, then deletes it.
     const spot = await emptySpot(page)
