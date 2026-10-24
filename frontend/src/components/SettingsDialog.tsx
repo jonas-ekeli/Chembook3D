@@ -6,6 +6,7 @@ import { NumberSetting } from './NumberSetting'
 import { StericColourSelect } from './Sterics'
 import { thermoSection } from './ThermoSettings'
 import { SETTINGS_SECTIONS } from '../settingsSections'
+import type { ThemeChoice } from '../theme'
 
 /** One setting: its name and a line or two of help beside its control; `more` is the rest of a
  * long explanation, shown in place by "More…" (D183). */
@@ -23,6 +24,12 @@ export type SettingSection = {
   note?: ReactNode
   rows: SettingRow[]
 }
+
+const THEMES: [ThemeChoice, string][] = [
+  ['light', 'Light'],
+  ['dark', 'Dark'],
+  ['system', 'Follow system'],
+]
 
 /** The words of a piece of help, for the search. */
 function textOf(node: ReactNode): string {
@@ -120,6 +127,26 @@ export function SettingsDialog({
                 <option key={unit}>{unit}</option>
               ))}
             </select>
+          ),
+        },
+        {
+          // D185
+          name: 'Theme',
+          help: 'Light or dark colours, or as this computer is set (and changing with it).',
+          more: 'Saved images and the read-only copy stay light.',
+          control: (
+            <div className="segmented" role="group" aria-label="Theme">
+              {THEMES.map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={settings.theme === value}
+                  onClick={() => save({ theme: value })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           ),
         },
       ],

@@ -103,6 +103,9 @@ export function sharedSettings(data: SnapshotData): Settings {
     crest_count: 0,
     hydrogen_modes: ['all', 'polar', 'none'],
     steric_colours: 'blue',
+    // D185: the copy is always light
+    theme: 'light',
+    themes: ['light'],
     // Copies made before D95 have no standard state: they are at 1 atm.
     standard_state: data.settings.standard_state ?? '1 atm',
     standard_states: ['1 atm', '1 M'],

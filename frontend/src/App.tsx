@@ -81,6 +81,7 @@ import { useLive } from './live'
 import type { HydrogenMode } from './chem'
 import { recordNames } from './names'
 import { HydrogenDisplay, StericColourSetting, type StericColours } from './display'
+import { setTheme } from './theme'
 import { EnergyNotes } from './components/EnergyNotes'
 import {
   CloneDialog,
@@ -176,6 +177,11 @@ function App() {
     }),
     [settings?.steric_colours],
   )
+  // D185: the theme follows the setting once it has loaded (index.html set it from its mirror).
+  const themeChoice = settings?.theme
+  useEffect(() => {
+    if (themeChoice) setTheme(themeChoice)
+  }, [themeChoice])
   const [picker, setPicker] = useState<'open' | 'create' | null>(null)
   const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -1581,6 +1587,22 @@ function App() {
       command(`settings-${id}`, `Settings: ${title}`, 'sliders', () => openSettings(id), {
         keywords: id === 'thermochemistry' ? 'quasi-harmonic G temperature cutoff standard state 1 M' : undefined,
       })
+    // D185: the theme, as in Settings, General.
+    for (const [theme, label] of [
+      ['light', 'Light'],
+      ['dark', 'Dark'],
+      ['system', 'Follow system'],
+    ] as const)
+      if (settings && settings.theme !== theme)
+        command(
+          `theme-${theme}`,
+          `Theme: ${label}`,
+          'moon',
+          () => {
+            api.saveSettings({ theme }).then(setSettings, () => undefined)
+          },
+          { keywords: 'dark mode light mode colours' },
+        )
     command('shortcuts', 'Keyboard shortcuts', 'keyboard', () => setShortcuts(true), { shortcut: '?' })
 
     for (const node of [...canvas.nodes, ...canvas.species]) {

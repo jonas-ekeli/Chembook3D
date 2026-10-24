@@ -3,6 +3,7 @@
 
 import type { HydrogenMode, Rotation } from './chem'
 import type { StericColours } from './display'
+import type { ThemeChoice } from './theme'
 
 export type Status = 'planned' | 'running_externally' | 'done' | 'failed' | 'rejected' | 'superseded'
 export type Role = 'minimum' | 'transition_state' | 'unspecified'
@@ -960,6 +961,9 @@ export type Settings = {
   hydrogen_modes: HydrogenMode[]
   /** D84: the colours of the steric maps. */
   steric_colours: StericColours
+  /** D185: the app's colours: light, dark or as the system prefers. */
+  theme: ThemeChoice
+  themes: ThemeChoice[]
   /** D106: how energy profiles are drawn, and the presets the style dialog offers. */
   profile_style: ProfileStyle
   profile_presets: Record<'screen' | 'publication', ProfileStyle>
@@ -2224,6 +2228,7 @@ export const api = {
         | 'crest_count'
         | 'hydrogens'
         | 'steric_colours'
+        | 'theme'
         | 'profile_style'
       >
     > & {

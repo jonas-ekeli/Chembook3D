@@ -9,12 +9,15 @@
   --glass-strong: rgb(255 255 255 / 92%);
   --field-bg: #ffffff;
   --viewer-bg: #ffffff; /* the 3D view (Viewer3D reads it) */
+  --viewer-line: #495057; /* the dashed line between atoms picked in the 3D view */
+  --card: #ffffff; /* a node card on the canvas */
   --border: #d9dde3;
   --divider: #eef0f3;
   --text: #1c2430;
   --text-2: #475467;
   --muted: #667085;
   --accent: #2459c6;
+  --accent-fill: #2459c6; /* a primary button's fill, under --on-accent */
   --accent-hover: #1f4fb0;
   --accent-soft: #e7eefc;
   --accent-tint: rgb(36 89 198 / 25%);
@@ -58,6 +61,10 @@
   --leave-bg: #f4f3ff;
   --leave-border: #bdb4fe;
   --tag-bg: #eef0f3;
+  --chart-grid: #eaecf0; /* grid lines of the charts drawn in the app */
+  --sketch-bond: #5f6670; /* a structure card's bonds (MoleculeSketch) */
+  --sketch-bond-h: #c4c8cf; /* its bonds to hydrogen */
+  --sketch-edge: #3a3f47; /* the rim of its atoms */
   --swatch-edge: rgb(0 0 0 / 15%);
   --checker-a: #f2f4f7; /* behind a transparent figure */
   --checker-b: #ffffff;
@@ -98,6 +105,101 @@
   line-height: 1.45;
   color: var(--text);
   background: var(--bg);
+}
+
+/* D185: the dark theme, the same tokens with dark values (theme.ts sets data-theme on <html>,
+   from the setting or the system's preference). Text keeps WCAG AA contrast on --panel and
+   --card; amber still warns, blue still informs, green is still done. What is always light (a
+   figure, Ketcher, pictures in notes) uses --paper and the figure's own colours. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0e1116;
+  --panel: #161b22;
+  --panel-alt: rgb(255 255 255 / 4%);
+  --glass: rgb(22 27 34 / 85%);
+  --glass-strong: rgb(22 27 34 / 92%);
+  --field-bg: #0d1117;
+  --viewer-bg: #0e1116;
+  --viewer-line: #adb5bd;
+  --card: #1a2029;
+  --border: #2b323d;
+  --divider: #222831;
+  --text: #e6e9ef;
+  --text-2: #c3cad5;
+  --muted: #98a2b3;
+  --accent: #6ea8fe;
+  --accent-fill: #2f6fdf;
+  --accent-hover: #3d7bea;
+  --accent-soft: #1b2a44;
+  --accent-tint: rgb(110 168 254 / 30%);
+  --on-accent: #ffffff;
+  --focus: 0 0 0 3px rgb(110 168 254 / 40%);
+  --hover: #1c222b;
+  --border-strong: #46505e;
+  --quiet-text: #d0d5dd;
+  --quiet-hover: #222934;
+  --danger: #f97066;
+  --danger-bg: #2d1515;
+  --danger-border: #7a271a;
+  --danger-soft: #3a1714;
+  --warn: #fdb022;
+  --warn-text: #fec84b;
+  --warn-bg: #2b2210;
+  --warn-border: #7a5410;
+  --warn-soft: #3a2a10;
+  --warn-strong: #fdb022;
+  --warn-dot: #f79009;
+  --no-ts-bg: #3a2a10;
+  --on-warn: #1c1405;
+  --pill-border: #39414d;
+  --rep: #f5a524;
+  --ok: #47cd89;
+  --ok-text: #75e0a7;
+  --ok-bg: #0f2a1d;
+  --ok-border: #1d6b45;
+  --ok-edge: #2f8f5f;
+  --ok-dot: #32d583;
+  --live: #4ade80;
+  --idle-dot: #667085;
+  --text-faint: #7d8696;
+  --card-planned: #141920;
+  --select-halo: rgb(110 168 254 / 22%);
+  --info: #53b1fd;
+  --info-text: #84caff;
+  --info-bg: #102a43;
+  --info-border: #1f5f99;
+  --leave-text: #bdb4fe;
+  --leave-bg: #221a40;
+  --leave-border: #4a3a8c;
+  --tag-bg: #252c36;
+  --chart-grid: #262d37;
+  --sketch-bond: #aab2bf;
+  --sketch-bond-h: #5b6472;
+  --sketch-edge: #0e1116;
+  --swatch-edge: rgb(255 255 255 / 20%);
+  --tip-bg: #2b323d;
+  --tip-text: #ffffff;
+  --tip-muted: #c3cad5;
+  --tip-faint: #98a2b3;
+  --tip-warn: #fec84b;
+  --shadow-rgb: 0 0 0;
+  --scrim: rgb(0 0 0 / 55%);
+  --note-yellow-bg: #39321a;
+  --note-yellow-edge: #8a7520;
+  --note-blue-bg: #172a45;
+  --note-blue-edge: #3d6aa8;
+  --note-green-bg: #16301f;
+  --note-green-edge: #3f8a57;
+  --note-pink-bg: #3a1a26;
+  --note-pink-edge: #a2557a;
+  --note-grey-bg: #242a33;
+  --note-grey-edge: #4b5462;
+  --flow-dots: #3a414c;
+  --minimap-bg: #161b22;
+  --minimap-mask: rgb(14 17 22 / 70%);
+  --flow-control-bg: #1c222b;
+  --flow-control-hover: #262d38;
+  --flow-control-border: #2b323d;
 }
 
 * {
@@ -175,8 +277,8 @@ button:disabled,
 }
 /* Primary: the one main next step of an area */
 button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
   color: var(--on-accent);
 }
 button.primary:hover:not(:disabled) {
@@ -304,7 +406,7 @@ textarea {
   height: 44px;
   flex-shrink: 0;
   border-radius: 10px;
-  background: var(--accent);
+  background: var(--accent-fill);
   color: var(--on-accent);
   display: grid;
   place-items: center;
@@ -2293,6 +2395,7 @@ pre.route {
   border-color: var(--flow-control-border);
 }
 .react-flow {
+  --xy-background-color: var(--bg); /* D185: not React Flow's own dark grey */
   --xy-background-pattern-color: var(--flow-dots);
   --xy-minimap-background-color: var(--minimap-bg);
   --xy-minimap-mask-background-color: var(--minimap-mask);
@@ -2666,7 +2769,7 @@ label.check {
    opens at: label 14 px, the energy in the title row at 15 px, status as a dot and a word. */
 .cnode {
   width: 188px;
-  background: var(--panel);
+  background: var(--card);
   border: 1px solid var(--border);
   border-left: 5px solid var(--branch);
   border-radius: 8px;
@@ -4949,9 +5052,10 @@ table.scan-path-held input.drive-value {
   flex: 1;
   min-height: 0;
   position: relative;
-  /* Ketcher draws on white whatever the app's theme. */
+  /* Ketcher draws on white whatever the app's theme (D185), its native controls too. */
   background: var(--paper);
   color: var(--paper-text);
+  color-scheme: light;
 }
 .ketcher-drawer-foot {
   display: flex;

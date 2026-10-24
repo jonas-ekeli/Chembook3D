@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useTheme } from '../theme'
 import {
   api,
   energyTypeName,
@@ -309,6 +310,7 @@ export function EnergyDrawer({
   const shownProfiles = request ? profiles : null
   const shownTable = request ? table : null
 
+  const dark = useTheme() === 'dark' // D185: on screen only; the saved figure stays light
   // D181: the saved figure is drawn afresh in the style alone, without the screen's text scale,
   // zoom or pointer marks.
   const figure = () => shownProfiles && figureOf({ data: shownProfiles, colours, names, settings })
@@ -628,6 +630,7 @@ export function EnergyDrawer({
                 settings={settings}
                 size={zoom === null ? undefined : { width: style.width * zoom, height: style.height * zoom }}
                 textScale={SCREEN_TEXT}
+                dark={dark}
                 pointing={{
                   selectedId,
                   onSelect: onSelectNode,

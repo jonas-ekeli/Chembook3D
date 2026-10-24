@@ -64,6 +64,8 @@ import {
   type TransitionSides,
 } from '../api'
 import { MoleculeSketch } from './MoleculeSketch'
+import { useTheme } from '../theme'
+import { colourToken } from '../util'
 import { CardNotes, type NoteActions } from './CanvasNotes'
 import { noteTitle } from '../notes'
 import { Icon } from '../icons'
@@ -662,6 +664,7 @@ function CanvasView({
   asked?: Request | null
 }) {
   const flow = useReactFlow()
+  const theme = useTheme() // D185: React Flow's own colours follow the theme
   const updateNodeInternals = useUpdateNodeInternals()
   const store = useStoreApi()
   const placer = useLabelPlacer()
@@ -1075,7 +1078,7 @@ function CanvasView({
       transform = getViewportForBounds(bounds, width, height, 0.1, 2, 0.05)
     }
     const options = {
-      backgroundColor: '#ffffff',
+      backgroundColor: colourToken('--bg'), // D185: as the canvas is shown
       width,
       height,
       pixelRatio: format === 'png' ? 2 : 1,
@@ -1220,6 +1223,7 @@ function CanvasView({
         fitView
         fitViewOptions={{ maxZoom: 1.2, padding: 0.15 }}
         proOptions={{ hideAttribution: true }}
+        colorMode={theme}
       >
         <Background gap={24} size={1} />
         <Controls showInteractive={false} />

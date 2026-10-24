@@ -430,6 +430,9 @@ class SettingsOut(BaseModel):
     hydrogens: str
     hydrogen_modes: list[str]
     steric_colours: str
+    # D185: light, dark or follow the system
+    theme: str
+    themes: list[str]
     # D106: how energy profiles are drawn, and the presets the style dialog offers
     profile_style: dict[str, Any]
     profile_presets: dict[str, dict[str, Any]]
@@ -452,6 +455,7 @@ class SettingsIn(BaseModel):
     crest_count: int | None = None
     hydrogens: str | None = None
     steric_colours: str | None = None
+    theme: str | None = None
     # D106: the keys given replace the current style's; unknown keys and values are dropped
     profile_style: dict[str, Any] | None = None
 
@@ -1013,6 +1017,8 @@ def get_settings(request: Request):
         hydrogens=s.hydrogens,
         hydrogen_modes=list(app_settings.HYDROGEN_MODES),
         steric_colours=s.steric_colours,
+        theme=s.theme,
+        themes=list(app_settings.THEMES),
         profile_style=s.profile_style,
         profile_presets=app_settings.PROFILE_PRESETS,
         solvents=[{"name": x["name"], "molarity": x["molarity"]} for x in concentrations.SOLVENTS],
@@ -1065,6 +1071,10 @@ def put_settings(body: SettingsIn, request: Request):
         if body.steric_colours not in app_settings.STERIC_COLOURS:
             raise HTTPException(422, f"Unknown steric map colours '{body.steric_colours}'")
         s.steric_colours = body.steric_colours
+    if body.theme is not None:
+        if body.theme not in app_settings.THEMES:
+            raise HTTPException(422, f"Unknown theme '{body.theme}'")
+        s.theme = body.theme
     if body.profile_style is not None:
         s.profile_style = app_settings.clean_profile_style(
             {**s.profile_style, **body.profile_style}
