@@ -613,6 +613,11 @@ button.recent-row:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  /* D187: the app stays locked to the window. Anything placed absolutely inside it is held
+     and clipped here, so it can never make the page itself scroll past the app; clip, not
+     hidden, so focus or scrollIntoView cannot scroll the app out of place either. */
+  position: relative;
+  overflow: clip;
 }
 .topbar {
   display: flex;
@@ -3013,7 +3018,11 @@ label.check {
 }
 /* Read by a screen reader (and tests), not shown. */
 .visually-hidden {
+  /* D187: pinned to its containing block's corner, never left where its row sits, which in a
+     scrolled list is below the window. */
   position: absolute;
+  top: 0;
+  left: 0;
   width: 1px;
   height: 1px;
   overflow: hidden;
