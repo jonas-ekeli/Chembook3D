@@ -1,6 +1,7 @@
 import { useContext, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { defaultRotation, hiddenAtoms, measure, parseXyz, type HydrogenMode, type Rotation } from '../chem'
 import { HydrogenDisplay } from '../display'
+import { useTheme } from '../theme'
 import { colourToken } from '../util'
 
 type Viewer = import('3dmol').GLViewer
@@ -204,9 +205,26 @@ export function Viewer3D({
     onSaveRotation(q)
   }
 
+  // D185: the view's background follows the theme.
+  const theme = useTheme()
+  useEffect(() => {
+    viewer.current?.setBackgroundColor(colourToken('--viewer-bg'), 1)
+    viewer.current?.render()
+  }, [theme])
+
   useEffect(() => {
     if (!imageRef) return
-    imageRef.current = () => viewer.current?.pngURI() ?? ''
+    // D185: the picture is always on white, whatever the theme.
+    imageRef.current = () => {
+      const v = viewer.current
+      if (!v) return ''
+      v.setBackgroundColor(colourToken('--paper'), 1)
+      v.render()
+      const image = v.pngURI()
+      v.setBackgroundColor(colourToken('--viewer-bg'), 1)
+      v.render()
+      return image
+    }
     return () => {
       imageRef.current = null
     }
@@ -271,7 +289,7 @@ export function Viewer3D({
       })
       const next = atoms[picks[i + 1]]
       if (next) {
-        v.addCylinder({ start: center, end: { x: next.x, y: next.y, z: next.z }, radius: 0.04, color: '#495057', dashed: true })
+        v.addCylinder({ start: center, end: { x: next.x, y: next.y, z: next.z }, radius: 0.04, color: colourToken('--viewer-line'), dashed: true })
       }
     })
     v.render()

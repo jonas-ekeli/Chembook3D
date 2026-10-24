@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTheme } from '../theme'
 import {
   api,
   balanceText,
@@ -571,6 +572,7 @@ function TurnoverResultView({
 }) {
   const unit = settings?.energy_unit ?? 'kcal/mol'
   const svgRef = useRef<SVGSVGElement>(null)
+  const dark = useTheme() === 'dark' // D185
   const ok = result.status === 'ok'
   const point = (index: number | null) => (index === null ? null : result.points[index])
   const tdts = point(result.tdts)
@@ -645,6 +647,7 @@ function TurnoverResultView({
             settings={settings}
             svgRef={svgRef}
             marks={marks}
+            dark={dark}
           />
         </div>
       )}

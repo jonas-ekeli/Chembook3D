@@ -1,9 +1,12 @@
 """Node behaviour through the API: FR-NODE-*, FR-HIST-*, identity rules ID-4 and ID-5."""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from chembook3d import settings as app_settings
 from chembook3d.models import Calculation, Node
 from tests.conftest import WATER
 
@@ -283,6 +286,21 @@ def test_steric_map_colours_setting(open_client):
     assert response.json()["steric_colours"] == "green-yellow-red"
     assert open_client.get("/api/settings").json()["steric_colours"] == "green-yellow-red"
     assert open_client.put("/api/settings", json={"steric_colours": "pink"}).status_code == 422
+
+
+def test_theme_setting(open_client):
+    # D185: light, dark or follow the system (the default), kept with the app's settings; a
+    # settings file with an unknown theme falls back to the default.
+    settings = open_client.get("/api/settings").json()
+    assert settings["theme"] == "system"
+    assert settings["themes"] == ["light", "dark", "system"]
+    assert open_client.put("/api/settings", json={"theme": "dark"}).json()["theme"] == "dark"
+    assert app_settings.load().theme == "dark"
+    assert open_client.put("/api/settings", json={"theme": "dim"}).status_code == 422
+    assert open_client.get("/api/settings").json()["theme"] == "dark"
+    path = app_settings.config_dir() / "settings.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), "theme": "sepia"}))
+    assert app_settings.load().theme == "system"
 
 
 def test_profile_style_setting(open_client):

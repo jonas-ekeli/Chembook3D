@@ -38,8 +38,28 @@ function tickDecimals(values: number[]): number {
   return 6
 }
 
-const MARK = { fontWeight: 700, fill: '#b42318' } as const
-const CHECK = { fontWeight: 700, fill: '#b54708' } as const
+/** The figure's own colours, in every saved PNG and SVG whatever the theme (D185). */
+const PAPER = {
+  zero: '#98a2b3',
+  grid: '#eaecf0',
+  mark: '#b42318',
+  check: '#b54708',
+  tagFill: '#fff4e5',
+  tagEdge: '#fdb022',
+  tagText: '#93370d',
+  faint: '#98a2b3',
+}
+/** D185: on screen in the dark theme the chart takes the theme's colours instead. */
+const DARK: typeof PAPER = {
+  zero: 'var(--text-faint)',
+  grid: 'var(--chart-grid)',
+  mark: 'var(--danger)',
+  check: 'var(--warn)',
+  tagFill: 'var(--no-ts-bg)',
+  tagEdge: 'var(--warn-strong)',
+  tagText: 'var(--warn-text)',
+  faint: 'var(--text-faint)',
+}
 
 let measure: CanvasRenderingContext2D | null | undefined
 
@@ -84,6 +104,8 @@ export type ChartProps = {
   /** D181: the text's size on screen as a share of the style's (`SCREEN_TEXT`). */
   textScale?: number
   pointing?: Pointing
+  /** D185: drawn on screen in the dark theme (never for a saved figure, which stays light). */
+  dark?: boolean
 }
 
 /** FR-EN-05, FR-EN-09: X(n) − X(ref) along each pathway, overlaid in branch colours. A direct
@@ -102,12 +124,15 @@ export function ProfileChart({
   size,
   textScale = 1,
   pointing,
+  dark = false,
 }: ChartProps) {
   // D181: the level under the pointer and where its line is on the screen.
   const [pointed, setPointed] = useState<{ pi: number; i: number; box: DOMRect; data: Profiles } | null>(null)
   const hover = pointed?.data === data ? pointed : null // forgotten when the profile changes
   const style = given ?? styleOf(settings)
-  const colours = pathwayColours(branchColours, style)
+  const paint = dark ? DARK : PAPER
+  // D185: black lines of a black or grey style would vanish on the dark theme's background.
+  const colours = pathwayColours(branchColours, style).map((c) => (dark && c === '#000000' ? 'var(--text)' : c))
   const unit = settings?.energy_unit ?? 'kcal/mol'
   const factor = settings?.energy_factors[unit] ?? 1
   const W = style.width
@@ -116,8 +141,8 @@ export function ProfileChart({
   const s = f / 11 // every distance that goes with the text scales with it
   const nameSize = (f * 10) / 11
   const row = f + 3
-  const ink = style.text === 'black' ? '#000000' : '#1c2430'
-  const soft = style.text === 'black' ? '#000000' : '#667085'
+  const ink = dark ? 'var(--text)' : style.text === 'black' ? '#000000' : '#1c2430'
+  const soft = dark ? 'var(--muted)' : style.text === 'black' ? '#000000' : '#667085'
 
   const family = FONTS[style.font]?.family ?? FONTS.system.family
   const typeName = energyTypeName(data.type, data.temperature, data.cutoff, data.standard_state, data.job_temperatures)
@@ -337,7 +362,7 @@ export function ProfileChart({
       className="profile-chart"
       style={svgStyle}
     >
-      {style.background === 'white' && <rect x={0} y={0} width={W} height={H} fill="#ffffff" />}
+      {style.background === 'white' && !dark && <rect x={0} y={0} width={W} height={H} fill="#ffffff" />}
       {style.title && (
         <>
           <text x={margin.left} y={18 * s} fontSize={f + 2} fontWeight={600} fill={ink}>
@@ -376,7 +401,7 @@ export function ProfileChart({
               x2={W - margin.right}
               y1={y(t / factor)}
               y2={y(t / factor)}
-              stroke={t === 0 ? '#98a2b3' : '#eaecf0'}
+              stroke={t === 0 ? paint.zero : paint.grid}
             />
           )}
           {style.y_axis && (
@@ -447,15 +472,15 @@ export function ProfileChart({
                       width={40 * s}
                       height={14 * s}
                       rx={7 * s}
-                      fill="#fff4e5"
-                      stroke="#fdb022"
+                      fill={paint.tagFill}
+                      stroke={paint.tagEdge}
                     />
                     <text
                       x={(x1 + x2) / 2}
                       y={(y1 + y2) / 2 - 6.5 * s}
                       fontSize={nameSize}
                       textAnchor="middle"
-                      fill="#93370d"
+                      fill={paint.tagText}
                     >
                       no TS
                     </text>
@@ -468,7 +493,7 @@ export function ProfileChart({
             const cx = x(slotOf(pi, i))
             if (point.relative === null) {
               return (
-                <text key={i} x={cx} y={margin.top + 10 * s} fontSize={nameSize} textAnchor="middle" fill="#98a2b3">
+                <text key={i} x={cx} y={margin.top + 10 * s} fontSize={nameSize} textAnchor="middle" fill={paint.faint}>
                   <title>{point.message ?? point.species_message ?? 'no value'}</title>
                   {point.label}: n/a
                 </text>
@@ -479,13 +504,13 @@ export function ProfileChart({
             // D154: a point the frequency job does not show to be what its role says. Left out of
             // the saved figure (profileStyle.figureText).
             const check = point.check && (
-              <tspan data-check="" {...CHECK}>
+              <tspan data-check="" fontWeight={700} fill={paint.check}>
                 {' '}⚠<title>{point.check.message}</title>
               </tspan>
             )
             const markSpan = (mark || check) && (
               <>
-                {mark && <tspan {...MARK}> {mark}</tspan>}
+                {mark && <tspan fontWeight={700} fill={paint.mark}> {mark}</tspan>}
                 {check}
               </>
             )

@@ -69,7 +69,7 @@ export const MoleculeSketch = memo(function MoleculeSketch({
             y1={a.y}
             x2={b.x}
             y2={b.y}
-            stroke={light ? '#c4c8cf' : '#5f6670'}
+            stroke={light ? 'var(--sketch-bond-h)' : 'var(--sketch-bond)'}
             strokeWidth={light ? 0.8 : 1.4}
           />
         )
@@ -84,7 +84,7 @@ export const MoleculeSketch = memo(function MoleculeSketch({
             cy={p.y}
             r={hydrogen ? radius * 0.55 : atoms[i].element === 'C' ? radius * 0.8 : radius}
             fill={elementColour(atoms[i].element)}
-            stroke="#3a3f47"
+            stroke="var(--sketch-edge)"
             strokeWidth={hydrogen ? 0.2 : 0.4}
           />
         )

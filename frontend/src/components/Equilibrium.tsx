@@ -89,8 +89,8 @@ function PopulationChart({
       <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" aria-label="Populations over time">
         {[0, 0.25, 0.5, 0.75, 1].map((p) => (
           <g key={p}>
-            <line x1={left} x2={W - right} y1={y(p)} y2={y(p)} stroke={p === 0 ? '#98a2b3' : '#eaecf0'} />
-            <text x={left - 6} y={y(p) + 4} textAnchor="end" fontSize="11" fill="#667085">
+            <line x1={left} x2={W - right} y1={y(p)} y2={y(p)} stroke={p === 0 ? 'var(--text-faint)' : 'var(--chart-grid)'} />
+            <text x={left - 6} y={y(p) + 4} textAnchor="end" fontSize="11" fill="var(--muted)">
               {p * 100}%
             </text>
           </g>
@@ -99,8 +99,8 @@ function PopulationChart({
           .filter((d) => (d - decades[0]) % step === 0)
           .map((d) => (
             <g key={d}>
-              <line x1={x(10 ** d)} x2={x(10 ** d)} y1={top} y2={H - bottom} stroke="#eaecf0" />
-              <text x={x(10 ** d)} y={H - bottom + 16} textAnchor="middle" fontSize="11" fill="#667085">
+              <line x1={x(10 ** d)} x2={x(10 ** d)} y1={top} y2={H - bottom} stroke="var(--chart-grid)" />
+              <text x={x(10 ** d)} y={H - bottom + 16} textAnchor="middle" fontSize="11" fill="var(--muted)">
                 {decadeLabel(d)}
               </text>
             </g>
@@ -111,7 +111,7 @@ function PopulationChart({
             x2={x(set.equilibrium_time)}
             y1={top}
             y2={H - bottom}
-            stroke="#98a2b3"
+            stroke="var(--text-faint)"
             strokeDasharray="4 4"
           >
             <title>Within 1 percentage point of equilibrium after {duration(set.equilibrium_time)}</title>
@@ -128,7 +128,7 @@ function PopulationChart({
             <title>{labels.get(id)}</title>
           </polyline>
         ))}
-        <text x={(left + W - right) / 2} y={H - 4} textAnchor="middle" fontSize="11" fill="#667085">
+        <text x={(left + W - right) / 2} y={H - 4} textAnchor="middle" fontSize="11" fill="var(--muted)">
           time from pure {labels.get(set.start_id ?? '')} (log scale)
         </text>
       </svg>

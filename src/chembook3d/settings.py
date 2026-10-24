@@ -24,6 +24,9 @@ CREST_COUNT = 10  # D34: the lowest N conformers of a CREST ensemble are ticked 
 HYDROGEN_MODES = ("all", "polar", "none")
 # D84: colours of the steric maps, low to high (the difference map keeps blue–grey–red).
 STERIC_COLOURS = ("blue", "green-yellow-red", "rainbow", "viridis", "grey")
+# D185: the app's colours, light, dark or as the system prefers (the default). Exported figures,
+# steric map images and the read-only copy stay light whatever is chosen.
+THEMES = ("light", "dark", "system")
 # D95: the standard state of G and G_qh, the 1 atm ideal gas of the files and the reference
 # script (D57) or 1 mol/L, which adds RT ln(V_m / 1 L mol⁻¹) to each molecule.
 STANDARD_STATES = ("1 atm", "1 M")
@@ -137,6 +140,7 @@ class Settings:
     crest_count: int = CREST_COUNT
     hydrogens: str = "all"
     steric_colours: str = "blue"
+    theme: str = "system"
     batch_suffixes: list[str] = field(default_factory=lambda: list(BATCH_SUFFIXES))
     profile_style: dict = field(default_factory=lambda: dict(PROFILE_PRESETS["screen"]))
 
@@ -224,6 +228,8 @@ def load() -> Settings:
         settings.standard_state = data["standard_state"]
     if data.get("steric_colours") in STERIC_COLOURS:
         settings.steric_colours = data["steric_colours"]
+    if data.get("theme") in THEMES:
+        settings.theme = data["theme"]
     suffixes = data.get("batch_suffixes")
     if isinstance(suffixes, list) and all(isinstance(s, str) for s in suffixes):
         settings.batch_suffixes = [s.strip() for s in suffixes if s.strip()]
