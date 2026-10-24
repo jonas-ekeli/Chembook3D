@@ -32,7 +32,7 @@ from chembook3d import settings as app_settings
 from chembook3d.api.downloads import file_name
 from chembook3d.investigation import FILES_DIR
 from chembook3d.models import Calculation, GroupNode, Node, NodeKind, SourceFile, new_id
-from chembook3d.parsers import crest, gaussian, orca, xtb
+from chembook3d.parsers import cml, crest, gaussian, orca, xtb
 from chembook3d.services import geometry, history, imports
 from chembook3d.services import nodes as node_service
 from chembook3d.services.layout import COLUMN_WIDTH, ROW_HEIGHT
@@ -79,6 +79,7 @@ class Batch:
 def _looks_like_output(head: str) -> bool:
     return (
         gaussian.looks_like_gaussian(head)
+        or cml.looks_like_cml(head)
         or orca.looks_like_orca(head)
         or xtb.looks_like_xtb(head)
         or crest.looks_like_ensemble(head)

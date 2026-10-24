@@ -48,7 +48,7 @@ from chembook3d.models import (
     Status,
     new_id,
 )
-from chembook3d.parsers import crest, gaussian, joined, orca, xtb
+from chembook3d.parsers import cml, crest, gaussian, joined, orca, xtb
 from chembook3d.parsers.common import NOT_STATIONARY, ParsedFile, ParsedStep
 from chembook3d.services import geometry, history, levels, spin
 from chembook3d.services import groups as group_service
@@ -95,6 +95,11 @@ def read_file(text: str, name: str = "", folder: Path | None = None) -> ParsedFi
             raise ImportFailed(f"{name or 'The file'} is not a readable xTB scan: {exc}") from exc
     elif gaussian.looks_like_gaussian(text):
         parsed = gaussian.parse(text)
+    elif cml.looks_like_cml(text):
+        try:
+            parsed = cml.parse(text)  # D186: ioChem-BD's CML of a Gaussian output
+        except cml.NotCml as exc:
+            raise ImportFailed(f"{name or 'The file'} is not a readable CML output: {exc}") from exc
     elif orca.looks_like_orca(text):
         parsed = orca.parse(text, beside(folder) if folder else None)
     elif xtb.looks_like_xtb(text):
@@ -111,8 +116,8 @@ def read_file(text: str, name: str = "", folder: Path | None = None) -> ParsedFi
         return parsed
     else:
         raise ImportFailed(
-            f"{name or 'The file'} is not a Gaussian, ORCA or xTB output file, an xTB scan or "
-            "a CREST conformer ensemble."
+            f"{name or 'The file'} is not a Gaussian, ORCA or xTB output file, ioChem-BD's CML "
+            "of a Gaussian output, an xTB scan or a CREST conformer ensemble."
         )
     if not parsed.steps:
         raise ImportFailed(f"No job steps were found in {name}")
