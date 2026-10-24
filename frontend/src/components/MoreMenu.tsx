@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Icon, type IconName } from '../icons'
+import { menuEntries, moveInMenu } from '../menuKeys'
 
 export type MenuItem = {
   label: string
@@ -12,6 +13,15 @@ export type MenuItem = {
   title?: string
   /** D180: a line above the item, setting it apart from the ones before. */
   separated?: boolean
+  /** D184: the key that does the same, shown at the right ("R", "Ctrl C"). */
+  shortcut?: string
+  /** D184: a list of choices opened from this item (a right-click menu's "Status ›"); its
+   * `onSelect` is then not used. */
+  items?: MenuItem[]
+  /** D184: in such a list, the choice in force (a status). */
+  checked?: boolean
+  /** D184: a short value at the right, such as a submenu's current choice. */
+  aside?: string
 }
 
 /** D179: a "⋯" button with the rare actions of a panel. */
@@ -53,11 +63,11 @@ export function Menu({
   const wrap = useRef<HTMLDivElement>(null)
   const button = useRef<HTMLButtonElement>(null)
 
-  const entries = () => [...(wrap.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])]
+  const list = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open) return
-    entries()[0]?.focus()
+    menuEntries(list.current)[0]?.focus()
     const outside = (event: PointerEvent) => {
       if (!wrap.current?.contains(event.target as globalThis.Node)) setOpen(false)
     }
@@ -71,17 +81,8 @@ export function Menu({
   }
 
   const onMenuKey = (event: KeyboardEvent) => {
-    const list = entries()
-    const at = list.indexOf(document.activeElement as HTMLButtonElement)
-    const go = (index: number) => {
-      event.preventDefault()
-      list[(index + list.length) % list.length]?.focus()
-    }
-    if (event.key === 'ArrowDown') go(at + 1)
-    else if (event.key === 'ArrowUp') go(at - 1)
-    else if (event.key === 'Home') go(0)
-    else if (event.key === 'End') go(list.length - 1)
-    else if (event.key === 'Escape') {
+    if (moveInMenu(event, list.current)) return
+    if (event.key === 'Escape') {
       event.preventDefault()
       event.stopPropagation()
       close()
@@ -102,13 +103,18 @@ export function Menu({
           if (event.key === 'ArrowDown' && !open) {
             event.preventDefault()
             setOpen(true)
+          } else if (event.key === 'Escape' && open) {
+            // Before the list has taken the focus (a key pressed right after the click).
+            event.preventDefault()
+            event.stopPropagation()
+            setOpen(false)
           }
         }}
       >
         {children}
       </button>
       {open && (
-        <div role="menu" aria-label={label} className="menu-list" onKeyDown={onMenuKey}>
+        <div ref={list} role="menu" aria-label={label} className="menu-list" onKeyDown={onMenuKey}>
           {heading && (
             <div className="menu-heading" aria-hidden="true">
               {heading}
@@ -123,26 +129,60 @@ export function Menu({
   )
 }
 
-function MenuEntry({ item, onChosen }: { item: MenuItem; onChosen: () => void }) {
+/** One entry of a menu list. D184: with `items` it opens a list of its own (`onOpen`), and a
+ * choice among such items (`checked` set) is a radio entry. */
+export function MenuEntry({
+  item,
+  onChosen,
+  onOpen,
+  open,
+  onPointerEnter,
+  index,
+}: {
+  item: MenuItem
+  onChosen: () => void
+  onOpen?: () => void
+  open?: boolean
+  onPointerEnter?: () => void
+  /** Its place in the list, for a menu that finds its entries again. */
+  index?: number
+}) {
+  const parent = item.items !== undefined
   return (
     <>
       {item.separated && <div role="separator" className="menu-separator" />}
       <button
-        role="menuitem"
+        role={item.checked !== undefined ? 'menuitemradio' : 'menuitem'}
+        aria-checked={item.checked}
+        aria-haspopup={parent ? 'menu' : undefined}
+        aria-expanded={parent ? Boolean(open) : undefined}
         className={item.danger ? 'danger' : undefined}
         aria-label={item.label}
         disabled={item.disabled}
         title={item.title}
+        data-index={index}
+        onPointerEnter={onPointerEnter}
         onClick={() => {
+          if (parent) {
+            onOpen?.()
+            return
+          }
           onChosen()
           item.onSelect()
         }}
       >
-        {item.icon && <Icon name={item.icon} />}
+        {item.icon ? (
+          <Icon name={item.icon} />
+        ) : (
+          item.checked !== undefined && <span className="menu-check">{item.checked ? '✓' : ''}</span>
+        )}
         <span className="menu-item-text">
           {item.label}
           {item.detail && <small className="muted">{item.detail}</small>}
         </span>
+        {item.aside && <span className="menu-aside">{item.aside}</span>}
+        {item.shortcut && <kbd className="menu-key">{item.shortcut}</kbd>}
+        {parent && <Icon name="chevronright" />}
       </button>
     </>
   )

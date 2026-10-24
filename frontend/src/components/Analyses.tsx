@@ -25,6 +25,7 @@ import { NumberInput } from './AnalysisParts'
 import { EquilibriumEditor } from './Equilibrium'
 import { EmptyState } from './EmptyState'
 import { Icon } from '../icons'
+import { PALETTE_KEY, useRequest, type Request } from '../commands'
 
 // D83: the Analyses view lists the saved selectivities (S7); each one compares outcomes
 // realised by TS nodes or groups at one level and energy type (S1–S6).
@@ -929,6 +930,7 @@ export function AnalysesView({
   openId,
   onSelectNode,
   onChanged,
+  asked,
 }: {
   canvas: Canvas
   settings: Settings | null
@@ -942,6 +944,8 @@ export function AnalysesView({
   onSelectNode: (id: string) => void
   /** A change that belongs in the history. */
   onChanged: () => void
+  /** D184: New selectivity, turnover or conformer equilibrium from the palette. */
+  asked?: Request | null
 }) {
   const [list, setList] = useState<Selectivity[] | null>(null)
   const [turnovers, setTurnovers] = useState<Turnover[] | null>(null)
@@ -1019,6 +1023,14 @@ export function AnalysesView({
       (err: unknown) => setError(errorText(err)),
     )
   }
+
+  // Names are numbered after those that exist, so a new one waits until they are loaded.
+  const ready = list !== null && turnovers !== null && equilibria !== null
+  useRequest(asked, ready ? 'analyses' : null, (action) => {
+    if (action === 'new-selectivity') create()
+    else if (action === 'new-turnover') createTurnover()
+    else if (action === 'new-equilibrium') createEquilibrium()
+  })
 
   const shownEquilibrium = equilibria?.find((e) => e.id === chosen) ?? null
   const shownTurnover = shownEquilibrium ? null : (turnovers?.find((t) => t.id === chosen) ?? null)
@@ -1186,7 +1198,8 @@ export function AnalysesView({
               tip={
                 <>
                   Tip: select the competing TSs or groups on the canvas and choose “Selectivity…” in the side
-                  panel to start with one outcome for each.
+                  panel or their right-click menu to start with one outcome for each. <kbd>{PALETTE_KEY}</kbd> finds
+                  every command.
                 </>
               }
             >
