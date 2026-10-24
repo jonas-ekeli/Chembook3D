@@ -47,19 +47,24 @@ const elementsOf = (n: Node) => parseXyz(n.xyz ?? '').map((a) => a.element).join
 // red where it is higher, grey for no change.
 const DIVERGING = ['#0d366b', '#1c5cab', '#3987e5', '#86b6ef', '#cde2fb', '#f0efec', '#f9d3cc', '#f0a091', '#e0644f', '#b8321f', '#7f1d12']
 
-/** The map colours setting, where the maps are (D84). */
-export function StericColourSelect() {
+/** The map colours setting, where the maps are (D84); `bare` leaves out the label, for a
+ * Settings row that names it (D183). */
+export function StericColourSelect({ bare = false }: { bare?: boolean }) {
   const { colours, setColours } = useContext(StericColourSetting)
+  const select = (
+    <select aria-label="Map colours" value={colours} onChange={(e) => setColours(e.target.value as StericColours)}>
+      {Object.entries(STERIC_PALETTES).map(([key, palette]) => (
+        <option key={key} value={key}>
+          {palette.name}
+        </option>
+      ))}
+    </select>
+  )
+  if (bare) return select
   return (
     <label className="field">
       <span>Map colours</span>
-      <select aria-label="Map colours" value={colours} onChange={(e) => setColours(e.target.value as StericColours)}>
-        {Object.entries(STERIC_PALETTES).map(([key, palette]) => (
-          <option key={key} value={key}>
-            {palette.name}
-          </option>
-        ))}
-      </select>
+      {select}
     </label>
   )
 }

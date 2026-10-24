@@ -35,8 +35,7 @@ import { FilterMenu } from './components/FilterMenu'
 import { FolderPicker } from './components/FolderPicker'
 import { GModelBadge } from './components/GModelBadge'
 import { HistoryList } from './components/HistoryList'
-import { NumberSetting } from './components/NumberSetting'
-import { ThermoSettings } from './components/ThermoSettings'
+import { SettingsDialog } from './components/SettingsDialog'
 import { UndoImportDialog } from './components/UndoImportDialog'
 import { BatchImportDialog } from './components/BatchImportDialog'
 import { ImportDialog } from './components/ImportDialog'
@@ -64,7 +63,6 @@ import type { HydrogenMode } from './chem'
 import { recordNames } from './names'
 import { HydrogenDisplay, StericColourSetting, type StericColours } from './display'
 import { EnergyNotes } from './components/EnergyNotes'
-import { StericColourSelect } from './components/Sterics'
 import {
   CloneDialog,
   ConflictDialog,
@@ -799,78 +797,16 @@ function App() {
         />
       )}
       {showSettings && settings && (
-        <Modal
-          title="Settings"
+        <SettingsDialog
+          settings={settings}
+          investigation={investigation ?? null}
+          onSettings={setSettings}
+          onThermoSaved={(s) => {
+            setSettings(s)
+            if (s.thermo_scope === 'investigation') reload()
+          }}
           onClose={() => setShowSettings(false)}
-          actions={<button onClick={() => setShowSettings(false)}>Done</button>}
-        >
-          <label className="field">
-            <span>Energy unit</span>
-            <select
-              aria-label="Energy unit"
-              value={settings.energy_unit}
-              onChange={(event) => api.saveSettings({ energy_unit: event.target.value }).then(setSettings)}
-            >
-              {settings.energy_units.map((unit) => (
-                <option key={unit}>{unit}</option>
-              ))}
-            </select>
-          </label>
-          <p className="muted">Relative energies use this unit; absolute energies are shown in hartree.</p>
-          <h3>Geometry tolerances (RMSD after alignment, Å)</h3>
-          <NumberSetting
-            label="Same geometry"
-            value={settings.geometry_tolerance}
-            onSave={(geometry_tolerance) => api.saveSettings({ geometry_tolerance }).then(setSettings)}
-          />
-          <p className="muted small">A job step's results attach to a node only within this RMSD (ID-7).</p>
-          <NumberSetting
-            label="Possible duplicate"
-            value={settings.duplicate_tolerance}
-            onSave={(duplicate_tolerance) => api.saveSettings({ duplicate_tolerance }).then(setSettings)}
-          />
-          <p className="muted small">An import this close to another node is flagged as a possible duplicate (ID-8).</p>
-          <ThermoSettings
-            key={`${settings.thermo_scope}:${investigation?.folder ?? ''}`}
-            settings={settings}
-            investigationName={investigation?.name ?? null}
-            onSaved={(s) => {
-              setSettings(s)
-              if (s.thermo_scope === 'investigation') reload()
-            }}
-          />
-          <h3>CREST ensembles</h3>
-          <NumberSetting
-            label="Conformers kept on import"
-            value={settings.crest_count}
-            onSave={(count) => api.saveSettings({ crest_count: Math.max(1, Math.round(count)) }).then(setSettings)}
-          />
-          <p className="muted small">The lowest this many conformers are ticked in the import preview (D34).</p>
-          <h3>Structures</h3>
-          <label className="field">
-            <span>Hydrogens</span>
-            <select
-              aria-label="Hydrogens"
-              value={settings.hydrogens}
-              onChange={(event) =>
-                api.saveSettings({ hydrogens: event.target.value as Settings['hydrogens'] }).then(setSettings)
-              }
-            >
-              <option value="all">Show all</option>
-              <option value="polar">Hide those bonded to carbon</option>
-              <option value="none">Hide all</option>
-            </select>
-          </label>
-          <p className="muted small">
-            Applies to the 3D views and the structure cards. “Hide those bonded to carbon” keeps hydrides, O–H and N–H,
-            and C–H hydrogens also close to a metal (agostic).
-          </p>
-          <h3>Steric maps</h3>
-          <StericColourSelect />
-          <p className="muted small">
-            Colours from low (far below the centre) to high (crowding it). Difference maps stay blue–grey–red.
-          </p>
-        </Modal>
+        />
       )}
       {sharing && (
         <Modal
