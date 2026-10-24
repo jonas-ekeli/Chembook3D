@@ -2,7 +2,7 @@
 
 A local-first notebook for computational chemistry mechanism investigations. It combines an infinite 2D reaction map, structured records for every structure and calculation, and an interactive 3D viewer.
 
-**Status:** all five build phases are in: investigations with nodes made by hand or imported (Gaussian, ORCA, xTB, CREST), the reaction map canvas with branches and groups, a 3D view, energy profiles and tables with quasi-harmonic G, and a resume overview.
+**Status:** all five build phases are in: investigations with nodes made by hand or imported (Gaussian, ORCA, xTB, CREST, and ioChem-BD's CML of Gaussian outputs), the reaction map canvas with branches and groups, a 3D view, energy profiles and tables with quasi-harmonic G, and a resume overview.
 
 ## Install the tools
 
