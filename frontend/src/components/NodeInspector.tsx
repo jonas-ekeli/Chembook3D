@@ -38,6 +38,7 @@ import { MoreMenu, type MenuItem } from './MoreMenu'
 import { Icon } from '../icons'
 import { cardEnergy, minus, type CanvasEnergy } from '../cardEnergy'
 import { hartree } from '../util'
+import { useRequest, type Request } from '../commands'
 
 const SYSTEM_TAGS = new Set(['optimization-incomplete'])
 
@@ -159,6 +160,7 @@ export function NodeInspector({
   onEditStructure,
   energy,
   levelLabel,
+  asked,
 }: {
   node: Node
   canvas: Canvas
@@ -188,6 +190,8 @@ export function NodeInspector({
   energy: CanvasEnergy
   /** The composite level's label, as the energy view's selector shows it. */
   levelLabel: string
+  /** D184: an action asked from a right-click menu, the palette or a key. */
+  asked?: Request | null
 }) {
   const nodes = [...canvas.nodes, ...canvas.species]
   // D69: a free species has no step, branch, group or edges; transitions list it instead.
@@ -348,6 +352,17 @@ export function NodeInspector({
     targets.current[key] = element
   }
 
+  const askDelete = () =>
+    api.deletePreview(node.id).then(
+      (preview) => setConfirmDelete(preview),
+      (err: unknown) => setError(String(err)),
+    )
+  useRequest(asked, node.id, (action) => {
+    if (action === 'delete') void askDelete()
+    // The 3D view in its own floating window (D82), as its pop-out button does.
+    else if (action === 'open-3d') setPoppedOut(true)
+  })
+
   const moreItems: MenuItem[] = []
   if (!isSpecies && irc && (irc.is_ts || irc.count > 0) && onIrc) {
     moreItems.push({
@@ -372,11 +387,7 @@ export function NodeInspector({
     label: isSpecies ? 'Delete species' : 'Delete node',
     icon: 'trash',
     danger: true,
-    onSelect: () =>
-      api.deletePreview(node.id).then(
-        (preview) => setConfirmDelete(preview),
-        (err: unknown) => setError(String(err)),
-      ),
+    onSelect: () => void askDelete(),
   })
 
   return (

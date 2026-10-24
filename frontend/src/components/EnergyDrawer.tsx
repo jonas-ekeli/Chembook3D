@@ -24,6 +24,7 @@ import { Menu } from './MoreMenu'
 import { ProfileChart, SCREEN_TEXT } from './ProfileChart'
 import { ProfileStyleDialog } from './ProfileStyleDialog'
 import { CompareStericsDialog } from './Sterics'
+import { useRequest, type Request } from '../commands'
 
 const NO_BRANCH = '#98a2b3'
 const FALLBACK = ['#2459c6', '#c4320a', '#079455', '#6938ef', '#b54708']
@@ -84,6 +85,7 @@ export function EnergyDrawer({
   onTurnover,
   saved,
   onViewChange,
+  asked,
 }: {
   canvas: Canvas
   settings: Settings | null
@@ -107,6 +109,8 @@ export function EnergyDrawer({
   saved?: DrawerView
   /** D105: the tab and pathways, whenever they change, to be remembered. */
   onViewChange?: (view: DrawerView) => void
+  /** D184: "Start energy pathway here" from a right-click menu or the palette. */
+  asked?: Request | null
 }) {
   const [tab, setTab] = useState<'profile' | 'table'>(saved?.tab ?? 'profile')
   const [paths, setPaths] = useState<Path[]>(
@@ -290,6 +294,10 @@ export function EnergyDrawer({
       (err: unknown) => setError(errorText(err)),
     )
   }
+
+  useRequest(asked, 'drawer', (action) => {
+    if (action === 'start') startAtSelection()
+  })
 
   const addBranch = (branchId: string) =>
     api.branchPathway(branchId).then(

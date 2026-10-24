@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type Ref } from 'react'
 import {
   api,
   formatDelta,
@@ -25,6 +25,8 @@ import { ScanPathDialog } from './ScanPathDialog'
 import { ScanPathsSection } from './ScanPathsOnEdge'
 import { MAX_OVERLAY, OverlayDialog } from './OverlayDialog'
 import { CompareStericsDialog } from './Sterics'
+import { useRequest, type Request } from '../commands'
+import { groupActions, scanPathEnds, selectionActions } from '../panelActions'
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -100,11 +102,14 @@ function TransitionSpeciesSection({
   canvas,
   onChanged,
   onSelectNode,
+  anchor,
 }: {
   transition: Transition
   canvas: Canvas
   onChanged: () => void
   onSelectNode: (id: string) => void
+  /** D184: where "Free species…" of the edge's menu takes the focus. */
+  anchor?: Ref<HTMLElement>
 }) {
   const [error, setError] = useState<string | null>(null)
   const available = canvas.species.filter((s) => !transition.species.some((e) => e.species_id === s.id))
@@ -121,7 +126,7 @@ function TransitionSpeciesSection({
       (err: unknown) => setError(errorText(err)),
     )
   return (
-    <section aria-label="Free species on this transition">
+    <section aria-label="Free species on this transition" ref={anchor} tabIndex={-1} className="jump-target">
       <h3>Free species</h3>
       {transition.warnings.length > 0 && (
         <ul className="warnings" aria-label="Transition warnings">
@@ -234,6 +239,7 @@ export function TransitionInspector({
   onDeleted,
   onSelectNode,
   onSelectGroup,
+  asked,
 }: {
   transition: Transition
   canvas: Canvas
@@ -246,10 +252,21 @@ export function TransitionInspector({
   onDeleted: () => void
   onSelectNode: (id: string) => void
   onSelectGroup: (id: string) => void
+  /** D184: an action asked from a right-click menu, the palette or a key. */
+  asked?: Request | null
 }) {
   const paths = transition.scan_paths ?? []
   const [error, setError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState(false)
+  const species = useRef<HTMLElement>(null)
+  useRequest(asked, transition.id, (action) => {
+    if (action === 'delete') setConfirm(true)
+    else if (action === 'species') {
+      const section = species.current
+      section?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      ;(section?.querySelector<HTMLElement>('select') ?? section)?.focus({ preventScroll: true })
+    }
+  })
   const update = (fields: Partial<Pick<Transition, 'status' | 'notes' | 'source_side' | 'target_side'>>) =>
     api.updateTransition(transition.id, fields).then(onChanged, (err: unknown) => setError(errorText(err)))
   const ends = { canvas, onSelectNode, onSelectGroup }
@@ -293,6 +310,7 @@ export function TransitionInspector({
         canvas={canvas}
         onChanged={onChanged}
         onSelectNode={onSelectNode}
+        anchor={species}
       />
       <ScanPathsSection
         transition={transition}
@@ -734,6 +752,7 @@ export function GroupInspector({
   onSelectNode,
   onSelectBranch,
   energy,
+  asked,
 }: {
   group: Group
   canvas: Canvas
@@ -742,6 +761,8 @@ export function GroupInspector({
   onSelectNode: (id: string) => void
   onSelectBranch: (id: string) => void
   energy: { view: EnergyView | null; typeName: string; settings: Settings | null }
+  /** D184: an action asked from a right-click menu, the palette or a key. */
+  asked?: Request | null
 }) {
   const [error, setError] = useState<string | null>(null)
   const [removing, setRemoving] = useState(false)
@@ -766,6 +787,13 @@ export function GroupInspector({
     sorted && energy.view
       ? [...listed].sort((a, b) => (valueOf(a.id) ?? Infinity) - (valueOf(b.id) ?? Infinity))
       : listed
+  const actions = groupActions(group, canvas)
+  useRequest(asked, group.id, (action) => {
+    const enabled = (key: string) => actions.some((a) => a.key === key && !a.disabled)
+    if (action === 'remove') setRemoving(true)
+    else if (action === 'overlay' && enabled('overlay')) setOverlay(true)
+    else if (action === 'sterics' && enabled('sterics')) setSterics(true)
+  })
 
   return (
     <div className="inspector" aria-label="Group inspector">
@@ -897,20 +925,16 @@ export function GroupInspector({
           </tbody>
         </table>
         <div className="buttons">
-          <button
-            disabled={shapes.length < 2 || shapes.length > MAX_OVERLAY}
-            onClick={() => setOverlay(true)}
-            title={`Superpose the members with coordinates, on the representative if there is one (FR-3D-04)`}
-          >
-            Overlay members
-          </button>
-          <button
-            disabled={shapes.length < 1}
-            onClick={() => setSterics(true)}
-            title="Buried volume and steric maps of the members (D81)"
-          >
-            Compare sterics
-          </button>
+          {actions.map((action) => (
+            <button
+              key={action.key}
+              disabled={action.disabled}
+              onClick={() => (action.key === 'overlay' ? setOverlay(true) : setSterics(true))}
+              title={action.title}
+            >
+              {action.label}
+            </button>
+          ))}
         </div>
         {shapes.length > MAX_OVERLAY && (
           <p className="muted small">
@@ -1056,6 +1080,7 @@ export function SelectionInspector({
   onGroupCreated,
   onSelectivity,
   onEquilibrium,
+  asked,
 }: {
   nodes: Node[]
   groups: Group[]
@@ -1066,6 +1091,8 @@ export function SelectionInspector({
   onSelectivity: () => void
   /** D171: a conformer equilibrium of the selection. */
   onEquilibrium: () => void
+  /** D184: an action asked from the selection's right-click menu or the palette. */
+  asked?: Request | null
 }) {
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -1089,6 +1116,19 @@ export function SelectionInspector({
   const free = nodes.filter((n) => !n.group_id)
   const target = groups.length === 1 ? groups[0] : null
   const joining = target ? nodes.filter((n) => n.group_id !== target.id) : []
+  const actions = selectionActions(nodes, groups, canvas)
+  const run = (key: string) => {
+    if (!actions.some((a) => a.key === key && !a.disabled)) return
+    if (key === 'add-to-group') setAdding(true)
+    else if (key === 'create-group') setCreating(true)
+    else if (key === 'overlay') setOverlay(true)
+    else if (key === 'match') setMatching(true)
+    else if (key === 'scan-path') setScanning(true)
+    else if (key === 'sterics') setSterics(true)
+    else if (key === 'selectivity') onSelectivity()
+    else if (key === 'equilibrium') onEquilibrium()
+  }
+  useRequest(asked, 'selection', run)
   return (
     <div className="inspector" aria-label="Selection inspector">
       <div className="inspector-head">
@@ -1139,62 +1179,17 @@ export function SelectionInspector({
         </section>
       )}
       <div className="buttons">
-        {groups.length > 0 && (
-          <button className="primary" disabled={!target || joining.length === 0} onClick={() => setAdding(true)} title="A20">
-            {target ? `Add to “${target.label || 'Group'}”…` : 'Add to group…'}
+        {actions.map((action) => (
+          <button
+            key={action.key}
+            className={action.primary ? 'primary' : undefined}
+            disabled={action.disabled}
+            onClick={() => run(action.key)}
+            title={action.title}
+          >
+            {action.label}
           </button>
-        )}
-        <button
-          disabled={nodes.length < 2 || groups.length > 0 || free.length !== nodes.length}
-          onClick={() => setCreating(true)}
-          title="WF-07"
-        >
-          Create group…
-        </button>
-        <button
-          disabled={nodes.length < 2 || nodes.length > MAX_OVERLAY || nodes.some((n) => !n.xyz)}
-          onClick={() => setOverlay(true)}
-          title={`2 to ${MAX_OVERLAY} nodes with coordinates (FR-3D-04)`}
-        >
-          Overlay in 3D
-        </button>
-        <button
-          disabled={nodes.length !== 2 || groups.length > 0 || nodes.some((n) => !n.xyz)}
-          onClick={() => setMatching(true)}
-          title="Match the second structure's atoms to the first one's numbering (D113)"
-        >
-          Match atoms…
-        </button>
-        <button
-          disabled={!scanEnds}
-          onClick={() => setScanning(true)}
-          title={
-            scanEnds
-              ? 'A path of xTB structures from one to the other, designed and run by a Claude Code cloud session (D114)'
-              : 'Select two nodes or groups joined by an edge'
-          }
-        >
-          Scan path…
-        </button>
-        <button
-          disabled={nodes.filter((n) => n.xyz).length < 1}
-          onClick={() => setSterics(true)}
-          title="Buried volume and steric maps of the selected nodes (D81)"
-        >
-          Compare sterics
-        </button>
-        <button
-          onClick={onSelectivity}
-          title="ΔΔG‡ and the predicted ratio, with each selected TS or group as one outcome (D83)"
-        >
-          Selectivity…
-        </button>
-        <button
-          onClick={onEquilibrium}
-          title="Populations of the selected conformers and the rates of the TSs between them (D171)"
-        >
-          Conformer equilibrium…
-        </button>
+        ))}
       </div>
       {groups.length === 0 && free.length !== nodes.length && (
         <p className="muted small">Some selected nodes are already in a group.</p>
@@ -1234,18 +1229,6 @@ export function SelectionInspector({
       )}
     </div>
   )
-}
-
-/** D114: the two selected items (nodes or groups) of a scan path, start first, when an edge
- * joins them (also through a member's group, D108); the edge's direction gives the start. */
-function scanPathEnds(nodes: Node[], groups: Group[], canvas: Canvas): [string, string] | null {
-  const items = [...nodes.map((n) => ({ id: n.id, ids: [n.id, n.group_id].filter(Boolean) as string[] })), ...groups.map((g) => ({ id: g.id, ids: [g.id] }))]
-  if (items.length !== 2) return null
-  const [a, b] = items
-  const joins = (from: string[], to: string[]) => canvas.transitions.some((t) => from.includes(t.source_id) && to.includes(t.target_id))
-  if (joins(a.ids, b.ids)) return [a.id, b.id]
-  if (joins(b.ids, a.ids)) return [b.id, a.id]
-  return null
 }
 
 /** FR-BR-02: split a node's branch into new child branches. */

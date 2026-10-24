@@ -71,6 +71,7 @@ import { EmptyState } from './EmptyState'
 import { Menu } from './MoreMenu'
 import { cardEnergy, minus, type CanvasEnergy, type CardEnergy } from '../cardEnergy'
 import { curveOf, LabelPlacer, leaderEnd, pointAt, type Curve, type Rect } from '../labelLayout'
+import { useRequest, type Request } from '../commands'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import type { Rotation } from '../chem'
@@ -195,6 +196,15 @@ type TransitionData = {
 
 /** D121: what clicking an edge's scan path chip does (the edge's id). */
 const PathChipClick = createContext<((transitionId: string) => void) | null>(null)
+
+/** D184: what a right-click on the canvas was on: a node card, a group, an arrow, the
+ * selection's box, or the empty canvas (with the canvas position under the pointer). */
+export type CanvasTarget =
+  | { kind: 'node' | 'group' | 'edge'; id: string }
+  | { kind: 'selection' }
+  | { kind: 'pane'; at: { x: number; y: number } }
+/** D184: a right-click at a point of the window on something of the canvas. */
+export type CanvasContextMenu = (target: CanvasTarget, point: { x: number; y: number }) => void
 
 const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<FlowNode<StructureData>>) {
   const { node, colour, stepName, mode, faded, representative, energy } = data
@@ -610,6 +620,8 @@ function CanvasView({
   onImport,
   readOnly = false,
   tools,
+  onContextMenu,
+  asked,
 }: {
   data: CanvasData
   mode: ViewMode
@@ -644,6 +656,10 @@ function CanvasView({
   /** D180: where Fit and Export go (the app's canvas toolbar); null until it is there. Without
    * it they float in the canvas's top-right corner (the read-only copy). */
   tools?: HTMLElement | null
+  /** D184: right-click menus; without it (the read-only copy) the browser's own menu shows. */
+  onContextMenu?: CanvasContextMenu
+  /** D184: "fit" (the selection, else everything) or "fit-all", from a menu, the palette or F. */
+  asked?: Request | null
 }) {
   const flow = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
@@ -1031,6 +1047,21 @@ function CanvasView({
   const position = (event: { clientX: number; clientY: number }) =>
     flow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
 
+  // The Controls' fit (everything), and the toolbar's Fit (the selection).
+  const fitAll = () => flow.fitView({ duration: 300, maxZoom: 1.2, padding: 0.15 })
+  const fitSelection = () => flow.fitView({ nodes: flow.getNodes().filter((n) => n.selected), duration: 300, maxZoom: 1.5 })
+  useRequest(asked, 'canvas', (action) => {
+    if (action.startsWith('fit:'))
+      void flow.fitView({ nodes: action.slice(4).split(',').map((id) => ({ id })), duration: 300, maxZoom: 1.5 })
+    else if (action === 'fit-all' || (action === 'fit' && !flow.getNodes().some((n) => n.selected))) void fitAll()
+    else if (action === 'fit') void fitSelection()
+  })
+  const menuAt = (event: { clientX: number; clientY: number; preventDefault: () => void }, target: CanvasTarget) => {
+    if (!onContextMenu) return
+    event.preventDefault()
+    onContextMenu(target, { x: event.clientX, y: event.clientY })
+  }
+
   const exportImage = async (what: 'viewport' | 'full', format: 'png' | 'svg') => {
     const viewport = wrapper.current?.querySelector<HTMLElement>('.react-flow__viewport')
     if (!viewport || !wrapper.current) return
@@ -1071,7 +1102,7 @@ function CanvasView({
         className={toolClass}
         title="Fit to selection"
         aria-label="Fit to selection"
-        onClick={() => flow.fitView({ nodes: flow.getNodes().filter((n) => n.selected), duration: 300, maxZoom: 1.5 })}
+        onClick={() => void fitSelection()}
       >
         <Icon name="fit" />
         <span className="tb-label">Fit</span>
@@ -1142,6 +1173,10 @@ function CanvasView({
         }}
         onEdgeClick={(_, edge) => onSelect({ kind: 'edge', id: edge.id })}
         onPaneClick={() => onSelect(null)}
+        onNodeContextMenu={(event, node) => menuAt(event, { kind: node.type === 'cgroup' ? 'group' : 'node', id: node.id })}
+        onEdgeContextMenu={(event, edge) => menuAt(event, { kind: 'edge', id: edge.id })}
+        onSelectionContextMenu={(event) => menuAt(event, { kind: 'selection' })}
+        onPaneContextMenu={(event) => menuAt(event, { kind: 'pane', at: position(event) })}
         onSelectionEnd={() => {
           // Box selection (Shift-drag); single clicks are handled above, so the app owns the selection.
           const ids = flow

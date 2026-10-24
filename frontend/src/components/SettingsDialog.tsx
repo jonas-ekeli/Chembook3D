@@ -1,10 +1,11 @@
-import { isValidElement, useRef, useState, type ReactNode } from 'react'
+import { isValidElement, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, type Settings } from '../api'
 import { Icon, type IconName } from '../icons'
 import { Modal } from './Modal'
 import { NumberSetting } from './NumberSetting'
 import { StericColourSelect } from './Sterics'
 import { thermoSection } from './ThermoSettings'
+import { SETTINGS_SECTIONS } from '../settingsSections'
 
 /** One setting: its name and a line or two of help beside its control; `more` is the rest of a
  * long explanation, shown in place by "More…" (D183). */
@@ -81,12 +82,15 @@ export function SettingsDialog({
   onSettings,
   onThermoSaved,
   onClose,
+  section,
 }: {
   settings: Settings
   investigation: { name: string; folder: string } | null
   onSettings: (settings: Settings) => void
   onThermoSaved: (settings: Settings) => void
   onClose: () => void
+  /** D184: the section to open on (its id). */
+  section?: string
 }) {
   const save = (fields: Parameters<typeof api.saveSettings>[0]) => api.saveSettings(fields).then(onSettings)
   const thermo = thermoSection({
@@ -98,7 +102,7 @@ export function SettingsDialog({
   const computer: SettingSection[] = [
     {
       id: 'general',
-      title: 'General',
+      title: SETTINGS_SECTIONS.general,
       icon: 'sliders',
       scope: 'computer',
       badge: 'All investigations',
@@ -122,7 +126,7 @@ export function SettingsDialog({
     },
     {
       id: 'geometry',
-      title: 'Geometry matching',
+      title: SETTINGS_SECTIONS.geometry,
       icon: 'target',
       scope: 'computer',
       badge: 'All investigations',
@@ -155,7 +159,7 @@ export function SettingsDialog({
     },
     {
       id: 'structures',
-      title: 'Structures',
+      title: SETTINGS_SECTIONS.structures,
       icon: 'cube',
       scope: 'computer',
       badge: 'All investigations',
@@ -184,7 +188,7 @@ export function SettingsDialog({
     },
     {
       id: 'sterics',
-      title: 'Steric maps',
+      title: SETTINGS_SECTIONS.sterics,
       icon: 'group',
       scope: 'computer',
       badge: 'All investigations',
@@ -198,7 +202,7 @@ export function SettingsDialog({
     },
     {
       id: 'crest',
-      title: 'CREST import',
+      title: SETTINGS_SECTIONS.crest,
       icon: 'file',
       scope: 'computer',
       badge: 'All investigations',
@@ -270,6 +274,11 @@ export function SettingsDialog({
     setActive(id)
     box.scrollTop += head.getBoundingClientRect().top - box.getBoundingClientRect().top
   }
+  useEffect(() => {
+    if (section) go(section)
+    // Only when the dialog opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // A new search starts the page at its top, on the first section left.
   const search = (text: string) => {
     setQuery(text)

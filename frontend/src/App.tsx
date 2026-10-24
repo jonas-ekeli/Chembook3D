@@ -4,6 +4,8 @@ import {
   api,
   ApiError,
   energyTypeName,
+  STATUS_LABEL,
+  STATUSES,
   SYNC_PROBLEMS,
   type Canvas,
   type EnergyOptions,
@@ -20,7 +22,9 @@ import {
   type RemoteServer,
   type RemoteStatus,
   type Settings,
+  type Status,
   type SyncConflict,
+  type Transition,
   type SyncStatus,
   type ViewState,
 } from './api'
@@ -28,7 +32,7 @@ import { NO_FILTERS, type Filters, type Selection, type ViewMode } from './canva
 import { BasisSetsDialog } from './components/BasisSets'
 import { CloudJobsDialog } from './components/CloudJobsDialog'
 import { useScanPathImports } from './cloudJobs'
-import { CanvasPane, type CanvasEnergy } from './components/Canvas'
+import { CanvasPane, type CanvasEnergy, type CanvasContextMenu, type CanvasTarget } from './components/Canvas'
 import { EnergyDrawer, type DrawerPath, type DrawerView } from './components/EnergyDrawer'
 import { download } from './util'
 import { FilterMenu } from './components/FilterMenu'
@@ -36,6 +40,7 @@ import { FolderPicker } from './components/FolderPicker'
 import { GModelBadge } from './components/GModelBadge'
 import { HistoryList } from './components/HistoryList'
 import { SettingsDialog } from './components/SettingsDialog'
+import { SETTINGS_SECTIONS } from './settingsSections'
 import { UndoImportDialog } from './components/UndoImportDialog'
 import { BatchImportDialog } from './components/BatchImportDialog'
 import { ImportDialog } from './components/ImportDialog'
@@ -56,8 +61,22 @@ import { SidePanel, type SideTab } from './components/SidePanel'
 import { HPC, hpcLabel } from './hpc'
 import { LaunchNotices, ShutDownDialog } from './components/ShutDown'
 import { StartPage } from './components/StartPage'
-import { Menu } from './components/MoreMenu'
-import { Icon } from './icons'
+import { Menu, type MenuItem } from './components/MoreMenu'
+import { ContextMenu, type MenuHeading } from './components/ContextMenu'
+import { CommandPalette, KeyListener, ShortcutsDialog } from './components/CommandPalette'
+import {
+  dialogOpen,
+  isPaletteKey,
+  MAC,
+  MOD,
+  PALETTE_KEY,
+  request,
+  typingIn,
+  type PaletteEntry,
+  type Request,
+} from './commands'
+import { cardEnergy, minus } from './cardEnergy'
+import { Icon, type IconName } from './icons'
 import { useLive } from './live'
 import type { HydrogenMode } from './chem'
 import { recordNames } from './names'
@@ -78,6 +97,7 @@ import {
   SelectionInspector,
   TransitionInspector,
 } from './components/PathwayInspectors'
+import { groupActions, selectionActions } from './panelActions'
 
 type LockPrompt = { folder: string; host?: string; openedAt?: string }
 
@@ -159,6 +179,8 @@ function App() {
   const [picker, setPicker] = useState<'open' | 'create' | null>(null)
   const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  // D184: the Settings section the palette opened the dialog on.
+  const [settingsSection, setSettingsSection] = useState<string | undefined>(undefined)
   const [showBases, setShowBases] = useState(false) // D94
   const [showJobs, setShowJobs] = useState(false) // D115
   const [error, setError] = useState<string | null>(null)
@@ -185,6 +207,35 @@ function App() {
     setMulti([])
   }
   const [focus, setFocus] = useState<{ id: string; n: number } | null>(null)
+  // D184: the right-click menu, the command palette, the shortcut list, and the action a menu
+  // asked of the panel that holds it.
+  const [menu, setMenu] = useState<{ x: number; y: number; target: CanvasTarget } | null>(null)
+  const [palette, setPalette] = useState(false)
+  const [shortcuts, setShortcuts] = useState(false)
+  const [asked, setAsked] = useState<Request | null>(null)
+  const ask = (target: string, action: string) => setAsked(request(target, action))
+  // A right-click selects what it is on, as a click does, and opens its menu; on a node or
+  // group of a multi-selection it keeps the selection and offers the selection's actions.
+  const openMenu: CanvasContextMenu = useCallback(
+    (target, point) => {
+      setNotice(null)
+      if (target.kind === 'node' || target.kind === 'group') {
+        if (multi.length >= 2 && multi.includes(target.id)) {
+          setMenu({ ...point, target: { kind: 'selection' } })
+          return
+        }
+        setSelection({ kind: target.kind, id: target.id })
+        setMulti([])
+      } else if (target.kind === 'edge') {
+        setSelection({ kind: 'edge', id: target.id })
+        setMulti([])
+      } else if (target.kind === 'selection' && multi.length < 2) {
+        return
+      }
+      setMenu({ ...point, target })
+    },
+    [multi],
+  )
   const [mode, setMode] = useState<ViewMode>(readMode)
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -806,6 +857,7 @@ function App() {
             if (s.thermo_scope === 'investigation') reload()
           }}
           onClose={() => setShowSettings(false)}
+          section={settingsSection}
         />
       )}
       {sharing && (
@@ -1124,6 +1176,536 @@ function App() {
       )
   }
 
+  // D180: the investigation menu's commands; the palette offers them too (D184).
+  const investigationItems: MenuItem[] = [
+    { label: 'New investigation…', icon: 'plus', onSelect: () => setPicker('create') },
+    { label: 'Open investigation…', icon: 'folder', onSelect: () => setPicker('open') },
+    { label: 'Close investigation', icon: 'x', onSelect: close },
+    investigation.linked
+      ? {
+          label: 'Sync with GitHub',
+          icon: 'branch',
+          detail: <SyncState status={sync} busy={syncing} />,
+          disabled: syncing,
+          onSelect: syncNow,
+          separated: true,
+        }
+      : { label: 'Sync with GitHub…', icon: 'branch', onSelect: () => setLinking(true), separated: true },
+    {
+      label: 'Share read-only copy…',
+      icon: 'share',
+      title: 'Save a read-only HTML file to send to others (D79)',
+      onSelect: () => {
+        setShareError(null)
+        setSharing('ask')
+      },
+    },
+    {
+      label: 'Basis sets',
+      icon: 'book',
+      title: 'The saved custom basis sets, to inspect and download (D94)',
+      onSelect: () => setShowBases(true),
+    },
+    {
+      label: 'Shut down Chembook3D',
+      icon: 'power',
+      danger: true,
+      separated: true,
+      title: 'Close the investigation and stop Chembook3D',
+      onSelect: () => setShuttingDown(true),
+    },
+  ]
+
+  // D184: the right-click menus and the palette. Every entry runs what a panel, the outline or a
+  // bar already does: directly when App holds it, else asked of the panel (`ask`), which runs its
+  // own code with its own checks and dialogs.
+  const nodeName = (n: Node) => n.label || (n.kind === 'species' ? 'Untitled species' : 'Untitled node')
+  const startPathway = () => {
+    setView('canvas')
+    setDrawerOpen(true)
+    ask('drawer', 'start')
+  }
+  const importOnto = (id: string) => setImportRequest({ targetId: id, files: [], position: null })
+  // As the coordinates' Copy does (FR-3D-06).
+  const copyXyz = (node: Node) => {
+    if (!node.xyz) return
+    navigator.clipboard.writeText(node.xyz).then(
+      () => setNotice(`Copied the xyz of “${nodeName(node)}” to the clipboard.`),
+      () => setError('The browser did not allow copying; use Copy under Coordinates in the node’s panel.'),
+    )
+  }
+  const statusItems = (current: Status, set: (status: Status) => Promise<unknown>): MenuItem => ({
+    label: 'Status',
+    icon: 'clock',
+    aside: STATUS_LABEL[current],
+    onSelect: () => undefined,
+    items: STATUSES.map((s) => ({
+      label: s.label,
+      checked: s.value === current,
+      onSelect: () => void set(s.value).then(reload, (err: unknown) => setError(errorText(err))),
+    })),
+  })
+  const goTo = (id: string) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id, true))
+
+  const nodeItems = (node: Node): MenuItem[] => {
+    const species = node.kind === 'species'
+    const others = canvas.groups.filter((g) => g.id !== node.group_id)
+    const items: (MenuItem | false)[] = [
+      {
+        label: 'Open 3D view',
+        icon: 'cube',
+        shortcut: 'Space',
+        disabled: !node.xyz,
+        detail: node.xyz ? undefined : 'No coordinates yet',
+        onSelect: () => ask(node.id, 'open-3d'),
+      },
+      !species && {
+        label: referenceId === node.id ? 'Energy reference' : 'Set as energy reference',
+        icon: 'target',
+        shortcut: 'R',
+        disabled: referenceId === node.id,
+        onSelect: () => setReferenceId(node.id),
+      },
+      {
+        label: species ? 'Import output onto species…' : 'Import output onto node…',
+        icon: 'upload',
+        shortcut: 'I',
+        onSelect: () => importOnto(node.id),
+      },
+      { label: 'Edit structure in 3D…', icon: 'pencil', onSelect: () => setEditingNode(node.id) },
+      !species &&
+        node.role === 'transition_state' && { label: 'IRC…', icon: 'wave', onSelect: () => setIrcNode(node.id) },
+      !species && { label: 'Start energy pathway here', icon: 'chart', separated: true, onSelect: startPathway },
+      !species && {
+        label: 'Add to group',
+        icon: 'group',
+        disabled: others.length === 0,
+        title: others.length ? undefined : 'There is no group yet',
+        onSelect: () => undefined,
+        items: others.map((g) => ({
+          label: g.label || 'Group',
+          onSelect: () => {
+            // A20: the selection inspector's Add to group, with the group and this node selected.
+            setSelection(null)
+            setMulti([g.id, node.id])
+            ask('selection', 'add-to-group')
+          },
+        })),
+      },
+      { ...statusItems(node.status, (status) => api.updateNode(node.id, { status })), separated: species },
+      !species && { label: 'Add pinned note', icon: 'note', onSelect: () => setNoteEditing({ nodeId: node.id }) },
+      {
+        label: 'Copy xyz',
+        icon: 'copy',
+        shortcut: `${MOD} C`,
+        separated: true,
+        disabled: !node.xyz,
+        onSelect: () => copyXyz(node),
+      },
+      {
+        label: species ? 'Delete species…' : 'Delete node…',
+        icon: 'trash',
+        shortcut: 'Del',
+        danger: true,
+        onSelect: () => ask(node.id, 'delete'),
+      },
+    ]
+    return items.filter((item): item is MenuItem => !!item)
+  }
+
+  const groupItems = (group: Group): MenuItem[] => {
+    const open = expanded.has(group.id)
+    const items: (MenuItem | false)[] = [
+      { label: open ? 'Collapse group' : 'Expand group', icon: 'group', onSelect: () => toggleGroup(group.id) },
+      {
+        label: referenceId === group.id ? 'Energy reference' : 'Set as energy reference',
+        icon: 'target',
+        shortcut: 'R',
+        disabled: referenceId === group.id,
+        onSelect: () => setReferenceId(group.id),
+      },
+      { label: 'Start energy pathway here', icon: 'chart', onSelect: startPathway },
+      group.member_ids.length > 1 && { label: 'Order members…', icon: 'arrowdown', onSelect: () => orderGroup(group.id) },
+      ...groupActions(group, canvas).map(
+        (action, index): MenuItem => ({
+          label: action.label,
+          icon: action.key === 'overlay' ? 'cube' : 'target',
+          title: action.title,
+          disabled: action.disabled,
+          separated: index === 0,
+          onSelect: () => ask(group.id, action.key),
+        }),
+      ),
+      {
+        label: 'Remove group…',
+        icon: 'trash',
+        shortcut: 'Del',
+        danger: true,
+        separated: true,
+        onSelect: () => ask(group.id, 'remove'),
+      },
+    ]
+    return items.filter((item): item is MenuItem => !!item)
+  }
+
+  const edgeItems = (edge: Transition): MenuItem[] => [
+    { label: `Go to start: ${endLabel(canvas, edge.source_id)}`, icon: 'arrowright', onSelect: () => goTo(edge.source_id) },
+    { label: `Go to end: ${endLabel(canvas, edge.target_id)}`, icon: 'arrowright', onSelect: () => goTo(edge.target_id) },
+    { ...statusItems(edge.status, (status) => api.updateTransition(edge.id, { status })), separated: true },
+    { label: 'Free species…', icon: 'flask', onSelect: () => ask(edge.id, 'species') },
+    {
+      label: 'Delete transition…',
+      icon: 'trash',
+      shortcut: 'Del',
+      danger: true,
+      separated: true,
+      onSelect: () => ask(edge.id, 'delete'),
+    },
+  ]
+
+  const SELECTION_ICONS: Record<string, IconName> = {
+    'add-to-group': 'group',
+    'create-group': 'group',
+    overlay: 'cube',
+    match: 'link',
+    'scan-path': 'wave',
+    sterics: 'target',
+    selectivity: 'chart',
+    equilibrium: 'chart',
+  }
+  const selectionItems = (): MenuItem[] => [
+    ...selectionActions(multiNodes, multiGroups, canvas).map(
+      (action): MenuItem => ({
+        label: action.label,
+        icon: SELECTION_ICONS[action.key],
+        title: action.title,
+        disabled: action.disabled,
+        separated: action.key === 'match' || action.key === 'selectivity',
+        onSelect: () => ask('selection', action.key),
+      }),
+    ),
+    { label: 'Fit to selection', icon: 'fit', shortcut: 'F', separated: true, onSelect: () => ask('canvas', 'fit') },
+  ]
+
+  const paneItems = (at: { x: number; y: number }): MenuItem[] => [
+    { label: 'Add node here', icon: 'plus', onSelect: () => addNode(at) },
+    {
+      label: 'Import file here…',
+      icon: 'upload',
+      onSelect: () => setImportRequest({ targetId: null, files: [], position: at }),
+    },
+    { label: 'Fit view', icon: 'fit', shortcut: 'F', separated: true, onSelect: () => ask('canvas', 'fit-all') },
+    { label: 'Search and commands…', icon: 'search', shortcut: PALETTE_KEY, onSelect: () => setPalette(true) },
+    { label: 'Keyboard shortcuts', icon: 'keyboard', shortcut: '?', onSelect: () => setShortcuts(true) },
+  ]
+
+  const stepName = (id: string | null) => {
+    const step = id ? canvas.steps.find((s) => s.id === id) : undefined
+    return step ? step.name || 'Unnamed step' : null
+  }
+  const branchName = (id: string | null) => {
+    const branch = id ? canvas.branches.find((b) => b.id === id) : undefined
+    return branch ? branch.name || 'Unnamed branch' : null
+  }
+
+  /** The open menu's heading and entries; none when its record is gone. */
+  const menuContent = (): { label: string; heading: MenuHeading; items: MenuItem[] } | null => {
+    if (!menu) return null
+    const { target } = menu
+    if (target.kind === 'node') {
+      const node = canvas.nodes.find((n) => n.id === target.id)
+      if (!node) return null
+      const detail = [node.role === 'transition_state' ? 'TS' : null, stepName(node.step_id)].filter(Boolean).join(' · ')
+      return {
+        label: 'Node actions',
+        heading: { title: nodeName(node), detail: detail || undefined },
+        items: nodeItems(node),
+      }
+    }
+    if (target.kind === 'group') {
+      const group = canvas.groups.find((g) => g.id === target.id)
+      if (!group) return null
+      const count = group.member_ids.length
+      return {
+        label: 'Group actions',
+        heading: { title: group.label || 'Group', detail: `group · ${count} member${count === 1 ? '' : 's'}` },
+        items: groupItems(group),
+      }
+    }
+    if (target.kind === 'edge') {
+      const edge = canvas.transitions.find((t) => t.id === target.id)
+      if (!edge) return null
+      return {
+        label: 'Transition actions',
+        heading: {
+          title: `${endLabel(canvas, edge.source_id)} → ${endLabel(canvas, edge.target_id)}`,
+          detail: 'transition',
+        },
+        items: edgeItems(edge),
+      }
+    }
+    if (target.kind === 'selection') {
+      if (multiNodes.length + multiGroups.length < 2) return null
+      const parts = [
+        multiNodes.length && `${multiNodes.length} node${multiNodes.length === 1 ? '' : 's'}`,
+        multiGroups.length && `${multiGroups.length} group${multiGroups.length === 1 ? '' : 's'}`,
+      ].filter(Boolean)
+      return { label: 'Selection actions', heading: { title: `${parts.join(' and ')} selected` }, items: selectionItems() }
+    }
+    if (target.kind === 'pane')
+      return { label: 'Canvas actions', heading: { title: 'Canvas' }, items: paneItems(target.at) }
+    return null
+  }
+
+  /** D184: the palette's entries: the selection's commands first, then the app's; the nodes,
+   * branches and steps. A command's submenu is one entry per choice. */
+  const paletteEntries = (): PaletteEntry[] => {
+    const entries: PaletteEntry[] = []
+    const command = (id: string, label: string, icon: IconName, run: () => void, extra: Partial<PaletteEntry> = {}) =>
+      entries.push({ id: `command:${id}`, group: 'Commands', label, icon, run, ...extra })
+    const fromMenu = (prefix: string, items: MenuItem[]) => {
+      for (const item of items) {
+        if (item.disabled) continue
+        if (item.items) {
+          for (const choice of item.items)
+            if (!choice.disabled && !choice.checked)
+              command(
+                `${prefix}:${item.label}:${choice.label}`,
+                `${prefix}: ${item.label}: ${choice.label}`,
+                item.icon ?? 'more',
+                choice.onSelect,
+              )
+        } else {
+          command(`${prefix}:${item.label}`, `${prefix}: ${item.label}`, item.icon ?? 'more', item.onSelect, {
+            shortcut: item.shortcut,
+          })
+        }
+      }
+    }
+    if (multiNodes.length + multiGroups.length >= 2) fromMenu('Selection', selectionItems())
+    else if (selectedNode) fromMenu(nodeName(selectedNode), nodeItems(selectedNode))
+    else if (selectedGroup) fromMenu(selectedGroup.label || 'Group', groupItems(selectedGroup))
+    else if (selectedEdge)
+      fromMenu(
+        `${endLabel(canvas, selectedEdge.source_id)} → ${endLabel(canvas, selectedEdge.target_id)}`,
+        edgeItems(selectedEdge),
+      )
+
+    const onCanvas = (run: () => void) => () => {
+      setView('canvas')
+      run()
+    }
+    command('add-node', 'Add node', 'plus', onCanvas(() => addNode()))
+    const importFiles = () => setImportRequest({ targetId: null, files: [], position: null })
+    command('import', 'Import output files…', 'upload', importFiles, { keywords: 'Gaussian ORCA xTB CREST' })
+    command('add-species', 'Add free species', 'plus', addSpecies)
+    command('import-species', 'Import free species…', 'upload', () =>
+      setImportRequest({ targetId: null, files: [], position: null, species: true }),
+    )
+    command('view-canvas', 'Go to Canvas', 'hexagon', () => setView('canvas'))
+    command('view-history', 'Go to History', 'clock', () => setView('history'))
+    command('view-analyses', 'Go to Analyses', 'chart', () => setView('analyses'))
+    const analysis = (action: string) => () => {
+      setOpenAnalysis(null)
+      setView('analyses')
+      ask('analyses', action)
+    }
+    command('new-selectivity', 'New selectivity', 'chart', analysis('new-selectivity'), {
+      keywords: 'compare TSs ΔΔG‡ ratio ee de',
+    })
+    command('new-turnover', 'New turnover', 'chart', analysis('new-turnover'), { keywords: 'TOF energetic span cycle' })
+    command('new-equilibrium', 'New conformer equilibrium', 'chart', analysis('new-equilibrium'), {
+      keywords: 'populations Boltzmann',
+    })
+    const modes: [ViewMode, string, string][] = [
+      ['compact', 'Compact', 'C'],
+      ['energy', 'Energy', 'E'],
+      ['structure', 'Structure', 'S'],
+    ]
+    for (const [value, label, key] of modes)
+      if (mode !== value)
+        command(`mode-${value}`, `Node view: ${label}`, 'cube', onCanvas(() => chooseMode(value)), { shortcut: key })
+    command('fit', 'Fit view', 'fit', onCanvas(() => ask('canvas', 'fit')), { shortcut: 'F', keywords: 'zoom' })
+    const drawer = drawerOpen ? 'Hide profile and table' : 'Show profile and table'
+    command('drawer', drawer, 'bottompanel', onCanvas(() => setDrawerOpen(!drawerOpen)), {
+      shortcut: 'P',
+      keywords: 'energy profile drawer pathway',
+    })
+    command('edge-energies', edgeEnergies ? 'Hide energies on arrows' : 'Show energies on arrows', 'chart', () =>
+      setEdgeEnergies(!edgeEnergies),
+    )
+    for (const level of energyOptions?.levels ?? [])
+      if (level.key !== levelKey)
+        command(`level-${level.key}`, `Energies: ${level.label}`, 'flask', () => setEnergyLevel(level.key), {
+          keywords: 'level of theory',
+        })
+    for (const type of levelOption?.types ?? []) {
+      if (type === shownType) continue
+      const name = energyTypeName(
+        type,
+        energyOptions?.temperature,
+        energyOptions?.cutoff,
+        energyOptions?.standard_state,
+        levelOption?.job_temperatures,
+      )
+      command(`type-${type}`, `Energy type: ${name}`, 'flask', () => setEnergyType(type))
+    }
+    if (levelOption?.bsse)
+      command('bsse', withBsse ? 'Energies without BSSE' : 'Energies with BSSE', 'flask', () => setWithBsse(!withBsse))
+    const hidden = filters.branches.length + filters.statuses.length + filters.steps.length
+    if (hidden) command('filters-all', 'Filters: show all', 'filter', () => setFilters(NO_FILTERS))
+    const filter = (key: keyof Filters, value: string, label: string) => {
+      const off = filters[key].includes(value)
+      command(`filter-${key}-${value}`, `Filter: ${off ? 'show' : 'hide'} ${label}`, 'filter', () =>
+        setFilters({ ...filters, [key]: off ? filters[key].filter((v) => v !== value) : [...filters[key], value] }),
+      )
+    }
+    for (const b of canvas.branches) filter('branches', b.id, `branch ${b.name || 'Unnamed branch'}`)
+    for (const st of STATUSES) filter('statuses', st.value, `${st.label.toLowerCase()} nodes and transitions`)
+    for (const st of canvas.steps) filter('steps', st.id, `step ${st.name || 'Unnamed step'}`)
+    command('scan-editor', 'Scan editor', 'wave', () => openScanEditor([]))
+    command('cloud-jobs', 'Cloud jobs', 'cloud', () => setShowJobs(true))
+    command('claude', sideTab === 'claude' ? 'Hide the Claude panel' : 'Claude panel', 'spark', () =>
+      setSideTab(sideTab === 'claude' ? null : 'claude'),
+    )
+    if (remote?.enabled)
+      command('hpc', hpcLabel(remote.servers), 'terminal', () => {
+        const first = remote.servers.find((server) => server.connected)
+        setSideTab(first?.id ?? HPC)
+      }, { keywords: 'cluster server ssh Saga' })
+    for (const item of investigationItems)
+      if (!item.disabled)
+        command(`investigation:${item.label}`, item.label, item.icon ?? 'more', item.onSelect, { keywords: 'investigation' })
+    command('settings', 'Settings', 'sliders', () => openSettings())
+    for (const [id, title] of Object.entries(SETTINGS_SECTIONS))
+      command(`settings-${id}`, `Settings: ${title}`, 'sliders', () => openSettings(id), {
+        keywords: id === 'thermochemistry' ? 'quasi-harmonic G temperature cutoff standard state 1 M' : undefined,
+      })
+    command('shortcuts', 'Keyboard shortcuts', 'keyboard', () => setShortcuts(true), { shortcut: '?' })
+
+    for (const node of [...canvas.nodes, ...canvas.species]) {
+      const energy = node.kind === 'species' ? null : cardEnergy(canvasEnergy, node.id)
+      const branch = branchName(node.branch_id)
+      const detail = [
+        node.kind === 'species' ? 'free species' : stepName(node.step_id),
+        branch && `branch ${branch}`,
+        energy?.value != null && energy.value !== '…' ? `${energy.type} ${minus(energy.value)}` : null,
+      ].filter(Boolean)
+      entries.push({
+        id: `node:${node.id}`,
+        group: 'Nodes',
+        label: nodeName(node),
+        icon: 'cube',
+        ts: node.role === 'transition_state' && node.kind !== 'species',
+        detail: detail.join(' · ') || undefined,
+        keywords: [
+          stepName(node.step_id),
+          branch,
+          node.role === 'transition_state' ? 'TS transition state' : null,
+          node.formula,
+          ...node.tags,
+        ]
+          .filter(Boolean)
+          .join(' '),
+        run: () => selectNode(node.id, true),
+      })
+    }
+    for (const branch of canvas.branches) {
+      const count = canvas.nodes.filter((n) => n.branch_id === branch.id).length
+      entries.push({
+        id: `branch:${branch.id}`,
+        group: 'Branches',
+        label: branch.name || 'Unnamed branch',
+        icon: 'branch',
+        colour: branch.colour,
+        detail: `${count} node${count === 1 ? '' : 's'}`,
+        run: () => {
+          setView('canvas')
+          selectBranch(branch.id)
+          const first = canvas.nodes.find((n) => n.branch_id === branch.id && !n.on_edge)
+          if (first) setFocus({ id: first.group_id ?? first.id, n: Date.now() })
+        },
+      })
+    }
+    canvas.steps.forEach((step, index) => {
+      const members = canvas.nodes.filter((n) => n.step_id === step.id && !n.on_edge)
+      entries.push({
+        id: `step:${step.id}`,
+        group: 'Steps',
+        label: step.name || 'Unnamed step',
+        icon: 'arrowright',
+        detail: `step ${index + 1} · ${members.length} node${members.length === 1 ? '' : 's'}`,
+        run: () => {
+          // The step's nodes selected together, and fitted into view.
+          if (members.length === 1) return selectNode(members[0].id, true)
+          setView('canvas')
+          setSelection(null)
+          setMulti(members.map((n) => n.id))
+          if (members.length) ask('canvas', `fit:${[...new Set(members.map((n) => n.group_id ?? n.id))].join(',')}`)
+        },
+      })
+    })
+    return entries
+  }
+
+  const openSettings = (section?: string) => {
+    setSettingsSection(section)
+    setShowSettings(true)
+  }
+
+  /** D184: Ctrl K (⌘ K) anywhere but in a terminal or Ketcher; the single keys only while the
+   * canvas has the focus, never while typing, and not under a dialog. */
+  const onKey = (event: KeyboardEvent) => {
+    const target = event.target instanceof HTMLElement ? event.target : null
+    if (isPaletteKey(event)) {
+      if (palette) {
+        event.preventDefault()
+        setPalette(false)
+        return
+      }
+      if (target?.closest('.xterm, .ketcher-drawer') || dialogOpen()) return
+      event.preventDefault()
+      setMenu(null)
+      setPalette(true)
+      return
+    }
+    if (palette || menu || shortcuts || dialogOpen() || view !== 'canvas') return
+    if (typingIn(target)) return
+    const onCanvasFocus = !target || target === document.body || target.closest('.canvas') !== null
+    if (!onCanvasFocus || target?.closest('button, a, [role="menuitem"]')) return
+    const node = selectedNode && selectedNode.kind !== 'species' && multi.length < 2 ? selectedNode : null
+    const mod = MAC ? event.metaKey : event.ctrlKey
+    if (mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'c') {
+      if (!node?.xyz || window.getSelection()?.toString()) return
+      event.preventDefault()
+      copyXyz(node)
+      return
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return
+    const key = event.key
+    const run = (action: () => void) => {
+      event.preventDefault()
+      action()
+    }
+    if (key === '?') run(() => setShortcuts(true))
+    else if (key === ' ' && node?.xyz) run(() => ask(node.id, 'open-3d'))
+    else if (key === 'Delete' || key === 'Backspace') {
+      if (multi.length >= 2) return
+      if (node) run(() => ask(node.id, 'delete'))
+      else if (selectedGroup) run(() => ask(selectedGroup.id, 'remove'))
+      else if (selectedEdge) run(() => ask(selectedEdge.id, 'delete'))
+    } else if (key.length === 1) {
+      const letter = key.toLowerCase()
+      const record = multi.length < 2 ? (node ?? selectedGroup) : undefined
+      if (letter === 'r' && record) run(() => setReferenceId(record.id))
+      else if (letter === 'i' && node) run(() => importOnto(node.id))
+      else if (letter === 'f') run(() => ask('canvas', 'fit'))
+      else if (letter === 'c') run(() => chooseMode('compact'))
+      else if (letter === 'e') run(() => chooseMode('energy'))
+      else if (letter === 's') run(() => chooseMode('structure'))
+      else if (letter === 'p') run(() => setDrawerOpen(!drawerOpen))
+    }
+  }
   let inspector
   if (multiNodes.length + multiGroups.length >= 2) {
     inspector = (
@@ -1138,6 +1720,7 @@ function App() {
         }}
         onSelectivity={() => newSelectivity(multiNodes, multiGroups)}
         onEquilibrium={() => newEquilibrium(multiNodes, multiGroups)}
+        asked={asked}
       />
     )
   } else if (selectedNode) {
@@ -1165,6 +1748,7 @@ function App() {
         onEditStructure={() => setEditingNode(selectedNode.id)}
         energy={canvasEnergy}
         levelLabel={levelLabel}
+        asked={asked}
       />
     )
   } else if (selectedGroup) {
@@ -1178,6 +1762,7 @@ function App() {
         onSelectNode={(id) => selectNode(id, true)}
         onSelectBranch={selectBranch}
         energy={{ view: shownView, typeName: shownType, settings }}
+        asked={asked}
       />
     )
   } else if (selectedEdge) {
@@ -1196,6 +1781,7 @@ function App() {
         onDeleted={cleared}
         onSelectNode={(id) => selectNode(id, true)}
         onSelectGroup={selectGroup}
+        asked={asked}
       />
     )
   } else if (selectedBranch) {
@@ -1252,44 +1838,7 @@ function App() {
             buttonClass="investigation"
             buttonLabel={`${investigation.name}, investigation menu`}
             title={investigation.folder}
-            items={[
-              { label: 'New investigation…', icon: 'plus', onSelect: () => setPicker('create') },
-              { label: 'Open investigation…', icon: 'folder', onSelect: () => setPicker('open') },
-              { label: 'Close investigation', icon: 'x', onSelect: close },
-              investigation.linked
-                ? {
-                    label: 'Sync with GitHub',
-                    icon: 'branch',
-                    detail: <SyncState status={sync} busy={syncing} />,
-                    disabled: syncing,
-                    onSelect: syncNow,
-                    separated: true,
-                  }
-                : { label: 'Sync with GitHub…', icon: 'branch', onSelect: () => setLinking(true), separated: true },
-              {
-                label: 'Share read-only copy…',
-                icon: 'share',
-                title: 'Save a read-only HTML file to send to others (D79)',
-                onSelect: () => {
-                  setShareError(null)
-                  setSharing('ask')
-                },
-              },
-              {
-                label: 'Basis sets',
-                icon: 'book',
-                title: 'The saved custom basis sets, to inspect and download (D94)',
-                onSelect: () => setShowBases(true),
-              },
-              {
-                label: 'Shut down Chembook3D',
-                icon: 'power',
-                danger: true,
-                separated: true,
-                title: 'Close the investigation and stop Chembook3D',
-                onSelect: () => setShuttingDown(true),
-              },
-            ]}
+            items={investigationItems}
           >
             <span className="investigation-name">{investigation.name}</span>
             <Icon name="chevron" />
@@ -1310,6 +1859,18 @@ function App() {
               Analyses
             </button>
           </nav>
+          {/* D184: the command palette, also opened by Ctrl K (⌘ K) */}
+          <button
+            className="command-search"
+            onClick={() => setPalette(true)}
+            title={`Search nodes, branches, steps and commands (${PALETTE_KEY})`}
+            aria-label="Search and commands"
+            aria-keyshortcuts={MAC ? 'Meta+K' : 'Control+K'}
+          >
+            <Icon name="search" />
+            <span className="tb-label">Search…</span>
+            <kbd>{PALETTE_KEY}</kbd>
+          </button>
           <span className="spacer" />
           <button
             className="quiet"
@@ -1359,7 +1920,7 @@ function App() {
             onSync={syncNow}
             onLink={() => setLinking(true)}
           />
-          <button className="quiet icon-only" aria-label="Settings" title="Settings" onClick={() => setShowSettings(true)}>
+          <button className="quiet icon-only" aria-label="Settings" title="Settings" onClick={() => openSettings()}>
             <Icon name="sliders" />
           </button>
         </header>
@@ -1517,6 +2078,8 @@ function App() {
                   onOpenNote={openNote}
                   onLayoutNote={layoutNote}
                   tools={canvasTools}
+                  onContextMenu={openMenu}
+                  asked={asked}
                 />
               </ReactFlowProvider>
               <div
@@ -1558,6 +2121,7 @@ function App() {
                 onTurnover={newTurnover}
                 onSelectNode={(id) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id, true))}
                 onSettings={setSettings}
+                asked={asked}
               />
             </div>
           </div>
@@ -1572,6 +2136,7 @@ function App() {
             openId={openAnalysis}
             onSelectNode={(id) => selectNode(id, true)}
             onChanged={reload}
+            asked={asked}
           />
         ) : (
           <main className="main history-view">
@@ -1608,6 +2173,20 @@ function App() {
           />
         </div>
         {dialogs}
+        <KeyListener onKey={onKey} />
+        {menu && (
+          <ContextMenu
+            key={`${menu.x},${menu.y}`}
+            x={menu.x}
+            y={menu.y}
+            content={menuContent}
+            onClose={() => setMenu(null)}
+          />
+        )}
+        {palette && (
+          <CommandPalette build={paletteEntries} onClose={() => setPalette(false)} onShortcuts={() => setShortcuts(true)} />
+        )}
+        {shortcuts && <ShortcutsDialog onClose={() => setShortcuts(false)} />}
       </div>
     </Displays>
   )

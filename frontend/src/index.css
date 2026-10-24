@@ -2349,6 +2349,294 @@ pre.route {
   overflow: auto;
   min-width: 240px;
 }
+/* D184: a key shown beside what it does. */
+kbd {
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: var(--hover);
+  white-space: nowrap;
+}
+/* D184: a right-click menu, at the pointer: the shared menu list, its entries in one row with
+   their key at the right, and a list of choices beside an entry ("Status ›"). */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+}
+.context-menu .menu-list {
+  position: static;
+  width: max-content;
+  min-width: 250px;
+  max-width: 360px;
+  gap: 0;
+  padding: 4px;
+  border-radius: 8px;
+  font-size: 13px;
+  box-shadow: 0 12px 32px rgb(var(--shadow-rgb) / 18%);
+}
+.context-menu .menu-list.context-submenu {
+  position: absolute;
+  top: -5px;
+  left: calc(100% + 6px);
+  width: auto;
+  min-width: 180px;
+  max-height: 60vh;
+  overflow: auto;
+}
+.context-menu .menu-list.context-submenu.left {
+  left: auto;
+  right: calc(100% + 6px);
+}
+.menu-entry {
+  position: relative;
+  display: grid;
+}
+.context-menu button[role^='menuitem'] {
+  width: 100%;
+  min-height: 0;
+  gap: 10px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+  justify-content: flex-start;
+  background: none;
+  color: var(--text);
+}
+.context-menu .menu-item-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.context-menu button[role^='menuitem'] .ic {
+  color: var(--muted);
+}
+.context-menu button[role^='menuitem']:hover:not(:disabled),
+.context-menu button[role^='menuitem']:focus-visible,
+.context-menu button[role^='menuitem'][aria-expanded='true'] {
+  background: var(--accent-soft);
+  box-shadow: none;
+}
+.context-menu button[role^='menuitem']:hover:not(:disabled) .ic,
+.context-menu button[role^='menuitem']:focus-visible .ic {
+  color: var(--accent);
+}
+.context-menu button.danger,
+.context-menu button.danger .ic,
+.context-menu button.danger:hover:not(:disabled) .ic {
+  color: var(--danger);
+}
+.context-menu button.danger:hover:not(:disabled),
+.context-menu button.danger:focus-visible {
+  background: var(--danger-bg);
+}
+.context-menu .menu-separator {
+  margin: 4px 0;
+  background: var(--border);
+}
+.context-heading {
+  padding: 6px 10px 4px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.context-heading b {
+  color: var(--text);
+}
+.menu-key,
+.menu-aside {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--muted);
+}
+.menu-key {
+  border: none;
+  background: none;
+  padding-right: 0;
+}
+.menu-aside + .ic,
+.menu-key + .ic {
+  margin-left: 0;
+}
+.menu-check {
+  width: 15px;
+  flex-shrink: 0;
+  text-align: center;
+  color: var(--accent);
+}
+.menu-list > button > .ic:last-child:not(:first-child) {
+  margin-left: auto;
+}
+.menu-list > button > .menu-aside + .ic:last-child {
+  margin-left: 4px;
+}
+/* D184: the command palette, over a scrim, under the app bar. */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgb(var(--shadow-rgb) / 28%);
+}
+.palette {
+  position: fixed;
+  left: 50%;
+  top: 110px;
+  transform: translateX(-50%);
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100vh - 150px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgb(var(--shadow-rgb) / 30%);
+  overflow: hidden;
+  font-size: 14px;
+}
+.palette-query {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.palette-query .ic {
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+.palette-query input,
+.palette-query input:focus-visible {
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  min-height: 0;
+  font-size: 16px;
+  background: none;
+}
+.palette-list {
+  overflow: auto;
+  padding-bottom: 4px;
+}
+.palette-group {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 10px 16px 4px;
+}
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  cursor: pointer;
+  min-width: 0;
+}
+.palette-item .ic {
+  color: var(--muted);
+}
+.palette-item[aria-selected='true'] {
+  background: var(--accent-soft);
+}
+.palette-item[aria-selected='true'] .ic {
+  color: var(--accent);
+}
+.palette-item .swatch {
+  width: 10px;
+  height: 10px;
+  margin: 0 2.5px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.palette-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.palette-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.palette-label .ts-mark.marked {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.palette-label mark {
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+.palette-detail {
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.palette-key {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.palette-empty {
+  padding: 12px 16px;
+  margin: 0;
+}
+.palette-foot {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--card-planned);
+}
+.palette-foot button.link {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 12px;
+}
+table.shortcuts td {
+  padding: 4px 12px 4px 0;
+  vertical-align: top;
+}
+/* D184: the app bar's way to the palette, with its key. */
+.appbar .command-search {
+  margin-left: 14px;
+  min-width: 200px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 6px 0 10px;
+  justify-content: flex-start;
+  gap: 8px;
+  font-weight: 400;
+  color: var(--muted);
+  background: var(--hover);
+  flex-shrink: 0;
+}
+.appbar .command-search kbd {
+  margin-left: auto;
+  background: var(--panel);
+}
+@media (max-width: 1150px) {
+  .appbar .command-search {
+    min-width: 0;
+    margin-left: 8px;
+  }
+}
 fieldset {
   border: none;
   margin: 0;
