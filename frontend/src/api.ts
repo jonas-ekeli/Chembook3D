@@ -920,11 +920,21 @@ export type UndoPreview = {
   files: UndoFile[]
 }
 
+export type RecentInfo = {
+  name: string | null
+  opened: string | null
+  nodes: number | null
+  branches: number | null
+}
+
 export type Settings = {
   energy_unit: string
   energy_units: string[]
   energy_factors: Record<string, number>
   recent: string[]
+  /** D182: name, last opened (UTC) and counts of each recent folder, by its path in `recent`, as
+   * of its last open or close; a field is missing for a folder an older version opened. */
+  recent_info: Record<string, RecentInfo>
   last_device: string
   /** D78: the folder a file was last picked from in the import dialog ("" when none or gone). */
   last_import_folder: string

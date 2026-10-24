@@ -95,6 +95,7 @@ export function sharedSettings(data: SnapshotData): Settings {
     ...data.settings,
     energy_units: [data.settings.energy_unit],
     recent: [],
+    recent_info: {},
     last_device: '',
     last_import_folder: '',
     geometry_tolerance: 0,

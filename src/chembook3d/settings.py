@@ -4,6 +4,7 @@
 import json
 import os
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 from platformdirs import user_config_dir
@@ -119,6 +120,11 @@ def config_dir() -> Path:
 class Settings:
     energy_unit: str = "kcal/mol"
     recent: list[str] = field(default_factory=list)
+    # D182: what the start page shows for each recent folder, by its path in `recent`: the
+    # investigation's name, when it was last opened (UTC, ISO 8601) and its node and branch
+    # counts, written when it is opened and refreshed when it is closed, so listing them never
+    # opens a database. A folder opened by an older version has none of them.
+    recent_info: dict[str, dict] = field(default_factory=dict)
     last_device: str = ""  # FR-FILE-02: origin device defaults to the last one used
     # D78: the import file browser starts in the folder a file was last picked from
     last_import_folder: str = ""
@@ -154,6 +160,39 @@ def clean_profile_style(data: object) -> dict:
     return style
 
 
+RECENT_COUNTS = ("nodes", "branches")
+
+
+def clean_recent_info(data: object, recent: list[str]) -> dict[str, dict]:
+    """The start page's details of the recent folders (D182) from `data`: only folders still in
+    `recent`, and in each only the known fields with valid values (a settings file from before
+    D182 has none, and its folders show without them)."""
+    data = data if isinstance(data, dict) else {}
+    cleaned: dict[str, dict] = {}
+    for path in recent:
+        entry = data.get(path)
+        if not isinstance(entry, dict):
+            continue
+        info: dict = {}
+        if isinstance(entry.get("name"), str) and entry["name"].strip():
+            info["name"] = entry["name"]
+        opened = entry.get("opened")
+        if isinstance(opened, str):
+            try:
+                when = datetime.fromisoformat(opened)
+            except ValueError:
+                pass
+            else:
+                info["opened"] = (when if when.tzinfo else when.replace(tzinfo=UTC)).isoformat()
+        for key in RECENT_COUNTS:
+            value = entry.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                info[key] = value
+        if info:
+            cleaned[path] = info
+    return cleaned
+
+
 def _path() -> Path:
     return config_dir() / "settings.json"
 
@@ -168,6 +207,7 @@ def load() -> Settings:
         settings.energy_unit = data["energy_unit"]
     if isinstance(data.get("recent"), list):
         settings.recent = [p for p in data["recent"] if isinstance(p, str)][:MAX_RECENT]
+    settings.recent_info = clean_recent_info(data.get("recent_info"), settings.recent)
     for key in ("last_device", "last_import_folder"):
         if isinstance(data.get(key), str):
             setattr(settings, key, data[key])
@@ -200,11 +240,36 @@ def save(settings: Settings) -> None:
     _path().write_text(json.dumps(asdict(settings), indent=2), encoding="utf-8")
 
 
-def remember_recent(folder: Path) -> None:
+def _details(name: str | None, nodes: int | None, branches: int | None) -> dict:
+    found = {"name": name, "nodes": nodes, "branches": branches}
+    return {key: value for key, value in found.items() if value is not None}
+
+
+def remember_recent(
+    folder: Path, name: str | None = None, nodes: int | None = None, branches: int | None = None
+) -> None:
+    """Put a folder that was just opened first in the recent list, with its details (D182)."""
     settings = load()
     path = str(Path(folder).resolve())
     settings.recent = [path] + [p for p in settings.recent if p != path]
     settings.recent = settings.recent[:MAX_RECENT]
+    info = settings.recent_info.get(path, {}) | _details(name, nodes, branches)
+    info["opened"] = datetime.now(UTC).isoformat()
+    settings.recent_info = clean_recent_info(settings.recent_info | {path: info}, settings.recent)
+    save(settings)
+
+
+def refresh_recent(
+    folder: Path, name: str | None = None, nodes: int | None = None, branches: int | None = None
+) -> None:
+    """D182: an investigation being closed updates its name and counts in the recent list,
+    keeping its place and the time it was opened; a folder no longer listed is left out."""
+    settings = load()
+    path = str(Path(folder).resolve())
+    if path not in settings.recent:
+        return
+    info = settings.recent_info.get(path, {}) | _details(name, nodes, branches)
+    settings.recent_info = clean_recent_info(settings.recent_info | {path: info}, settings.recent)
     save(settings)
 
 

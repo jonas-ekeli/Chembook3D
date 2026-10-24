@@ -78,7 +78,7 @@ test('conformer equilibrium from two minima', async ({ page }) => {
     .getByRole('dialog', { name: 'Delete conformer equilibrium' })
     .getByRole('button', { name: 'Delete' })
     .click()
-  await expect(page.getByText('No analyses yet.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No analyses yet' })).toBeVisible()
   await page.getByRole('button', { name: 'Canvas' }).click()
   await expect(canvasNode(page, 'A-S1')).toBeVisible()
 })

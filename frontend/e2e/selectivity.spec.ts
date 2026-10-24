@@ -106,7 +106,7 @@ test('selectivity from two transition states', async ({ page }) => {
   await page.getByRole('button', { name: 'Analyses' }).click()
   await editor.getByRole('button', { name: 'Delete…' }).click()
   await page.getByRole('dialog', { name: 'Delete selectivity' }).getByRole('button', { name: 'Delete' }).click()
-  await expect(page.getByText('No analyses yet.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No analyses yet' })).toBeVisible()
   await states.waitFor({ state: 'detached' })
   await page.getByRole('button', { name: 'Canvas' }).click()
   await expect(canvasNode(page, 'B-S2')).toBeVisible()

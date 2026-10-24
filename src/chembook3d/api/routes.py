@@ -12,6 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import AfterValidator, BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, object_session
 
 from chembook3d import settings as app_settings
@@ -394,12 +395,23 @@ class HistoryOut(BaseModel):
     undo: str | None = None
 
 
+class RecentInfoOut(BaseModel):
+    """D182: what the start page shows for a recent folder, as of its last open or close;
+    each field is missing for a folder last opened by a version before D182."""
+
+    name: str | None = None
+    opened: UtcDatetime | None = None
+    nodes: int | None = None
+    branches: int | None = None
+
+
 class SettingsOut(BaseModel):
     energy_unit: str
     energy_units: list[str]
     # hartree → unit factors (P17), so the interface converts with the backend's constants
     energy_factors: dict[str, float]
     recent: list[str]
+    recent_info: dict[str, RecentInfoOut]
     last_device: str
     last_import_folder: str
     geometry_tolerance: float
@@ -552,10 +564,25 @@ def _investigation_out(investigation: Investigation, status=None) -> Investigati
     )
 
 
+def _remember(investigation: Investigation, opened: bool) -> None:
+    """D182: the recent list's name and counts, read from the open database: an investigation
+    just opened goes first with the time, one being closed only has them brought up to date.
+    A database that cannot be read leaves the details as they were."""
+    name, nodes, branches = None, None, None
+    try:
+        name = investigation.name
+        nodes, branches = investigation.counts()
+    except SQLAlchemyError:
+        pass
+    remember = app_settings.remember_recent if opened else app_settings.refresh_recent
+    remember(investigation.folder, name, nodes, branches)
+
+
 def close_and_push(
     investigation: Investigation, timeout: float = sync.NETWORK_TIMEOUT
 ) -> sync.SyncStatus | None:
     """Close an investigation, then commit and push it if it is linked (FR-SYNC-05)."""
+    _remember(investigation, opened=False)
     investigation.close()
     if not sync.is_linked(investigation.folder):
         return None
@@ -571,7 +598,7 @@ def _set_open(request: Request, investigation: Investigation, status=None) -> In
         close_and_push(current)
     _staging(request).clear()
     request.app.state.investigation = investigation
-    app_settings.remember_recent(investigation.folder)
+    _remember(investigation, opened=True)
     return _investigation_out(investigation, status)
 
 
@@ -972,6 +999,7 @@ def get_settings(request: Request):
         energy_units=list(app_settings.ENERGY_UNITS),
         energy_factors=units.HARTREE_IN,
         recent=s.recent,
+        recent_info=s.recent_info,
         last_device=s.last_device,
         last_import_folder=app_settings.import_folder(s),
         geometry_tolerance=s.geometry_tolerance,

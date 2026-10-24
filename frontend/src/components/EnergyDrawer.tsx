@@ -16,6 +16,7 @@ import { Icon } from '../icons'
 import { figureOf } from '../profileFigure'
 import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
 import { closesCycle, csvTitle, download } from '../util'
+import { EmptyState } from './EmptyState'
 import { EnergyNotes } from './EnergyNotes'
 import { EnergyTableView } from './EnergyTableView'
 import { GModelBadge } from './GModelBadge'
@@ -581,10 +582,35 @@ export function EnergyDrawer({
           {!layout.pathways && errorLine}
           {livePaths.length > 0 && <EnergyNotes notes={shownProfiles?.notes} />}
           {!livePaths.length ? (
-            <p className="muted placeholder">
-              Add a branch, or select a node on the canvas and start a pathway there. Pathways follow the transitions
-              you drew; at a fork you choose how to go on.
-            </p>
+            <EmptyState
+              compact
+              icon="chart"
+              title="No pathways yet"
+              actions={
+                <>
+                  {canvas.branches
+                    .filter((b) => canvas.nodes.some((n) => n.branch_id === b.id))
+                    .slice(0, 3)
+                    .map((b, index) => (
+                      <button key={b.id} className={index === 0 ? 'primary' : undefined} onClick={() => addBranch(b.id)}>
+                        <Icon name="branch" />
+                        Pathway of {b.name || 'Unnamed branch'}
+                      </button>
+                    ))}
+                  <button
+                    onClick={startAtSelection}
+                    disabled={!selectedId}
+                    title={selectedId ? undefined : 'Select a node on the canvas first'}
+                  >
+                    <Icon name="target" />
+                    Start at the selected node
+                  </button>
+                </>
+              }
+            >
+              A pathway follows the transitions you drew and shows them as an energy profile and a table. Add a
+              branch&apos;s pathway, or select a node on the canvas and start one there.
+            </EmptyState>
           ) : tab === 'profile' ? (
             shownProfiles && (
               <ProfileChart
