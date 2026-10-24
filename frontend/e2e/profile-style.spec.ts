@@ -193,7 +193,9 @@ test('"no TS" tags can be hidden and the title keeps clear of the legend', async
     expect(atBottom).toBeLessThan(step)
     // A–S1 and B–S1 share a column: one line each, starting just under the plot (D110).
     await expect(chart.locator('text', { hasText: /^[AB]-S1$/ })).toHaveCount(2)
-    expect(Number(await chart.getAttribute('height')) - (await at(/^B-S1$/)).y).toBeLessThan(50)
+    // Which of the two comes last depends on the order of the pathways, so take the lower one.
+    const lowest = Math.max((await at(/^A-S1$/)).y, (await at(/^B-S1$/)).y)
+    expect(Number(await chart.getAttribute('height')) - lowest).toBeLessThan(50)
     await page.screenshot({ path: 'test-results/profile-names-bottom.png' })
   } finally {
     await page.request.put('/api/settings', { data: { profile_style: screen } })

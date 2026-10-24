@@ -1623,6 +1623,202 @@ label.inline input {
 .modal-backdrop:has(.modal.wide) {
   padding-top: 4vh;
 }
+
+/* D183 (UI11): Settings as a two-pane page. The head holds the title and the search, the
+   sections are listed on the left, one row per setting (name and help | control) on the right. */
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.modal-note {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+.modal.settings-dialog {
+  width: min(920px, 94vw);
+  height: min(800px, 86vh);
+  max-height: none;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+.settings-dialog .modal-actions {
+  align-items: center;
+  padding: 10px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-alt);
+}
+.modal-backdrop:has(.modal.settings-dialog) {
+  padding-top: 6vh;
+}
+.settings-dialog .modal-head {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-dialog .modal-head h2 {
+  font-size: 17px;
+}
+.settings-search {
+  position: relative;
+  margin-left: auto;
+  width: min(260px, 45%);
+}
+.settings-search .ic {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.settings-search input {
+  padding-left: 30px;
+}
+.settings-dialog > .modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 0;
+}
+.settings-nav {
+  border-right: 1px solid var(--border);
+  background: var(--panel-alt);
+  padding: 10px 8px;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+}
+.settings-group {
+  display: grid;
+  gap: 2px;
+}
+.settings-group-name {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 10px 10px 4px;
+}
+.settings-nav button {
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 6px 10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--quiet-text);
+  font-weight: 400;
+}
+.settings-nav button:hover:not(:disabled) {
+  background: var(--quiet-hover);
+  border-color: transparent;
+}
+.settings-nav button[aria-current='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.settings-content {
+  overflow: auto;
+  padding: 4px 24px 20px;
+}
+.settings-section {
+  border: none;
+  border-radius: 0;
+  background: none;
+  padding: 14px 0 0;
+}
+.settings-section h3 {
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.scope-badge {
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+  padding: 1px 8px;
+  background: var(--tag-bg);
+  color: var(--text-2);
+}
+.scope-badge.investigation {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+.setting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 230px);
+  gap: 24px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--divider);
+  align-items: start;
+}
+.setting-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+.setting-help {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+.setting-help button.link {
+  font-size: 12px;
+  text-decoration: none;
+}
+.setting-help button.link:hover {
+  text-decoration: underline;
+}
+.setting-control {
+  display: grid;
+}
+.setting-control button.wraps {
+  white-space: normal;
+  text-align: center;
+}
+.settings-none {
+  padding-top: 16px;
+}
+.number-setting {
+  position: relative;
+  display: block;
+}
+.number-setting input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.number-setting.with-unit input {
+  padding-right: 52px;
+}
+.number-setting .unit {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+@media (max-width: 760px) {
+  .settings-dialog > .modal-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-nav {
+    display: none;
+  }
+  .setting-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+}
 .badge.warn {
   background: var(--warn-soft);
   color: var(--warn-text);

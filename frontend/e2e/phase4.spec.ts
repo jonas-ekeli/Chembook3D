@@ -304,9 +304,9 @@ test('the 1 M standard state is an investigation setting the energy view names',
   try {
     await page.getByRole('button', { name: 'Settings' }).click()
     const dialog = page.getByRole('dialog', { name: 'Settings' })
-    // D159: the setting is the open investigation's, and says so.
-    await expect(dialog.getByRole('heading', { name: 'Thermochemistry of this investigation' })).toBeVisible()
-    await expect(dialog.getByLabel('Thermochemistry')).toContainText('These belong to Demo investigation')
+    // D159: the setting is the open investigation's, and says so (D183: in its section's badge).
+    await expect(dialog.getByRole('heading', { name: 'Thermochemistry Saved in Demo investigation' })).toBeAttached()
+    await expect(dialog).toContainText('Thermochemistry is saved in Demo investigation and synced with it')
     await expect(dialog.getByLabel('Standard state')).toHaveValue('1 atm')
     await expect(dialog).toContainText('1.8943 kcal/mol at 298.15 K')
     await dialog.getByLabel('Standard state').selectOption('1 M')
