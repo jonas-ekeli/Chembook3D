@@ -147,3 +147,54 @@ test('energy drawer: a compact head and a profile you can point at', async ({ pa
     await forgetView(page.request, join(E2E_DIR, 'demo'))
   }
 })
+
+// T-UI-64, D188: a node label longer than the pathways list is wide wraps in the list, so the
+// pathway's own buttons stay beside its name instead of under the profile; the node panel's
+// head keeps its buttons in the window the same way.
+test('energy drawer: a long node label wraps instead of hiding the pathway buttons', async ({ page }) => {
+  const long = 'X2Prime_guess_from_scan_TSGO_part2_CAAC_iPr_otBu_conformer7'
+  let id = ''
+  try {
+    await openDemo(page)
+    const canvas = await (await page.request.get('/api/canvas')).json()
+    id = canvas.nodes.find((n: { label: string }) => n.label === 'B-S1').id
+    await page.request.patch(`/api/nodes/${id}`, { data: { label: long } })
+    await page.getByRole('group', { name: 'Node T-S0', exact: true }).click()
+    await page.getByRole('button', { name: 'Profile and table' }).click()
+    const drawer = page.getByLabel('Energy drawer')
+    await drawer.getByRole('button', { name: 'Start at selected node', exact: true }).click()
+    const pathway = drawer.getByRole('group', { name: /^Pathway / })
+    const choice = pathway.getByRole('group', { name: 'Continue with' }).getByRole('button', { name: long })
+    await expect(choice).toBeVisible()
+
+    const right = async (locator: typeof drawer) => {
+      const box = (await locator.boundingBox())!
+      return box.x + box.width
+    }
+    const list = await right(drawer.getByLabel('Pathways', { exact: true }))
+    expect(list).toBeLessThanOrEqual((await drawer.locator('.drawer-main').boundingBox())!.x + 1)
+    for (const button of [
+      pathway.getByRole('button', { name: 'Undo step' }),
+      pathway.getByRole('button', { name: 'Sterics' }),
+      pathway.getByRole('button', { name: /^Remove pathway/ }),
+      choice,
+    ])
+      expect(await right(button)).toBeLessThanOrEqual(list)
+    // Taking the long node: its link in the pathway wraps too.
+    await choice.click()
+    const nodes = pathway.locator('.pathway-nodes')
+    await expect(nodes).toContainText(long)
+    expect(await right(pathway.getByRole('button', { name: /^Remove pathway/ }))).toBeLessThanOrEqual(list)
+    expect(await right(nodes.getByRole('button', { name: long }))).toBeLessThanOrEqual(list)
+
+    // T-S0's panel lists a transition to the long node; the head's buttons stay in the window.
+    const panel = page.getByLabel('Node inspector')
+    await expect(panel.getByLabel('Transitions')).toContainText(long)
+    const width = page.viewportSize()!.width
+    expect(await right(panel.getByRole('button', { name: 'More node actions' }))).toBeLessThanOrEqual(width)
+    expect(await right(panel.getByLabel('Transitions'))).toBeLessThanOrEqual(width)
+  } finally {
+    if (id) await page.request.patch(`/api/nodes/${id}`, { data: { label: 'B-S1' } })
+    await forgetView(page.request, join(E2E_DIR, 'demo'))
+  }
+})

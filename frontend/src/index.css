@@ -1328,6 +1328,9 @@ button.node-item.selected {
 /* Inspector */
 .inspector {
   display: grid;
+  /* D188: as wide as the side panel; a long node label wraps rather than pushing the head's
+     buttons out of the window. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
   max-width: 1200px;
 }
@@ -3091,6 +3094,11 @@ ul.transitions li {
   gap: 0.5rem;
   align-items: center;
 }
+ul.transitions li button.link {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
 .parents {
   max-height: 180px;
   overflow: auto;
@@ -3294,10 +3302,14 @@ table.overlay-legend td {
   padding: 0.5rem 0.75rem;
   border-right: 1px solid var(--border);
   display: grid;
+  /* D188: the column stays the list's width. A long node label wraps instead of widening the
+     cards and pushing their buttons under the profile. */
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 0.6rem;
 }
 .pathway {
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.35rem 0.5rem;
@@ -3307,16 +3319,39 @@ table.overlay-legend td {
   align-items: center;
   gap: 0.35rem;
 }
+.pathway-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pathway-head button {
+  flex-shrink: 0;
+}
+.pathway-nodes,
+.pathways .error {
+  overflow-wrap: anywhere;
+}
 .pathway-nodes {
   margin: 0.25rem 0;
   font-size: 12px;
   line-height: 1.5;
+}
+.pathway-nodes button.link {
+  text-align: left;
 }
 .choices {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem;
+}
+/* D188: a node label is the one button label here that may wrap; it can be longer than the
+   list is wide. */
+.choices button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  justify-content: flex-start;
 }
 .pathway-add {
   display: flex;
