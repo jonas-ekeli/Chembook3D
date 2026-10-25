@@ -241,6 +241,7 @@ TOOLS: list[ToolSpec] = [
         help={
             "path": "Node and group ids so far, in order (at least one).",
             "branch_id": "Only follow edges within this branch's lineage (optional).",
+            "follow": "False lists every way on from the last id without walking (default true).",
         },
     ),
     T(

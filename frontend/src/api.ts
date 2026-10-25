@@ -2329,8 +2329,9 @@ export const api = {
         (reference ? `&reference=${encodeURIComponent(reference)}` : '') +
         (bsse ? '&bsse=true' : ''),
     ),
-  extendPathway: (path: string[], branchId?: string | null) =>
-    request<Pathway>('POST', '/pathways/extend', { path, branch_id: branchId ?? null }),
+  /** D189: `follow` false lists the ways on from the last id without walking. */
+  extendPathway: (path: string[], branchId?: string | null, follow = true) =>
+    request<Pathway>('POST', '/pathways/extend', { path, branch_id: branchId ?? null, follow }),
   branchPathway: (branchId: string) => request<Pathway>('GET', `/branches/${branchId}/pathway`),
   profiles: (body: ProfileRequest) => request<Profiles>('POST', '/energies/profile', body),
   energyTable: (body: ProfileRequest) => request<EnergyTable>('POST', '/energies/table', body),

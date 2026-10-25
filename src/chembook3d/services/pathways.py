@@ -227,7 +227,9 @@ class Extended:
     closed: bool
 
 
-def extend(session: Session, ids: list[str], branch_id: str | None = None) -> Extended:
+def extend(
+    session: Session, ids: list[str], branch_id: str | None = None, follow: bool = True
+) -> Extended:
     """Follow outgoing transitions from the last node while exactly one leads on, directly or
     through a group (D108). With a branch, only edges into that branch's lineage (its
     ancestors and descendants) or into a node on no branch (D67) count, so an interconversion
@@ -236,7 +238,8 @@ def extend(session: Session, ids: list[str], branch_id: str | None = None) -> Ex
     Without a branch an edge into a group is a choice between the group and its members.
     Stops at an end, at a fork (listing the choices, which may include nodes already visited)
     and when the pathway returns to a node it visited, closing a cycle (A13). A closed pathway
-    is complete."""
+    is complete. With `follow` off it walks no further and lists every way on from the last node,
+    even a single one, so a pathway cut back by the drawer's Undo step can go on (D189)."""
     path = list(ids)
     resolve(session, path)
     if closed(path):
@@ -256,7 +259,7 @@ def extend(session: Session, ids: list[str], branch_id: str | None = None) -> Ex
 
     while True:
         options = onward(members=related is None)
-        if len(options) != 1:
+        if not follow or len(options) != 1:
             return Extended(path, _choices(session, onward(members=True)), False)
         path.append(options[0][1].id)
         if closed(path):

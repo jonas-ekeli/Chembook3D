@@ -466,6 +466,31 @@ def test_branch_pathway_follows_edges_and_lineage(open_client, energetic):
     assert sorted(c["label"] for c in fork["choices"]) == ["A-S0", "B-S0"]
 
 
+def test_extend_without_following_lists_every_way_on(open_client, energetic):
+    # D189 (T-EN-46): cut back by Undo step, a pathway lists the ways on from its last node,
+    # even a single one, and walks no further.
+    ex = energetic
+    labels = {v: k for k, v in ex.nodes.items()}
+    body = {"path": [ex.nodes["A1-S1"]], "follow": False}
+    single = post(open_client, "/pathways/extend", body, status=200)
+    assert [labels[i] for i in single["path"]] == ["A1-S1"]
+    assert [c["label"] for c in single["choices"]] == ["A1-S2"]
+    assert single["closed"] is False
+
+    def onward(label: str) -> dict:
+        body = {"path": [ex.nodes[label]], "follow": False}
+        return post(open_client, "/pathways/extend", body, status=200)
+
+    fork = onward("T-pre")
+    assert sorted(c["label"] for c in fork["choices"]) == ["A-S0", "B-S0"]
+
+    # The end of a pathway lists nothing; following a choice still walks on.
+    end = onward("A1-S6")
+    assert end["choices"] == []
+    walked = post(open_client, "/pathways/extend", {"path": [ex.nodes["A1-S1"]]}, status=200)
+    assert labels[walked["path"][-1]] == "A1-S6"
+
+
 def test_profile_needs_edges_and_is_not_rerouted_by_energies(open_client, energetic):
     ex = energetic
     # T-BR-08: nodes without a connecting edge cannot form a profile (INV-2).
