@@ -1507,6 +1507,11 @@ export type PathChoice = {
 }
 export type Pathway = { path: string[]; choices: PathChoice[]; closed: boolean }
 
+/** D190: a pathway of a saved energy profile; `shown` draws it on the figure. */
+export type ProfilePath = { ids: string[]; branch_id: string | null; shown: boolean }
+/** D190: a saved energy profile, a named figure of pathways the drawer opens. */
+export type EnergyProfile = { id: string; name: string; paths: ProfilePath[] }
+
 export type ProfilePoint = EnergyValue & {
   id: string
   kind: 'node' | 'group'
@@ -1942,7 +1947,8 @@ export type ViewState = {
   drawer: {
     open: boolean
     tab: 'profile' | 'table'
-    paths: { ids: string[]; branch_id: string | null; choices: { node_id: string; label: string; status: string }[] }[]
+    /** D190: the saved energy profile the drawer has open. */
+    profile_id: string | null
   }
 }
 
@@ -2411,6 +2417,13 @@ export const api = {
     ),
   atomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>
     request<AtomMatch>('POST', '/atom-match', { start_id: startId, end_id: endId, pairs }),
+  energyProfiles: () => request<EnergyProfile[]>('GET', '/energy-profiles'),
+  createEnergyProfile: (body: { name?: string; paths?: ProfilePath[] }) =>
+    request<EnergyProfile>('POST', '/energy-profiles', body),
+  updateEnergyProfile: (id: string, body: { name?: string; paths?: ProfilePath[] }) =>
+    request<EnergyProfile>('PATCH', `/energy-profiles/${id}`, body),
+  duplicateEnergyProfile: (id: string) => request<EnergyProfile>('POST', `/energy-profiles/${id}/duplicate`),
+  deleteEnergyProfile: (id: string) => request<void>('DELETE', `/energy-profiles/${id}`),
   alignmentSets: () => request<AlignmentSet[]>('GET', '/alignment-sets'),
   createAlignmentSet: (name: string, atoms: Record<string, number[]>) =>
     request<AlignmentSet>('POST', '/alignment-sets', { name, atoms }),

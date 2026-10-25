@@ -252,3 +252,82 @@ test('energy drawer: a pathway can always go on after Undo step or a new edge', 
     await forgetView(page.request, join(E2E_DIR, 'demo'))
   }
 })
+
+// T-UI-66, D190: saved energy profiles. The first pathway makes "Profile 1"; each pathway has
+// "Show on the figure" and any number are drawn together; New, Rename, Duplicate and Delete;
+// the drawer comes back on the profile it had open, and the Analyses view opens any of them.
+test('energy drawer: saved profiles with pathways shown on the figure', async ({ page }) => {
+  try {
+    await openDemo(page)
+    await page.getByRole('button', { name: 'Profile and table' }).click()
+    const drawer = page.getByLabel('Energy drawer')
+    const picker = drawer.getByRole('combobox', { name: 'Open profile' })
+    await expect(picker).toBeDisabled()
+    await expect(picker).toHaveText('No saved profiles')
+
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'A' })
+    await expect(picker.locator('option:checked')).toHaveText('Profile 1')
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+    const b = drawer.getByRole('group', { name: 'Pathway B' })
+    await expect(b).toContainText('T-S0 → B-S1 → B-S2 → B-S3')
+    const chart = drawer.locator('.drawer-main').getByRole('img', { name: 'Energy profile' })
+    // Both pathways drawn together: A's A-S1 and B's TS at 17.30.
+    await expect(chart.locator('text', { hasText: /^A-S1/ })).toHaveCount(1)
+    await expect(chart).toContainText('17.30')
+
+    // Left off the figure, B stays in the list; ticked again, it is back.
+    const showB = drawer.getByLabel('Show B on the figure')
+    await showB.uncheck()
+    await expect(chart).not.toContainText('17.30')
+    await expect(chart.locator('text', { hasText: /^A-S1/ })).toHaveCount(1)
+    await expect(b).toBeVisible()
+    await drawer.getByLabel('Show A on the figure').uncheck()
+    await expect(drawer.getByText('No pathway shown')).toBeVisible()
+    await drawer.getByLabel('Show A on the figure').check()
+    await showB.check()
+    await expect(chart).toContainText('17.30')
+
+    // A second profile, renamed, with B only.
+    await drawer.getByRole('button', { name: 'New', exact: true }).click()
+    await expect(picker.locator('option:checked')).toHaveText('Profile 2')
+    await expect(drawer.getByRole('group', { name: /^Pathway / })).toHaveCount(0)
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+    await drawer.getByRole('button', { name: 'Profile actions' }).click()
+    await page.getByRole('menuitem', { name: 'Rename' }).click()
+    await drawer.getByLabel('Profile name').fill('Only B')
+    await drawer.getByLabel('Profile name').press('Enter')
+    await expect(picker.locator('option:checked')).toHaveText('Only B')
+
+    // Switching back finds Profile 1 as it was left.
+    await picker.selectOption({ label: 'Profile 1' })
+    await expect(drawer.getByRole('group', { name: /^Pathway / })).toHaveCount(2)
+    await picker.selectOption({ label: 'Only B' })
+    await expect(drawer.getByRole('group', { name: /^Pathway / })).toHaveCount(1)
+
+    // After a reload the drawer opens on the profile it had open.
+    await page.reload()
+    await expect(picker.locator('option:checked')).toHaveText('Only B')
+
+    // The Analyses view lists the profiles and opens one in the drawer.
+    await page.getByRole('button', { name: 'Analyses' }).click()
+    const list = page.getByRole('navigation', { name: 'Analyses' }).getByRole('list', { name: 'Energy profiles' })
+    await expect(list.getByRole('listitem')).toHaveText(['Profile 1 2 of 2 pathways shown', 'Only B 1 of 1 pathway shown'])
+    await list.getByRole('button', { name: 'Profile 1' }).click()
+    await expect(picker.locator('option:checked')).toHaveText('Profile 1')
+    await expect(drawer.getByRole('group', { name: /^Pathway / })).toHaveCount(2)
+
+    // Duplicate, then delete the copy.
+    await drawer.getByRole('button', { name: 'Profile actions' }).click()
+    await page.getByRole('menuitem', { name: 'Duplicate' }).click()
+    await expect(picker.locator('option:checked')).toHaveText('Profile 1 (copy)')
+    await expect(drawer.getByRole('group', { name: /^Pathway / })).toHaveCount(2)
+    await drawer.getByRole('button', { name: 'Profile actions' }).click()
+    await page.getByRole('menuitem', { name: 'Delete…' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Delete profile' })
+    await expect(dialog).toContainText('“Profile 1 (copy)”')
+    await dialog.getByRole('button', { name: 'Delete' }).click()
+    await expect(picker.locator('option')).toHaveText(['Profile 1', 'Only B'])
+  } finally {
+    await forgetView(page.request, join(E2E_DIR, 'demo'))
+  }
+})

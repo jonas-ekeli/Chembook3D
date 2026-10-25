@@ -52,6 +52,7 @@ NOT_OFFERED = re.compile(
     r"|calculations/[^/]+/steps"  # every structure of a job, for the movie (D101, A48)
     r"|calculations/[^/]+/steps/[^/]+/use"  # "Use this structure" (D112, A58)
     r"|calculations/[^/]+/steps/trim(-preview)?"  # removing a scan path's points (D117)
+    r"|energy-profiles(/.*)?"  # D190: the drawer's saved profiles; Claude only reads them
     r"|scan-paths"  # D114: the Scan path dialog's Send starts a cloud session
     r"|claude(/.*)?"  # the Claude panel (D92): Claude never starts terminals
     r"|remote(/.*)?"  # D122: logging in to a server is for the app's own page only

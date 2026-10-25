@@ -349,7 +349,7 @@ function App() {
       setFilters(saved.filters)
       setExpanded(new Set(saved.expanded))
       setDrawerOpen(saved.drawer.open)
-      setDrawerView({ tab: saved.drawer.tab, paths: saved.drawer.paths })
+      setDrawerView({ tab: saved.drawer.tab, profile_id: saved.drawer.profile_id })
       setDrawerKey((k) => k + 1)
       done(null)
     }, () => done(''))
@@ -2158,6 +2158,13 @@ function App() {
             openId={openAnalysis}
             onSelectNode={(id) => selectNode(id, true)}
             onChanged={reload}
+            onOpenProfile={(id) => {
+              // D190: the drawer starts anew on that profile, open below the canvas.
+              setDrawerView((current) => ({ tab: current?.tab ?? 'profile', profile_id: id }))
+              setDrawerKey((k) => k + 1)
+              setDrawerOpen(true)
+              setView('canvas')
+            }}
             asked={asked}
           />
         ) : (

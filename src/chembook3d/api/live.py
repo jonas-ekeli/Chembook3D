@@ -71,6 +71,7 @@ QUIET = re.compile(
     r"|scan-editor(/.*)?"  # D135: scans put together without importing anything
     r"|builder(/.*)?"  # D139: the Edit structure window's tools, nothing stored
     r"|server-files(/.*)?"  # D124, D126: files on a server, not the notebook
+    r"|energy-profiles(/.*)?"  # D190: the drawer saves its profile on every step
     r"|jobs|jobs/(?![^/]+/import-path$).*"  # importing a scan path changes the notebook
     r")$"
 )

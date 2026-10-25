@@ -9,6 +9,7 @@ from tests.test_pathway import (  # noqa: F401
     get,
     history,
     node,
+    post,
     reconnect_g6,
 )
 
@@ -26,13 +27,14 @@ def test_a_new_investigation_remembers_nothing(open_client):
         "edge_energies": True,
         "filters": {"branches": [], "statuses": [], "steps": []},
         "expanded": [],
-        "drawer": {"open": False, "tab": "profile", "paths": []},
+        "drawer": {"open": False, "tab": "profile", "profile_id": None},
     }
 
 
 def test_saved_view_survives_closing_and_opening(open_client, example, tmp_path):  # noqa: F811
     ids = example.nodes
     group = reconnect_g6(open_client, example)
+    profile = post(open_client, "/energy-profiles", {})
     state = {
         "level": "abc~def",
         "energy_type": "G_qh",
@@ -44,17 +46,8 @@ def test_saved_view_survives_closing_and_opening(open_client, example, tmp_path)
             "steps": [example.steps[2]],
         },
         "expanded": [group["id"]],
-        "drawer": {
-            "open": True,
-            "tab": "table",
-            "paths": [
-                {
-                    "ids": [ids["T-pre"], ids["A1-S1"]],
-                    "branch_id": example.branches["A"],
-                    "choices": [{"node_id": ids["A1-S2"], "label": "old", "status": "planned"}],
-                }
-            ],
-        },
+        # D190: the drawer names its saved energy profile, whose pathways are its own.
+        "drawer": {"open": True, "tab": "table", "profile_id": profile["id"]},
     }
     before = len(history(open_client))
     save(open_client, state)
@@ -63,12 +56,7 @@ def test_saved_view_survives_closing_and_opening(open_client, example, tmp_path)
     open_client.post("/api/investigations/close")
     response = open_client.post("/api/investigations/open", json={"folder": str(tmp_path / "inv")})
     assert response.status_code == 200, response.text
-    found = get(open_client, "/view-state")
-    # The fork's choices carry their current label and status.
-    state["drawer"]["paths"][0]["choices"] = [
-        {"node_id": ids["A1-S2"], "label": "A1-S2", "status": "planned"}
-    ]
-    assert found == state
+    assert get(open_client, "/view-state") == state
 
 
 def test_deleted_records_are_dropped(open_client, example):  # noqa: F811
@@ -86,12 +74,7 @@ def test_deleted_records_are_dropped(open_client, example):  # noqa: F811
                 "statuses": ["failed", "nonsense"],
                 "steps": ["missing"],
             },
-            "drawer": {
-                "paths": [
-                    {"ids": [ids["T-pre"], gone], "branch_id": None},
-                    {"ids": [ids["T-pre"]], "branch_id": "missing", "choices": [{"node_id": gone}]},
-                ]
-            },
+            "drawer": {"profile_id": "missing"},
         },
     )
     open_client.delete(f"/api/nodes/{gone}")
@@ -99,8 +82,7 @@ def test_deleted_records_are_dropped(open_client, example):  # noqa: F811
     assert found["reference_id"] is None
     assert found["expanded"] == [group["id"]]
     assert found["filters"] == {"branches": ["none"], "statuses": ["failed"], "steps": []}
-    # The pathway through the deleted node is dropped; the other loses its gone branch and choice.
-    assert found["drawer"]["paths"] == [{"ids": [ids["T-pre"]], "branch_id": None, "choices": []}]
+    assert found["drawer"]["profile_id"] is None
 
 
 def test_junk_is_not_kept(open_client):
@@ -111,14 +93,14 @@ def test_junk_is_not_kept(open_client):
             "level": ["not", "text"],
             "edge_energies": "no",
             "expanded": "all",
-            "drawer": {"open": "yes", "tab": "chart", "paths": [{"ids": []}, "x"]},
+            "drawer": {"open": "yes", "tab": "chart", "profile_id": ["x"]},
             "secret": "x" * 10000,
         },
     )
     found = get(open_client, "/view-state")
     assert found["energy_type"] is None and found["level"] is None
     assert found["edge_energies"] is True and found["expanded"] == []
-    assert found["drawer"] == {"open": False, "tab": "profile", "paths": []}
+    assert found["drawer"] == {"open": False, "tab": "profile", "profile_id": None}
     assert "secret" not in found
 
 

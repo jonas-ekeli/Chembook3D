@@ -7,7 +7,9 @@ import {
   type EnergyTable,
   type EnergyType,
   type Node,
+  type EnergyProfile,
   type PathChoice,
+  type ProfilePath,
   type Profiles,
   type ProfileRequest,
   type Settings,
@@ -21,6 +23,7 @@ import { EmptyState } from './EmptyState'
 import { EnergyNotes } from './EnergyNotes'
 import { EnergyTableView } from './EnergyTableView'
 import { GModelBadge } from './GModelBadge'
+import { Modal } from './Modal'
 import { Menu } from './MoreMenu'
 import { ProfileChart, SCREEN_TEXT } from './ProfileChart'
 import { ProfileStyleDialog } from './ProfileStyleDialog'
@@ -30,7 +33,14 @@ import { useRequest, type Request } from '../commands'
 const NO_BRANCH = '#98a2b3'
 const FALLBACK = ['#2459c6', '#c4320a', '#079455', '#6938ef', '#b54708']
 
-type Path = { ids: string[]; choices: Omit<PathChoice, 'transition_id'>[]; branchId: string | null }
+type Path = { ids: string[]; choices: Omit<PathChoice, 'transition_id'>[]; branchId: string | null; shown: boolean }
+
+/** D190: a saved profile's pathways in the drawer's form; the choices are asked for (D189). */
+const pathsOf = (profile: EnergyProfile | undefined): Path[] =>
+  profile?.paths.map((p) => ({ ids: p.ids, choices: [], branchId: p.branch_id, shown: p.shown })) ?? []
+/** D190: what is saved of the pathways; never the choices. */
+const storedOf = (paths: Path[]): ProfilePath[] =>
+  paths.map((p) => ({ ids: p.ids, branch_id: p.branchId, shown: p.shown }))
 
 /** A pathway as the read-only copy exports it (D79, A30). */
 export type DrawerPath = { ids: string[]; branch_id: string | null }
@@ -106,17 +116,25 @@ export function EnergyDrawer({
   onPathsChange?: (paths: DrawerPath[]) => void
   /** D86: a saved turnover from a closed pathway, opened in the Analyses view. */
   onTurnover?: (ids: string[], name: string) => void
-  /** D105: the tab and pathways to start with, as the investigation remembered them. */
+  /** D105: the tab and the open profile (D190) to start with, as the investigation remembered them. */
   saved?: DrawerView
-  /** D105: the tab and pathways, whenever they change, to be remembered. */
+  /** D105: the tab and the open profile, whenever they change, to be remembered. */
   onViewChange?: (view: DrawerView) => void
   /** D184: "Start energy pathway here" from a right-click menu or the palette. */
   asked?: Request | null
 }) {
   const [tab, setTab] = useState<'profile' | 'table'>(saved?.tab ?? 'profile')
-  const [paths, setPaths] = useState<Path[]>(
-    () => saved?.paths.map((p) => ({ ids: p.ids, choices: p.choices, branchId: p.branch_id })) ?? [],
-  )
+  // D190: the saved profiles (null while loading), the one open and its pathways.
+  const [stored, setStored] = useState<EnergyProfile[] | null>(null)
+  const [openId, setOpenId] = useState<string | null>(saved?.profile_id ?? null)
+  const [paths, setPaths] = useState<Path[]>([])
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  // What the open profile last saved, so a change is saved once and loading saves nothing.
+  const lastSaved = useRef<string | null>(null)
+  // The open profile for callbacks that finish after a render, such as a pathway being found.
+  const openRef = useRef<string | null>(null)
+  const saving = useRef<Promise<unknown>>(Promise.resolve())
   const [profiles, setProfiles] = useState<Profiles | null>(null)
   const [table, setTable] = useState<EnergyTable | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -221,29 +239,32 @@ export function EnergyDrawer({
   }
 
   // Records can be deleted elsewhere; drop pathways that lost a node.
-  const livePaths = paths.filter((p) => p.ids.every((id) => labels.has(id)))
+  // Each pathway with its place in `paths`, its colour and its name; D190: only the ticked
+  // ones are drawn, valued and exported, and a pathway keeps its colour whether shown or not.
+  const listed = paths
+    .map((path, at) => {
+      const branchId = path.branchId ?? [...path.ids].reverse().map(branchOf).find((b) => b)
+      const colour = branchId ? (branches.get(branchId)?.colour ?? NO_BRANCH) : FALLBACK[at % FALLBACK.length]
+      const branch = path.branchId ? branches.get(path.branchId) : undefined
+      const name = branch
+        ? `${branch.name || 'Unnamed branch'}`
+        : `${labels.get(path.ids[0])} → ${labels.get(path.ids.at(-1)!)}`
+      return { path, at, colour, name }
+    })
+    .filter(({ path }) => path.ids.every((id) => labels.has(id)))
+  const drawn = listed.filter(({ path }) => path.shown)
+  const livePaths = drawn.map(({ path }) => path)
+  const colours = drawn.map(({ colour }) => colour)
+  const names = drawn.map(({ name }) => name)
   const onPaths = new Set(livePaths.flatMap((p) => p.ids))
   const reference = referenceId && onPaths.has(referenceId) ? referenceId : (livePaths[0]?.ids[0] ?? null)
-  const colours = livePaths.map((p, i) => {
-    const branchId = p.branchId ?? [...p.ids].reverse().map(branchOf).find((b) => b)
-    return branchId ? (branches.get(branchId)?.colour ?? NO_BRANCH) : FALLBACK[i % FALLBACK.length]
-  })
-  const names = livePaths.map((p) => {
-    const branch = p.branchId ? branches.get(p.branchId) : undefined
-    return branch ? `${branch.name || 'Unnamed branch'}` : `${labels.get(p.ids[0])} → ${labels.get(p.ids.at(-1)!)}`
-  })
 
   const pathsKey = JSON.stringify(livePaths.map((p) => ({ ids: p.ids, branch_id: p.branchId })))
   useEffect(() => {
     onPathsChange?.(JSON.parse(pathsKey) as DrawerPath[])
   }, [pathsKey, onPathsChange])
 
-  // Every pathway, also one whose node is not on the canvas yet (still loading); the backend
-  // drops those through a deleted node when the view is read again.
-  const viewKey = JSON.stringify({
-    tab,
-    paths: paths.map((p) => ({ ids: p.ids, branch_id: p.branchId, choices: p.choices })),
-  })
+  const viewKey = JSON.stringify({ tab, profile_id: openId })
   useEffect(() => {
     onViewChange?.(JSON.parse(viewKey) as DrawerView)
   }, [viewKey, onViewChange])
@@ -320,16 +341,89 @@ export function EnergyDrawer({
   const replace = (index: number, next: Path | null) =>
     setPaths((current) => (next ? current.map((p, i) => (i === index ? next : p)) : current.filter((_, i) => i !== index)))
 
-  const extend = (index: number, ids: string[], branchId: string | null) =>
-    api.extendPathway(ids, branchId).then(
-      (found) => replace(index, { ids: found.path, choices: found.choices, branchId }),
+  const extend = (index: number, path: Path, ids: string[]) =>
+    api.extendPathway(ids, path.branchId).then(
+      (found) => replace(index, { ...path, ids: found.path, choices: found.choices }),
       (err: unknown) => setError(errorText(err)),
     )
+
+  // D190: the saved profiles, read once each time the drawer opens; the remembered one opens,
+  // else the first. Before the view is restored (no `saved`) none opens: this drawer is about
+  // to be replaced, and naming a profile now could undo what is being restored.
+  useEffect(() => {
+    let current = true
+    api.energyProfiles().then(
+      (found) => {
+        if (!current) return
+        const open = saved ? (found.find((p) => p.id === saved.profile_id) ?? found[0]) : undefined
+        setStored(found)
+        show(open)
+      },
+      (err: unknown) => current && setError(errorText(err)),
+    )
+    return () => {
+      current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, from what the drawer started with
+  }, [])
+
+  /** Open a saved profile (none: no profile). */
+  const show = (profile: EnergyProfile | undefined) => {
+    const next = pathsOf(profile)
+    lastSaved.current = profile ? JSON.stringify(storedOf(next)) : null
+    openRef.current = profile?.id ?? null
+    setOpenId(profile?.id ?? null)
+    setPaths(next)
+    setRenaming(null)
+  }
+
+  // D190: every change to the open profile's pathways is saved at once, one save after the
+  // other, so leaving the drawer or the app loses nothing.
+  const storedKey = JSON.stringify(storedOf(paths))
+  useEffect(() => {
+    if (!openId || lastSaved.current === null || lastSaved.current === storedKey) return
+    lastSaved.current = storedKey
+    const body = { paths: JSON.parse(storedKey) as ProfilePath[] }
+    saving.current = saving.current
+      .then(() => api.updateEnergyProfile(openId, body))
+      .then(
+        (updated) => setStored((current) => current?.map((p) => (p.id === updated.id ? { ...p, paths: body.paths } : p)) ?? null),
+        (err: unknown) => setError(errorText(err)),
+      )
+  }, [openId, storedKey])
+
+  /** D190: a new, empty profile, opened; made after any save still on its way. */
+  const newProfile = (): Promise<EnergyProfile> => {
+    const made = saving.current
+      .then(() => api.createEnergyProfile({}))
+      .then((created) => {
+        setStored((current) => [...(current ?? []), created])
+        show(created)
+        return created
+      })
+    saving.current = made.catch(() => undefined)
+    return made
+  }
+
+  /** Add a pathway to the open profile, making "Profile 1" first when none is open; two
+   * pathways added at once share the one profile made for them. */
+  const creating = useRef<Promise<unknown> | null>(null)
+  const addPath = (path: Path) => {
+    if (!openRef.current && !creating.current)
+      creating.current = newProfile().finally(() => {
+        creating.current = null
+      })
+    const ready = creating.current ?? Promise.resolve()
+    ready.then(
+      () => setPaths((current) => [...current, path]),
+      (err: unknown) => setError(errorText(err)),
+    )
+  }
 
   const startAtSelection = () => {
     if (!selectedId) return
     api.extendPathway([selectedId]).then(
-      (found) => setPaths((current) => [...current, { ids: found.path, choices: found.choices, branchId: null }]),
+      (found) => addPath({ ids: found.path, choices: found.choices, branchId: null, shown: true }),
       (err: unknown) => setError(errorText(err)),
     )
   }
@@ -340,13 +434,111 @@ export function EnergyDrawer({
 
   const addBranch = (branchId: string) =>
     api.branchPathway(branchId).then(
-      (found) => setPaths((current) => [...current, { ids: found.path, choices: found.choices, branchId }]),
+      (found) => addPath({ ids: found.path, choices: found.choices, branchId, shown: true }),
       (err: unknown) => setError(errorText(err)),
     )
+
+  const openProfile = stored?.find((p) => p.id === openId)
+  const rename = (name: string) => {
+    if (!openProfile) return
+    if (name.trim() === openProfile.name) return setRenaming(null)
+    api.updateEnergyProfile(openProfile.id, { name }).then(
+      (updated) => {
+        setStored((current) => current?.map((p) => (p.id === updated.id ? { ...p, name: updated.name } : p)) ?? null)
+        setRenaming(null)
+        setError(null)
+      },
+      (err: unknown) => setError(errorText(err)),
+    )
+  }
+  const duplicateProfile = () => {
+    if (!openProfile) return
+    // The copy is made from what was saved last, after any save still on its way.
+    saving.current = saving.current.then(() =>
+      api.duplicateEnergyProfile(openProfile.id).then(
+        (copy) => {
+          setStored((current) => [...(current ?? []), copy])
+          show(copy)
+        },
+        (err: unknown) => setError(errorText(err)),
+      ),
+    )
+  }
+  const deleteProfile = () => {
+    if (!openProfile) return
+    const gone = openProfile.id
+    saving.current = saving.current.then(() =>
+      api.deleteEnergyProfile(gone).then(
+        () => {
+          const rest = (stored ?? []).filter((p) => p.id !== gone)
+          setStored(rest)
+          show(rest[0])
+          setDeleting(false)
+        },
+        (err: unknown) => {
+          setDeleting(false)
+          setError(errorText(err))
+        },
+      ),
+    )
+  }
 
   // Shown only while there is something to show; a stale result is never drawn.
   const shownProfiles = request ? profiles : null
   const shownTable = request ? table : null
+
+  // D190: which saved profile the drawer shows, and its New, Rename, Duplicate and Delete.
+  const profilePicker = (
+    <div className="profile-picker" role="group" aria-label="Saved profiles">
+      {renaming !== null ? (
+        <input
+          aria-label="Profile name"
+          value={renaming}
+          maxLength={200}
+          autoFocus
+          onChange={(event) => setRenaming(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') rename(renaming)
+            if (event.key === 'Escape') setRenaming(null)
+          }}
+          onBlur={() => rename(renaming)}
+        />
+      ) : (
+        <select
+          aria-label="Open profile"
+          value={openId ?? ''}
+          disabled={!stored?.length}
+          onChange={(event) => show(stored?.find((p) => p.id === event.target.value))}
+        >
+          {!stored?.length && <option value="">No saved profiles</option>}
+          {stored?.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      )}
+      <button
+        className="small"
+        onClick={() => newProfile().catch((err: unknown) => setError(errorText(err)))}
+        title="A new, empty profile; every profile is saved as you go (D190)"
+      >
+        New
+      </button>
+      <Menu
+        label="Profile actions"
+        buttonClass="small"
+        buttonLabel="Profile actions"
+        items={[
+          { label: 'Rename', onSelect: () => openProfile && setRenaming(openProfile.name), disabled: !openProfile },
+          { label: 'Duplicate', onSelect: duplicateProfile, disabled: !openProfile },
+          { label: 'Delete…', onSelect: () => setDeleting(true), disabled: !openProfile, danger: true },
+        ]}
+      >
+        ⋯
+      </Menu>
+    </div>
+  )
 
   const dark = useTheme() === 'dark' // D185: on screen only; the saved figure stays light
   // D181: the saved figure is drawn afresh in the style alone, without the screen's text scale,
@@ -494,11 +686,24 @@ export function EnergyDrawer({
       <div className="drawer-body">
         {layout.pathways && (
           <div className="pathways" aria-label="Pathways">
-            {livePaths.map((path, index) => (
-              <div key={index} className="pathway" role="group" aria-label={`Pathway ${names[index]}`}>
+            {profilePicker}
+            {listed.map(({ path, at: index, colour, name }) => (
+              <div
+                key={index}
+                className={`pathway${path.shown ? '' : ' hidden-path'}`}
+                role="group"
+                aria-label={`Pathway ${name}`}
+              >
                 <div className="pathway-head">
-                  <span className="swatch" style={{ background: colours[index] }} />
-                  <strong>{names[index]}</strong>
+                  <input
+                    type="checkbox"
+                    checked={path.shown}
+                    onChange={(event) => replace(index, { ...path, shown: event.target.checked })}
+                    aria-label={`Show ${name} on the figure`}
+                    title="Show on the figure; any number of pathways may be drawn together (D190)"
+                  />
+                  <span className="swatch" style={{ background: colour }} />
+                  <strong>{name}</strong>
                   <span className="spacer" />
                   <button
                     className="small"
@@ -511,7 +716,7 @@ export function EnergyDrawer({
                   {onTurnover && closesCycle(path.ids) && (
                     <button
                       className="small"
-                      onClick={() => onTurnover(path.ids, names[index])}
+                      onClick={() => onTurnover(path.ids, name)}
                       title="TOF of this closed cycle from the energetic-span model (D86)"
                     >
                       Turnover
@@ -524,7 +729,7 @@ export function EnergyDrawer({
                   >
                     Sterics
                   </button>
-                  <button className="small" onClick={() => replace(index, null)} aria-label={`Remove pathway ${names[index]}`}>
+                  <button className="small" onClick={() => replace(index, null)} aria-label={`Remove pathway ${name}`}>
                     ✕
                   </button>
                 </div>
@@ -552,7 +757,7 @@ export function EnergyDrawer({
                       <button
                         key={choice.node_id}
                         className="small"
-                        onClick={() => extend(index, [...path.ids, choice.node_id], path.branchId)}
+                        onClick={() => extend(index, path, [...path.ids, choice.node_id])}
                         title={
                           choice.kind === 'group'
                             ? 'The group, valued by its representative'
@@ -629,7 +834,11 @@ export function EnergyDrawer({
         >
           {!layout.pathways && errorLine}
           {livePaths.length > 0 && <EnergyNotes notes={shownProfiles?.notes} />}
-          {!livePaths.length ? (
+          {!livePaths.length && listed.length ? (
+            <EmptyState compact icon="chart" title="No pathway shown">
+              Tick “Show on the figure” beside a pathway to draw it; any number can be drawn together.
+            </EmptyState>
+          ) : !livePaths.length ? (
             <EmptyState
               compact
               icon="chart"
@@ -692,6 +901,22 @@ export function EnergyDrawer({
           )}
         </div>
       </div>
+      {deleting && openProfile && (
+        <Modal
+          title="Delete profile"
+          onClose={() => setDeleting(false)}
+          actions={
+            <>
+              <button onClick={() => setDeleting(false)}>Cancel</button>
+              <button className="danger" onClick={deleteProfile}>
+                Delete
+              </button>
+            </>
+          }
+        >
+          <p>Delete the profile “{openProfile.name}” and its pathways? The nodes and their energies are kept.</p>
+        </Modal>
+      )}
       {styling && settings && (
         <ProfileStyleDialog
           settings={settings}

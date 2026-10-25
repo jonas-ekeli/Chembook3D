@@ -119,8 +119,8 @@ uv run python scripts/build_frontend.py
 **Share read-only copy…** saves the open investigation as one HTML file you can send to a
 supervisor or co-author. It opens in a current browser by double-click, offline, with nothing to
 install, and nothing in it can be changed. It shows the canvas, notes, calculations, 3D
-structures, and energies at every level. The energy profile and table show the pathways you
-added under **Profile and table**, or one pathway per branch if you added none. It leaves out
+structures, and energies at every level. The energy profile and table show the pathways shown in
+the profile open under **Profile and table**, or one pathway per branch if none is shown. It leaves out
 the folders and file paths on your computer, the output files themselves and the change history.
 
 After updating Chembook3D, build the interface again (`uv run python scripts/build_frontend.py`),

@@ -17,6 +17,7 @@ from chembook3d.api.builds import Builds
 from chembook3d.api.claude import Panel
 from chembook3d.api.claude import router as claude_router
 from chembook3d.api.energies import router as energy_router
+from chembook3d.api.energy_profiles import router as energy_profile_router
 from chembook3d.api.equilibrium import router as equilibrium_router
 from chembook3d.api.import_undo import router as undo_router
 from chembook3d.api.inspect import inspections
@@ -133,6 +134,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(undo_router)
     app.include_router(pathway_router)
     app.include_router(energy_router)
+    app.include_router(energy_profile_router)  # D190
     app.include_router(snapshot_router)
     app.include_router(steric_router)
     app.include_router(selectivity_router)
