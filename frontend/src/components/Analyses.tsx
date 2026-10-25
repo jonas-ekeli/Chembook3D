@@ -6,6 +6,7 @@ import {
   energyTypeName,
   formatDelta,
   type Canvas,
+  type EnergyProfile,
   type Equilibrium,
   type EnergyOptions,
   type EnergyType,
@@ -933,6 +934,7 @@ export function AnalysesView({
   openId,
   onSelectNode,
   onChanged,
+  onOpenProfile,
   asked,
 }: {
   canvas: Canvas
@@ -947,10 +949,13 @@ export function AnalysesView({
   onSelectNode: (id: string) => void
   /** A change that belongs in the history. */
   onChanged: () => void
+  /** D190: open a saved energy profile in the drawer below the canvas. */
+  onOpenProfile?: (id: string) => void
   /** D184: New selectivity, turnover or conformer equilibrium from the palette. */
   asked?: Request | null
 }) {
   const [list, setList] = useState<Selectivity[] | null>(null)
+  const [profiles, setProfiles] = useState<EnergyProfile[] | null>(null)
   const [turnovers, setTurnovers] = useState<Turnover[] | null>(null)
   const [equilibria, setEquilibria] = useState<Equilibrium[] | null>(null)
   const [chosen, setChosen] = useState<string | null>(openId)
@@ -971,6 +976,9 @@ export function AnalysesView({
   useEffect(() => {
     load()
   }, [load, refreshKey])
+  useEffect(() => {
+    api.energyProfiles().then(setProfiles, () => setProfiles([]))
+  }, [refreshKey])
 
   const freeName = (taken: Set<string>, base: string, start: number) => {
     let n = start
@@ -1113,6 +1121,35 @@ export function AnalysesView({
                 </button>
               </li>
             ))}
+          </ul>
+        </div>
+        <div className="outline-section">
+          <div className="section-head">
+            <h3>Energy profiles</h3>
+          </div>
+          {profiles && profiles.length === 0 && (
+            <p className="muted small">
+              Figures of pathways, saved as you build them in “Profile and table” below the canvas.
+            </p>
+          )}
+          <ul className="plain" aria-label="Energy profiles">
+            {profiles?.map((p) => {
+              const shown = p.paths.filter((path) => path.shown).length
+              return (
+                <li key={p.id}>
+                  <button
+                    className="link"
+                    onClick={() => onOpenProfile?.(p.id)}
+                    title="Open in the drawer below the canvas (D190)"
+                  >
+                    {p.name}
+                  </button>{' '}
+                  <span className="muted small">
+                    {shown} of {p.paths.length} {p.paths.length === 1 ? 'pathway' : 'pathways'} shown
+                  </span>
+                </li>
+              )
+            })}
           </ul>
         </div>
         {error && <p role="alert">{error}</p>}

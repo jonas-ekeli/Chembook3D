@@ -668,6 +668,25 @@ class SelectivityMember(Base):
     )
 
 
+class EnergyProfile(Base):
+    """D190, FR-EN-19: a saved energy profile, a named figure of pathways the drawer opens.
+    Layout-like data: saved in the investigation but not in the history (A127)."""
+
+    __tablename__ = "energy_profiles"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    seq: Mapped[int] = mapped_column(
+        Integer, default=text("(SELECT COALESCE(MAX(seq), 0) + 1 FROM energy_profiles)")
+    )
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    # Each pathway as {"ids": node and group ids in order, "branch_id": the branch it was
+    # added for or None, "shown": drawn on the figure}. A pathway through a deleted node
+    # is dropped when the profile is read (services/energy_profiles.py).
+    paths: Mapped[list[Any]] = mapped_column(default=list)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
 class Turnover(Base):
     """D86, FR-TOF-01: a saved turnover: the TOF of a closed catalytic cycle (A13) from the
     energetic-span model, at one composite level and energy type. Like selectivities it is in

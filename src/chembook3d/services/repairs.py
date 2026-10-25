@@ -26,7 +26,14 @@ from chembook3d.parsers.common import (
     SPIN_KEYS,
     THERMO_MODEL_KEYS,
 )
-from chembook3d.services import geometry, history, imports, levels, thermo_settings
+from chembook3d.services import (
+    energy_profiles,
+    geometry,
+    history,
+    imports,
+    levels,
+    thermo_settings,
+)
 
 log = logging.getLogger(__name__)
 SOURCE = "repair"
@@ -358,6 +365,12 @@ def start_geometries(session: Session, folder: Path) -> dict[str, int]:
     return counts
 
 
+def drawer_profiles(session: Session, folder: Path) -> int:
+    """D190: the pathways an investigation's drawer held before saved profiles become
+    "Profile 1"; the count of pathways moved."""
+    return energy_profiles.from_drawer(session)
+
+
 REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "geometry_levels": geometry_levels,
     "scan_path_edges": scan_path_edges,
@@ -368,6 +381,7 @@ REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "counterpoise_energies": counterpoise_energies,
     "thermo_models": thermo_models,
     "start_geometries": start_geometries,
+    "energy_profiles": drawer_profiles,
 }
 
 

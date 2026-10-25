@@ -362,6 +362,15 @@ TOOLS: list[ToolSpec] = [
         "why a result is out of date.",
     ),
     T(
+        "list_energy_profiles",
+        "read",
+        "GET",
+        "/api/energy-profiles",
+        "The saved energy profiles of the drawer (D190): each a named figure of pathways (node "
+        "and group ids in order, the branch, and `shown`: drawn on the figure). Value them with "
+        "get_energy_profile; they are made and changed in the page only.",
+    ),
+    T(
         "list_alignment_sets",
         "read",
         "GET",

@@ -3353,6 +3353,30 @@ table.overlay-legend td {
   text-align: left;
   justify-content: flex-start;
 }
+/* D190: the saved profile the drawer shows, above its pathways. */
+.profile-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.profile-picker select,
+.profile-picker input {
+  flex: 1;
+  min-width: 0;
+}
+.profile-picker button {
+  flex-shrink: 0;
+}
+.pathway-head input[type='checkbox'] {
+  flex-shrink: 0;
+  width: auto;
+  margin: 0;
+}
+/* A pathway left off the figure stays in the list, quieter, and can still go on. */
+.pathway.hidden-path > :not(.pathway-head),
+.pathway.hidden-path .pathway-head strong {
+  opacity: 0.6;
+}
 .pathway-add {
   display: flex;
   gap: 0.35rem;

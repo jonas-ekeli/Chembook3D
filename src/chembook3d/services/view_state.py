@@ -1,7 +1,8 @@
 """What an investigation showed when it was last used (D105): the energy view (composite level,
 energy type, reference), the canvas filters, the expanded groups and the energy drawer (open,
-tab, pathways). Saved in the investigation, so it travels with the folder and its sync, but it
-is view only: never in the history, and saving it is not a change other tabs reload for.
+tab, the saved energy profile it shows, D190). Saved in the investigation, so it travels with
+the folder and its sync, but it is view only: never in the history, and saving it is not a
+change other tabs reload for.
 
 What is saved is cleaned twice: on the way in (only known keys and plausible values, so an
 investigation cannot fill up with junk) and on the way out (records deleted since are dropped,
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from chembook3d.models import (
     Branch,
+    EnergyProfile,
     GroupNode,
     InvestigationInfo,
     Node,
@@ -27,7 +29,6 @@ from chembook3d.services.energies import ENERGY_TYPES
 
 TABS = ("profile", "table")
 MAX_IDS = 2000  # a generous ceiling on any one list
-MAX_PATHS = 50
 NONE = "none"  # the filters' "no branch" / "no step" (canvasView.ts)
 
 
@@ -46,24 +47,6 @@ def clean(data: Any) -> dict[str, Any]:
     data = data if isinstance(data, dict) else {}
     filters = data.get("filters") if isinstance(data.get("filters"), dict) else {}
     drawer = data.get("drawer") if isinstance(data.get("drawer"), dict) else {}
-    paths = []
-    for path in (
-        drawer.get("paths", [])[:MAX_PATHS] if isinstance(drawer.get("paths"), list) else []
-    ):
-        if not isinstance(path, dict) or not _ids(path.get("ids")):
-            continue
-        choices = path.get("choices") if isinstance(path.get("choices"), list) else []
-        paths.append(
-            {
-                "ids": _ids(path.get("ids")),
-                "branch_id": _text(path.get("branch_id")),
-                "choices": [
-                    {"node_id": c["node_id"]}
-                    for c in choices[:100]
-                    if isinstance(c, dict) and _text(c.get("node_id"))
-                ],
-            }
-        )
     energy_type = data.get("energy_type")
     return {
         "level": _text(data.get("level")),
@@ -75,7 +58,8 @@ def clean(data: Any) -> dict[str, Any]:
         "drawer": {
             "open": drawer.get("open") is True,
             "tab": drawer.get("tab") if drawer.get("tab") in TABS else "profile",
-            "paths": paths,
+            # D190: the saved energy profile the drawer has open (its pathways are its own).
+            "profile_id": _text(drawer.get("profile_id")),
         },
     }
 
@@ -94,24 +78,13 @@ def load(session: Session) -> dict[str, Any]:
 
 def current(session: Session, state: dict[str, Any]) -> dict[str, Any]:
     """A cleaned view without the records that no longer exist. A reference, a group, a branch
-    or a step that is gone is dropped, and so is a pathway through a deleted node; a choice at
-    a pathway's fork is given its current label and status."""
+    or a step that is gone is dropped, and so is a deleted energy profile (D190)."""
     nodes = {n.id: n for n in session.scalars(select(Node).where(Node.kind == NodeKind.NODE))}
     groups = {g.id: g for g in session.scalars(select(GroupNode))}
     branches = set(session.scalars(select(Branch.id)))
     steps = set(session.scalars(select(ReactionStep.id)))
+    profiles = set(session.scalars(select(EnergyProfile.id)))
     on_canvas = nodes.keys() | groups.keys()
-
-    def choice(record_id: str) -> dict[str, str]:
-        if record_id in nodes:
-            node = nodes[record_id]
-            return {
-                "node_id": record_id,
-                "label": node.label or "Untitled node",
-                "status": node.status,
-            }
-        return {"node_id": record_id, "label": groups[record_id].label or "Group", "status": ""}
-
     if state["reference_id"] not in on_canvas:
         state["reference_id"] = None
     state["expanded"] = [g for g in state["expanded"] if g in groups]
@@ -119,15 +92,6 @@ def current(session: Session, state: dict[str, Any]) -> dict[str, Any]:
     filters["branches"] = [b for b in filters["branches"] if b in branches or b == NONE]
     filters["steps"] = [s for s in filters["steps"] if s in steps or s == NONE]
     filters["statuses"] = [s for s in filters["statuses"] if s in set(Status)]
-    paths = []
-    for path in state["drawer"]["paths"]:
-        if not all(i in on_canvas for i in path["ids"]):
-            continue
-        if path["branch_id"] not in branches:
-            path["branch_id"] = None
-        path["choices"] = [
-            choice(c["node_id"]) for c in path["choices"] if c["node_id"] in on_canvas
-        ]
-        paths.append(path)
-    state["drawer"]["paths"] = paths
+    if state["drawer"]["profile_id"] not in profiles:
+        state["drawer"]["profile_id"] = None
     return state
