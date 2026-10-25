@@ -279,6 +279,44 @@ export function EnergyDrawer({
     }
   }, [requestKey, refreshKey])
 
+  // D189: the ways on from each pathway's end are asked for again whenever its nodes or the
+  // canvas change, so a step undone or an edge drawn later never leaves a pathway at a dead end.
+  const graphKey = useMemo(
+    () =>
+      JSON.stringify([
+        canvas.transitions.map((t) => [t.source_id, t.target_id]),
+        canvas.groups.map((g) => [g.id, g.label, g.member_ids, g.representative_id, g.outgoing_branch_id]),
+        canvas.nodes.map((n) => [n.id, n.label, n.branch_id]),
+      ]),
+    [canvas],
+  )
+  const endsKey = JSON.stringify(paths.map((p) => [p.ids, p.branchId]))
+  useEffect(() => {
+    const ends = JSON.parse(endsKey) as [string[], string | null][]
+    let current = true
+    for (const [ids, branchId] of ends) {
+      if (!ids.length) continue
+      api.extendPathway(ids, branchId, false).then(
+        (found) => {
+          if (!current) return
+          const choices = JSON.stringify(found.choices)
+          setPaths((now) =>
+            now.map((p) =>
+              p.branchId === branchId && JSON.stringify(p.ids) === JSON.stringify(ids) && JSON.stringify(p.choices) !== choices
+                ? { ...p, choices: found.choices }
+                : p,
+            ),
+          )
+        },
+        // A pathway through a deleted node is dropped above; nothing to offer meanwhile.
+        () => undefined,
+      )
+    }
+    return () => {
+      current = false
+    }
+  }, [endsKey, graphKey, refreshKey])
+
   const replace = (index: number, next: Path | null) =>
     setPaths((current) => (next ? current.map((p, i) => (i === index ? next : p)) : current.filter((_, i) => i !== index)))
 
@@ -466,7 +504,7 @@ export function EnergyDrawer({
                     className="small"
                     disabled={path.ids.length < 2}
                     onClick={() => replace(index, { ...path, ids: path.ids.slice(0, -1), choices: [] })}
-                    title="Remove the last node"
+                    title="Remove the last node; every way on from the node before is offered again (D189)"
                   >
                     Undo step
                   </button>

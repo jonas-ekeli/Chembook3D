@@ -198,3 +198,57 @@ test('energy drawer: a long node label wraps instead of hiding the pathway butto
     await forgetView(page.request, join(E2E_DIR, 'demo'))
   }
 })
+
+// T-UI-65, D189: Undo step offers every way on from the node before, so a fork can be taken
+// the other way, and an edge drawn after a pathway stopped is offered when you come back.
+test('energy drawer: a pathway can always go on after Undo step or a new edge', async ({ page }) => {
+  let closing = ''
+  try {
+    await openDemo(page)
+    await page.getByRole('button', { name: 'Profile and table' }).click()
+    const drawer = page.getByLabel('Energy drawer')
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'A' })
+    const a = drawer.getByRole('group', { name: 'Pathway A' })
+    const choices = a.getByRole('group', { name: 'Continue with' })
+    await choices.getByRole('button', { name: 'A-S3' }).click()
+    await expect(a).toContainText('T-S0 → A-S1 → A-S3')
+    await expect(choices).toHaveCount(0)
+
+    // Back to the fork: both ways are offered again, and the other one can be taken.
+    await a.getByRole('button', { name: 'Undo step' }).click()
+    await expect(a.locator('.pathway-nodes')).toHaveText('T-S0 → A-S1')
+    await expect(choices.getByRole('button')).toHaveText(['A-S2', 'A-S3'])
+    await choices.getByRole('button', { name: 'A-S2' }).click()
+    await expect(a).toContainText('T-S0 → A-S1 → A-S2')
+
+    // One step back from a single edge offers that edge too.
+    while ((await a.locator('.pathway-nodes').textContent()) !== 'T-S0 → A-S1') {
+      const before = await a.locator('.pathway-nodes').textContent()
+      await a.getByRole('button', { name: 'Undo step' }).click()
+      await expect(a.locator('.pathway-nodes')).not.toHaveText(before!)
+    }
+    await a.getByRole('button', { name: 'Undo step' }).click()
+    await expect(a.locator('.pathway-nodes')).toHaveText('T-S0')
+    await expect(choices.getByRole('button')).toHaveText(['A-S1'])
+
+    // Pathway B stops at B-S3; an edge drawn from there later is offered after a reload.
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+    const b = drawer.getByRole('group', { name: 'Pathway B' })
+    await expect(b).toContainText('T-S0 → B-S1 → B-S2 → B-S3')
+    await expect(b.getByRole('group', { name: 'Continue with' })).toHaveCount(0)
+    const canvas = await (await page.request.get('/api/canvas')).json()
+    const id = (label: string) => canvas.nodes.find((n: { label: string }) => n.label === label).id
+    const response = await page.request.post('/api/transitions', { data: { source_id: id('B-S3'), target_id: id('T-S0') } })
+    closing = (await response.json()).id
+    await page.reload()
+    // D105: the drawer comes back open, with its pathways.
+    const again = page.getByLabel('Energy drawer').getByRole('group', { name: 'Pathway B' })
+    const onward = again.getByRole('group', { name: 'Continue with' })
+    await expect(onward.getByRole('button')).toHaveText(['T-S0'])
+    await onward.getByRole('button', { name: 'T-S0' }).click()
+    await expect(again).toContainText('Cycle closed.')
+  } finally {
+    if (closing) await page.request.delete(`/api/transitions/${closing}`)
+    await forgetView(page.request, join(E2E_DIR, 'demo'))
+  }
+})

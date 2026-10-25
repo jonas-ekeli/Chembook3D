@@ -101,6 +101,8 @@ class EnergyViewOut(BaseModel):
 class PathIn(BaseModel):
     path: list[str]
     branch_id: str | None = None
+    # D189: off lists the ways on from the last id without walking (the drawer's Undo step).
+    follow: bool = True
 
 
 class ChoiceOut(BaseModel):
@@ -277,7 +279,7 @@ def energy_view(
 
 @router.post("/pathways/extend", response_model=PathOut)
 def extend_pathway(body: PathIn, session: DbSession):
-    return _path_out(pathways.extend(session, body.path, body.branch_id))
+    return _path_out(pathways.extend(session, body.path, body.branch_id, body.follow))
 
 
 @router.get("/branches/{branch_id}/pathway", response_model=PathOut)
