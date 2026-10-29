@@ -614,6 +614,7 @@ def make_node(
             pos_x=node.pos_x + sign * END_NODE_OFFSET[0] if new_id is None else None,
             pos_y=node.pos_y + END_NODE_OFFSET[1] if new_id is None else None,
             branch_id=node.branch_id if new_id is None else None,
+            canvas_id=node.canvas_id,  # D193: beside the TS
             missing_basis=basis,
         )
         try:

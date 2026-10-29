@@ -38,6 +38,7 @@ from chembook3d.models import (
     ReactionStep,
     Selectivity,
     StericProfile,
+    SubInvestigation,
     Transition,
     Turnover,
 )
@@ -46,6 +47,7 @@ from chembook3d.services import groups as group_service
 from chembook3d.services import history, import_undo
 from chembook3d.services import nodes as node_service
 from chembook3d.services import species as species_service
+from chembook3d.services import sub_investigations as sub_service
 from chembook3d.services import transitions as transition_service
 from chembook3d.services.records import RecordError, get
 
@@ -285,6 +287,8 @@ def _label(record: Any) -> str:
         return record.label or "Untitled node"
     if isinstance(record, GroupNode):
         return record.label or "Group"
+    if isinstance(record, SubInvestigation):
+        return record.label or "Sub-investigation"
     return getattr(record, "name", "") or "unnamed"
 
 
@@ -414,6 +418,34 @@ def _describe_dissolve(session: Session, params: dict[str, Any]) -> str:
     return text
 
 
+def _describe_sub(session: Session, params: dict[str, Any]) -> str:
+    """D193: everything inside goes with the box."""
+    found = sub_service.delete_preview(session, params["sub_investigation_id"])
+    inside = found.contents
+    parts = [
+        _count(len(inside.nodes), "node") if inside.nodes else "",
+        _count(len(inside.groups), "group") if inside.groups else "",
+        _count(len(inside.subs), "sub-investigation") if inside.subs else "",
+        _count(found.calculations, "calculation") if found.calculations else "",
+        _count(len(found.transitions), "edge") if found.transitions else "",
+    ]
+    text = f"Delete sub-investigation “{_label(found.sub)}”"
+    return text + (" with its contents: " + _listing(parts) if any(parts) else " (it is empty)")
+
+
+def _describe_sub_dissolve(session: Session, params: dict[str, Any]) -> str:
+    found = sub_service.delete_preview(session, params["sub_investigation_id"])
+    where = (
+        f"“{_label(session.get(SubInvestigation, found.sub.parent_id))}”"
+        if found.sub.parent_id
+        else "the main canvas"
+    )
+    return (
+        f"Dissolve sub-investigation “{_label(found.sub)}”: what it holds goes back onto {where}, "
+        "where the box was; nothing is deleted"
+    )
+
+
 def _describe_step(session: Session, params: dict[str, Any]) -> str:
     step = get(session, ReactionStep, params["step_id"], "Reaction step")
     count = session.scalar(select(func.count()).select_from(Node).where(Node.step_id == step.id))
@@ -507,6 +539,12 @@ ACTIONS: dict[str, Action] = {
         "/api/groups/{group_id}/dissolve",
         _describe_dissolve,
         lambda p: {"restore_branches": bool(p.get("restore_branches", False))},
+    ),
+    "delete_sub_investigation": Action(
+        "DELETE", "/api/sub-investigations/{sub_investigation_id}", _describe_sub
+    ),
+    "dissolve_sub_investigation": Action(
+        "POST", "/api/sub-investigations/{sub_investigation_id}/dissolve", _describe_sub_dissolve
     ),
     "delete_step": Action("DELETE", "/api/steps/{step_id}", _describe_step),
     "delete_branch": Action("DELETE", "/api/branches/{branch_id}", _describe_branch),

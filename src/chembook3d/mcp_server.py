@@ -41,6 +41,9 @@ How the notebook is organised:
   TS at either end ("no TS").
 - A branch is a mechanistic alternative; its parents form the lineage. A group node stands for
   several nodes (e.g. conformers); its representative is the user's choice.
+- A sub-investigation is a box with a canvas of its own for a side mechanism (a conformer
+  interconversion, a decomposition path). Nodes and groups inside it have its id as canvas_id.
+  It has no energy and no edges: edges end at the real nodes inside, so pathways go through them.
 - Calculations are imported from Gaussian, ORCA, xTB or CREST outputs. Changing the
   coordinates of a node that has calculations makes a new derived node; the original keeps the
   geometry its calculations ran on.
@@ -81,9 +84,9 @@ Rules:
   here" in the app's server tab. Never edit in place: write a copy (name_v2.ext, based_on the
   original), show the difference, and leave deleting to the user: give them an rm command
   naming each file to copy themselves; never run it.
-- Deleting anything, dissolving a group and removing coordinates are asked in the app's
-  window; the tool waits for the user's answer. Give a short reason. If they refuse, do not
-  ask again.
+- Deleting anything, dissolving a group or a sub-investigation and removing coordinates are
+  asked in the app's window; the tool waits for the user's answer. Give a short reason. If they
+  refuse, do not ask again.
 """
 
 

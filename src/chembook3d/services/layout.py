@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from chembook3d.models import Branch, GroupNode, Node
+from chembook3d.models import Branch, GroupNode, Node, SubInvestigation
 from chembook3d.services import branches as branch_service
 from chembook3d.services import steps as step_service
 from chembook3d.services.records import RecordError, get, number_value
@@ -64,12 +64,17 @@ def arrange_branch(session: Session, branch_id: str) -> list[Node | GroupNode]:
 
 
 def set_positions(session: Session, positions: dict[str, Any]) -> int:
-    """Store dragged positions for nodes and group nodes: {id: {"x": …, "y": …}}."""
+    """Store dragged positions for nodes, group nodes and sub-investigation boxes (D193):
+    {id: {"x": …, "y": …}}, each on its own canvas."""
     count = 0
     for record_id, position in positions.items():
-        record = session.get(Node, record_id) or session.get(GroupNode, record_id)
+        record = (
+            session.get(Node, record_id)
+            or session.get(GroupNode, record_id)
+            or session.get(SubInvestigation, record_id)
+        )
         if record is None:
-            raise RecordError("unknown node or group")
+            raise RecordError("unknown node, group or sub-investigation")
         if not isinstance(position, dict):
             raise RecordError("each position needs x and y")
         record.pos_x = number_value("x", position.get("x"))

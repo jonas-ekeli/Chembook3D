@@ -200,6 +200,16 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-CAN-10 | An edge whose ends are on the same side of two boxes lined up on that side is drawn bowing out from that side, not as a straight line along the boxes. | D147 | 4 |
 | FR-CAN-11 | A right-click on a node, a group, an arrow, the empty canvas or a multi-selection opens a menu of the actions that fit it; a command palette (Ctrl K) finds nodes, branches, steps and commands; single keys work while the canvas has the focus. Each runs an action the app already has, by pointer or keyboard; the read-only copy has none. | D184 | 5 |
 
+## FR-SUB · Sub-investigations (D193)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-SUB-01 | Nodes, groups and sub-investigations on one canvas can be moved into a new sub-investigation: a box with a name, notes and a canvas of its own, drawn where they were, which they keep their arrangement inside. A sub-investigation can hold another, at any depth. "Move to…" moves things onto another sub-investigation or the main canvas; nothing is deleted and every edge stays. | D193, Q61 | after 5 |
+| FR-SUB-02 | The box shows one structure, its face (a node inside it, picked by the user), only as a picture, with what it holds (nodes, TSs, groups). It has no energy, no step and no branch, and no edge ends at it: an edge to a node inside is drawn to the outermost box shown, and pathways, energies and every analysis work on the real nodes. | D193, Q59 | after 5 |
+| FR-SUB-03 | The user opens a box in one of two ways: Expand here grows it in place, showing its inside at its own layout with its edges, or Open switches the canvas to its inside, with a breadcrumb back and the outside neighbours as faded stubs at the rim. Which canvas is open and which boxes are expanded are remembered with the view. | D193, Q58, D105 | after 5 |
+| FR-SUB-04 | A group and its members always share one canvas: moving a member moves its whole group, after asking. Dissolve puts everything back onto the box's canvas where the box was; Delete removes the box with everything inside, after showing what goes. | D193, Q60, D54 | after 5 |
+| FR-SUB-05 | Making, renaming, the face, moving in or out, dissolving and deleting are in the history; box positions are not. New nodes and imports land on the canvas that is open, a derived node on its parent's. The overview, outline, search, Ctrl K, pickers and the read-only copy name where a node is and open its canvas. | D193, A128 | after 5 |
+
 ## FR-3D · 3D viewer
 
 | ID | Requirement | Trace | Phase |
@@ -345,6 +355,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-MCP-10 | Claude can turn a set of atoms rigidly about an axis given by atoms or their middles, or by the smallest turn that lines one vector up with another at a set angle; the answer states the sign convention, the bonds to the rest before and after, and new close contacts. | D150, A95 | after 5 |
 | FR-MCP-11 | Claude can measure distances, angles, dihedrals and vector angles across nodes and groups in one call, with each row's geometry level and convergence, per-column statistics, numbering by a reference node or SMARTS, and filters by level, convergence and value. | D151, A96 | after 5 |
 | FR-MCP-12 | Claude can list, read the result of, create and change conformer equilibria, with the next step's TSs; deleting one asks the user first. | D171, D173, D91 | after 5 |
+| FR-MCP-13 | Claude sees which canvas each node and group is on, lists sub-investigations, makes one from given nodes, groups and boxes, moves things in and out and renames one or sets its face; dissolving or deleting one asks the user first. New nodes take a canvas. | D193, D91 | after 5 |
 
 **AC:** with the app open, Claude Code renames a node: the canvas shows the new name at once and the history marks it "claude". Asked to delete it, Claude waits; Refuse in the app keeps the node, Confirm deletes it.
 

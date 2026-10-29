@@ -47,7 +47,7 @@ NOT_OFFERED = re.compile(
     r"^/api/(investigations?(/.*)?|sync(/.*)?|folders|settings|snapshot"
     r"|source-files/[^/]+/(open|download)|imports|batch-imports(/.*)?|note-images(/.*)?|health"
     r"|live|selection$|view-state|confirmations(/.*)?|nodes/[^/]+/delete-preview"
-    r"|groups/[^/]+/delete-preview|steric-profiles/[^/]+/(difference|table\.csv)"
+    r"|groups/[^/]+/delete-preview|sub-investigations/[^/]+/delete-preview|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|energies/table\.csv|history/[^/]+/undo|turnovers/[^/]+/table\.csv|custom-bases/[^/]+/file"
     r"|calculations/[^/]+/steps"  # every structure of a job, for the movie (D101, A48)
     r"|calculations/[^/]+/steps/[^/]+/use"  # "Use this structure" (D112, A58)

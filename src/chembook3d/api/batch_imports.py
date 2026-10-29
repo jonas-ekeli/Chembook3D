@@ -36,6 +36,7 @@ class BatchOptionsIn(BaseModel):
     missing_basis: str | None = None  # D104: for every file that names no basis set
     origin_device: str | None = None
     suffixes: list[str] | None = None
+    canvas_id: str | None = None  # D193: new nodes go on this sub-investigation's canvas
 
 
 class BatchImportedOut(BaseModel):
@@ -53,6 +54,7 @@ def _options(body: BatchOptionsIn | None) -> batch_import.BatchOptions:
         missing_basis=body.missing_basis,
         origin_device=body.origin_device,
         suffixes=body.suffixes,
+        canvas_id=body.canvas_id,
     )
 
 
