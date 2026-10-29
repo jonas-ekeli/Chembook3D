@@ -40,6 +40,32 @@ export function OverviewSections({
     item.kind === "transition"
       ? onSelectTransition(item.id)
       : onSelectNode(item.id);
+  // D191: planned transitions fold into one closed line at the end, so the edges
+  // drawn between finished nodes do not bury what is still to compute.
+  const folded = (item: OpenItem) =>
+    item.kind === "transition" && item.reason === "planned";
+  const plannedEdges = data.open_items.filter(folded);
+  const itemList = (title: string, listed: OpenItem[], kindNote: boolean) => (
+    <ul aria-label={title}>
+      {listed.map((item) => (
+        <li key={`${item.kind}-${item.id}`}>
+          <button className="link" onClick={() => open(item)}>
+            {item.label}
+          </button>
+          {item.kind === "transition" && kindNote && (
+            <span className="muted"> (transition)</span>
+          )}
+          {item.detail && <span className="badge warn">{item.detail}</span>}
+          {item.branch_ids.length > 0 && (
+            <span className="muted small">
+              {" "}
+              · {item.branch_ids.map(branchName).join(", ")}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
   return (
     <>
       <section aria-label="Branch status">
@@ -104,37 +130,25 @@ export function OverviewSections({
           </p>
         )}
         {REASONS.map(({ reason, title }) => {
-          const listed = data.open_items.filter((i) => i.reason === reason);
+          const listed = data.open_items.filter(
+            (i) => i.reason === reason && !folded(i),
+          );
           if (listed.length === 0) return null;
           return (
             <div key={reason} className="open-items">
               <h4>
                 {title} ({listed.length})
               </h4>
-              <ul aria-label={title}>
-                {listed.map((item) => (
-                  <li key={`${item.kind}-${item.id}`}>
-                    <button className="link" onClick={() => open(item)}>
-                      {item.label}
-                    </button>
-                    {item.kind === "transition" && reason !== "direct" && (
-                      <span className="muted"> (transition)</span>
-                    )}
-                    {item.detail && (
-                      <span className="badge warn">{item.detail}</span>
-                    )}
-                    {item.branch_ids.length > 0 && (
-                      <span className="muted small">
-                        {" "}
-                        · {item.branch_ids.map(branchName).join(", ")}
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
+              {itemList(title, listed, reason !== "direct")}
             </div>
           );
         })}
+        {plannedEdges.length > 0 && (
+          <details className="open-items open-items-folded">
+            <summary>Planned transitions ({plannedEdges.length})</summary>
+            {itemList("Planned transitions", plannedEdges, false)}
+          </details>
+        )}
       </section>
 
       <section aria-label="Step notes">

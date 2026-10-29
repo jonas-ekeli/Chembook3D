@@ -87,7 +87,7 @@ Result: a node on the canvas at the clicked position.
 ### WF-10 Resume after a gap (D45)
 Opening an investigation shows the **Overview** panel:
 - each branch with its status and counts of nodes by status;
-- open items: planned, running externally and failed nodes and transitions, nodes with warnings, and direct connections ("no TS") per branch (D53);
+- open items: planned, running externally and failed nodes and transitions, nodes with warnings, and direct connections ("no TS") per branch (D53); planned transitions sit in one closed line at the end (D191);
 - recent changes from the history (newest first, filterable by date);
 - notes per reaction step.
 Clicking any item selects it on the canvas and zooms to it.

@@ -1707,6 +1707,14 @@ label.inline input {
 .open-items li {
   padding: 0.1rem 0;
 }
+/* D191: planned transitions sit in one closed line at the end of the open items. */
+.open-items-folded summary {
+  margin: 0.5rem 0 0.2rem;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
 .step-notes {
   margin: 0;
 }
