@@ -363,7 +363,7 @@ def _expand(session: Session, equilibrium: ConformerEquilibrium, notes: list[str
     return found
 
 
-def _check_atoms(nodes: list[Node]) -> str | None:
+def check_atoms(nodes: list[Node]) -> str | None:
     """D171a: conformers and their TSs are one molecule: the same atoms and charge."""
     for node in nodes:
         if not node.geometry:
@@ -387,7 +387,7 @@ def _check_atoms(nodes: list[Node]) -> str | None:
     return None
 
 
-def _drop_duplicates(rows: list[dict[str, Any]], nodes: dict[str, Node], tolerance: float):
+def drop_duplicates(rows: list[dict[str, Any]], nodes: dict[str, Node], tolerance: float):
     """As D156: a member with the same charge and multiplicity as an earlier one of its kind,
     within the duplicate tolerance in geometry and 0.1 kcal/mol in value, is the same structure
     counted twice. Returns the rows kept, {dropped id: kept id} and the notes."""
@@ -611,7 +611,7 @@ def result(
             notes.append(
                 f"“{_name_of(node)}” is not marked as a minimum; it counts as a conformer."
             )
-    refused = _check_atoms([n for n, _ in members])
+    refused = check_atoms([n for n, _ in members])
     if refused:
         return stop("refused", refused)
     if equilibrium.level is None:
@@ -660,7 +660,7 @@ def result(
     if missing:
         return stop("n/a", f"No {equilibrium.energy_type} at this level for {', '.join(missing)}.")
     nodes = {n.id: n for n, _ in members}
-    rows, twins, dropped = _drop_duplicates(rows, nodes, settings.duplicate_tolerance)
+    rows, twins, dropped = drop_duplicates(rows, nodes, settings.duplicate_tolerance)
     notes.extend(dropped)
     if equilibrium.energy_type == "E":
         notes.append("E is the electronic energy, with no thermal correction.")

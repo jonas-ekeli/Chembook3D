@@ -5434,3 +5434,22 @@ table.scan-path-held input.drive-value {
   text-overflow: ellipsis;
   max-width: 45%;
 }
+
+/* D197: a member's population % in its group, and what the group's shares are of. */
+.cnode-share {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text);
+}
+.cnode-share.na {
+  font-weight: 400;
+  color: var(--muted);
+}
+.cgroup-share {
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--muted);
+}
