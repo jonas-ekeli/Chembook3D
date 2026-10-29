@@ -6,6 +6,8 @@
   as "no TS" (D53, FR-EDGE-03). Group nodes are not TS nodes, so an edge into a reconnection
   without a TS is a direct connection too (D14).
 - Each end is drawn on one side of its box (D76); the sides are layout, not history (A29).
+- A new transition given no status starts done when both its ends are done, and planned
+  otherwise (D192); after that its status is the user's alone (D19).
 """
 
 from typing import Any
@@ -13,7 +15,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, object_session
 
-from chembook3d.models import GroupNode, Node, NodeKind, Role, Transition
+from chembook3d.models import GroupNode, Node, NodeKind, Role, Status, Transition
 from chembook3d.services import history
 from chembook3d.services.records import RecordError, get, status_value, text_value
 
@@ -85,6 +87,22 @@ def is_ts(end: Endpoint) -> bool:
     return representative is not None and representative.role == Role.TRANSITION_STATE
 
 
+def is_done(end: Endpoint) -> bool:
+    """A done node, or a group whose representative is one (the group stands for it, D111)."""
+    if isinstance(end, Node):
+        return end.status == Status.DONE
+    if end.representative_id is None:
+        return False
+    session = object_session(end)
+    representative = session.get(Node, end.representative_id) if session else None
+    return representative is not None and representative.status == Status.DONE
+
+
+def default_status(source: Endpoint, target: Endpoint) -> str:
+    """D192: an edge drawn between two finished ends is a finished connection."""
+    return Status.DONE if is_done(source) and is_done(target) else Status.PLANNED
+
+
 def branches_of(end: Endpoint) -> set[str]:
     if isinstance(end, Node):
         return {end.branch_id} if end.branch_id else set()
@@ -132,7 +150,7 @@ def create(session: Session, fields: dict[str, Any]) -> Transition:
     if existing is not None:
         raise RecordError("These two nodes are already connected in this direction")
     transition = Transition(
-        status=status_value(fields.get("status", "planned")),
+        status=status_value(fields.get("status", default_status(source, target))),
         notes=text_value("notes", fields.get("notes", "")),
         source_side=side_value("source_side", fields.get("source_side", "right")),
         target_side=side_value("target_side", fields.get("target_side", "left")),
