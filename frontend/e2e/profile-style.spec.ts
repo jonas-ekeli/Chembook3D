@@ -194,10 +194,70 @@ test('"no TS" tags can be hidden and the title keeps clear of the legend', async
     // A–S1 and B–S1 share a column: one line each, starting just under the plot (D110).
     await expect(chart.locator('text', { hasText: /^[AB]-S1$/ })).toHaveCount(2)
     // Which of the two comes last depends on the order of the pathways, so take the lower one.
+    // In this narrow figure the step names wrap (D198), so measure from them, not the bottom edge.
     const lowest = Math.max((await at(/^A-S1$/)).y, (await at(/^B-S1$/)).y)
-    expect(Number(await chart.getAttribute('height')) - lowest).toBeLessThan(50)
+    const stepTop = (await at(/^π-complex$/)).y
+    expect(stepTop - lowest).toBeGreaterThan(0)
+    expect(stepTop - lowest).toBeLessThan(30)
     await page.screenshot({ path: 'test-results/profile-names-bottom.png' })
   } finally {
+    await page.request.put('/api/settings', { data: { profile_style: screen } })
+    await forgetView(page.request, join(E2E_DIR, 'demo'))
+  }
+})
+
+test('long names along the bottom wrap inside their columns', async ({ page }) => {
+  // T-UI-74, D198: names wider than their column wrap onto more lines instead of running into
+  // the next column's.
+  const screen = (await (await page.request.get('/api/settings')).json()).profile_presets.screen
+  const long: Record<string, string> = {
+    'A-S1': 'A_pi_complex_side_on_conformer_2',
+    'B-S1': 'B_pi_complex_side_on_conformer_1',
+    'B-S2': 'B_cycloaddition_scan_top_TSGO',
+    'B-S3': 'B_metallacyclobutane_cis_opt',
+  }
+  const renamed: { id: string; label: string }[] = []
+  try {
+    await page.request.put('/api/settings', {
+      data: { profile_style: { ...screen, width: 480, name_position: 'bottom' } },
+    })
+    await openDemo(page)
+    for (const node of (await (await page.request.get('/api/nodes')).json()) as { id: string; label: string }[])
+      if (long[node.label]) {
+        await page.request.patch(`/api/nodes/${node.id}`, { data: { label: long[node.label] } })
+        renamed.push(node)
+      }
+    expect(renamed).toHaveLength(4)
+    await page.getByRole('button', { name: 'Profile and table' }).click()
+    const drawer = page.getByLabel('Energy drawer')
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'A' })
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+    const chart = drawer.locator('.drawer-main').getByRole('img', { name: 'Energy profile' })
+    const names = Object.values(long).map((name) => chart.locator('text', { hasText: name }))
+    const steps = [/^alkylidene$/, /^π-complex$/, /^\[2\+2\] TS$/, /^metallacyclobutane$/].map((name) =>
+      chart.locator('text', { hasText: name }),
+    )
+    for (const name of names) {
+      await expect(name).toHaveCount(1)
+      expect(await name.locator('tspan').count()).toBeGreaterThan(1)
+    }
+    const boxes: { x: number; y: number; width: number; height: number }[] = []
+    for (const line of [...names, ...steps]) boxes.push((await line.boundingBox())!)
+    // Lines in neighbouring columns never share any width where they share height.
+    for (const a of boxes)
+      for (const b of boxes) {
+        const sameColumn = Math.abs(a.x + a.width / 2 - (b.x + b.width / 2)) < 1
+        if (!sameColumn && a.y < b.y + b.height && b.y < a.y + a.height)
+          expect(a.x + a.width <= b.x + 0.5 || b.x + b.width <= a.x + 0.5).toBe(true)
+      }
+    // The two names in the π-complex column stack, the step name under both.
+    const column = [names[1], names[0], steps[1]].map((line) => boxes[[...names, ...steps].indexOf(line)])
+    const [upper, lower] = column[0].y < column[1].y ? [column[0], column[1]] : [column[1], column[0]]
+    expect(lower.y).toBeGreaterThanOrEqual(upper.y + upper.height - 2)
+    expect(column[2].y).toBeGreaterThan(lower.y + lower.height - 2)
+    await page.screenshot({ path: 'test-results/profile-names-wrap.png' })
+  } finally {
+    for (const node of renamed) await page.request.patch(`/api/nodes/${node.id}`, { data: { label: node.label } })
     await page.request.put('/api/settings', { data: { profile_style: screen } })
     await forgetView(page.request, join(E2E_DIR, 'demo'))
   }
