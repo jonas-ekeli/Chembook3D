@@ -23,13 +23,17 @@ import {
   type RemoteStatus,
   type Settings,
   type Status,
+  type SubInvestigation,
   type SyncConflict,
   type Transition,
+  type TransitionSides,
   type SyncStatus,
   type ViewState,
 } from './api'
 import { NO_FILTERS, type Filters, type Selection, type ViewMode } from './canvasView'
 import { BasisSetsDialog } from './components/BasisSets'
+import { BoxEndDialog, MoveToDialog, NewSubDialog, SubInspector } from './components/SubInvestigations'
+import { canvasOf, chainOf, subName, subsOf, visibleCanvases } from './subCanvas'
 import { CloudJobsDialog } from './components/CloudJobsDialog'
 import { useScanPathImports } from './cloudJobs'
 import { CanvasPane, type CanvasEnergy, type CanvasContextMenu, type CanvasTarget } from './components/Canvas'
@@ -225,7 +229,7 @@ function App() {
   const openMenu: CanvasContextMenu = useCallback(
     (target, point) => {
       setNotice(null)
-      if (target.kind === 'node' || target.kind === 'group') {
+      if (target.kind === 'node' || target.kind === 'group' || target.kind === 'sub') {
         if (multi.length >= 2 && multi.includes(target.id)) {
           setMenu({ ...point, target: { kind: 'selection' } })
           return
@@ -245,6 +249,11 @@ function App() {
   const [mode, setMode] = useState<ViewMode>(readMode)
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  // D193: the sub-investigation whose canvas is open (none: the main canvas); the dialogs that
+  // move things onto another canvas; an arrow drawn to a closed box, to end at a node inside.
+  const [canvasId, setCanvasId] = useState<string | null>(null)
+  const [subDialog, setSubDialog] = useState<{ kind: 'new' | 'move'; ids: string[] } | null>(null)
+  const [boxEnd, setBoxEnd] = useState<{ source: string; target: string; sides: TransitionSides } | null>(null)
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [undoing, setUndoing] = useState<HistoryEntry | null>(null) // D102
   const [refreshKey, setRefreshKey] = useState(0)
@@ -348,6 +357,7 @@ function App() {
       setEdgeEnergies(saved.edge_energies)
       setFilters(saved.filters)
       setExpanded(new Set(saved.expanded))
+      setCanvasId(saved.canvas ?? null)
       setDrawerOpen(saved.drawer.open)
       setDrawerView({ tab: saved.drawer.tab, profile_id: saved.drawer.profile_id })
       setDrawerKey((k) => k + 1)
@@ -369,6 +379,7 @@ function App() {
       edge_energies: edgeEnergies,
       filters,
       expanded: [...expanded],
+      canvas: canvasId,
       drawer: { open: drawerOpen, ...drawerView },
     }
     const text = JSON.stringify(state)
@@ -378,7 +389,7 @@ function App() {
     }
     lastSaved.current = text
     saving.current = saving.current.then(() => api.saveViewState(state)).catch(() => undefined)
-  }, [shown, energyLevel, energyType, referenceId, edgeEnergies, filters, expanded, drawerOpen, drawerView])
+  }, [shown, energyLevel, energyType, referenceId, edgeEnergies, filters, expanded, canvasId, drawerOpen, drawerView])
 
   // Answers to earlier fetches can arrive after later ones (slow runners, a large import); only
   // the latest is shown, or a stale canvas without a just-created node would drop its inspector.
@@ -604,12 +615,32 @@ function App() {
     })
   }
 
+  // D193: the open canvas, while its box exists; and showing a record means opening its canvas
+  // unless the open one already draws it (on itself or in a box expanded here).
+  const subs = subsOf(canvas)
+  const openCanvas = canvasId !== null && subs.some((s) => s.id === canvasId) ? canvasId : null
+  const reveal = (id: string) => {
+    const on = canvasOf(canvas, id)
+    if (on !== undefined && !visibleCanvases(subs, openCanvas, expanded).has(on)) setCanvasId(on)
+  }
+
+  // A stub at the rim of an open box: open the canvas its record is on, and select it.
+  const openRecord = (id: string) => {
+    const on = canvasOf(canvas, id)
+    if (on === undefined) return
+    setCanvasId(on)
+    const kind = canvas.groups.some((g) => g.id === id) ? 'group' : subs.some((b) => b.id === id) ? 'sub' : 'node'
+    choose({ kind, id })
+    setFocus({ id, n: Date.now() })
+  }
+
   const selectNode = (id: string, centre = false) => {
     setNotice(null)
     choose({ kind: 'node', id })
     setView('canvas')
     // A free species is not on the canvas, so there is nothing to centre (D69).
     const onCanvas = canvas.nodes.find((n) => n.id === id)
+    if (onCanvas) reveal(onCanvas.group_id ?? id)
     if (centre && onCanvas) setFocus({ id: onCanvas.group_id ?? id, n: Date.now() })
   }
 
@@ -624,11 +655,12 @@ function App() {
     )
 
   const addNode = (position?: { x: number; y: number }) => {
+    // D193: on the canvas open, right of what it holds.
     const spot = position ?? {
-      x: canvas.nodes.reduce((max, n) => Math.max(max, n.pos_x), -220) + 220,
+      x: canvas.nodes.filter((n) => (n.canvas_id ?? null) === openCanvas).reduce((max, n) => Math.max(max, n.pos_x), -220) + 220,
       y: 0,
     }
-    api.createNode({ pos_x: spot.x, pos_y: spot.y }).then(
+    api.createNode({ pos_x: spot.x, pos_y: spot.y, canvas_id: openCanvas }).then(
       (node) => {
         reload()
         choose({ kind: 'node', id: node.id })
@@ -664,6 +696,9 @@ function App() {
       ...current,
       nodes: current.nodes.map((n) => (positions[n.id] ? { ...n, pos_x: positions[n.id].x, pos_y: positions[n.id].y } : n)),
       groups: current.groups.map((g) => (positions[g.id] ? { ...g, pos_x: positions[g.id].x, pos_y: positions[g.id].y } : g)),
+      sub_investigations: current.sub_investigations?.map((b) =>
+        positions[b.id] ? { ...b, pos_x: positions[b.id].x, pos_y: positions[b.id].y } : b,
+      ),
     }))
     api.savePositions(positions).catch((err: unknown) => setError(errorText(err)))
   }
@@ -740,6 +775,7 @@ function App() {
   const canvasSelection: Selection = selection && selection.kind !== 'branch' ? selection : null
   const multiNodes = multi.map((id) => canvas.nodes.find((n) => n.id === id)).filter((n): n is Node => !!n)
   const multiGroups = multi.map((id) => canvas.groups.find((g) => g.id === id)).filter((g): g is Group => !!g)
+  const multiSubs = multi.map((id) => subs.find((b) => b.id === id)).filter((b): b is SubInvestigation => !!b)
 
   const editedNote = noteEditing && 'noteId' in noteEditing ? canvas.notes.find((n) => n.id === noteEditing.noteId) : null
   const notedNodeId = editedNote ? editedNote.node_id : noteEditing && 'nodeId' in noteEditing ? noteEditing.nodeId : null
@@ -897,6 +933,42 @@ function App() {
           {shareError && <p role="alert">{shareError}</p>}
         </Modal>
       )}
+      {subDialog?.kind === 'new' && (
+        <NewSubDialog
+          canvas={canvas}
+          ids={subDialog.ids}
+          onClose={() => setSubDialog(null)}
+          onDone={(sub) => {
+            setSubDialog(null)
+            setMulti([])
+            choose({ kind: 'sub', id: sub.id })
+            reload()
+          }}
+        />
+      )}
+      {subDialog?.kind === 'move' && (
+        <MoveToDialog
+          canvas={canvas}
+          ids={subDialog.ids}
+          onClose={() => setSubDialog(null)}
+          onDone={() => {
+            setSubDialog(null)
+            setMulti([])
+            reload()
+          }}
+        />
+      )}
+      {boxEnd && (
+        <BoxEndDialog
+          canvas={canvas}
+          {...boxEnd}
+          onClose={() => setBoxEnd(null)}
+          onDone={() => {
+            setBoxEnd(null)
+            reload()
+          }}
+        />
+      )}
       {importRequest && investigation && (
         <ImportDialog
           key={`${importRequest.targetId}-${importRequest.files.length}-${importRequest.files[0]?.name ?? ''}-${importRequest.remote?.path ?? ''}-${importRequest.inspection?.id ?? ''}-${importRequest.pathEdge ?? ''}`}
@@ -904,6 +976,7 @@ function App() {
           remote={importRequest.remote ?? null}
           inspection={importRequest.inspection ?? null}
           pathEdge={importRequest.pathEdge ?? null}
+          canvasId={openCanvas}
           target={[...canvas.nodes, ...canvas.species].find((n) => n.id === importRequest.targetId) ?? null}
           nodes={[...canvas.nodes, ...canvas.species]}
           asSpecies={importRequest.species ?? false}
@@ -1041,6 +1114,7 @@ function App() {
           remote={remoteBatch}
           nodes={[...canvas.nodes, ...canvas.species]}
           linked={investigation.linked}
+          canvasId={openCanvas}
           onClose={() => {
             setBatchFolder(null)
             setRemoteBatch(null)
@@ -1087,15 +1161,22 @@ function App() {
   const selectedGroup = selection?.kind === 'group' ? canvas.groups.find((g) => g.id === selection.id) : undefined
   const selectedEdge = selection?.kind === 'edge' ? canvas.transitions.find((t) => t.id === selection.id) : undefined
   const selectedBranch = selection?.kind === 'branch' ? canvas.branches.find((b) => b.id === selection.id) : undefined
+  const selectedSub = selection?.kind === 'sub' ? subs.find((b) => b.id === selection.id) : undefined
   const selectGroup = (id: string) => {
     choose({ kind: 'group', id })
+    reveal(id)
+    setFocus({ id, n: Date.now() })
+  }
+  const selectSub = (id: string) => {
+    choose({ kind: 'sub', id })
+    reveal(id)
     setFocus({ id, n: Date.now() })
   }
   const toggleNode = (id: string) =>
     setMulti((current) => {
       const base = current.length
         ? current
-        : selection?.kind === 'node' || selection?.kind === 'group'
+        : selection?.kind === 'node' || selection?.kind === 'group' || selection?.kind === 'sub'
           ? [selection.id]
           : []
       return base.includes(id) ? base.filter((x) => x !== id) : [...base, id]
@@ -1251,7 +1332,21 @@ function App() {
       onSelect: () => void set(s.value).then(reload, (err: unknown) => setError(errorText(err))),
     })),
   })
-  const goTo = (id: string) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id, true))
+  const goTo = (id: string) =>
+    canvas.groups.some((g) => g.id === id)
+      ? selectGroup(id)
+      : subs.some((b) => b.id === id)
+        ? selectSub(id)
+        : selectNode(id, true)
+  // D193: "Move to…" and "Move into new sub-investigation…", for a record or the selection.
+  const moveItems = (ids: string[]): MenuItem[] => [
+    { label: 'Move to…', icon: 'layers', separated: true, onSelect: () => setSubDialog({ kind: 'move', ids }) },
+    {
+      label: 'Move into new sub-investigation…',
+      icon: 'layers',
+      onSelect: () => setSubDialog({ kind: 'new', ids }),
+    },
+  ]
 
   const nodeItems = (node: Node): MenuItem[] => {
     const species = node.kind === 'species'
@@ -1300,6 +1395,7 @@ function App() {
       },
       { ...statusItems(node.status, (status) => api.updateNode(node.id, { status })), separated: species },
       !species && { label: 'Add pinned note', icon: 'note', onSelect: () => setNoteEditing({ nodeId: node.id }) },
+      ...(species ? [] : moveItems([node.id])),
       {
         label: 'Copy xyz',
         icon: 'copy',
@@ -1342,6 +1438,7 @@ function App() {
           onSelect: () => ask(group.id, action.key),
         }),
       ),
+      ...moveItems([group.id]),
       {
         label: 'Remove group…',
         icon: 'trash',
@@ -1353,6 +1450,24 @@ function App() {
     ]
     return items.filter((item): item is MenuItem => !!item)
   }
+
+  const subItems = (sub: SubInvestigation): MenuItem[] => [
+    { label: 'Open', icon: 'enter', onSelect: () => setCanvasId(sub.id) },
+    {
+      label: expanded.has(sub.id) ? 'Collapse' : 'Expand here',
+      icon: 'layers',
+      onSelect: () => toggleGroup(sub.id),
+    },
+    ...moveItems([sub.id]),
+    {
+      label: 'Remove sub-investigation…',
+      icon: 'trash',
+      shortcut: 'Del',
+      danger: true,
+      separated: true,
+      onSelect: () => ask(sub.id, 'remove'),
+    },
+  ]
 
   const edgeItems = (edge: Transition): MenuItem[] => [
     { label: `Go to start: ${endLabel(canvas, edge.source_id)}`, icon: 'arrowright', onSelect: () => goTo(edge.source_id) },
@@ -1380,7 +1495,7 @@ function App() {
     equilibrium: 'chart',
   }
   const selectionItems = (): MenuItem[] => [
-    ...selectionActions(multiNodes, multiGroups, canvas).map(
+    ...(multiNodes.length + multiGroups.length >= 2 ? selectionActions(multiNodes, multiGroups, canvas) : []).map(
       (action): MenuItem => ({
         label: action.label,
         icon: SELECTION_ICONS[action.key],
@@ -1390,6 +1505,7 @@ function App() {
         onSelect: () => ask('selection', action.key),
       }),
     ),
+    ...moveItems(multi),
     { label: 'Fit to selection', icon: 'fit', shortcut: 'F', separated: true, onSelect: () => ask('canvas', 'fit') },
   ]
 
@@ -1438,6 +1554,15 @@ function App() {
         items: groupItems(group),
       }
     }
+    if (target.kind === 'sub') {
+      const sub = subs.find((b) => b.id === target.id)
+      if (!sub) return null
+      return {
+        label: 'Sub-investigation actions',
+        heading: { title: subName(sub), detail: 'sub-investigation' },
+        items: subItems(sub),
+      }
+    }
     if (target.kind === 'edge') {
       const edge = canvas.transitions.find((t) => t.id === target.id)
       if (!edge) return null
@@ -1451,10 +1576,11 @@ function App() {
       }
     }
     if (target.kind === 'selection') {
-      if (multiNodes.length + multiGroups.length < 2) return null
+      if (multiNodes.length + multiGroups.length + multiSubs.length < 2) return null
       const parts = [
         multiNodes.length && `${multiNodes.length} node${multiNodes.length === 1 ? '' : 's'}`,
         multiGroups.length && `${multiGroups.length} group${multiGroups.length === 1 ? '' : 's'}`,
+        multiSubs.length && `${multiSubs.length} sub-investigation${multiSubs.length === 1 ? '' : 's'}`,
       ].filter(Boolean)
       return { label: 'Selection actions', heading: { title: `${parts.join(' and ')} selected` }, items: selectionItems() }
     }
@@ -1488,9 +1614,10 @@ function App() {
         }
       }
     }
-    if (multiNodes.length + multiGroups.length >= 2) fromMenu('Selection', selectionItems())
+    if (multiNodes.length + multiGroups.length + multiSubs.length >= 2) fromMenu('Selection', selectionItems())
     else if (selectedNode) fromMenu(nodeName(selectedNode), nodeItems(selectedNode))
     else if (selectedGroup) fromMenu(selectedGroup.label || 'Group', groupItems(selectedGroup))
+    else if (selectedSub) fromMenu(subName(selectedSub), subItems(selectedSub))
     else if (selectedEdge)
       fromMenu(
         `${endLabel(canvas, selectedEdge.source_id)} → ${endLabel(canvas, selectedEdge.target_id)}`,
@@ -1715,7 +1842,11 @@ function App() {
       if (multi.length >= 2) return
       if (node) run(() => ask(node.id, 'delete'))
       else if (selectedGroup) run(() => ask(selectedGroup.id, 'remove'))
+      else if (selectedSub) run(() => ask(selectedSub.id, 'remove'))
       else if (selectedEdge) run(() => ask(selectedEdge.id, 'delete'))
+    } else if (key === 'Escape' && openCanvas !== null && !selection && multi.length < 2) {
+      // D193: Esc with nothing selected goes up to the canvas the open box is on.
+      run(() => setCanvasId(subs.find((b) => b.id === openCanvas)?.parent_id ?? null))
     } else if (key.length === 1) {
       const letter = key.toLowerCase()
       const record = multi.length < 2 ? (node ?? selectedGroup) : undefined
@@ -1784,6 +1915,22 @@ function App() {
         onSelectNode={(id) => selectNode(id, true)}
         onSelectBranch={selectBranch}
         energy={{ view: shownView, typeName: shownType, settings }}
+        asked={asked}
+      />
+    )
+  } else if (selectedSub) {
+    inspector = (
+      <SubInspector
+        key={selectedSub.id}
+        sub={selectedSub}
+        canvas={canvas}
+        expanded={expanded.has(selectedSub.id)}
+        onChanged={reload}
+        onRemoved={cleared}
+        onOpen={setCanvasId}
+        onToggle={toggleGroup}
+        onSelect={goTo}
+        onMoveTo={(ids) => setSubDialog({ kind: 'move', ids })}
         asked={asked}
       />
     )
@@ -1949,6 +2096,29 @@ function App() {
         {view === 'canvas' && (
           // D180: the canvas's own controls, in one row under the app bar.
           <div className="canvasbar">
+            {openCanvas !== null && (
+              // D193: where the open canvas is; each part opens that canvas.
+              <>
+                <nav className="crumbs" aria-label="Canvas">
+                  <button className="quiet" onClick={() => setCanvasId(null)}>
+                    Main canvas
+                  </button>
+                  {chainOf(subs, openCanvas).map((b) => (
+                    <span key={b.id} className="crumb">
+                      <Icon name="chevronright" />
+                      <button
+                        className="quiet"
+                        aria-current={b.id === openCanvas ? 'location' : undefined}
+                        onClick={() => setCanvasId(b.id)}
+                      >
+                        {subName(b)}
+                      </button>
+                    </span>
+                  ))}
+                </nav>
+                <span className="vsep" />
+              </>
+            )}
             <div className="segmented" role="group" aria-label="Node view">
               <button aria-pressed={mode === 'compact'} onClick={() => chooseMode('compact')}>
                 Compact
@@ -2075,6 +2245,9 @@ function App() {
                   multi={multi}
                   focus={focus}
                   expanded={expanded}
+                  canvasId={openCanvas}
+                  onOpenSub={setCanvasId}
+                  onOpenRecord={openRecord}
                   onToggleGroup={toggleGroup}
                   onGroupLayout={setGroupLayout}
                   onGroupOrder={orderGroup}
@@ -2085,7 +2258,10 @@ function App() {
                   onMultiSelect={setMulti}
                   onToggleNode={toggleNode}
                   onConnect={(source, target, sides) =>
-                    api.createTransition(source, target, sides).then(reload, (err: unknown) => setError(errorText(err)))
+                    // D193: an arrow to a closed box ends at a node inside it, picked in a dialog.
+                    subs.some((b) => b.id === source || b.id === target)
+                      ? setBoxEnd({ source, target, sides })
+                      : api.createTransition(source, target, sides).then(reload, (err: unknown) => setError(errorText(err)))
                   }
                   onMoveEnds={(ids, sides) =>
                     Promise.all(ids.map((id) => api.updateTransition(id, sides))).then(reload, (err: unknown) =>

@@ -16,6 +16,7 @@ const FIELD_LABELS: Record<string, string> = {
   branch_id: 'Branch',
   group_id: 'Group',
   path_edge_id: 'Scan path shown on edge',
+  canvas_id: 'Canvas',
 }
 
 /** Names of steps, branches, groups and nodes, to show ids in history entries readably. */
@@ -28,6 +29,8 @@ function named(names: Names, value: unknown): string {
 }
 
 function show(field: string | null, value: unknown, names: Names = new Map()): string {
+  // D193: the canvas a record is on; none is the main canvas.
+  if ((field === 'canvas_id' || field === 'parent_id') && (value === null || value === undefined)) return 'Main canvas'
   if (value === null || value === undefined || value === '') return '—'
   if (field === 'status') return STATUSES.find((s) => s.value === value)?.label ?? String(value)
   if (field === 'role') return ROLES.find((r) => r.value === value)?.label ?? String(value)
@@ -76,6 +79,9 @@ function show(field: string | null, value: unknown, names: Names = new Map()): s
 }
 
 const ID_FIELDS = new Set([
+  'canvas_id',
+  'parent_id',
+  'face_id',
   'step_id',
   'branch_id',
   'group_id',
@@ -90,6 +96,9 @@ const ID_FIELDS = new Set([
 ])
 
 const STRUCTURE_FIELDS: Record<string, string> = {
+  canvas_id: 'Canvas',
+  parent_id: 'Inside',
+  face_id: 'Face',
   name: 'Name',
   label: 'Label',
   notes: 'Notes',
@@ -125,6 +134,7 @@ const STRUCTURE_TYPES: Record<string, string> = {
   selectivity: 'selectivity',
   turnover: 'turnover',
   equilibrium: 'conformer equilibrium',
+  sub_investigation: 'sub-investigation',
 }
 
 function describeStructure(entry: HistoryEntry, names: Names): string | null {
@@ -151,7 +161,7 @@ function describeStructure(entry: HistoryEntry, names: Names): string | null {
     const removed = before.filter((id) => !after.has(id))
     return `Took ${named(names, removed)} out of group “${title || 'Group'}”`
   }
-  if (entry.action === 'dissolve') return `Dissolved group “${title || 'Group'}”`
+  if (entry.action === 'dissolve') return `Dissolved ${kind} “${title || (kind === 'group' ? 'Group' : 'Sub-investigation')}”`
   if (entry.action === 'create') return `Created ${kind}${title ? ` “${title}”` : ''}`
   if (entry.action === 'delete') return `Deleted ${kind}${title ? ` “${title}”` : ''}`
   const field = entry.field ?? ''

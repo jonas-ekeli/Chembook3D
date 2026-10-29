@@ -81,6 +81,8 @@ test('right-click menus on a node, an arrow, the canvas and a selection', async 
       'Add to group',
       'StatusPlanned',
       'Add pinned note',
+      'Move to…',
+      'Move into new sub-investigation…',
       'Copy xyzCtrl C',
       'Delete node…Del',
     ])
@@ -179,7 +181,7 @@ test('right-click menus on a node, an arrow, the canvas and a selection', async 
     await card(page, 'B-S2').click({ button: 'right' })
     const selectionMenu = menu(page, 'Selection actions')
     await expect(selectionMenu.locator('.context-heading')).toHaveText('2 nodes selected')
-    await expect(entries(selectionMenu)).toHaveText([...buttons, 'Fit to selectionF'])
+    await expect(entries(selectionMenu)).toHaveText([...buttons, 'Move to…', 'Move into new sub-investigation…', 'Fit to selectionF'])
     await expect(selectionMenu.getByRole('menuitem', { name: 'Scan path…' })).toBeDisabled()
     await selectionMenu.getByRole('menuitem', { name: 'Overlay in 3D' }).click()
     await expect(page.getByRole('dialog', { name: 'Overlay in 3D' })).toBeVisible()
@@ -318,6 +320,8 @@ test.describe('in an investigation of its own', () => {
       'Order members…',
       'Overlay members',
       'Compare sterics',
+      'Move to…',
+      'Move into new sub-investigation…',
       'Remove group…Del',
     ])
     await groupMenu.getByRole('menuitem', { name: 'Expand group' }).click()

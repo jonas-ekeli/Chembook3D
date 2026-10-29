@@ -6,4 +6,5 @@ export type ViewMode = 'compact' | 'energy' | 'structure'
 export type Filters = { branches: string[]; statuses: string[]; steps: string[] }
 export const NO_FILTERS: Filters = { branches: [], statuses: [], steps: [] }
 
-export type Selection = { kind: 'node' | 'group' | 'edge'; id: string } | null
+/** D193: 'sub' is a sub-investigation's box. */
+export type Selection = { kind: 'node' | 'group' | 'edge' | 'sub'; id: string } | null

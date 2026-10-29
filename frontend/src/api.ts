@@ -102,6 +102,9 @@ export type Node = {
   branch_id: string | null
   group_id: string | null
   origin_branch_id: string | null
+  /** D193: the sub-investigation whose canvas the node is drawn on; null (or absent in an older
+   * read-only copy) is the main canvas. Its position is on that canvas. */
+  canvas_id?: string | null
   pos_x: number
   pos_y: number
   /** The orientation saved from the 3D view, used by the structure-mode card. */
@@ -283,10 +286,44 @@ export type Group = {
   representative_id: string | null
   incoming_branch_ids: string[]
   outgoing_branch_id: string | null
+  /** D193: the sub-investigation it and its members are on; null is the main canvas. */
+  canvas_id?: string | null
   pos_x: number
   pos_y: number
   /** How the members are laid out when the group is expanded (A21). */
   layout: GroupLayout
+}
+
+/** D193: a box on a canvas holding a canvas of its own, for a side mechanism. It has no energy
+ * and no edge ends at it; edges to the nodes inside are drawn to it. */
+export type SubInvestigation = {
+  id: string
+  label: string
+  notes: string
+  /** The canvas the box is on: another sub-investigation, or null for the main canvas. */
+  parent_id: string | null
+  pos_x: number
+  pos_y: number
+  /** The node inside whose structure the closed box shows, only as a picture. */
+  face_id: string | null
+  /** The boxes from the main canvas down to this one, outermost first. */
+  path: string[]
+  /** What it holds at any depth. */
+  node_count: number
+  ts_count: number
+  group_count: number
+  sub_count: number
+}
+
+export type SubInvestigationFields = Partial<Pick<SubInvestigation, 'label' | 'notes' | 'face_id' | 'pos_x' | 'pos_y'>>
+
+export type SubDeletePreview = {
+  nodes: number
+  transition_states: number
+  groups: number
+  sub_investigations: number
+  calculations: number
+  transitions: number
 }
 
 export type GroupLayout = 'grid' | 'vertical' | 'horizontal'
@@ -305,6 +342,8 @@ export type Canvas = {
   groups: Group[]
   /** D85: notes pinned to a corner of a node's card. */
   notes: Note[]
+  /** D193: boxes holding canvases of their own; absent in a read-only copy made before them. */
+  sub_investigations?: SubInvestigation[]
 }
 
 export const NOTE_CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const
@@ -1679,6 +1718,8 @@ export type ImportOptions = {
   /** D137: a scan path (a joined scan) shown on this edge, its box on the canvas or not. */
   path_edge_id?: string | null
   on_edge_only?: boolean
+  /** D193: the canvas a new node goes on (the one open); null for the main canvas. */
+  canvas_id?: string | null
 }
 
 export type ImportResult = {
@@ -1777,6 +1818,8 @@ export type BatchOptions = {
   missing_basis?: string | null
   origin_device?: string | null
   suffixes?: string[] | null
+  /** D193: the canvas new nodes go on (the one open); null for the main canvas. */
+  canvas_id?: string | null
 }
 
 export type BatchImported = {
@@ -1943,7 +1986,10 @@ export type ViewState = {
   reference_id: string | null
   edge_energies: boolean
   filters: { branches: string[]; statuses: string[]; steps: string[] }
+  /** Expanded groups and (D193) sub-investigation boxes. */
   expanded: string[]
+  /** D193: the sub-investigation whose canvas is open; null for the main canvas. */
+  canvas?: string | null
   drawer: {
     open: boolean
     tab: 'profile' | 'table'
@@ -2184,7 +2230,9 @@ export const api = {
   /** D121: show a scan path node on an edge (null: on none); `on_edge_only` hides its box. */
   setPathEdge: (id: string, edge_id: string | null, on_edge_only?: boolean) =>
     request<Node>('PUT', `/nodes/${id}/path-edge`, { edge_id, ...(on_edge_only === undefined ? {} : { on_edge_only }) }),
-  createNode: (fields: NodeFields & { kind?: NodeKind; xyz?: string; pos_x?: number; pos_y?: number }) =>
+  createNode: (
+    fields: NodeFields & { kind?: NodeKind; xyz?: string; pos_x?: number; pos_y?: number; canvas_id?: string | null },
+  ) =>
     request<Node>('POST', '/nodes', fields),
   updateNode: (id: string, fields: NodeFields) => request<Node>('PATCH', `/nodes/${id}`, fields),
   /** D139: `newNode` saves as a new node derived from this one even without calculations. */
@@ -2326,6 +2374,24 @@ export const api = {
   dissolveGroup: (id: string, restore_branches: boolean) =>
     request<void>('POST', `/groups/${id}/dissolve`, { restore_branches }),
   deleteGroup: (id: string) => request<unknown>('DELETE', `/groups/${id}`),
+
+  // D193: sub-investigations. `with_groups`: a member given alone moves its whole group (asked first).
+  createSubInvestigation: (fields: {
+    label: string
+    ids: string[]
+    face_id?: string | null
+    with_groups?: boolean
+    canvas_id?: string | null
+    pos_x?: number
+    pos_y?: number
+  }) => request<SubInvestigation>('POST', '/sub-investigations', fields),
+  moveToCanvas: (ids: string[], target_id: string | null, with_groups = false) =>
+    request<{ moved: number }>('POST', '/sub-investigations/move', { ids, target_id, with_groups }),
+  updateSubInvestigation: (id: string, fields: SubInvestigationFields) =>
+    request<SubInvestigation>('PATCH', `/sub-investigations/${id}`, fields),
+  dissolveSubInvestigation: (id: string) => request<{ moved: number }>('POST', `/sub-investigations/${id}/dissolve`),
+  subDeletePreview: (id: string) => request<SubDeletePreview>('GET', `/sub-investigations/${id}/delete-preview`),
+  deleteSubInvestigation: (id: string) => request<unknown>('DELETE', `/sub-investigations/${id}`),
 
   energyOptions: () => request<EnergyOptions>('GET', '/energies/options'),
   energyView: (level: string, type: EnergyType, reference: string | null, bsse = false) =>

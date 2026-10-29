@@ -8,6 +8,7 @@ export function recordNames(canvas: Canvas): Map<string, string> {
     ...canvas.steps.map((s) => [s.id, s.name || 'Unnamed step'] as [string, string]),
     ...canvas.branches.map((b) => [b.id, b.name || 'Unnamed branch'] as [string, string]),
     ...canvas.groups.map((g) => [g.id, g.label || 'Group'] as [string, string]),
+    ...(canvas.sub_investigations ?? []).map((b) => [b.id, b.label || 'Sub-investigation'] as [string, string]),
   ])
   // D121: an edge by its ends, for the scan path a node is shown on.
   const ends = new Map(names)

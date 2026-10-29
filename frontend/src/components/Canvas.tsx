@@ -57,6 +57,7 @@ import {
   type Note,
   type NoteLayout,
   type PathOnEdge,
+  type SubInvestigation,
   SIDES,
   isSide,
   type Side,
@@ -74,6 +75,7 @@ import { Menu } from './MoreMenu'
 import { cardEnergy, minus, type CanvasEnergy, type CardEnergy } from '../cardEnergy'
 import { curveOf, LabelPlacer, leaderEnd, pointAt, type Curve, type Rect } from '../labelLayout'
 import { useRequest, type Request } from '../commands'
+import { chainOf, contentsText, placeOf, subName, subsOf, visibleCanvases, canvasName } from '../subCanvas'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import type { Rotation } from '../chem'
@@ -133,6 +135,13 @@ function CardEnergyText({ energy, below }: { energy: CardEnergy; below: boolean 
   )
 }
 const GROUP_HEADER = 48
+/** D193: an expanded sub-investigation's header, the margin round its inside, and the size the
+ * cards inside are taken to have when the box is sized round them (they are measured only once
+ * drawn; a card dragged past the edge grows the box). */
+const SUB_HEADER = 44
+const SUB_PAD = 24
+const CARD_HEIGHT: Record<ViewMode, number> = { compact: 78, energy: 78, structure: 196 }
+const STUB_GAP = { x: 300, y: 84 }
 
 type StructureData = {
   node: Node
@@ -173,6 +182,21 @@ type GroupData = {
   /** D158: each member's warnings, "label: code: message", marked on the group's head. */
   memberWarnings: string[]
 }
+/** D193: a sub-investigation's box: closed (its face and what it holds), or expanded in place
+ * around its inside. Its own canvas is opened with Open or a double-click (A128). */
+type SubData = {
+  sub: SubInvestigation
+  /** The node whose structure the closed box shows, only as a picture (Q59). */
+  face: Node | null
+  mode: ViewMode
+  expanded: boolean
+  onToggle: (id: string) => void
+  onOpen?: (id: string) => void
+}
+/** D193: with a sub-investigation open, a neighbour outside it that a crossing edge joins,
+ * faded at the rim; a click goes out to it. */
+type StubData = { label: string; where: string; ts: boolean; colour: string }
+
 type TransitionData = {
   /** The transitions this line stands for; more than one between two collapsed groups (A24). */
   ids: string[]
@@ -202,7 +226,7 @@ const PathChipClick = createContext<((transitionId: string) => void) | null>(nul
 /** D184: what a right-click on the canvas was on: a node card, a group, an arrow, the
  * selection's box, or the empty canvas (with the canvas position under the pointer). */
 export type CanvasTarget =
-  | { kind: 'node' | 'group' | 'edge'; id: string }
+  | { kind: 'node' | 'group' | 'edge' | 'sub'; id: string }
   | { kind: 'selection' }
   | { kind: 'pane'; at: { x: number; y: number } }
 /** D184: a right-click at a point of the window on something of the canvas. */
@@ -357,6 +381,76 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
   )
 })
 
+const SubBox = memo(function SubBox({ data, selected }: NodeProps<FlowNode<SubData>>) {
+  const { sub, face, mode, expanded, onToggle, onOpen } = data
+  const name = subName(sub)
+  return (
+    <div
+      className={`csub${selected ? ' selected' : ''}${expanded ? ' expanded' : ''}`}
+      data-testid="canvas-sub"
+      title={sub.notes || undefined}
+    >
+      <SideHandles />
+      <div className="csub-head">
+        <Icon name="layers" />
+        <span className="cnode-label">{name}</span>
+        <button
+          className="small nodrag"
+          aria-label={expanded ? `Collapse ${name}` : `Expand ${name} here`}
+          title={expanded ? 'Collapse' : 'Expand here: show its inside on this canvas'}
+          onClick={(event) => {
+            event.stopPropagation()
+            onToggle(sub.id)
+          }}
+        >
+          {expanded ? '−' : '+'}
+        </button>
+        {onOpen && (
+          <button
+            className="small nodrag"
+            aria-label={`Open ${name}`}
+            title="Open: switch the canvas to its inside (double-click)"
+            onClick={(event) => {
+              event.stopPropagation()
+              onOpen(sub.id)
+            }}
+          >
+            <Icon name="enter" />
+          </button>
+        )}
+      </div>
+      {!expanded && mode === 'structure' && (
+        <MoleculeSketch xyz={face?.xyz ?? null} rotation={face?.view_rotation ?? null} width={NODE_WIDTH - 24} height={120} />
+      )}
+      {!expanded && (
+        <div className="cnode-meta">
+          <span className="small">{contentsText(sub)}</span>
+        </div>
+      )}
+      {!expanded && face && mode !== 'structure' && (
+        <div className="csub-face small muted" title="The structure this box shows (its face)">
+          {face.label || 'Untitled node'}
+        </div>
+      )}
+    </div>
+  )
+})
+
+const StubNode = memo(function StubNode({ data }: NodeProps<FlowNode<StubData>>) {
+  return (
+    <div className="cstub" style={{ ['--branch' as string]: data.colour }} data-testid="canvas-stub" title={`Go to it, ${data.where}`}>
+      <SideHandles />
+      <div className="cnode-head">
+        <span className="cnode-label">{data.label}</span>
+        {data.ts && <span className="ts-mark">TS</span>}
+      </div>
+      <div className="cnode-meta">
+        <span className="small">{data.where}</span>
+      </div>
+    </div>
+  )
+})
+
 /**
  * React Flow raises an edge that ends at a node inside a group (an expanded group's member)
  * to that node's level, above the layer where edge labels are drawn. Its label is raised as
@@ -379,7 +473,9 @@ function cardRects(nodes: Iterable<InternalNode>): Rect[] {
     const { width, height } = node.measured
     if (node.hidden || !width || !height) continue
     const { x, y } = node.internals.positionAbsolute
-    const open = node.type === 'cgroup' && (node.data as GroupData).expanded
+    const open =
+      (node.type === 'cgroup' && (node.data as GroupData).expanded) ||
+      (node.type === 'csub' && (node.data as SubData).expanded)
     rects.push({ x: Math.round(x), y: Math.round(y), w: Math.round(width), h: Math.round(open ? GROUP_HEADER : height) })
   }
   return rects
@@ -577,7 +673,7 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
   )
 }
 
-const nodeTypes = { structure: StructureNode, cgroup: GroupBox }
+const nodeTypes = { structure: StructureNode, cgroup: GroupBox, csub: SubBox, stub: StubNode }
 const edgeTypes = { transition: TransitionEdge }
 
 /** The sides a new or moved connection uses (D76); a handle without one is left to the default. */
@@ -586,6 +682,11 @@ function sides(connection: Connection): TransitionSides {
     ...(isSide(connection.sourceHandle) ? { source_side: connection.sourceHandle } : {}),
     ...(isSide(connection.targetHandle) ? { target_side: connection.targetHandle } : {}),
   }
+}
+
+/** What a click or right-click on a drawn box selects. */
+function kindOf(node: FlowNode): 'node' | 'group' | 'sub' {
+  return node.type === 'cgroup' ? 'group' : node.type === 'csub' ? 'sub' : 'node'
 }
 
 function download(url: string, name: string) {
@@ -624,6 +725,9 @@ function CanvasView({
   tools,
   onContextMenu,
   asked,
+  canvasId = null,
+  onOpenSub,
+  onOpenRecord,
 }: {
   data: CanvasData
   mode: ViewMode
@@ -662,6 +766,12 @@ function CanvasView({
   onContextMenu?: CanvasContextMenu
   /** D184: "fit" (the selection, else everything) or "fit-all", from a menu, the palette or F. */
   asked?: Request | null
+  /** D193: the sub-investigation whose canvas is open; null for the main canvas. */
+  canvasId?: string | null
+  /** D193: open a box's canvas (its Open button, a double-click). */
+  onOpenSub?: (id: string) => void
+  /** D193: a rim stub's record, outside the open canvas: go out to it. */
+  onOpenRecord?: (id: string) => void
 }) {
   const flow = useReactFlow()
   const theme = useTheme() // D185: React Flow's own colours follow the theme
@@ -705,7 +815,7 @@ function CanvasView({
   const nodeEnergySource =
     mode === 'energy' || (mode === 'structure' && energy.referenceId) ? energy : null
 
-  const { flowNodes, flowEdges: plainEdges } = useMemo(() => {
+  const { flowNodes, flowEdges: plainEdges, origins } = useMemo(() => {
     // D43, D72: ΔX from the reference node (`cardEnergy`).
     const nodeEnergy = (id: string) => cardEnergy(nodeEnergySource, id)
     const hidden = {
@@ -729,9 +839,116 @@ function CanvasView({
     const isSelected = (id: string) => chosen.has(id) || (selection?.kind === 'node' && selection.id === id)
 
     const result: FlowNode[] = []
-    // Where each record is drawn: itself, or its collapsed group.
+    // Where each record is drawn: itself, its collapsed group, the closed box holding it
+    // (D193), or a stub at the rim when it is outside the open sub-investigation.
     const drawnAs = new Map<string, string>()
     const branchColour = (id: string | null) => (id ? (colours.get(id) ?? NO_BRANCH) : NO_BRANCH)
+
+    // D193: the boxes. One the filters leave nothing in is hidden (A128); an empty one stays.
+    const subs = subsOf(data)
+    const holding = new Map<string, { any: boolean; shown: boolean }>()
+    for (const node of data.nodes) {
+      if (!node.canvas_id) continue
+      for (const box of chainOf(subs, node.canvas_id)) {
+        const found = holding.get(box.id) ?? { any: false, shown: false }
+        found.any = true
+        found.shown ||= nodeShown(node)
+        holding.set(box.id, found)
+      }
+    }
+    const boxShown = (sub: SubInvestigation) => {
+      const found = holding.get(sub.id)
+      return !found?.any || found.shown
+    }
+    const shownSubs = subs.filter((sub) => chainOf(subs, sub.id).every(boxShown))
+    const visible = visibleCanvases(shownSubs, canvasId, expanded)
+    const drawnBoxes = new Set(
+      shownSubs.filter((sub) => visible.has(sub.parent_id)).map((sub) => sub.id),
+    )
+    // Records outside the open canvas that an edge may need as a stub: their names.
+    const outside = new Map<string, { label: string; canvas: string | null; ts: boolean; colour: string }>()
+    /** Where a record on canvas `on` goes: its own card, or false once noted as drawn by a
+     * box, as outside, or hidden with its box. */
+    const own = (on: string | null | undefined, ids: { id: string; label: string; ts: boolean; colour: string }[]) => {
+      const place = placeOf(subs, visible, on ?? null)
+      if (place.kind === 'self') return true
+      for (const record of ids)
+        if (place.kind === 'box' && drawnBoxes.has(place.id)) drawnAs.set(record.id, place.id)
+        else if (place.kind === 'outside')
+          outside.set(record.id, { label: record.label, canvas: on ?? null, ts: record.ts, colour: record.colour })
+      return false
+    }
+
+    // D193: an expanded box frames its inside at the inside's own layout: each card keeps its
+    // place relative to the others, the box sized round them, innermost boxes first.
+    const sizes = new Map<string, { w: number; h: number }>()
+    const origins = new Map<string, { x: number; y: number }>()
+    const cardHeight = CARD_HEIGHT[mode]
+    const groupSize = (group: Group) => {
+      if (!expanded.has(group.id)) return { w: NODE_WIDTH + 4, h: cardHeight }
+      const count = Math.max(1, group.member_ids.length)
+      const columns =
+        group.layout === 'vertical' ? 1 : group.layout === 'horizontal' ? count : Math.ceil(Math.sqrt(count))
+      return { w: columns * cell.w + 16, h: GROUP_HEADER + Math.ceil(count / columns) * cell.h + 8 }
+    }
+    const openBoxes = shownSubs
+      .filter((sub) => drawnBoxes.has(sub.id) && visible.has(sub.id))
+      .sort((a, b) => chainOf(subs, b.id).length - chainOf(subs, a.id).length)
+    for (const box of openBoxes) {
+      const items = [
+        ...data.nodes
+          .filter((n) => (n.canvas_id ?? null) === box.id && !n.group_id && !n.on_edge && nodeShown(n))
+          .map((n) => ({ x: n.pos_x, y: n.pos_y, w: NODE_WIDTH, h: cardHeight })),
+        ...data.groups
+          .filter((g) => (g.canvas_id ?? null) === box.id)
+          .map((g) => ({ x: g.pos_x, y: g.pos_y, ...groupSize(g) })),
+        ...shownSubs
+          .filter((sub) => sub.parent_id === box.id)
+          .map((sub) => ({ x: sub.pos_x, y: sub.pos_y, ...(sizes.get(sub.id) ?? { w: NODE_WIDTH, h: cardHeight + 20 }) })),
+      ]
+      if (!items.length) {
+        origins.set(box.id, { x: 0, y: 0 })
+        sizes.set(box.id, { w: NODE_WIDTH + 2 * SUB_PAD, h: SUB_HEADER + SUB_PAD + 40 })
+        continue
+      }
+      const x0 = Math.min(...items.map((i) => i.x))
+      const y0 = Math.min(...items.map((i) => i.y))
+      const x1 = Math.max(...items.map((i) => i.x + i.w))
+      const y1 = Math.max(...items.map((i) => i.y + i.h))
+      origins.set(box.id, { x: x0 - SUB_PAD, y: y0 - SUB_HEADER })
+      sizes.set(box.id, { w: Math.max(240, x1 - x0 + 2 * SUB_PAD), h: y1 - y0 + SUB_HEADER + SUB_PAD })
+    }
+    /** A card on canvas `on`: at its own place on the open canvas, or inside its expanded box. */
+    const at = (on: string | null | undefined, x: number, y: number) => {
+      const box = on ?? null
+      if (box === canvasId || box === null) return { position: { x, y } }
+      const origin = origins.get(box) ?? { x: 0, y: 0 }
+      return { position: { x: x - origin.x, y: y - origin.y }, parentId: box, expandParent: true }
+    }
+    const faces = new Map(data.nodes.map((n) => [n.id, n]))
+    // Outer boxes first: React Flow needs a parent before the cards in it.
+    for (const sub of shownSubs
+      .filter((s) => drawnBoxes.has(s.id))
+      .sort((a, b) => chainOf(subs, a.id).length - chainOf(subs, b.id).length)) {
+      const open = visible.has(sub.id)
+      drawnAs.set(sub.id, sub.id)
+      result.push({
+        id: sub.id,
+        type: 'csub',
+        ...at(sub.parent_id, sub.pos_x, sub.pos_y),
+        ariaLabel: `Sub-investigation ${subName(sub)}`,
+        selected: chosen.has(sub.id) || (selection?.kind === 'sub' && selection.id === sub.id),
+        style: open ? { width: sizes.get(sub.id)?.w, height: sizes.get(sub.id)?.h } : undefined,
+        data: {
+          sub,
+          face: sub.face_id ? (faces.get(sub.face_id) ?? null) : null,
+          mode,
+          expanded: open,
+          onToggle: onToggleGroup,
+          onOpen: onOpenSub,
+        } satisfies SubData,
+      })
+    }
 
     for (const group of data.groups) {
       const members = group.member_ids.map((id) => byId.get(id)).filter((n): n is Node => !!n)
@@ -740,6 +957,17 @@ function CanvasView({
       // node, in the group's place (A23).
       const shown = members.filter(nodeShown)
       if (hidden.steps.has(group.step_id ?? 'none')) continue
+      const groupColour = branchColour(group.outgoing_branch_id ?? shown[0]?.branch_id ?? null)
+      const records = [
+        { id: group.id, label: group.label || 'Group', ts: false, colour: groupColour },
+        ...shown.map((m) => ({
+          id: m.id,
+          label: m.label || 'Untitled node',
+          ts: m.role === 'transition_state',
+          colour: branchColour(m.branch_id),
+        })),
+      ]
+      if (!own(group.canvas_id, records)) continue
       // A reconnection stays while its outgoing branch is shown, as the start of that branch.
       const starts = group.outgoing_branch_id !== null && !hidden.branches.has(group.outgoing_branch_id)
       if (members.length ? shown.length === 0 && !starts : !groupShown(group)) continue
@@ -753,7 +981,7 @@ function CanvasView({
           className: notesOf(only.id).length ? 'has-notes' : undefined,
           // D87: its notes, floating ones too, are drawn over the cards around it.
           zIndex: notesOf(only.id).length ? 1 : undefined,
-          position: { x: group.pos_x, y: group.pos_y },
+          ...at(group.canvas_id, group.pos_x, group.pos_y),
           ariaLabel: `Node ${only.label || 'Untitled node'}`,
           selected: isSelected(only.id),
           data: {
@@ -788,7 +1016,7 @@ function CanvasView({
       result.push({
         id: group.id,
         type: 'cgroup',
-        position: { x: group.pos_x, y: group.pos_y },
+        ...at(group.canvas_id, group.pos_x, group.pos_y),
         ariaLabel: `Group ${group.label || ''}`.trim(),
         selected: chosen.has(group.id) || (selection?.kind === 'group' && selection.id === group.id),
         style: open ? { width: columns * cell.w + 16, height: GROUP_HEADER + rows * cell.h + 8 } : undefined,
@@ -851,6 +1079,8 @@ function CanvasView({
     for (const node of data.nodes) {
       // D121: a scan path shown on its edge only is drawn as the edge's chip.
       if (node.group_id || !nodeShown(node) || node.on_edge) continue
+      const self = { id: node.id, label: node.label || 'Untitled node', ts: node.role === 'transition_state' }
+      if (!own(node.canvas_id, [{ ...self, colour: branchColour(node.branch_id) }])) continue
       drawnAs.set(node.id, node.id)
       result.push({
         id: node.id,
@@ -858,7 +1088,7 @@ function CanvasView({
         className: notesOf(node.id).length ? 'has-notes' : undefined,
         // D87: its notes, floating ones too, are drawn over the cards around it.
         zIndex: notesOf(node.id).length ? 1 : undefined,
-        position: { x: node.pos_x, y: node.pos_y },
+        ...at(node.canvas_id, node.pos_x, node.pos_y),
         ariaLabel: `Node ${node.label || 'Untitled node'}`,
         selected: isSelected(node.id),
         data: {
@@ -873,6 +1103,43 @@ function CanvasView({
           noteActions,
         } satisfies StructureData,
       })
+    }
+
+    // D193: a neighbour outside the open sub-investigation that a crossing edge joins is a faded
+    // stub at the rim: left of everything for an edge coming in, right for one going out.
+    if (outside.size) {
+      const top = result.filter((n) => !n.parentId)
+      const width = (n: FlowNode) => (typeof n.style?.width === 'number' ? n.style.width : NODE_WIDTH)
+      const x0 = top.length ? Math.min(...top.map((n) => n.position.x)) : 0
+      const x1 = top.length ? Math.max(...top.map((n) => n.position.x + width(n))) : NODE_WIDTH
+      const y0 = top.length ? Math.min(...top.map((n) => n.position.y)) : 0
+      const sides = new Map<string, 'left' | 'right'>()
+      for (const t of data.transitions) {
+        if (hidden.statuses.has(t.status)) continue
+        if (outside.has(t.source_id) && drawnAs.has(t.target_id)) sides.set(t.source_id, 'left')
+        else if (outside.has(t.target_id) && drawnAs.has(t.source_id) && !sides.has(t.target_id))
+          sides.set(t.target_id, 'right')
+      }
+      const rows = { left: 0, right: 0 }
+      for (const [id, side] of sides) {
+        const record = outside.get(id)!
+        const stub = `stub:${id}`
+        drawnAs.set(id, stub)
+        result.push({
+          id: stub,
+          type: 'stub',
+          position: { x: side === 'left' ? x0 - STUB_GAP.x : x1 + STUB_GAP.x - NODE_WIDTH, y: y0 + rows[side]++ * STUB_GAP.y },
+          draggable: false,
+          connectable: false,
+          ariaLabel: `Outside: ${record.label}`,
+          data: {
+            label: record.label,
+            where: `in ${canvasName(subs, record.canvas)}`,
+            ts: record.ts,
+            colour: record.colour,
+          } satisfies StubData,
+        })
+      }
     }
 
     const groupsById = new Map(data.groups.map((g) => [g.id, g]))
@@ -951,6 +1218,8 @@ function CanvasView({
     // end at the group's representative (or at the group itself). None such: no energy.
     const transitionsById = new Map(data.transitions.map((t) => [t.id, t]))
     const atRepresentative = (end: string, box: string) => {
+      // D193: a sub-investigation's box has no energy (Q59), so neither has a line it merges.
+      if (subs.some((sub) => sub.id === box) || box.startsWith('stub:')) return false
       const group = groupsById.get(box)
       return !group || end === box || (group.representative_id !== null && group.representative_id === end)
     }
@@ -962,8 +1231,8 @@ function CanvasView({
           return !!t && atRepresentative(t.source_id, e.source) && atRepresentative(t.target_id, e.target)
         }) ?? null
     }
-    return { flowNodes: result, flowEdges: edges }
-  }, [data, mode, nodeEnergySource, filters, expanded, selection, multi, colours, stepNames, onToggleGroup, onGroupLayout, onGroupOrder, notesByNode, noteActions])
+    return { flowNodes: result, flowEdges: edges, origins }
+  }, [data, mode, nodeEnergySource, filters, expanded, selection, multi, colours, stepNames, onToggleGroup, onGroupLayout, onGroupOrder, notesByNode, noteActions, canvasId, onOpenSub])
 
   // FR-EN-02: ΔX = X(target) − X(source) on each edge, or n/a (EN-3). D121: the scan path
   // chips, in the energy unit, are always shown (A68) and never feed ΔX.
@@ -1129,6 +1398,20 @@ function CanvasView({
     </>
   )
 
+  // D193: nothing drawn on the open canvas itself (its rim stubs aside).
+  const emptyHere =
+    !data.nodes.some((n) => (n.canvas_id ?? null) === canvasId && !n.on_edge) &&
+    !data.groups.some((g) => (g.canvas_id ?? null) === canvasId) &&
+    !subsOf(data).some((sub) => sub.parent_id === canvasId)
+  // D193: a canvas switched to (Open, the breadcrumb, Esc) is fitted into view once drawn.
+  const shownCanvas = useRef(canvasId)
+  useEffect(() => {
+    if (shownCanvas.current === canvasId) return
+    shownCanvas.current = canvasId
+    const timer = setTimeout(() => void flow.fitView({ duration: 200, maxZoom: 1.2, padding: 0.15 }), 80)
+    return () => clearTimeout(timer)
+  }, [canvasId, flow])
+
   const dropTarget = (event: DragEvent) => {
     const element = (event.target as HTMLElement).closest('.react-flow__node')
     const id = element?.getAttribute('data-id') ?? null
@@ -1166,17 +1449,29 @@ function CanvasView({
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onNodeClick={(event, node) => {
+          // D193: a stub at the rim stands for a record outside the open sub-investigation.
+          if (node.type === 'stub') {
+            onOpenRecord?.(node.id.slice('stub:'.length))
+            return
+          }
           // A click with Ctrl, Cmd or Shift adds to the selection instead of replacing it; a
           // group can be part of it too, to add nodes to the group (A20).
           if (event.ctrlKey || event.metaKey || event.shiftKey) {
             onToggleNode(node.id)
             return
           }
-          onSelect({ kind: node.type === 'cgroup' ? 'group' : 'node', id: node.id })
+          onSelect({ kind: kindOf(node), id: node.id })
+        }}
+        onNodeDoubleClick={(_, node) => {
+          // A128: a double-click opens a box's canvas.
+          if (node.type === 'csub') onOpenSub?.(node.id)
         }}
         onEdgeClick={(_, edge) => onSelect({ kind: 'edge', id: edge.id })}
         onPaneClick={() => onSelect(null)}
-        onNodeContextMenu={(event, node) => menuAt(event, { kind: node.type === 'cgroup' ? 'group' : 'node', id: node.id })}
+        onNodeContextMenu={(event, node) => {
+          if (node.type === 'stub') return event.preventDefault()
+          menuAt(event, { kind: kindOf(node), id: node.id })
+        }}
         onEdgeContextMenu={(event, edge) => menuAt(event, { kind: 'edge', id: edge.id })}
         onSelectionContextMenu={(event) => menuAt(event, { kind: 'selection' })}
         onPaneContextMenu={(event) => menuAt(event, { kind: 'pane', at: position(event) })}
@@ -1209,10 +1504,12 @@ function CanvasView({
         onNodeDragStop={(_, __, dragged) => {
           const moved: Record<string, { x: number; y: number }> = {}
           for (const n of dragged) {
-            if (n.parentId) continue
+            // D193: a card inside an expanded box moves in the box's own layout.
+            const origin = n.parentId ? origins.get(n.parentId) : { x: 0, y: 0 }
+            if (!origin) continue // a group's member, placed by its group
             // A node drawn in place of its group moves the group (A23).
             const id = (n.data as { standsFor?: string }).standsFor ?? n.id
-            moved[id] = { x: n.position.x, y: n.position.y }
+            moved[id] = { x: n.position.x + origin.x, y: n.position.y + origin.y }
           }
           if (Object.keys(moved).length) onPositions(moved)
         }}
@@ -1233,7 +1530,15 @@ function CanvasView({
             {canvasTools}
           </Panel>
         )}
-        {data.nodes.length === 0 && data.groups.length === 0 && (
+        {emptyHere && canvasId !== null && (
+          <div className="canvas-empty">
+            <EmptyState icon="layers" title="This sub-investigation is empty">
+              Move nodes, groups or other sub-investigations into it with Move to… on their menus
+              {readOnly ? '.' : ', or double-click here to add a node.'}
+            </EmptyState>
+          </div>
+        )}
+        {emptyHere && canvasId === null && (
           <div className="canvas-empty">
             {readOnly ? (
               <EmptyState icon="hexagon" title="This investigation has no nodes">
