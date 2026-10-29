@@ -15,12 +15,18 @@ type Held = { end: 'start' | 'end'; atoms: number[]; ticked: boolean; why: strin
 /** D119: one of the user's own coordinates to drive, from and to as typed. */
 type Drive = { atoms: number[]; kind: string; start_value: number; end_value: number; from: string; to: string }
 
+/** D196: a coordinate kept fixed along the whole path, at the value typed. */
+type Constrain = { atoms: number[]; kind: string; start_value: number; end_value: number; value: string }
+
 const wrap = (degrees: number) => ((((degrees + 180) % 360) + 360) % 360) - 180
 /** Where a coordinate ends: a dihedral the short way round from its start value. */
 const shortTo = (kind: string, from: number, end: number) => (kind === 'dihedral' ? from + wrap(end - from) : end)
 const fixed = (kind: string, value: number) => value.toFixed(kind === 'distance' ? 3 : 1)
 const sameAtoms = (a: number[], b: number[]) => a.join('-') === b.join('-') || a.join('-') === [...b].reverse().join('-')
 const number = (text: string) => (text.trim() === '' ? Number.NaN : Number(text))
+/** Whether a value is off another by more than `pathtools.py check` allows (0.1 Å or 5°). */
+const differs = (kind: string, a: number, b: number) =>
+  kind === 'distance' ? Math.abs(a - b) > 0.1 : Math.abs(kind === 'dihedral' ? wrap(a - b) : a - b) > 5
 
 const PAIRS_KEY = 'chembook3d.scanPathPairs'
 
@@ -58,8 +64,8 @@ function tsHeading(ts: ScanPathTsEnd): string {
 
 /** D114, A60: a scan path between two nodes joined by an edge, run by a Claude Code cloud
  * session (D93). The dialog shows the atom match (D113, reviewed when doubtful), the
- * coordinates held at a TS end, the user's own coordinates to drive (D119) and the solvent,
- * and sends the job. */
+ * coordinates held at a TS end, the user's own coordinates to drive (D119), the ones to keep
+ * fixed (D196) and the solvent, and sends the job. */
 export function ScanPathDialog({ startId, endId, onClose }: { startId: string; endId: string; onClose: () => void }) {
   const [ends, setEnds] = useState({ start: startId, end: endId })
   const [members, setMembers] = useState<{ start: string | null; end: string | null }>({ start: null, end: null })
@@ -74,6 +80,9 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
   const [driveOrder, setDriveOrder] = useState<'together' | 'staged'>('together')
   const [driveText, setDriveText] = useState('')
   const [driveError, setDriveError] = useState<string | null>(null)
+  const [constrain, setConstrain] = useState<Constrain[]>([])
+  const [constrainText, setConstrainText] = useState('')
+  const [constrainError, setConstrainError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState<{
     job: CloudJob
@@ -129,6 +138,15 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
               ]
             }),
           )
+          setConstrain((rows) =>
+            rows.flatMap((row) => {
+              const start = measure(row.atoms.map((n) => a[n - 1]))
+              const end = measure(row.atoms.map((n) => b[n - 1]))
+              if (!start || !end) return []
+              const value = row.value === fixed(row.kind, row.start_value) ? fixed(row.kind, start.value) : row.value
+              return [{ ...row, start_value: start.value, end_value: end.value, value }]
+            }),
+          )
         },
         (err: unknown) => !cancelled && setAnswer({ key, plan: null, error: errorText(err) }),
       )
@@ -159,6 +177,7 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
     setPairs(null)
     setReviewing(null)
     setDrive([]) // numbered in the start's atoms, which are now the other end's
+    setConstrain([])
   }
 
   const atomsOf = (text: string): number[] | null => {
@@ -212,6 +231,10 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
       setDriveError(`${name} is listed already.`)
       return
     }
+    if (constrain.some((c) => sameAtoms(c.atoms, atoms))) {
+      setDriveError(`${name} is kept fixed below, so it cannot be driven.`)
+      return
+    }
     const row = {
       atoms,
       kind: a.kind,
@@ -227,6 +250,35 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
 
   const changeDrive = (index: number, change: Partial<Drive>) => setDrive(drive.map((d, i) => (i === index ? { ...d, ...change } : d)))
   const driveBad = drive.find((d) => !Number.isFinite(number(d.from)) || !Number.isFinite(number(d.to)))
+
+  // D196: a coordinate kept at one value along the whole path, in every strategy.
+  const addConstrain = () => {
+    if (!plan) return
+    const atoms = atomsOf(constrainText)
+    if (!atoms) {
+      setConstrainError(`Give 2 to 4 different atom numbers from 1 to ${startAtoms.length}.`)
+      return
+    }
+    const a = measure(atoms.map((n) => startAtoms[n - 1]))
+    const b = measure(atoms.map((n) => endAtoms[n - 1]))
+    if (!a || !b) return
+    const name = `${a.kind} ${atoms.join('–')}`
+    let why: string | null = null
+    if (heldDriven.some((h) => sameAtoms(h.atoms, atoms))) why = `${name} is held at the TS and driven to the other end's value, so it cannot stay fixed.`
+    else if (drive.some((d) => sameAtoms(d.atoms, atoms))) why = `${name} is driven above, so it cannot stay fixed.`
+    else if ([...plan.match.formed, ...plan.match.broken].some((pair) => sameAtoms(pair, atoms))) {
+      why = `${name} forms or breaks along the path, so it cannot stay fixed.`
+    } else if (constrain.some((c) => sameAtoms(c.atoms, atoms))) why = `${name} is listed already.`
+    if (why) {
+      setConstrainError(why)
+      return
+    }
+    setConstrain([...constrain, { atoms, kind: a.kind, start_value: a.value, end_value: b.value, value: fixed(a.kind, a.value) }])
+    setConstrainText('')
+    setConstrainError(null)
+  }
+
+  const constrainBad = constrain.find((c) => !Number.isFinite(number(c.value)))
 
   const send = () => {
     if (!plan) return
@@ -247,6 +299,7 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
           to: number(d.to),
         })),
         drive_order: driveOrder,
+        constrain: constrain.map((c) => ({ atoms: c.atoms, value: number(c.value) })),
         solvent: chosenSolvent,
       })
       .then(
@@ -330,14 +383,16 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
           <button onClick={onClose}>Cancel</button>
           <button
             className="primary"
-            disabled={!plan || busy || sending || missing.length > 0 || driveBad !== undefined}
+            disabled={!plan || busy || sending || missing.length > 0 || driveBad !== undefined || constrainBad !== undefined}
             onClick={send}
             title={
               missing.length
                 ? `Tick the coordinates that make “${missing[0].label}” a TS`
                 : driveBad
                   ? `Give numbers for ${driveBad.kind} ${driveBad.atoms.join('–')}`
-                  : 'Write the job and start a Claude Code cloud session on it (D93)'
+                  : constrainBad
+                    ? `Give a number for ${constrainBad.kind} ${constrainBad.atoms.join('–')}`
+                    : 'Write the job and start a Claude Code cloud session on it (D93)'
             }
           >
             {sending ? 'Sending…' : 'Send'}
@@ -365,7 +420,10 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
                     onChange={(event) => {
                       setMembers({ ...members, [which]: event.target.value })
                       setPairs(null)
-                      if (which === 'start') setDrive([])
+                      if (which === 'start') {
+                        setDrive([])
+                        setConstrain([])
+                      }
                     }}
                   >
                     {plan[which].members.map((m) => (
@@ -565,6 +623,76 @@ export function ScanPathDialog({ startId, endId, onClose }: { startId: string; e
                 </label>
               </div>
             )}
+          </section>
+          <section className="scan-path-section" aria-label="Constrain these">
+            <p>
+              <strong>Constrain these (optional)</strong>{' '}
+              <span className="muted small">
+                Kept fixed at one value along the whole path, in every scan the agent runs, yours and its own. A bond that forms or breaks, or a
+                coordinate that is driven, cannot be kept fixed.
+              </span>
+            </p>
+            {constrain.length > 0 && (
+              <table className="scan-path-held">
+                <thead>
+                  <tr>
+                    <th>Coordinate (start's numbering)</th>
+                    <th>At “{plan.start.label}”</th>
+                    <th>At “{plan.end.label}”</th>
+                    <th>Keep at</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {constrain.map((c, i) => {
+                    const name = `${c.kind} ${c.atoms.join('–')}`
+                    const kept = number(c.value)
+                    const offEnd = Number.isFinite(kept) && differs(c.kind, kept, c.end_value)
+                    return (
+                      <tr key={c.atoms.join('-')} aria-label={`Constrain ${name}`}>
+                        <td>
+                          {c.kind} {c.atoms.map((a) => `${startAtoms[a - 1]?.element ?? ''}${a}`).join('–')}
+                        </td>
+                        <td className="num">{format(c.kind, c.start_value)}</td>
+                        <td className="num">{format(c.kind, c.end_value)}</td>
+                        <td className="num">
+                          <input
+                            className="drive-value"
+                            aria-label={`Keep ${name} at`}
+                            value={c.value}
+                            onChange={(event) => setConstrain(constrain.map((x, k) => (k === i ? { ...x, value: event.target.value } : x)))}
+                          />{' '}
+                          {unit(c.kind)}
+                        </td>
+                        <td>
+                          {offEnd && (
+                            <span className="muted small" role="note">
+                              the end differs here, so the path cannot match it{' '}
+                            </span>
+                          )}
+                          <button className="small" aria-label={`Remove ${name} from the fixed`} onClick={() => setConstrain(constrain.filter((_, k) => k !== i))}>
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+            <div className="scan-path-add">
+              <input
+                aria-label="Atoms to constrain"
+                placeholder="atoms, e.g. 2 6 10 11"
+                value={constrainText}
+                onChange={(event) => setConstrainText(event.target.value)}
+                onKeyDown={(event) => event.key === 'Enter' && addConstrain()}
+              />
+              <button className="small" aria-label="Add a coordinate to constrain" onClick={addConstrain}>
+                Add
+              </button>
+              {constrainError && <span role="alert">{constrainError}</span>}
+            </div>
           </section>
           <label className="field">
             <span>Solvent (xTB ALPB)</span>

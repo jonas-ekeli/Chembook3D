@@ -226,3 +226,72 @@ test('your own coordinates to drive are sent with the job', async ({ page }) => 
   expect(sent.coordinates[0].from).toBeCloseTo(2.6, 3)
   expect(sent.coordinates[1].to).toBeCloseTo(long, 1)
 })
+
+test('coordinates to keep fixed are sent with the job', async ({ page }) => {
+  // T-UI-72, D196: rows typed under "Constrain these", at the start's value unless typed, a
+  // note when the end differs, refused when held at the TS or driven, and the job's `constrain`.
+  test.slow() // software WebGL is slow on the Windows runners
+  await newInvestigation(page, 'Scan path with fixed coordinates')
+  const stretched = reversed.map((atom, i) => (i === reversed.length - 7 ? (['H', atom[1] + 0.45, atom[2] + 0.45, atom[3]] as const) : atom))
+  const ids: string[] = []
+  for (const body of [
+    { label: 'start', xyz: xyz(GLYCEROL), pos_x: 100, pos_y: 100, charge: 0, multiplicity: 1 },
+    { label: 'guess', xyz: xyz(stretched), pos_x: 400, pos_y: 100, role: 'transition_state' },
+  ]) {
+    const response = await page.request.post('/api/nodes', { data: body })
+    expect(response.ok()).toBeTruthy()
+    ids.push(((await response.json()) as { id: string }).id)
+  }
+  const edge = await page.request.post('/api/transitions', { data: { source_id: ids[0], target_id: ids[1] } })
+  expect(edge.ok()).toBeTruthy()
+  await page.reload()
+  await canvasNode(page, 'start').click()
+  await canvasNode(page, 'guess').click({ modifiers: ['Control'] })
+  await page.getByLabel('Selection inspector').getByRole('button', { name: 'Scan path…' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'Scan path' })
+  await expect(dialog.getByLabel('Scan path plan')).toContainText('From “start” to “guess”')
+  const fixed = dialog.getByLabel('Constrain these')
+  await expect(fixed.getByRole('table')).toHaveCount(0)
+  await dialog.getByLabel('Atoms to hold').fill('1 2')
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await dialog.getByLabel('Atoms to drive').fill('1 3')
+  await dialog.getByRole('button', { name: 'Add a coordinate to drive' }).click()
+  const atoms = dialog.getByLabel('Atoms to constrain')
+  // Held at the TS or driven: neither can stay fixed.
+  await atoms.fill('2 1')
+  await atoms.press('Enter')
+  await expect(fixed.getByRole('alert')).toContainText('is held at the TS')
+  await atoms.fill('3 1')
+  await atoms.press('Enter')
+  await expect(fixed.getByRole('alert')).toContainText('is driven above')
+
+  await atoms.fill('2 6')
+  await atoms.press('Enter')
+  await atoms.fill('4 1 2 6')
+  await dialog.getByRole('button', { name: 'Add a coordinate to constrain' }).click()
+  await expect(fixed.getByRole('alert')).toHaveCount(0)
+  const bond = fixed.getByLabel('Keep distance 2–6 at')
+  const start = Number(await bond.inputValue())
+  expect(start).toBeGreaterThan(1.3)
+  expect(start).toBeLessThan(1.5)
+  // Both ends share the value: no note until another value is typed.
+  const row = fixed.getByLabel('Constrain distance 2–6')
+  await expect(row.getByRole('note')).toHaveCount(0)
+  await bond.fill('')
+  await expect(dialog.getByRole('button', { name: 'Send' })).toBeDisabled()
+  await bond.fill('1.6')
+  await expect(row.getByRole('note')).toContainText('the end differs here')
+  await dialog.getByRole('button', { name: 'Send' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('is saved but could not be started')
+  const jobs = (await (await page.request.get('/api/jobs')).json()) as {
+    scan_path: { constrain: { atoms: number[]; value: number; start_value: number }[] }
+  }[]
+  const sent = jobs[0].scan_path.constrain
+  expect(sent.map((c) => c.atoms)).toEqual([
+    [2, 6],
+    [4, 1, 2, 6],
+  ])
+  expect(sent[0].value).toBeCloseTo(1.6, 3)
+  expect(sent[1].value).toBeCloseTo(sent[1].start_value, 1)
+})

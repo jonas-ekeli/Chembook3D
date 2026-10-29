@@ -53,6 +53,7 @@ KINDS = {2: "distance", 3: "angle", 4: "dihedral"}
 MAX_HELD = 12
 MAX_DRIVE = 8  # the user's own coordinates (D119)
 DRIVE_ORDERS = ("together", "staged")  # one concerted scan, or one stage per row in order
+MAX_CONSTRAIN = 8  # coordinates the user keeps fixed along the whole path (D196)
 
 
 @dataclass
@@ -575,14 +576,7 @@ def check_drive(
         for key, default in (("from", start_value), ("to", end_value)):
             given = row.get(key)
             number = default if given is None else float(given)
-            if not np.isfinite(number):
-                raise RecordError(f"{name}: give a number")
-            if kind == "distance" and not 0.5 <= number <= 15:
-                raise RecordError(f"{name}: a distance from 0.5 to 15 Å")
-            if kind == "angle" and not 0 < number < 180:
-                raise RecordError(f"{name}: an angle between 0° and 180°")
-            if kind == "dihedral" and not -540 <= number <= 540:
-                raise RecordError(f"{name}: a dihedral from −540° to 540°")
+            _check_value(name, kind, number)
             ends.append(number)
         out.append(
             {
@@ -595,6 +589,122 @@ def check_drive(
             }
         )
     return {"order": order, "coordinates": out}
+
+
+def _check_value(name: str, kind: str, number: float) -> None:
+    """The ranges a typed value of a distance, angle or dihedral keeps to (A65)."""
+    if not np.isfinite(number):
+        raise RecordError(f"{name}: give a number")
+    if kind == "distance" and not 0.5 <= number <= 15:
+        raise RecordError(f"{name}: a distance from 0.5 to 15 Å")
+    if kind == "angle" and not 0 < number < 180:
+        raise RecordError(f"{name}: an angle between 0° and 180°")
+    if kind == "dihedral" and not -540 <= number <= 540:
+        raise RecordError(f"{name}: a dihedral from −540° to 540°")
+
+
+def check_constrain(
+    plan_: Plan,
+    constrain: list[dict[str, Any]],
+    held: list[dict[str, Any]],
+    driven: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """The coordinates the user keeps fixed along the whole path (D196), checked: 2 to 4 atoms
+    of the structure, none a coordinate that is held at a TS, driven, or a bond that forms or
+    breaks between the ends; each at its `value` (the start's, unless given)."""
+    if len(constrain) > MAX_CONSTRAIN:
+        raise RecordError(f"constrain at most {MAX_CONSTRAIN} coordinates")
+    count = len(plan_.start_rows)
+    summary = atom_matching.summary(plan_.match)
+    changing = [list(pair) for pair in summary["formed"] + summary["broken"]]
+    if plan_.species is not None:
+        changing += [list(pair) for pair in plan_.species.bonds]
+    out: list[dict[str, Any]] = []
+    for row in constrain:
+        atoms = row.get("atoms")
+        if (
+            not isinstance(atoms, list)
+            or len(atoms) not in KINDS
+            or not all(isinstance(x, int) and 1 <= x <= count for x in atoms)
+            or len(set(atoms)) != len(atoms)
+        ):
+            raise RecordError(
+                f"a coordinate to constrain names 2 to 4 different atoms from 1 to {count}"
+            )
+        kind = KINDS[len(atoms)]
+        name = f"{kind} {'–'.join(map(str, atoms))}"
+        if any(_same(atoms, h["atoms"]) for h in held):
+            raise RecordError(
+                f"{name} is held at the TS and driven to the other end's value, so it cannot "
+                "stay fixed"
+            )
+        if driven and any(_same(atoms, d["atoms"]) for d in driven["coordinates"]):
+            raise RecordError(f"{name} is driven, so it cannot stay fixed")
+        if any(_same(atoms, pair) for pair in changing):
+            raise RecordError(f"{name} forms or breaks along the path, so it cannot stay fixed")
+        if any(_same(atoms, o["atoms"]) for o in out):
+            raise RecordError(f"{name} is listed twice")
+        start_value = value(plan_.start_rows, atoms)
+        given = row.get("value")
+        number = start_value if given is None else float(given)
+        _check_value(name, kind, number)
+        out.append(
+            {
+                "kind": kind,
+                "atoms": atoms,
+                "value": round(number, 4),
+                "start_value": round(start_value, 4),
+                "end_value": round(value(plan_.renumbered, atoms), 4),
+            }
+        )
+    return out
+
+
+def _constrain_text(constrain: list[dict[str, Any]]) -> str:
+    lines = []
+    for row in constrain:
+        unit = "Å" if row["kind"] == "distance" else "°"
+        atoms = ", ".join(str(a) for a in row["atoms"])
+        lines.append(
+            f"- {row['kind']} {atoms}: at {row['value']:.3f} {unit} "
+            f"(start {row['start_value']:.3f}, end {row['end_value']:.3f} {unit})"
+        )
+    return "\n".join(lines)
+
+
+def _constrain_brief(constrain: list[dict[str, Any]]) -> str:
+    """The brief's part on the coordinates kept fixed (D196), empty without them; it says
+    when one is kept away from an end's value, where the path then cannot match that end."""
+    if not constrain:
+        return ""
+
+    def off(row: dict[str, Any], key: str) -> bool:
+        size = len(row["atoms"])
+        return abs(pathtools._wrapped(row[key] - row["value"], size)) > pathtools.REACHED[size]
+
+    def names(rows: list[dict[str, Any]], one: str, more: str) -> str:
+        listed = ", ".join(f"{r['kind']} {'–'.join(map(str, r['atoms']))}" for r in rows)
+        return f"{listed} {one if len(rows) == 1 else more}"
+
+    at_start = [r for r in constrain if off(r, "start_value")]
+    at_end = [r for r in constrain if off(r, "end_value")]
+    start_note = (
+        f" At the start, {names(at_start, 'is', 'are')} not at the value asked for: the first "
+        "optimisation, with them in `$constrain`, takes the start there; the path starts from "
+        "that structure."
+        if at_start
+        else ""
+    )
+    end_note = (
+        f" At the end node, {names(at_end, 'has', 'have')} another value, so the path cannot "
+        "match the end there: that is the user's choice. Judge the end as usual, and if it "
+        "misses only because of these coordinates, say so in `missed`."
+        if at_end
+        else ""
+    )
+    notes = (start_note + end_note).strip()
+    text = CONSTRAIN.format(rows=_constrain_text(constrain), notes="\n\n" + notes if notes else "")
+    return _wrapped(text)
 
 
 def _drive_text(drive: dict[str, Any]) -> str:
@@ -648,7 +758,7 @@ Atoms are numbered from 1 everywhere, as xTB numbers them.
   form and break between the ends by the app's rule; `mapping` gives each start atom's number
   in the end's own file.
 - `inputs/path.json`: the settings below, machine-readable, and `active`: the {active_count}
-  atoms the end is judged on (below).{species_file}{drive_file}{mode_files}
+  atoms the end is judged on (below).{species_file}{drive_file}{constrain_file}{mode_files}
 
 Charge {charge}, multiplicity {multiplicity}: run every xtb call with
 `--gfn 2 --chrg {charge} --uhf {uhf}{solvent_flag}`{solvent_text}.
@@ -665,7 +775,7 @@ left free. Holding them means the path passes through the TS's values, not that 
 fixed: at the TS end of the path they are at the TS's values (within 0.05 Å or 2°), and from
 there they are driven to the other end's values, usually as the path's reaction coordinate.
 Never optimise the TS end without them in `$constrain`.
-{species}{drive}
+{species}{drive}{constrain}
 ## Running xTB scans
 
 A stage is `xtb <structure>.xyz --opt --input scan.inp <the flags above> > scan.out 2>&1`;
@@ -810,7 +920,7 @@ the app imports it all the same, saying in its notes that it did not pass.
 
   `gate` is `"passed"` or `"missed"`; `missed` lists the reasons in a few words each (for
   example "end RMSD over the reacting atoms 0.81 Å"). `summary` says in two or three sentences
-  what the best path does and how close it came.{user_result}{species_result}
+  what the best path does and how close it came.{user_result}{constrain_result}{species_result}
 - `outputs/feedback.md` (optional): anything in these instructions or the helper that got in
   your way, and what would have helped, for the app's developer. The app keeps it with the job.
 """
@@ -852,6 +962,28 @@ USER_STAGES = {
     "staged": "One stage per line, in the order given; a later stage keeps what earlier stages "
     "drove, at the values they reached.",
 }
+
+CONSTRAIN = """
+## Coordinates the user keeps fixed
+
+The user asked to keep these at the values given along the whole path, whatever the strategy:
+
+{rows}
+
+These are in `path.json` as `constrain` (`value` for each, in the start's numbering). Put every
+one in the `$constrain` block of every xtb call, at its value: every stage of every strategy,
+the TS's push downhill and any last optimisation too, after the lines a `$scan` drives (so the
+`$scan` numbers stay those of the driven lines). Never drop one or change its value; a stiffer
+force constant is fine if one slips. The trace says whether each stayed. xTB's own path finder
+may not keep them: use its path only if `check` says they stayed. `pathtools.py check ...
+--settings inputs/path.json` reports under `constrained` how far each strayed from its value
+along the path (`largest_change`; `kept` within 0.1 Å or 5°), and a path that lets one go
+does not pass.{notes}
+"""
+
+CONSTRAIN_RESULT = """
+  `constrained` is `check`'s `constrained` for the path returned: `[{"atoms": "3-7",
+  "largest_change": 0.02, "kept": true}]`."""
 
 USER_RESULT = """
   `user_strategy` reports the user's design either way: `{"gate": "passed" or "missed",
@@ -1105,15 +1237,18 @@ def create_job(
     solvent: str | None,
     drive: list[dict[str, Any]] | None = None,
     drive_order: str = "together",
+    constrain: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """D114: the scan path job folder, ready to start (D93). The database is not changed.
-    `drive` lists the user's own coordinates (D119), run first as given."""
+    `drive` lists the user's own coordinates (D119), run first as given; `constrain` the ones
+    kept fixed along the whole path (D196)."""
     if solvent:
         solvent = SOLVENT_NAMES.get(solvent.strip().lower(), solvent.strip().lower())
         if solvent not in ALPB_SOLVENTS:
             raise RecordError(f"xTB's ALPB has no solvent “{solvent}”")
     held = check_held(plan_, held)
     driven = check_drive(plan_, drive or [], drive_order, held)
+    constrained = check_constrain(plan_, constrain or [], held, driven)
     start, end, match = plan_.start, plan_.end, plan_.match
     summary = atom_matching.summary(match)
     mapping = {
@@ -1135,6 +1270,8 @@ def create_job(
     }
     if driven is not None:
         settings["drive"] = driven
+    if constrained:
+        settings["constrain"] = constrained
     joining = _species_settings(plan_) if plan_.species is not None else None
     if joining is not None:
         settings["species"] = joining
@@ -1214,6 +1351,13 @@ def create_job(
             else ""
         ),
         user_result=USER_RESULT if driven else "",
+        constrain_file=(
+            "\n  With coordinates the user keeps fixed, `constrain` too (below)."
+            if constrained
+            else ""
+        ),
+        constrain=_constrain_brief(constrained),
+        constrain_result=CONSTRAIN_RESULT if constrained else "",
         **_species_text(plan_, joining, solvent),
     )
     inputs = [
@@ -1244,6 +1388,7 @@ def create_job(
             text=json.dumps(settings, indent=2),
             description="charge, multiplicity, solvent, the coordinates held at a TS end"
             + (" and the user's own coordinates" if driven else "")
+            + (" and the ones kept fixed" if constrained else "")
             + (" and the species that joins or leaves" if joining else ""),
         ),
     ]
@@ -1363,6 +1508,27 @@ def _species_note(joining: dict[str, Any], report: Any) -> str:
     return text
 
 
+def _constrain_note(constrain: list[dict[str, Any]], report: Any) -> str:
+    """D196: the coordinates kept fixed, and those the path let go of by `check`'s report."""
+    rows = []
+    for row in constrain:
+        number = float(row.get("value", 0))
+        shown = f"{number:.2f} Å" if row.get("kind") == "distance" else f"{number:.1f}°"
+        rows.append(f"{row.get('kind')} {'–'.join(map(str, row.get('atoms', [])))} at {shown}")
+    text = "Kept fixed as you asked (D196): " + ", ".join(rows) + "."
+    if isinstance(report, list):
+        loose = [
+            f"{r.get('atoms')} (by {float(r['largest_change']):.2f})"
+            for r in report
+            if isinstance(r, dict)
+            and r.get("kept") is False
+            and isinstance(r.get("largest_change"), int | float)
+        ]
+        if loose:
+            text += " The path let go of " + ", ".join(loose) + "."
+    return text
+
+
 def _notes(
     job: dict[str, Any], result: dict[str, Any], start: str, end: str, feedback: bool = False
 ) -> str:
@@ -1413,6 +1579,9 @@ def _notes(
             lines.append(
                 f"The agent's own design (yours {verdict}" + (f": {why})." if why else ").")
             )
+    constrain = (job.get("scan_path") or {}).get("constrain")
+    if isinstance(constrain, list) and constrain:
+        lines.append(_constrain_note(constrain, path.get("constrained")))
     design = str(path.get("design") or "").strip()
     if design:
         lines.append(f"Design: {design}")
