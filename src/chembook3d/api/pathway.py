@@ -25,6 +25,7 @@ from chembook3d.api.routes import (
     _investigation,
     _node_out,
 )
+from chembook3d.api.sub_investigations import SubInvestigationOut, subs_out
 from chembook3d.models import (
     AlignmentSet,
     Branch,
@@ -163,6 +164,7 @@ class GroupOut(BaseModel):
     representative_id: str | None
     incoming_branch_ids: list[str]
     outgoing_branch_id: str | None
+    canvas_id: str | None = None  # D193: the sub-investigation it and its members are in
     pos_x: float
     pos_y: float
     layout: str
@@ -214,6 +216,7 @@ class CanvasOut(BaseModel):
     transitions: list[TransitionOut]
     groups: list[GroupOut]
     notes: list[NoteOut]  # pinned to node cards (D85)
+    sub_investigations: list[SubInvestigationOut] = []  # D193: boxes with canvases of their own
 
 
 class PositionsIn(BaseModel):
@@ -443,6 +446,7 @@ def _group_out(session: Session, group: GroupNode) -> GroupOut:
         representative_id=group.representative_id,
         incoming_branch_ids=[b.id for b in group.incoming_branches],
         outgoing_branch_id=group.outgoing_branch_id,
+        canvas_id=group.canvas_id,
         pos_x=group.pos_x,
         pos_y=group.pos_y,
         layout=group.layout,
@@ -515,6 +519,7 @@ def canvas(request: Request, session: DbSession):
         ],
         groups=[_group_out(session, g) for g in group_service.list_groups(session)],
         notes=[note_out(n) for n in note_service.list_all(session)],
+        sub_investigations=subs_out(session),
     )
 
 

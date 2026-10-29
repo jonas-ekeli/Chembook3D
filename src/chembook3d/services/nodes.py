@@ -19,6 +19,7 @@ from chembook3d.models import (
     ReactionStep,
     Role,
     Status,
+    SubInvestigation,
     TransitionSpecies,
 )
 from chembook3d.services import concentrations, history, transitions
@@ -97,6 +98,18 @@ def _validate_link(session: Session, node: Node | None, field: str, value: Any) 
     model = ReactionStep if field == "step_id" else Branch
     if session.get(model, value) is None:
         raise NodeError("unknown reaction step" if field == "step_id" else "unknown branch")
+    return value
+
+
+def _canvas(session: Session, node: Node, value: Any) -> str | None:
+    """D193: a new node goes on the canvas that is open: the main one (None) or a
+    sub-investigation's. A free species is on none."""
+    if value is None:
+        return None
+    if node.kind == NodeKind.SPECIES:
+        raise NodeError("A free species is not drawn on any canvas (D69)")
+    if not isinstance(value, str) or session.get(SubInvestigation, value) is None:
+        raise NodeError("unknown sub-investigation")
     return value
 
 
@@ -184,6 +197,8 @@ def create(session: Session, fields: dict[str, Any], xyz_text: str | None = None
     for field, value in fields.items():
         if field in ("step_id", "branch_id"):
             setattr(node, field, _validate_link(session, node, field, value))
+        elif field == "canvas_id":
+            node.canvas_id = _canvas(session, node, value)
         elif field == "concentration":
             node.concentration = _concentration(node, value)
         else:
@@ -199,6 +214,8 @@ def create(session: Session, fields: dict[str, Any], xyz_text: str | None = None
 def update(session: Session, node_id: str, changes: dict[str, Any]) -> Node:
     node = get(session, node_id)
     for field, value in changes.items():
+        if field == "canvas_id":
+            raise NodeError("A node changes canvas with Move to… (D193), not by editing it")
         if field not in EDITABLE_FIELDS and field not in LAYOUT_FIELDS:
             raise NodeError(f"'{field}' cannot be edited")
         if field in ("step_id", "branch_id"):
@@ -269,6 +286,8 @@ def derive(session: Session, node: Node, geometry: list[list[Any]]) -> Node:
         # The derived node starts at the same place in the mechanism; the user can move it.
         step_id=node.step_id,
         branch_id=node.branch_id,
+        # D193: on its parent's canvas, beside it; a group member's on its group's.
+        canvas_id=node.canvas_id,
         pos_x=node.pos_x + DERIVED_NODE_OFFSET,
         pos_y=node.pos_y + DERIVED_NODE_OFFSET,
         view_rotation=node.view_rotation,
@@ -324,6 +343,10 @@ def delete(session: Session, node_id: str) -> dict[str, Any]:
         if group is not None and group.representative_id == node.id:
             history.record(session, "group", group.id, "update", "representative_id", node.id, None)
             group.representative_id = None
+    # D193: a sub-investigation it was the face of shows none until another is picked.
+    for sub in session.scalars(select(SubInvestigation).where(SubInvestigation.face_id == node.id)):
+        history.record(session, "sub_investigation", sub.id, "update", "face_id", node.id, None)
+        sub.face_id = None
     history.record(session, "node", node.id, "delete", old=snapshot(node))
     session.delete(node)
     session.flush()

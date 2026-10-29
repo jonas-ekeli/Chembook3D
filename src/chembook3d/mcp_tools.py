@@ -44,6 +44,7 @@ FIELD_HELP = {
         "A build_structure answer's build_id: its coordinates are used, so no xyz is needed (D148)."
     ),
     "group_id": "Id of a group node.",
+    "sub_investigation_id": "Id of a sub-investigation (a box with a canvas of its own, D193).",
     "step_id": "Id of a reaction step.",
     "branch_id": "Id of a branch.",
     "transition_id": "Id of a transition (edge).",
@@ -126,8 +127,9 @@ TOOLS: list[ToolSpec] = [
         "GET",
         "/api/canvas",
         "Everything on the canvas in one answer: nodes (with xyz), free species, steps, branches, "
-        "transitions with their free species, groups and pinned notes. Can be large; prefer the "
-        "list and get tools for one kind of record.",
+        "transitions with their free species, groups, pinned notes and sub-investigations. Each "
+        "node and group has the canvas_id of the sub-investigation it is drawn in (none: the "
+        "main canvas). Can be large; prefer the list and get tools for one kind of record.",
     ),
     T(
         "list_nodes",
@@ -584,8 +586,9 @@ TOOLS: list[ToolSpec] = [
         "Create a node (or, with kind 'species', a free species), optionally with coordinates "
         "(xyz, or a build_structure answer's build_id, whose charge and multiplicity it takes "
         "when these are not given). A new node is usually 'planned' until calculations are "
-        "imported on it.",
+        "imported on it. canvas_id puts it inside a sub-investigation (D193).",
         exclude=("view_rotation",),
+        help={"canvas_id": "Id of the sub-investigation whose canvas it goes on; none: main."},
     ),
     T(
         "update_node",
@@ -595,7 +598,7 @@ TOOLS: list[ToolSpec] = [
         "Change a node's label, role, status, charge, multiplicity, tags, notes, step, branch "
         "or position. Only the fields given change. Coordinates: set_coordinates; kind: "
         "set_node_kind.",
-        exclude=("xyz", "kind", "view_rotation"),
+        exclude=("xyz", "kind", "view_rotation", "canvas_id", "build_id"),
     ),
     T(
         "set_coordinates",
@@ -736,12 +739,62 @@ TOOLS: list[ToolSpec] = [
         "outgoing branch, position or layout ('grid', 'vertical' or 'horizontal').",
     ),
     T(
+        "create_sub_investigation",
+        "write",
+        "POST",
+        "/api/sub-investigations",
+        "Tuck nodes, groups and sub-investigations that are on one canvas into a new "
+        "sub-investigation (D193): a box with a canvas of its own for a side mechanism, e.g. a "
+        "conformer interconversion. Nothing is deleted and edges stay: an edge to a node inside "
+        "is drawn to the box. The box has no energy; pathways go through the real nodes inside.",
+        help={
+            "label": "The sub-investigation's name.",
+            "ids": "Ids of the nodes, groups and sub-investigations that move into it.",
+            "face_id": "The node inside whose structure the closed box shows (default: the "
+            "first node given).",
+            "with_groups": "A group member given alone moves its whole group; set it only "
+            "after telling the user.",
+            "canvas_id": "Only for an empty box: the sub-investigation it goes in (none: main).",
+        },
+    ),
+    T(
+        "list_sub_investigations",
+        "read",
+        "GET",
+        "/api/sub-investigations",
+        "The sub-investigations (D193): name, notes, the box it sits in (parent_id), its face, "
+        "the chain of boxes from the main canvas (path) and how many nodes, TSs, groups and "
+        "sub-investigations it holds at any depth.",
+    ),
+    T(
+        "move_to_sub_investigation",
+        "write",
+        "POST",
+        "/api/sub-investigations/move",
+        "Move nodes, groups and sub-investigations onto a sub-investigation's canvas, or back to "
+        "the main canvas (target_id left out). Edges stay.",
+        help={
+            "ids": "Ids of the nodes, groups and sub-investigations to move.",
+            "target_id": "Id of the sub-investigation; leave out for the main canvas.",
+            "with_groups": "A group member given alone moves its whole group; set it only "
+            "after telling the user.",
+        },
+    ),
+    T(
+        "update_sub_investigation",
+        "write",
+        "PATCH",
+        "/api/sub-investigations/{sub_investigation_id}",
+        "Rename a sub-investigation, change its notes, its face (a node inside it) or the box's "
+        "position on its canvas.",
+    ),
+    T(
         "move_on_canvas",
         "write",
         "PUT",
         "/api/positions",
-        "Move nodes and groups on the canvas.",
-        help={"positions": "Per node or group id, its new {x, y} in px."},
+        "Move nodes, groups and sub-investigation boxes on their canvas.",
+        help={"positions": "Per node, group or sub-investigation id, its new {x, y} in px."},
     ),
     T(
         "create_note",
@@ -1060,6 +1113,11 @@ CONFIRM_DESCRIPTIONS = {
     "delete_group": "Delete a group with its contents: its members, their calculations and "
     "every edge touching any of them.",
     "dissolve_group": "Dissolve a group: the members stay as nodes, edges to the group go.",
+    "delete_sub_investigation": "Delete a sub-investigation with everything inside it: its "
+    "nodes with their calculations, its groups, the sub-investigations inside it and every edge "
+    "touching any of them. To keep the contents, use dissolve_sub_investigation.",
+    "dissolve_sub_investigation": "Dissolve a sub-investigation: what it holds goes back onto "
+    "the canvas the box is on, where the box was; nothing is deleted.",
     "delete_step": "Delete a reaction step; its nodes stay with no step.",
     "delete_branch": "Delete a branch; its nodes stay with no branch.",
     "delete_transition": "Delete a transition (edge).",

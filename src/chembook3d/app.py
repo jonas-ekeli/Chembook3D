@@ -41,6 +41,7 @@ from chembook3d.api.server_files import copies as server_copies
 from chembook3d.api.server_files import router as server_files_router
 from chembook3d.api.snapshot import router as snapshot_router
 from chembook3d.api.sterics import router as steric_router
+from chembook3d.api.sub_investigations import router as sub_investigation_router
 from chembook3d.api.turnover import router as turnover_router
 from chembook3d.api.view_state import router as view_state_router
 from chembook3d.services.imports import Staging
@@ -135,6 +136,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(pathway_router)
     app.include_router(energy_router)
     app.include_router(energy_profile_router)  # D190
+    app.include_router(sub_investigation_router)  # D193
     app.include_router(snapshot_router)
     app.include_router(steric_router)
     app.include_router(selectivity_router)

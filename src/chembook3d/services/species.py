@@ -34,6 +34,7 @@ from chembook3d.models import (
     LevelOfTheory,
     Node,
     NodeKind,
+    SubInvestigation,
     Transition,
     TransitionSpecies,
 )
@@ -134,10 +135,15 @@ def set_kind(session: Session, node_id: str, kind: Any) -> Node:
             raise RecordError("Remove this node's transitions before making it a free species")
         if node.group_id is not None:
             raise RecordError("Take this node out of its group before making it a free species")
-        for field in ("step_id", "branch_id"):
+        # D193: a species is on no canvas, so it is nobody's face either.
+        for field in ("step_id", "branch_id", "canvas_id"):
             if getattr(node, field) is not None:
                 history.record(session, "node", node.id, "update", field, getattr(node, field))
                 setattr(node, field, None)
+        faced = select(SubInvestigation).where(SubInvestigation.face_id == node.id)
+        for sub in session.scalars(faced):
+            history.record(session, "sub_investigation", sub.id, "update", "face_id", node.id)
+            sub.face_id = None
     elif usage(session, node.id):
         raise RecordError("Remove this species from its transitions before making it a node")
     elif node.concentration is not None:  # D160: only a free species has one

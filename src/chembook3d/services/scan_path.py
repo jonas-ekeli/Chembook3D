@@ -1494,6 +1494,7 @@ def _import_result(session: Session, folder: Path, job_id: str, again: bool) -> 
         group = session.get(GroupNode, start.group_id) if start.group_id else None
         options.step_id = start.step_id or (group.step_id if group else None)
         options.branch_id = start.branch_id or (group.outgoing_branch_id if group else None)
+        options.canvas_id = start.canvas_id  # D193
         a = _place(session, start)
         b = _place(session, end) if end is not None else (a[0] + 400.0, a[1])
         options.pos_x = a[0] + NODE_GAP * (b[0] - a[0])

@@ -142,6 +142,7 @@ class NodeOut(BaseModel):
     branch_id: str | None
     group_id: str | None
     origin_branch_id: str | None
+    canvas_id: str | None = None  # D193: the sub-investigation it is drawn in; none: main canvas
     pos_x: float
     pos_y: float
     view_rotation: list[float] | None
@@ -176,6 +177,7 @@ class NodeIn(BaseModel):
     # of Settings' `solvents`, or any name with "molarity"), {"kind": "molar", "molarity": 0.1};
     # null: the investigation's standard state
     concentration: dict[str, Any] | None = None
+    canvas_id: str | None = None  # D193: only when creating; the canvas it goes on
     xyz: str | None = None
     # D148: or the coordinates of a build_structure answer (and its charge and multiplicity
     # when these are not given); only when creating
@@ -363,6 +365,7 @@ class ImportOptionsIn(BaseModel):
     original_name: str | None = None
     pos_x: float | None = None
     pos_y: float | None = None
+    canvas_id: str | None = None  # D193: the canvas a new node goes on (none: the main one)
     irc_part: str | None = None  # D131: "path" or "end", onto the TS node target_node_id
     path_edge_id: str | None = None  # D137: a scan path shown on this edge (D121)
     on_edge_only: bool = False
@@ -521,6 +524,7 @@ def _node_out(session: Session, node: Node) -> NodeOut:
         branch_id=node.branch_id,
         group_id=node.group_id,
         origin_branch_id=node.origin_branch_id,
+        canvas_id=node.canvas_id,
         pos_x=node.pos_x,
         pos_y=node.pos_y,
         view_rotation=node.view_rotation,

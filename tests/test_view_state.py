@@ -27,6 +27,7 @@ def test_a_new_investigation_remembers_nothing(open_client):
         "edge_energies": True,
         "filters": {"branches": [], "statuses": [], "steps": []},
         "expanded": [],
+        "canvas": None,
         "drawer": {"open": False, "tab": "profile", "profile_id": None},
     }
 
@@ -46,6 +47,7 @@ def test_saved_view_survives_closing_and_opening(open_client, example, tmp_path)
             "steps": [example.steps[2]],
         },
         "expanded": [group["id"]],
+        "canvas": None,
         # D190: the drawer names its saved energy profile, whose pathways are its own.
         "drawer": {"open": True, "tab": "table", "profile_id": profile["id"]},
     }

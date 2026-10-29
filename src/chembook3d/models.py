@@ -122,6 +122,18 @@ class Node(Base):
     )
     # D89: a member's place in its group's order, which every member layout follows.
     group_position: Mapped[int | None] = mapped_column(default=None)
+    # D193: the sub-investigation whose canvas the node is drawn on; None is the main canvas.
+    # A group member is always on its group's canvas. `pos_x`/`pos_y` are on that canvas.
+    canvas_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "sub_investigations.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_nodes_canvas_id",
+        ),
+        default=None,
+        index=True,
+    )
     pos_x: Mapped[float] = mapped_column(default=0.0)
     pos_y: Mapped[float] = mapped_column(default=0.0)
     # The orientation saved from the 3D view as a unit quaternion [x, y, z, w] turning the
@@ -408,6 +420,17 @@ class GroupNode(Base):
     outgoing_branch_id: Mapped[str | None] = mapped_column(
         ForeignKey("branches.id", ondelete="SET NULL"), default=None
     )
+    # D193: the canvas the group and all its members are on (None: the main canvas).
+    canvas_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "sub_investigations.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_group_nodes_canvas_id",
+        ),
+        default=None,
+        index=True,
+    )
     pos_x: Mapped[float] = mapped_column(default=0.0)
     pos_y: Mapped[float] = mapped_column(default=0.0)
     # How expanded members are laid out: "grid", "vertical" or "horizontal" (A21).
@@ -417,6 +440,34 @@ class GroupNode(Base):
     incoming_branches: Mapped[list[Branch]] = relationship(
         secondary=group_incoming_branches, order_by=lambda: Branch.seq
     )
+
+
+class SubInvestigation(Base):
+    """D193, FR-SUB-01: a box on a canvas that holds a canvas of its own, for a side mechanism
+    (a conformer interconversion, a decomposition path) kept out of the main canvas. Nodes and
+    groups on it have `canvas_id` set to it; a sub-investigation inside it has it as `parent_id`.
+    The box has no energy and no edges of its own: edges end at the real nodes inside, and
+    the canvas draws them to the box (Q59). Its face is one node inside, shown as a picture."""
+
+    __tablename__ = "sub_investigations"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    seq: Mapped[int] = mapped_column(
+        Integer, default=text("(SELECT COALESCE(MAX(seq), 0) + 1 FROM sub_investigations)")
+    )
+    label: Mapped[str] = mapped_column(String(200), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    # The canvas the box is drawn on: another sub-investigation (Q61), or None for the main one.
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("sub_investigations.id", ondelete="SET NULL"), default=None, index=True
+    )
+    pos_x: Mapped[float] = mapped_column(default=0.0)
+    pos_y: Mapped[float] = mapped_column(default=0.0)
+    # The node whose structure the closed box shows; a node inside it, at any depth.
+    face_id: Mapped[str | None] = mapped_column(
+        ForeignKey("nodes.id", ondelete="SET NULL", use_alter=True), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
 class Transition(Base):

@@ -46,6 +46,7 @@ from chembook3d.models import (
     Role,
     SourceFile,
     Status,
+    SubInvestigation,
     new_id,
 )
 from chembook3d.parsers import crest, gaussian, joined, orca, xtb
@@ -272,6 +273,9 @@ class ImportOptions:
     # D121: the edge a scan path's node was run on, and whether only its chip there shows it.
     path_edge_id: str | None = None
     on_edge_only: bool = False
+    # D193: the canvas a new node (or an ensemble's group) goes on: the one open in the app,
+    # None for the main canvas. A derived node goes on its parent's.
+    canvas_id: str | None = None
     # D131: an IRC part for the TS node `target_node_id`: "path" (the IRC itself; its file
     # says which direction) or "end" (an optimization or frequency job on the end point of the
     # path in `irc_direction`, "forward" or "reverse").
@@ -1507,7 +1511,13 @@ def _commit_ensemble(
             size=staged.size,
         )
         session.add(source)
-        group = GroupNode(label=label, pos_x=options.pos_x or 0.0, pos_y=options.pos_y or 0.0)
+        canvas_id = _canvas(session, options.canvas_id)
+        group = GroupNode(
+            label=label,
+            canvas_id=canvas_id,
+            pos_x=options.pos_x or 0.0,
+            pos_y=options.pos_y or 0.0,
+        )
         session.add(group)
         session.flush()
         calculation_ids = []
@@ -1523,6 +1533,7 @@ def _commit_ensemble(
                 tags=[],
                 group_id=group.id,
                 group_position=position,  # D89
+                canvas_id=canvas_id,
             )
             session.add(node)
             session.flush()
@@ -1660,6 +1671,7 @@ def _new_node(
         node.step_id = derived_from.step_id
         node.branch_id = derived_from.branch_id
         node.view_rotation = derived_from.view_rotation
+        node.canvas_id = derived_from.canvas_id  # D193
     else:
         if fields.get("pos_x") is not None and fields.get("pos_y") is not None:
             node.pos_x, node.pos_y = fields["pos_x"], fields["pos_y"]
@@ -1667,6 +1679,8 @@ def _new_node(
         node.branch_id = fields.get("branch_id")
         node.notes = fields.get("notes") or ""
         node.path_edge_id = fields.get("path_edge_id")
+        if node.kind == NodeKind.NODE:
+            node.canvas_id = fields.get("canvas_id")
         node.on_edge_only = bool(fields.get("on_edge_only")) and node.path_edge_id is not None
     session.add(node)
     session.flush()
@@ -1694,7 +1708,7 @@ def _remove_tag(session: Session, node: Node, tag: str) -> None:
         _set(session, node, "tags", [t for t in node.tags if t != tag])
 
 
-def _node_fields(plan_: Plan, options: ImportOptions) -> dict[str, Any]:
+def _node_fields(session: Session, plan_: Plan, options: ImportOptions) -> dict[str, Any]:
     fields = dict(plan_.suggested)
     if options.label is not None:
         fields["label"] = options.label
@@ -1714,7 +1728,14 @@ def _node_fields(plan_: Plan, options: ImportOptions) -> dict[str, Any]:
     fields["step_id"], fields["branch_id"] = options.step_id, options.branch_id
     fields["notes"] = options.notes
     fields["path_edge_id"], fields["on_edge_only"] = options.path_edge_id, options.on_edge_only
+    fields["canvas_id"] = _canvas(session, options.canvas_id)
     return fields
+
+
+def _canvas(session: Session, canvas_id: str | None) -> str | None:
+    if canvas_id is not None and session.get(SubInvestigation, canvas_id) is None:
+        raise ImportFailed("unknown sub-investigation")
+    return canvas_id
 
 
 def commit(
@@ -1734,7 +1755,7 @@ def commit(
         return _commit_ensemble(session, folder, staged, plan_, options, dry_run)
     if plan_.kind == "irc":
         return _commit_irc(session, folder, staged, plan_, options, dry_run)
-    fields = _node_fields(plan_, options)
+    fields = _node_fields(session, plan_, options)
     steps = {s.index: s for s in staged.parsed.steps}
     chosen = steps[plan_.chosen_step] if plan_.chosen_step is not None else None
     chosen_rows = _rows(chosen.final_geometry) if chosen else None

@@ -31,7 +31,15 @@ from sqlalchemy.orm import Session
 from chembook3d import settings as app_settings
 from chembook3d.api.downloads import file_name
 from chembook3d.investigation import FILES_DIR
-from chembook3d.models import Calculation, GroupNode, Node, NodeKind, SourceFile, new_id
+from chembook3d.models import (
+    Calculation,
+    GroupNode,
+    Node,
+    NodeKind,
+    SourceFile,
+    SubInvestigation,
+    new_id,
+)
 from chembook3d.parsers import crest, gaussian, orca, xtb
 from chembook3d.services import geometry, history, imports
 from chembook3d.services import nodes as node_service
@@ -274,6 +282,7 @@ class BatchOptions:
     missing_basis: str | None = None
     origin_device: str | None = None
     suffixes: list[str] | None = None
+    canvas_id: str | None = None  # D193: the canvas new nodes go on, the one open in the app
 
 
 @dataclass
@@ -410,15 +419,38 @@ def _closest(
     return best[1] if best else None
 
 
-def _grid_start(session: Session) -> tuple[float, float]:
-    """Right of everything on the canvas, level with its top (A44)."""
+def _grid_start(session: Session, canvas_id: str | None) -> tuple[float, float]:
+    """Right of everything on the canvas the batch goes on, level with its top (A44, D193)."""
     points = [
         (n.pos_x, n.pos_y)
         for n in session.scalars(
-            select(Node).where(Node.kind == NodeKind.NODE, Node.group_id.is_(None))
+            select(Node).where(
+                Node.kind == NodeKind.NODE,
+                Node.group_id.is_(None),
+                Node.canvas_id.is_(None) if canvas_id is None else Node.canvas_id == canvas_id,
+            )
         )
     ]
-    points += [(g.pos_x, g.pos_y) for g in session.scalars(select(GroupNode))]
+    points += [
+        (g.pos_x, g.pos_y)
+        for g in session.scalars(
+            select(GroupNode).where(
+                GroupNode.canvas_id.is_(None)
+                if canvas_id is None
+                else GroupNode.canvas_id == canvas_id
+            )
+        )
+    ]
+    points += [
+        (s.pos_x, s.pos_y)
+        for s in session.scalars(
+            select(SubInvestigation).where(
+                SubInvestigation.parent_id.is_(None)
+                if canvas_id is None
+                else SubInvestigation.parent_id == canvas_id
+            )
+        )
+    ]
     if not points:
         return 0.0, 0.0
     return max(x for x, _ in points) + 2 * COLUMN_WIDTH, min(y for _, y in points)
@@ -507,7 +539,7 @@ def run(
     basis_names = dict(options.basis_names)
     dispersion_names = dict(options.dispersion_names)
     tolerance = settings.geometry_tolerance
-    x0, y0 = _grid_start(session)
+    x0, y0 = _grid_start(session, options.canvas_id)
     slot = 0
     copied: list[str] = []
     written: list[dict[str, Any]] = []
@@ -676,6 +708,7 @@ def run(
                 origin_device=device,
                 pos_x=pos[0],
                 pos_y=pos[1],
+                canvas_id=options.canvas_id,
                 irc_part="path" if is_irc else None,
             )
             plan_: imports.Plan | None = None

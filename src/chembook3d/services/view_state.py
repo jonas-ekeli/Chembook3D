@@ -1,6 +1,7 @@
 """What an investigation showed when it was last used (D105): the energy view (composite level,
-energy type, reference), the canvas filters, the expanded groups and the energy drawer (open,
-tab, the saved energy profile it shows, D190). Saved in the investigation, so it travels with
+energy type, reference), the canvas filters, the expanded groups and sub-investigation boxes, the
+sub-investigation whose canvas is open (D193) and the energy drawer (open, tab, the saved energy
+profile it shows, D190). Saved in the investigation, so it travels with
 the folder and its sync, but it is view only: never in the history, and saving it is not a
 change other tabs reload for.
 
@@ -24,6 +25,7 @@ from chembook3d.models import (
     NodeKind,
     ReactionStep,
     Status,
+    SubInvestigation,
 )
 from chembook3d.services.energies import ENERGY_TYPES
 
@@ -54,7 +56,8 @@ def clean(data: Any) -> dict[str, Any]:
         "reference_id": _text(data.get("reference_id")),
         "edge_energies": data.get("edge_energies") is not False,
         "filters": {key: _ids(filters.get(key)) for key in ("branches", "statuses", "steps")},
-        "expanded": _ids(data.get("expanded")),
+        "expanded": _ids(data.get("expanded")),  # groups and, D193, sub-investigation boxes
+        "canvas": _text(data.get("canvas")),  # D193: the sub-investigation open; none: main
         "drawer": {
             "open": drawer.get("open") is True,
             "tab": drawer.get("tab") if drawer.get("tab") in TABS else "profile",
@@ -78,16 +81,20 @@ def load(session: Session) -> dict[str, Any]:
 
 def current(session: Session, state: dict[str, Any]) -> dict[str, Any]:
     """A cleaned view without the records that no longer exist. A reference, a group, a branch
-    or a step that is gone is dropped, and so is a deleted energy profile (D190)."""
+    or a step that is gone is dropped, and so is a deleted energy profile (D190) or
+    sub-investigation (D193)."""
     nodes = {n.id: n for n in session.scalars(select(Node).where(Node.kind == NodeKind.NODE))}
     groups = {g.id: g for g in session.scalars(select(GroupNode))}
     branches = set(session.scalars(select(Branch.id)))
     steps = set(session.scalars(select(ReactionStep.id)))
     profiles = set(session.scalars(select(EnergyProfile.id)))
+    subs = set(session.scalars(select(SubInvestigation.id)))
     on_canvas = nodes.keys() | groups.keys()
     if state["reference_id"] not in on_canvas:
         state["reference_id"] = None
-    state["expanded"] = [g for g in state["expanded"] if g in groups]
+    state["expanded"] = [g for g in state["expanded"] if g in groups or g in subs]
+    if state["canvas"] not in subs:
+        state["canvas"] = None
     filters = state["filters"]
     filters["branches"] = [b for b in filters["branches"] if b in branches or b == NONE]
     filters["steps"] = [s for s in filters["steps"] if s in steps or s == NONE]

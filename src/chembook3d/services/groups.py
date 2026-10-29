@@ -65,6 +65,12 @@ def _join(session: Session, node: Node, group: GroupNode) -> None:
         member.group_position = position
     node.group_position = len(current) + 1
     node.group_id = group.id
+    # Q60, D193: a group and its members share one canvas, so a node joins on the group's.
+    if node.canvas_id != group.canvas_id:
+        history.record(
+            session, "node", node.id, "update", "canvas_id", node.canvas_id, group.canvas_id
+        )
+        node.canvas_id = group.canvas_id
 
 
 def _refuse_species(nodes: list[Node]) -> None:
@@ -102,6 +108,7 @@ def reconnect(session: Session, fields: dict[str, Any]) -> GroupNode:
         label=text_value("label", fields.get("label", "")).strip(),
         notes=text_value("notes", fields.get("notes", "")),
         step_id=step_id,
+        canvas_id=nodes[0].canvas_id,  # D193: the others join it there
         pos_x=max(n.pos_x for n in nodes) + GROUP_OFFSET_X,
         pos_y=sum(n.pos_y for n in nodes) / len(nodes),
     )
