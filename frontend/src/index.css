@@ -3422,6 +3422,62 @@ table.overlay-legend td {
 .pathway-nodes button.link {
   text-align: left;
 }
+/* D195: a pathway's swatch is a button that opens its colours. */
+.pathway-colour {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.swatch-button {
+  min-height: 0;
+  padding: 3px;
+  border-color: transparent;
+  background: none;
+}
+.swatch-button:hover,
+.swatch-button[aria-expanded='true'] {
+  border-color: var(--border);
+}
+.colour-pop {
+  position: fixed;
+  z-index: 30;
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  width: max-content;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgb(var(--shadow-rgb) / 12%);
+}
+.colour-presets {
+  display: grid;
+  grid-template-columns: repeat(6, 1.4rem);
+  gap: 0.3rem;
+}
+.colour-preset {
+  width: 1.4rem;
+  height: 1.4rem;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--swatch-edge);
+}
+.colour-preset[aria-checked='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.colour-custom {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 12px;
+}
+.colour-custom input[type='color'] {
+  width: 2rem;
+  height: 1.4rem;
+  padding: 0;
+  flex-shrink: 0;
+}
 /* D194: a step moved along the axis, and the row that moves it. */
 .shift-mark {
   color: var(--muted);

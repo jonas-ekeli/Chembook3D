@@ -383,3 +383,54 @@ test('energy drawer: a step moved along the axis takes the later steps with it',
     await forgetView(page.request, join(E2E_DIR, 'demo'))
   }
 })
+
+// T-UI-71, D195: a click on a pathway's swatch opens its colours; the colour picked is drawn,
+// saved with the profile and in the saved figure, and "Branch colour" goes back to the branch's.
+test('energy drawer: a pathway takes the colour picked on its swatch', async ({ page }) => {
+  try {
+    await openDemo(page)
+    await page.getByRole('button', { name: 'Profile and table' }).click()
+    const drawer = page.getByLabel('Energy drawer')
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'A' })
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+    const chart = drawer.locator('.drawer-main').getByRole('img', { name: 'Energy profile' })
+    const line = chart.locator('g[aria-label="Profile B"] path').first()
+    const branch = await line.getAttribute('stroke')
+    const swatch = drawer.getByRole('button', { name: 'Colour of B' })
+    await expect(swatch.locator('.swatch')).toHaveCSS('background-color', hexToRgb(branch!))
+
+    await swatch.click()
+    const pop = drawer.getByRole('dialog', { name: 'Colour of B' })
+    await expect(pop.getByRole('button', { name: 'Branch colour' })).toBeDisabled()
+    await pop.getByRole('radio', { name: 'Colour 2' }).click()
+    await expect(pop).toHaveCount(0)
+    await expect(line).toHaveAttribute('stroke', '#d55e00')
+    await expect(swatch.locator('.swatch')).toHaveCSS('background-color', 'rgb(213, 94, 0)')
+    // A's colour is its branch's still.
+    await expect(chart.locator('g[aria-label="Profile A"] path').first()).not.toHaveAttribute(
+      'stroke',
+      '#d55e00',
+    )
+
+    // Kept with the profile, and in the saved figure.
+    await page.reload()
+    await expect(line).toHaveAttribute('stroke', '#d55e00')
+    expect(await savedSvg(page)).toContain('#d55e00')
+
+    // Any colour through the browser's colour field, then back to the branch's.
+    await swatch.click()
+    await expect(pop.getByRole('radio', { name: 'Colour 2' })).toHaveAttribute('aria-checked', 'true')
+    await pop.getByLabel('Any colour').fill('#123456')
+    await expect(line).toHaveAttribute('stroke', '#123456')
+    await pop.getByRole('button', { name: 'Branch colour' }).click()
+    await expect(line).toHaveAttribute('stroke', branch!)
+    await expect(pop).toHaveCount(0)
+  } finally {
+    await forgetView(page.request, join(E2E_DIR, 'demo'))
+  }
+})
+
+function hexToRgb(hex: string): string {
+  const n = parseInt(hex.slice(1), 16)
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
+}

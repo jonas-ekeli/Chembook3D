@@ -51,11 +51,15 @@ export function styleOf(settings: Settings | null | undefined): ProfileStyle {
   return { ...SCREEN_STYLE, ...settings?.profile_style }
 }
 
-/** The colour of each pathway in this style: its branch colour, or one of a fixed set. */
-export function pathwayColours(colours: string[], style: ProfileStyle): string[] {
+/** The colour of each pathway in this style: its branch colour, or one of a fixed set; D195: a
+ * colour the user chose for a pathway (`chosen`) wins over both. */
+export function pathwayColours(colours: string[], style: ProfileStyle, chosen?: (string | null | undefined)[]): string[] {
   const set = { 'colour-blind': COLOUR_BLIND, grey: GREYS, black: ['#000000'] }[style.colours as string]
-  return set ? colours.map((_, i) => set[i % set.length]) : colours
+  return colours.map((colour, i) => chosen?.[i] ?? (set ? set[i % set.length] : colour))
 }
+
+/** D195: the colours offered first for a pathway: the colour-blind-safe set, then a few more. */
+export const PATHWAY_PRESETS = [...COLOUR_BLIND, '#2459c6', '#c4320a', '#079455', '#6938ef', '#98a2b3']
 
 export function dashOf(style: ProfileStyle, index: number): string | undefined {
   const w = style.connector_width

@@ -18,7 +18,8 @@ from tests.test_pathway import (  # noqa: F401
 
 def paths(*runs: tuple[list[str], bool], branch_id: str | None = None) -> list[dict]:
     return [
-        {"ids": ids, "branch_id": branch_id, "shown": shown, "shifts": []} for ids, shown in runs
+        {"ids": ids, "branch_id": branch_id, "shown": shown, "shifts": [], "colour": None}
+        for ids, shown in runs
     ]
 
 
@@ -39,7 +40,9 @@ def test_profiles_are_saved_named_and_not_in_the_history(open_client, example): 
     assert changed["paths"] == body["paths"]
     # Several pathways may be shown together; "shown" defaults to true.
     shown = patch(open_client, f"/energy-profiles/{first['id']}", {"paths": [{"ids": b}]})
-    assert shown["paths"] == [{"ids": b, "branch_id": None, "shown": True, "shifts": []}]
+    assert shown["paths"] == [
+        {"ids": b, "branch_id": None, "shown": True, "shifts": [], "colour": None}
+    ]
 
     response = open_client.patch(
         f"/api/energy-profiles/{second['id']}", json={"name": "nhc VS caac"}
@@ -109,6 +112,24 @@ def test_steps_moved_along_the_axis_are_kept(open_client, example):  # noqa: F81
         assert response.status_code == 422, bad
 
 
+def test_a_pathways_chosen_colour_is_kept(open_client, example):  # noqa: F811
+    """D195, T-EN-49: a colour chosen for a pathway is saved in lower case, kept by a duplicate
+    and cleared with null (back to the branch's colour); anything but #rrggbb is refused."""
+    ids = example.nodes
+    a = [ids["T-pre"], ids["A1-S1"]]
+    profile = post(open_client, "/energy-profiles", {})
+    url = f"/energy-profiles/{profile['id']}"
+    saved = patch(open_client, url, {"paths": [{"ids": a, "colour": "#D55E00"}, {"ids": a}]})
+    assert [p["colour"] for p in saved["paths"]] == ["#d55e00", None]
+    copy = post(open_client, f"{url}/duplicate", status=200)
+    assert copy["paths"] == saved["paths"]
+    cleared = patch(open_client, url, {"paths": [{"ids": a, "colour": None}]})
+    assert cleared["paths"][0]["colour"] is None
+    for bad in ("red", "#abc", "#12345g", " #123456", 3, ["#123456"]):
+        response = open_client.patch(f"/api{url}", json={"paths": [{"ids": a, "colour": bad}]})
+        assert response.status_code == 422, bad
+
+
 def test_a_deleted_node_drops_its_pathways(open_client, example):  # noqa: F811
     ids = example.nodes
     gone = node(open_client, label="Gone")["id"]
@@ -129,6 +150,7 @@ def test_a_deleted_node_drops_its_pathways(open_client, example):  # noqa: F811
             "branch_id": example.branches["A"],
             "shown": True,
             "shifts": [],
+            "colour": None,
         }
     ]
 
@@ -164,8 +186,14 @@ def test_the_drawers_pathways_become_profile_1(open_client, example, tmp_path): 
     [profile] = get(open_client, "/energy-profiles")
     assert profile["name"] == "Profile 1"
     assert profile["paths"] == [
-        {"ids": old[0]["ids"], "branch_id": example.branches["A"], "shown": True, "shifts": []},
-        {"ids": old[1]["ids"], "branch_id": None, "shown": True, "shifts": []},
+        {
+            "ids": old[0]["ids"],
+            "branch_id": example.branches["A"],
+            "shown": True,
+            "shifts": [],
+            "colour": None,
+        },
+        {"ids": old[1]["ids"], "branch_id": None, "shown": True, "shifts": [], "colour": None},
     ]
     drawer = get(open_client, "/view-state")["drawer"]
     assert drawer == {"open": True, "tab": "table", "profile_id": profile["id"]}

@@ -71,7 +71,13 @@ export function ProfileStyleDialog({
   onClose,
 }: {
   settings: Settings
-  preview: { data: Profiles; colours: string[]; names: string[]; shifts?: PathShift[][] } | null
+  preview: {
+    data: Profiles
+    colours: string[]
+    names: string[]
+    shifts?: PathShift[][]
+    chosen?: (string | null | undefined)[]
+  } | null
   onSave: (style: ProfileStyle) => Promise<unknown>
   onClose: () => void
 }) {
@@ -163,6 +169,7 @@ export function ProfileStyleDialog({
             colours={preview.colours}
             names={preview.names}
             shifts={preview.shifts}
+            chosen={preview.chosen}
             settings={settings}
             style={style}
           />

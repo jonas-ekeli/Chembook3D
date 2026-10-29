@@ -109,6 +109,8 @@ export type ChartProps = {
   dark?: boolean
   /** D194: each pathway's steps moved later along the axis, in columns, with the steps after them. */
   shifts?: PathShift[][]
+  /** D195: the colour the user chose for each pathway, winning over `colours` and the style's set. */
+  chosen?: (string | null | undefined)[]
 }
 
 /** FR-EN-05, FR-EN-09: X(n) − X(ref) along each pathway, overlaid in branch colours. A direct
@@ -129,6 +131,7 @@ export function ProfileChart({
   pointing,
   dark = false,
   shifts,
+  chosen,
 }: ChartProps) {
   // D181: the level under the pointer and where its line is on the screen.
   const [pointed, setPointed] = useState<{ pi: number; i: number; box: DOMRect; data: Profiles } | null>(null)
@@ -136,7 +139,7 @@ export function ProfileChart({
   const style = given ?? styleOf(settings)
   const paint = dark ? DARK : PAPER
   // D185: black lines of a black or grey style would vanish on the dark theme's background.
-  const colours = pathwayColours(branchColours, style).map((c) => (dark && c === '#000000' ? 'var(--text)' : c))
+  const colours = pathwayColours(branchColours, style, chosen).map((c) => (dark && c === '#000000' ? 'var(--text)' : c))
   const unit = settings?.energy_unit ?? 'kcal/mol'
   const factor = settings?.energy_factors[unit] ?? 1
   const W = style.width
