@@ -335,6 +335,7 @@ export function ImportDialog({
   inspection = null,
   irc = null,
   pathEdge = null,
+  canvasId = null,
   onClose,
   onImported,
   onImportFolder,
@@ -350,6 +351,8 @@ export function ImportDialog({
   irc?: { part: 'path' | 'end'; direction: IrcDirection | null } | null
   /** D137: the imported scan path is shown on this edge only (D121). */
   pathEdge?: string | null
+  /** D193: the canvas a new node goes on (the one open; none: the main canvas). */
+  canvasId?: string | null
   target: Node | null
   nodes: Node[]
   /** Start with "free species" ticked (D69). */
@@ -379,6 +382,7 @@ export function ImportDialog({
     pos_y: position?.y ?? null,
     irc_part: irc?.part ?? null,
     irc_direction: irc?.direction ?? null,
+    canvas_id: canvasId,
     ...(pathEdge ? { path_edge_id: pathEdge, on_edge_only: true } : {}),
   })
   const [error, setError] = useState<string | null>(null)

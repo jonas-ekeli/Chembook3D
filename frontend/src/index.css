@@ -42,6 +42,8 @@
   --on-warn: #ffffff; /* text on --warn-strong (an arrow's "!" badge) */
   --pill-border: #c9ced6; /* an arrow's label pill (D176) */
   --rep: #f59f00; /* a group's representative */
+  --sub-edge: #7048e8; /* D193: a sub-investigation's box */
+  --sub-fill: rgb(112 72 232 / 6%);
   --ok: #067647;
   --ok-text: #05603a;
   --ok-bg: #ecfdf3;
@@ -153,6 +155,8 @@
   --on-warn: #1c1405;
   --pill-border: #39414d;
   --rep: #f5a524;
+  --sub-edge: #9775fa;
+  --sub-fill: rgb(151 117 250 / 9%);
   --ok: #47cd89;
   --ok-text: #75e0a7;
   --ok-bg: #0f2a1d;
@@ -2909,6 +2913,71 @@ label.check {
   align-items: center;
   gap: 0.4rem;
 }
+/* D193: a sub-investigation's box: a card with a second edge behind it, like a stack; expanded,
+   a frame round its inside. */
+.csub {
+  width: 188px;
+  position: relative;
+  background: var(--card);
+  border: 1.5px solid var(--sub-edge);
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: grid;
+  gap: 2px;
+  font-size: 12.5px;
+  box-shadow:
+    4px 4px 0 -1px var(--card),
+    4px 4px 0 0.5px var(--sub-edge);
+}
+.csub.expanded {
+  width: auto;
+  height: 100%;
+  align-content: start;
+  background: var(--sub-fill);
+  border-style: dashed;
+  border-width: 2px;
+  border-radius: 12px;
+  box-shadow: none;
+}
+.csub.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.csub-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  color: var(--sub-edge);
+}
+.csub-head .cnode-label {
+  color: var(--text);
+}
+.csub-face {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* D193: a neighbour outside the open sub-investigation, faded at the rim. */
+.cstub {
+  width: 188px;
+  background: var(--card);
+  border: 1px dashed var(--border-strong);
+  border-left: 4px solid var(--branch);
+  border-radius: 8px;
+  padding: 5px 8px;
+  display: grid;
+  gap: 1px;
+  font-size: 12px;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.cstub:hover {
+  opacity: 0.9;
+}
+.cstub .react-flow__handle {
+  visibility: hidden;
+}
 .sketch {
   display: block;
   margin: 0 auto;
@@ -3038,7 +3107,9 @@ label.check {
   white-space: nowrap;
 }
 .react-flow__node-structure,
-.react-flow__node-cgroup {
+.react-flow__node-cgroup,
+.react-flow__node-csub,
+.react-flow__node-stub {
   padding: 0;
   border: none;
   background: none;
@@ -3046,7 +3117,8 @@ label.check {
 /* D76: a handle on every side; they grow on hover so a side is easy to hit. D175: they show
    only on a hovered or selected box, and on every box while an arrow is being drawn. */
 .cnode .react-flow__handle,
-.cgroup .react-flow__handle {
+.cgroup .react-flow__handle,
+.csub .react-flow__handle {
   width: 7px;
   height: 7px;
   min-width: 0;
@@ -3058,15 +3130,19 @@ label.check {
 }
 .react-flow__node:hover > .cnode > .react-flow__handle,
 .react-flow__node:hover > .cgroup > .react-flow__handle,
+.react-flow__node:hover > .csub > .react-flow__handle,
 .cnode.selected > .react-flow__handle,
 .cgroup.selected > .react-flow__handle,
+.csub.selected > .react-flow__handle,
 .canvas.connecting .react-flow__handle {
   opacity: 1;
 }
 .react-flow__node:hover > .cnode > .react-flow__handle,
 .react-flow__node:hover > .cgroup > .react-flow__handle,
+.react-flow__node:hover > .csub > .react-flow__handle,
 .cnode .react-flow__handle.connectingto,
-.cgroup .react-flow__handle.connectingto {
+.cgroup .react-flow__handle.connectingto,
+.csub .react-flow__handle.connectingto {
   width: 11px;
   height: 11px;
   background: var(--accent);
@@ -5235,4 +5311,43 @@ table.scan-path-held input.drive-value {
   .structure-editor {
     grid-template-columns: 1fr;
   }
+}
+
+/* D193: the breadcrumb of the open sub-investigation, and the sub-investigation dialogs. */
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+.crumbs .crumb {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--muted);
+}
+.crumbs button {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+.crumbs button[aria-current] {
+  font-weight: 600;
+  color: var(--text);
+}
+.move-targets {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  max-height: 260px;
+  overflow: auto;
+}
+.sub-contents {
+  list-style: none;
+  margin: 4px 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 2px;
 }

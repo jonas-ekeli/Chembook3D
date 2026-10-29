@@ -101,6 +101,7 @@ export function BatchImportDialog({
   remote = null,
   nodes,
   linked = false,
+  canvasId = null,
   onClose,
   onImported,
 }: {
@@ -110,12 +111,14 @@ export function BatchImportDialog({
   nodes: Node[]
   /** The investigation syncs through Git, whose host refuses large files (FR-SYNC-09). */
   linked?: boolean
+  /** D193: the canvas new nodes go on (the one open; none: the main canvas). */
+  canvasId?: string | null
   onClose: () => void
   onImported: (result: BatchImported, notice: string) => void
 }) {
   const [recursive, setRecursive] = useState(true)
   const [plan, setPlan] = useState<BatchPlan | null>(null)
-  const [options, setOptions] = useState<BatchOptions>({})
+  const [options, setOptions] = useState<BatchOptions>({ canvas_id: canvasId })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(true)
   const [open, setOpen] = useState<Set<string>>(new Set())
@@ -165,8 +168,8 @@ export function BatchImportDialog({
   useEffect(() => {
     if (started.current) return
     started.current = true
-    scan(true, {})
-  }, [scan])
+    scan(true, { canvas_id: canvasId })
+  }, [scan, canvasId])
 
   // D104: basis sets offered for files that name none: those in levels and the saved custom ones.
   useEffect(() => {
