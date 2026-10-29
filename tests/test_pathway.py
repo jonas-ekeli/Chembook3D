@@ -265,6 +265,32 @@ def test_transition_rules(open_client):
     assert kinds == ["delete", "update", "create"]
 
 
+def test_a_new_transition_starts_done_between_done_ends(open_client, example):
+    # T-BR-22, D192: given no status, an edge between two done ends starts done, else planned.
+    a = node(open_client, label="a", status="done")
+    b = node(open_client, label="b", status="done")
+    c = node(open_client, label="c")
+    assert edge(open_client, a["id"], b["id"])["status"] == "done"
+    assert edge(open_client, b["id"], c["id"])["status"] == "planned"
+    assert edge(open_client, c["id"], a["id"])["status"] == "planned"
+    assert edge(open_client, b["id"], a["id"], status="planned")["status"] == "planned"
+    # Only new edges: finishing c leaves its edges as they were (D19).
+    patch(open_client, f"/nodes/{c['id']}", {"status": "done"})
+    assert {
+        t["status"]
+        for t in get(open_client, "/transitions")
+        if c["id"] in (t["source_id"], t["target_id"])
+    } == {"planned"}
+
+    # A group stands for its representative (D111); with none it is not done.
+    group = reconnect_g6(open_client, example)
+    chosen = example.nodes["B1-S6"]
+    patch(open_client, f"/nodes/{chosen}", {"status": "done"})
+    assert edge(open_client, a["id"], group["id"])["status"] == "planned"
+    patch(open_client, f"/groups/{group['id']}", {"representative_id": chosen})
+    assert edge(open_client, group["id"], a["id"])["status"] == "done"
+
+
 def test_transition_sides(open_client, example):
     # D76, A29: an arrow may use any side of either box; left to right unless chosen.
     a, b = node(open_client, label="a"), node(open_client, label="b")

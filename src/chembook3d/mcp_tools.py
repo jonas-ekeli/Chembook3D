@@ -666,7 +666,8 @@ TOOLS: list[ToolSpec] = [
         "write",
         "POST",
         "/api/transitions",
-        "Connect two nodes or groups with a transition (edge), from source to target.",
+        "Connect two nodes or groups with a transition (edge), from source to target. "
+        "Given no status, it starts done when both ends are done, planned otherwise.",
     ),
     T(
         "update_transition",

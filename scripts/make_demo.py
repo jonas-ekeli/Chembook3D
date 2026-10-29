@@ -133,13 +133,18 @@ def _mechanism(session) -> None:
                 ETHYLENE if not ts else WATER,
             )
             _energies(session, node)
-            transitions.create(session, {"source_id": previous.id, "target_id": node.id})
+            # Planned on purpose, so the overview and the dashed outline have edges to show.
+            transitions.create(
+                session, {"source_id": previous.id, "target_id": node.id, "status": "planned"}
+            )
             if column == 1:
                 first = node
             previous = node
         if branch.name == "A":
             # D53: a direct connection, drawn dotted and marked "no TS".
-            transitions.create(session, {"source_id": first.id, "target_id": previous.id})
+            transitions.create(
+                session, {"source_id": first.id, "target_id": previous.id, "status": "planned"}
+            )
 
 
 def make_demo(folder: Path) -> None:

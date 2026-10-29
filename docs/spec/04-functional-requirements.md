@@ -119,7 +119,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-BR-02 | "Split into branches" on a node creates N child branches whose parent is that node's branch, and records the split node. | D12 | 3 |
 | FR-BR-03 | A node belongs to at most one branch. Membership changes only by explicit user action. | P5, INV-3 | 3 |
 | FR-BR-04 | The inspector shows a branch's full lineage (chain of parents) and child branches. | INV-1 | 3 |
-| FR-EDGE-01 | The user can create a directed transition between any two nodes or group nodes, with status and notes. | D3 | 3 |
+| FR-EDGE-01 | The user can create a directed transition between any two nodes or group nodes, with status and notes. Given no status, it starts done when both ends are done (a group by its representative) and planned otherwise (D192). | D3, D192 | 3 |
 | FR-EDGE-02 | Transitions between nodes of different branches are allowed and do not change membership. | D17, INV-4 | 3 |
 | FR-EDGE-03 | A transition where neither endpoint is a TS-role node is a **direct connection**. It is drawn dotted with a "no TS" marker on the canvas, and is listed as such in the overview and the inspector. | D53 | 3 |
 | FR-GRP-01 | "Create group" creates a group node from selected nodes and records the incoming branches. It starts no branch (D152); an outgoing branch whose parents are the incoming branches can be set by hand, or passed through the API. | D13, D18, D152 | 3 |
