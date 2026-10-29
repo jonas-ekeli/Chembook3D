@@ -1547,7 +1547,9 @@ export type PathChoice = {
 export type Pathway = { path: string[]; choices: PathChoice[]; closed: boolean }
 
 /** D190: a pathway of a saved energy profile; `shown` draws it on the figure. */
-export type ProfilePath = { ids: string[]; branch_id: string | null; shown: boolean }
+/** D194: the step at index `at` of a pathway, and every step after it, moved `by` columns later. */
+export type PathShift = { at: number; by: number }
+export type ProfilePath = { ids: string[]; branch_id: string | null; shown: boolean; shifts?: PathShift[] }
 /** D190: a saved energy profile, a named figure of pathways the drawer opens. */
 export type EnergyProfile = { id: string; name: string; paths: ProfilePath[] }
 
@@ -2419,7 +2421,7 @@ export const api = {
 
   /** D79: the investigation as one read-only HTML file, with the drawer's pathways (A30). */
   exportSnapshot: async (
-    paths: { ids: string[]; branch_id: string | null }[],
+    paths: { ids: string[]; branch_id: string | null; shifts?: PathShift[] }[],
     referenceId: string | null,
     view: SharedViewState,
   ): Promise<{ blob: Blob; name: string }> => {

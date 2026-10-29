@@ -369,7 +369,9 @@ TOOLS: list[ToolSpec] = [
         "GET",
         "/api/energy-profiles",
         "The saved energy profiles of the drawer (D190): each a named figure of pathways (node "
-        "and group ids in order, the branch, and `shown`: drawn on the figure). Value them with "
+        "and group ids in order, the branch, `shown`: drawn on the figure, and `shifts`: steps "
+        "moved later along the axis by whole columns with every step after them, D194). Value "
+        "them with "
         "get_energy_profile; they are made and changed in the page only.",
     ),
     T(

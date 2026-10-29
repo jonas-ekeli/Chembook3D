@@ -331,3 +331,55 @@ test('energy drawer: saved profiles with pathways shown on the figure', async ({
     await forgetView(page.request, join(E2E_DIR, 'demo'))
   }
 })
+
+// T-UI-70, D194: a pathway's step moved along the axis takes the steps after it along, the steps
+// before it stay put; it is saved with the profile, goes into the saved figure, and moves back.
+test('energy drawer: a step moved along the axis takes the later steps with it', async ({ page }) => {
+  try {
+    await openDemo(page)
+    await page.getByRole('button', { name: 'Profile and table' }).click()
+    const drawer = page.getByLabel('Energy drawer')
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'A' })
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+    const b = drawer.getByRole('group', { name: 'Pathway B' })
+    await expect(b).toContainText('T-S0 → B-S1 → B-S2 → B-S3')
+    const chart = drawer.locator('.drawer-main').getByRole('img', { name: 'Energy profile' })
+    const xOf = async (name: RegExp) => Number(await chart.locator('text', { hasText: name }).first().getAttribute('x'))
+    await expect(chart.locator('text', { hasText: /^B-S3/ })).toHaveCount(1)
+    const before = { s0: await xOf(/^T-S0/), s1: await xOf(/^B-S1/), s2: await xOf(/^B-S2/), s3: await xOf(/^B-S3/) }
+
+    const move = b.getByRole('group', { name: 'Move B along the axis' })
+    const step = move.getByLabel('Step to move')
+    await expect(move.getByRole('button', { name: 'Move back' })).toBeDisabled()
+    await step.selectOption({ label: '3. B-S2' })
+    await move.getByRole('button', { name: 'Move on' }).click()
+    await move.getByRole('button', { name: 'Move on' }).click()
+    await expect(step.locator('option:checked')).toHaveText('3. B-S2 (+2)')
+    await expect(b.locator('.pathway-nodes')).toContainText('B-S1 → +2 B-S2')
+    // The figure gains two columns, so every column is narrower.
+    await expect.poll(() => xOf(/^B-S2/)).toBeGreaterThan(before.s2)
+    const after = { s0: await xOf(/^T-S0/), s1: await xOf(/^B-S1/), s2: await xOf(/^B-S2/), s3: await xOf(/^B-S3/) }
+    // One column apart before; after, B-S2 is two more columns on and B-S3 still one after it.
+    expect(before.s2 - before.s1).toBeCloseTo(before.s1 - before.s0, 0)
+    const column = after.s1 - after.s0
+    expect(after.s2 - after.s1).toBeCloseTo(3 * column, 0)
+    expect(after.s3 - after.s2).toBeCloseTo(column, 0)
+
+    // Saved with the profile and in the saved figure.
+    await page.reload()
+    await expect(b.getByRole('group', { name: 'Move B along the axis' }).locator('option', { hasText: '(+2)' })).toHaveCount(1)
+    const svg = await savedSvg(page)
+    expect(svg).toContain('B-S2')
+
+    // Back one column, then every step back where the pathway puts it.
+    await step.selectOption({ label: '3. B-S2 (+2)' })
+    await move.getByRole('button', { name: 'Move back' }).click()
+    await expect(step.locator('option:checked')).toHaveText('3. B-S2 (+1)')
+    await move.getByRole('button', { name: 'Reset' }).click()
+    await expect(step.locator('option:checked')).toHaveText('3. B-S2')
+    await expect(move.getByRole('button', { name: 'Reset' })).toHaveCount(0)
+    await expect.poll(() => xOf(/^B-S2/)).toBeCloseTo(before.s2, 0)
+  } finally {
+    await forgetView(page.request, join(E2E_DIR, 'demo'))
+  }
+})

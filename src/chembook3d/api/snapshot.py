@@ -26,9 +26,9 @@ from chembook3d.api import energies as energy_api
 from chembook3d.api import pathway as pathway_api
 from chembook3d.api.routes import DbSession, _calculation_out, _investigation
 from chembook3d.models import Calculation, CalculationType
+from chembook3d.services import energy_profiles, pathways, species, thermo_settings, view_state
 from chembook3d.services import nodes as node_service
 from chembook3d.services import notes as note_service
-from chembook3d.services import pathways, species, thermo_settings, view_state
 from chembook3d.services.energies import Energies, LevelKey
 from chembook3d.services.records import RecordError
 
@@ -54,6 +54,8 @@ MODES = ("compact", "energy", "structure")
 class PathIn(BaseModel):
     ids: list[str]
     branch_id: str | None = None
+    # D194: the steps moved along the axis, as the drawer's profile holds them.
+    shifts: list[dict[str, Any]] = []
 
 
 class SnapshotIn(BaseModel):
@@ -102,7 +104,14 @@ def _paths(session: Session, body: SnapshotIn) -> list[dict[str, Any]]:
     if body.paths:
         for path in body.paths:
             pathways.resolve(session, path.ids)  # refuses a pathway with a gap (INV-2)
-        return [{"ids": p.ids, "branch_id": p.branch_id} for p in body.paths]
+        return [
+            {
+                "ids": p.ids,
+                "branch_id": p.branch_id,
+                "shifts": energy_profiles.clean_shifts(p.shifts, len(p.ids)),
+            }
+            for p in body.paths
+        ]
     found = []
     for branch in pathway_api.list_branches(session):
         try:

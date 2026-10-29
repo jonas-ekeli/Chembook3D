@@ -7,7 +7,7 @@ import { ProfileChart, type ChartProps } from './components/ProfileChart'
 
 /** The figure rendered afresh in the profile style alone (D106): none of the screen's text
  * scale, zoom, hover or selection marks, whatever the chart on screen shows (D181). */
-export function figureOf(props: Pick<ChartProps, 'data' | 'colours' | 'names' | 'settings' | 'marks'>): SVGSVGElement {
+export function figureOf(props: Pick<ChartProps, 'data' | 'colours' | 'names' | 'settings' | 'marks' | 'shifts'>): SVGSVGElement {
   const holder = document.createElement('div')
   const root = createRoot(holder)
   flushSync(() => root.render(createElement(ProfileChart, props)))
