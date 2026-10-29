@@ -111,6 +111,13 @@ class DriveIn(BaseModel):
     )
 
 
+class ConstrainIn(BaseModel):
+    atoms: list[int] = Field(description="2 to 4 atoms, 1-based, in the start's numbering.")
+    value: float | None = Field(
+        None, description="The value it is kept at; the start's value if left out."
+    )
+
+
 class JobIn(PlanIn):
     held: list[HeldIn] = Field(default_factory=list)
     drive: list[DriveIn] = Field(
@@ -119,6 +126,10 @@ class JobIn(PlanIn):
     )
     drive_order: Literal["together", "staged"] = Field(
         "together", description="One concerted scan, or one stage per coordinate in order."
+    )
+    constrain: list[ConstrainIn] = Field(
+        default_factory=list,
+        description="D196: coordinates kept fixed along the whole path, in every strategy.",
     )
     solvent: str | None = None
     start: bool = Field(True, description="Start the cloud session at once.")
@@ -222,6 +233,7 @@ def send(body: JobIn, request: Request, session: DbSession) -> dict[str, Any]:
         body.solvent,
         [{"atoms": d.atoms, "from": d.from_value, "to": d.to_value} for d in body.drive],
         body.drive_order,
+        [{"atoms": c.atoms, "value": c.value} for c in body.constrain],
     )
     folder = investigation.folder
     start_error = None

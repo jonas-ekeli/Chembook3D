@@ -42,9 +42,12 @@ Written by Chembook3D into `.claude/chembook3d/pathtools.py` of the investigatio
         into or out of it, as a conformer flipping in one step gives) reported apart; with
         settings that carry the user's own coordinates (`drive`), whether the path starts at
         each one's `from` value and ends at its `to` value (`followed`); with settings that carry
-        a species joining or leaving (`species`), its separated end judged on the complex and
-        on the species' closest contact (`separated`), and with --apart (each optimised alone,
-        their xtbopt.xyz) the separated end's energy above the two apart (`leftover_kcal`)
+        coordinates the user keeps fixed (`constrain`), how far each strays from its value
+        along the path (`constrained`, `kept` within 0.1 Å or 5°; a path that lets one go is
+        not good); with settings that carry a species joining or leaving (`species`), its
+        separated end judged on the complex and on the species' closest contact (`separated`),
+        and with --apart (each optimised alone, their xtbopt.xyz) the separated end's energy
+        above the two apart (`leftover_kcal`)
     python3 pathtools.py mode TS.xyz MODE [--atoms 2 3 [--atoms ...]] [--json]
         the imaginary mode of MODE (the app's `inputs/start_mode.json` or `end_mode.json`, or
         the g98.out of `xtb TS.xyz --hess`): its wavenumber, the five distances that change
@@ -654,6 +657,25 @@ def followed(frames, drive):
     return out
 
 
+def kept(frames, constrain):
+    """Whether a path keeps the coordinates the user holds fixed (D196): each row's largest
+    change from its `value` over every structure (a dihedral compared the short way round)."""
+    out = []
+    for row in constrain:
+        atoms = row["atoms"]
+        size = len(atoms)
+        largest = max(
+            abs(_wrapped(measure(rows, atoms) - row["value"], size)) for _, rows in frames
+        )
+        out.append({
+            "atoms": "-".join(map(str, atoms)),
+            "value": row["value"],
+            "largest_change": round(largest, 3),
+            "kept": largest <= REACHED[size],
+        })  # fmt: skip
+    return out
+
+
 def contact(rows, species):
     """The closest distance in Å between the species (atoms from 1) and every other atom."""
     inside = {a - 1 for a in species}
@@ -681,12 +703,24 @@ def separated_end(rows, reference, species, active=None):
     }
 
 
-def check(path, start, end, allowed=None, active=None, drive=None, species=None, apart=None):
+def check(
+    path,
+    start,
+    end,
+    allowed=None,
+    active=None,
+    drive=None,
+    species=None,
+    apart=None,
+    constrain=None,
+):
     """How a path does: its ends, stray bond changes, jumps, spikes and its highest point.
     `allowed` lists more bonds (atom pairs from 1) that may form or break; with `active` (atoms
     from 1, `active_atoms`), the end is reached when those atoms fit the end (D118), and the
     RMSD over all atoms is given beside it; with `drive` (the user's coordinates, D119), whether
-    the path starts at each one's `from` and ends at its `to`. With `species` (path.json's, a
+    the path starts at each one's `from` and ends at its `to`; with `constrain` (the
+    coordinates the user keeps fixed, D196), how far each strays, and a path that lets one go
+    is not good. With `species` (path.json's, a
     species joining or leaving, D120), its separated end is judged by `separated_end` instead,
     and with `apart` (the energies in Eh of the complex and the species each optimised alone)
     the separated end's energy above the two apart, `leftover_kcal`."""
@@ -740,6 +774,8 @@ def check(path, start, end, allowed=None, active=None, drive=None, species=None,
     }
     if drive:
         report["drive"] = followed(frames, drive)
+    if constrain:
+        report["constrained"] = kept(frames, constrain)
     if species:
         which = species["separated"]
         k = 0 if which == "start" else -1
@@ -761,6 +797,7 @@ def check(path, start, end, allowed=None, active=None, drive=None, species=None,
         and report.get("reached_start", True)
         and not stray
         and largest <= GOOD_JUMP
+        and all(row["kept"] for row in report.get("constrained", []))
     )
     return report
 
@@ -999,13 +1036,14 @@ def main(argv=None):
             with open(args.mapping, encoding="utf-8") as handle:
                 mapping = json.load(handle)
             allowed = mapping.get("formed", []) + mapping.get("broken", [])
-        active = drive = species = apart = None
+        active = drive = species = apart = constrain = None
         if args.settings:
             with open(args.settings, encoding="utf-8") as handle:
                 settings = json.load(handle)
             active = settings.get("active")
             drive = (settings.get("drive") or {}).get("coordinates")
             species = settings.get("species")
+            constrain = settings.get("constrain")
         if args.apart:
             if not species:
                 parser.error("--apart needs --settings with a species (path.json's `species`)")
@@ -1016,7 +1054,7 @@ def main(argv=None):
                     parser.error(f"{name} has no `energy:` on its comment line (use xtbopt.xyz)")
                 apart.append(energy)
         start, end = read_xyz(args.start), read_xyz(args.end)
-        report = check(args.path, start, end, allowed, active, drive, species, apart)
+        report = check(args.path, start, end, allowed, active, drive, species, apart, constrain)
         _print(report, args.json)
     return 0
 

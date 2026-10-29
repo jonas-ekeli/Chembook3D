@@ -2476,6 +2476,8 @@ export const api = {
       /** D119: the user's own coordinates, run first as given. */
       drive?: { atoms: number[]; from: number; to: number }[]
       drive_order?: 'together' | 'staged'
+      /** D196: coordinates kept fixed along the whole path. */
+      constrain?: { atoms: number[]; value: number }[]
       solvent: string | null
     },
   ) =>
