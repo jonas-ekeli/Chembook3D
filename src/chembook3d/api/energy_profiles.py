@@ -14,10 +14,16 @@ from chembook3d.services import energy_profiles as profile_service
 router = APIRouter(prefix="/api")
 
 
+class PathShiftOut(BaseModel):
+    at: int  # the step's index on the pathway
+    by: int  # columns it, and every step after it, is moved later (D194)
+
+
 class ProfilePathOut(BaseModel):
     ids: list[str]
     branch_id: str | None
     shown: bool
+    shifts: list[PathShiftOut] = []
 
 
 class EnergyProfileOut(BaseModel):
@@ -28,7 +34,8 @@ class EnergyProfileOut(BaseModel):
 
 class EnergyProfileIn(BaseModel):
     name: str | None = None
-    # Each {"ids": [...], "branch_id": ... or null, "shown": true or false}.
+    # Each {"ids": [...], "branch_id": ... or null, "shown": true or false, "shifts": [{"at": a
+    # step's index, "by": columns later}]} (D194: optional, none moved).
     paths: list[dict[str, Any]] | None = None
 
 

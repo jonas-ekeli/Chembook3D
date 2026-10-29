@@ -3422,6 +3422,25 @@ table.overlay-legend td {
 .pathway-nodes button.link {
   text-align: left;
 }
+/* D194: a step moved along the axis, and the row that moves it. */
+.shift-mark {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.pathway-move {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+.pathway-move select {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+.pathway-move button {
+  flex-shrink: 0;
+}
 .choices {
   display: flex;
   flex-wrap: wrap;

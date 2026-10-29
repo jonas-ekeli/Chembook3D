@@ -1,6 +1,8 @@
 """Saved energy profiles (D190, FR-EN-19, A127): named figures of pathways that the energy
 drawer opens, one at a time. Each pathway keeps its node and group ids, the branch it was added
-for and whether it is drawn ("Show on the figure"); any number may be drawn together. The
+for, whether it is drawn ("Show on the figure"; any number may be drawn together) and the steps
+moved along the axis (D194: each a step's index and the columns it, with every later step, is
+moved; only later than where the pathway puts it, so moving back stops there). The
 "Continue with" choices are never stored: the drawer asks `pathways.extend(..., follow=False)`
 for them (D189).
 
@@ -20,6 +22,7 @@ from chembook3d.services.records import RecordError, get, text_value
 
 MAX_PATHS = 50  # as many as the drawer remembered before profiles (D105)
 MAX_IDS = 500  # nodes along one pathway
+MAX_SHIFT = 20  # columns one step may be moved (D194)
 FIRST_NAME = "Profile"
 
 
@@ -33,8 +36,32 @@ def _ids(value: Any) -> list[str]:
     return list(value)
 
 
+def _whole(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def clean_shifts(value: Any, length: int) -> list[dict[str, int]]:
+    """D194: the steps moved along the axis, by index, each once, in order along the pathway."""
+    if not isinstance(value, list):
+        raise RecordError("a pathway's shifts must be a list")
+    found: dict[int, int] = {}
+    for shift in value:
+        if not (isinstance(shift, dict) and _whole(shift.get("at")) and _whole(shift.get("by"))):
+            raise RecordError("each shift must be {at: a step's index, by: whole columns}")
+        at, by = shift["at"], shift["by"]
+        if not 0 <= at < length:
+            raise RecordError("a shift's step must be on the pathway")
+        if not 0 <= by <= MAX_SHIFT:
+            raise RecordError(f"a step is moved 0 to {MAX_SHIFT} columns later")
+        if at in found:
+            raise RecordError("a step is moved once")
+        if by:
+            found[at] = by
+    return [{"at": at, "by": found[at]} for at in sorted(found)]
+
+
 def clean_paths(value: Any) -> list[dict[str, Any]]:
-    """The pathways as stored: ids, branch_id and shown, nothing else."""
+    """The pathways as stored: ids, branch_id, shown and shifts, nothing else."""
     if not isinstance(value, list):
         raise RecordError("paths must be a list")
     if len(value) > MAX_PATHS:
@@ -49,7 +76,9 @@ def clean_paths(value: Any) -> list[dict[str, Any]]:
         shown = path.get("shown", True)
         if not isinstance(shown, bool):
             raise RecordError("a pathway's shown must be true or false")
-        paths.append({"ids": _ids(path.get("ids")), "branch_id": branch_id, "shown": shown})
+        ids = _ids(path.get("ids"))
+        shifts = clean_shifts(path.get("shifts", []), len(ids))
+        paths.append({"ids": ids, "branch_id": branch_id, "shown": shown, "shifts": shifts})
     return paths
 
 
@@ -63,7 +92,8 @@ def current_paths(session: Session, paths: list[dict[str, Any]]) -> list[dict[st
         if not all(i in on_canvas for i in path["ids"]):
             continue
         branch_id = path["branch_id"] if path["branch_id"] in branches else None
-        kept.append({**path, "branch_id": branch_id})
+        # Stored before D194: no step moved.
+        kept.append({"shifts": [], **path, "branch_id": branch_id})
     return kept
 
 

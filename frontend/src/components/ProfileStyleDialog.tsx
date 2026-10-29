@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import type { ProfileStyle, Profiles, Settings } from '../api'
+import type { PathShift, ProfileStyle, Profiles, Settings } from '../api'
 import { Modal } from './Modal'
 import { FONTS } from '../profileStyle'
 import { ProfileChart } from './ProfileChart'
@@ -71,7 +71,7 @@ export function ProfileStyleDialog({
   onClose,
 }: {
   settings: Settings
-  preview: { data: Profiles; colours: string[]; names: string[] } | null
+  preview: { data: Profiles; colours: string[]; names: string[]; shifts?: PathShift[][] } | null
   onSave: (style: ProfileStyle) => Promise<unknown>
   onClose: () => void
 }) {
@@ -162,6 +162,7 @@ export function ProfileStyleDialog({
             data={preview.data}
             colours={preview.colours}
             names={preview.names}
+            shifts={preview.shifts}
             settings={settings}
             style={style}
           />

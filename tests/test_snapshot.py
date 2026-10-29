@@ -136,7 +136,11 @@ def test_drawer_pathways_are_exported_and_checked(client, page, tmp_path):
     ids = {n["label"]: n["id"] for n in client.get("/api/canvas").json()["nodes"]}
     path = [ids["T-S0"], ids["B-S1"], ids["B-S2"]]
     data = data_of(export(client, {"paths": [{"ids": path, "branch_id": None}]}))
-    assert data["paths"] == [{"ids": path, "branch_id": None}]
+    assert data["paths"] == [{"ids": path, "branch_id": None, "shifts": []}]
+    # D194: the steps the drawer moved along the axis go with the pathway.
+    moved = {"ids": path, "branch_id": None, "shifts": [{"at": 1, "by": 2}]}
+    assert data_of(export(client, {"paths": [moved]}))["paths"] == [moved]
+    export(client, {"paths": [{**moved, "shifts": [{"at": 9, "by": 1}]}]}, status=422)
     assert data["reference_id"] is None
     assert {k.rsplit("|", 1)[1] for k in data["profiles"]} == set(path)
     # A pathway with a gap is refused (INV-2).

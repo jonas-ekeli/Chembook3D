@@ -65,9 +65,10 @@ export function SnapshotDrawer({
     return branch ? branch.name || 'Unnamed branch' : `${labels.get(p.ids[0])} → ${labels.get(p.ids.at(-1)!)}`
   })
   const shown = level && reference ? data.profiles[`${level}|${type}|${reference}`] : undefined
+  const shifts = paths.map((p) => p.shifts ?? []) // D194
 
   // D181: the saved figure is drawn afresh in the style alone, as the app saves it.
-  const figure = () => shown && figureOf({ data: shown.profiles, colours, names, settings })
+  const figure = () => shown && figureOf({ data: shown.profiles, colours, names, settings, shifts })
 
   const exportSvg = () => {
     const svg = figure()
@@ -175,6 +176,7 @@ export function SnapshotDrawer({
                 data={shown.profiles}
                 colours={colours}
                 names={names}
+                shifts={shifts}
                 settings={settings}
                 textScale={SCREEN_TEXT}
                 pointing={{

@@ -17,7 +17,9 @@ from tests.test_pathway import (  # noqa: F401
 
 
 def paths(*runs: tuple[list[str], bool], branch_id: str | None = None) -> list[dict]:
-    return [{"ids": ids, "branch_id": branch_id, "shown": shown} for ids, shown in runs]
+    return [
+        {"ids": ids, "branch_id": branch_id, "shown": shown, "shifts": []} for ids, shown in runs
+    ]
 
 
 def test_profiles_are_saved_named_and_not_in_the_history(open_client, example):  # noqa: F811
@@ -37,7 +39,7 @@ def test_profiles_are_saved_named_and_not_in_the_history(open_client, example): 
     assert changed["paths"] == body["paths"]
     # Several pathways may be shown together; "shown" defaults to true.
     shown = patch(open_client, f"/energy-profiles/{first['id']}", {"paths": [{"ids": b}]})
-    assert shown["paths"] == [{"ids": b, "branch_id": None, "shown": True}]
+    assert shown["paths"] == [{"ids": b, "branch_id": None, "shown": True, "shifts": []}]
 
     response = open_client.patch(
         f"/api/energy-profiles/{second['id']}", json={"name": "nhc VS caac"}
@@ -71,6 +73,42 @@ def test_bad_pathways_are_refused(open_client):
     assert response.status_code == 422
 
 
+def test_steps_moved_along_the_axis_are_kept(open_client, example):  # noqa: F811
+    """D194, T-EN-48: a step moved later along the axis, with every step after it, is saved
+    with its pathway in order, once per step; a step moved 0 columns is not stored; a duplicate
+    keeps them."""
+    ids = example.nodes
+    a = [ids["T-pre"], ids["A1-S1"], ids["A1-S2"]]
+    profile = post(open_client, "/energy-profiles", {})
+    body = {"paths": [{"ids": a, "shifts": [{"at": 2, "by": 3}, {"at": 0, "by": 1}]}]}
+    saved = patch(open_client, f"/energy-profiles/{profile['id']}", body)
+    assert saved["paths"][0]["shifts"] == [{"at": 0, "by": 1}, {"at": 2, "by": 3}]
+    back = patch(
+        open_client,
+        f"/energy-profiles/{profile['id']}",
+        {"paths": [{"ids": a, "shifts": [{"at": 0, "by": 0}, {"at": 2, "by": 3}]}]},
+    )
+    assert back["paths"][0]["shifts"] == [{"at": 2, "by": 3}]
+    copy = post(open_client, f"/energy-profiles/{profile['id']}/duplicate", status=200)
+    assert copy["paths"] == back["paths"]
+    assert get(open_client, "/energy-profiles")[0]["paths"] == back["paths"]
+    for bad in (
+        "x",
+        [{"at": 3, "by": 1}],  # past the pathway's end
+        [{"at": -1, "by": 1}],
+        [{"at": 0, "by": -1}],  # never before where the pathway puts it
+        [{"at": 0, "by": 21}],
+        [{"at": 0, "by": 1.5}],
+        [{"at": True, "by": 1}],
+        [{"at": 1, "by": 1}, {"at": 1, "by": 2}],
+        [{"at": 1}],
+    ):
+        response = open_client.patch(
+            f"/api/energy-profiles/{profile['id']}", json={"paths": [{"ids": a, "shifts": bad}]}
+        )
+        assert response.status_code == 422, bad
+
+
 def test_a_deleted_node_drops_its_pathways(open_client, example):  # noqa: F811
     ids = example.nodes
     gone = node(open_client, label="Gone")["id"]
@@ -86,7 +124,12 @@ def test_a_deleted_node_drops_its_pathways(open_client, example):  # noqa: F811
     open_client.delete(f"/api/nodes/{gone}")
     found = get(open_client, "/energy-profiles")[0]
     assert found["paths"] == [
-        {"ids": [ids["T-pre"], ids["A1-S1"]], "branch_id": example.branches["A"], "shown": True}
+        {
+            "ids": [ids["T-pre"], ids["A1-S1"]],
+            "branch_id": example.branches["A"],
+            "shown": True,
+            "shifts": [],
+        }
     ]
 
 
@@ -121,8 +164,8 @@ def test_the_drawers_pathways_become_profile_1(open_client, example, tmp_path): 
     [profile] = get(open_client, "/energy-profiles")
     assert profile["name"] == "Profile 1"
     assert profile["paths"] == [
-        {"ids": old[0]["ids"], "branch_id": example.branches["A"], "shown": True},
-        {"ids": old[1]["ids"], "branch_id": None, "shown": True},
+        {"ids": old[0]["ids"], "branch_id": example.branches["A"], "shown": True, "shifts": []},
+        {"ids": old[1]["ids"], "branch_id": None, "shown": True, "shifts": []},
     ]
     drawer = get(open_client, "/view-state")["drawer"]
     assert drawer == {"open": True, "tab": "table", "profile_id": profile["id"]}

@@ -12,6 +12,7 @@ import {
   balanceText,
   energyTypeName,
   formatDelta,
+  type PathShift,
   type ProfilePoint,
   type ProfileStyle,
   type Profiles,
@@ -106,6 +107,8 @@ export type ChartProps = {
   pointing?: Pointing
   /** D185: drawn on screen in the dark theme (never for a saved figure, which stays light). */
   dark?: boolean
+  /** D194: each pathway's steps moved later along the axis, in columns, with the steps after them. */
+  shifts?: PathShift[][]
 }
 
 /** FR-EN-05, FR-EN-09: X(n) − X(ref) along each pathway, overlaid in branch colours. A direct
@@ -125,6 +128,7 @@ export function ProfileChart({
   textScale = 1,
   pointing,
   dark = false,
+  shifts,
 }: ChartProps) {
   // D181: the level under the pointer and where its line is on the screen.
   const [pointed, setPointed] = useState<{ pi: number; i: number; box: DOMRect; data: Profiles } | null>(null)
@@ -171,8 +175,19 @@ export function ProfileChart({
   const slots = byStep
     ? [...new Set(data.profiles.flatMap((p) => p.points.map((pt) => pt.step_position as number)))].sort((a, b) => a - b)
     : Array.from({ length: Math.max(...data.profiles.map((p) => p.points.length)) }, (_, i) => i)
+  // D194: a step moved along the axis takes every later step of its pathway with it.
+  const moved = data.profiles.map((profile, pi) => {
+    let sum = 0
+    return profile.points.map((_, i) => (sum += shifts?.[pi]?.find((shift) => shift.at === i)?.by ?? 0))
+  })
   const slotOf = (profileIndex: number, pointIndex: number) =>
-    byStep ? slots.indexOf(data.profiles[profileIndex].points[pointIndex].step_position as number) : pointIndex
+    (byStep ? slots.indexOf(data.profiles[profileIndex].points[pointIndex].step_position as number) : pointIndex) +
+    (moved[profileIndex][pointIndex] ?? 0)
+  // The columns along the axis: one per slot, and more where a pathway was moved past the last.
+  const columns = Array.from(
+    { length: Math.max(slots.length, ...data.profiles.flatMap((p, pi) => p.points.map((_, i) => slotOf(pi, i) + 1))) },
+    (_, i) => i,
+  )
   const pointName = (pi: number, i: number) => {
     const point = data.profiles[pi].points[i]
     const closing = i === data.profiles[pi].points.length - 1 && closesCycle(data.profiles[pi].points.map((p) => p.id))
@@ -197,7 +212,7 @@ export function ProfileChart({
 
   // D109: node names along the bottom, one line per node in each column (a node shared by
   // overlaid pathways once), in its pathway's colour where a column holds more than one.
-  const bottomNames = slots.map(() => [] as { id: string; name: string; colour: string }[])
+  const bottomNames = columns.map(() => [] as { id: string; name: string; colour: string }[])
   if (style.name_position === 'bottom')
     data.profiles.forEach((profile, pi) =>
       profile.points.forEach((point, i) => {
@@ -221,7 +236,7 @@ export function ProfileChart({
   }
   const plotW = W - margin.left - margin.right
   const plotH = H - margin.top - margin.bottom
-  const slotW = plotW / Math.max(1, slots.length)
+  const slotW = plotW / Math.max(1, columns.length)
   const half = Math.min(style.level_width / 2, slotW * 0.45)
   const x = (slot: number) => margin.left + slotW * (slot + 0.5)
 
@@ -274,7 +289,7 @@ export function ProfileChart({
   } | null
   const labels = new Map<string, Label>()
   const close = Math.max(18 * s, gap + Math.max(above.length, below.length) * row + 2 * s)
-  slots.forEach((_, slot) => {
+  columns.forEach((slot) => {
     const here: {
       key: string
       place: string
@@ -436,11 +451,23 @@ export function ProfileChart({
         )),
       )}
       {stepNames &&
-        slots.map((position, i) => {
-          const name = data.profiles.flatMap((p) => p.points).find((pt) => pt.step_position === position)?.step_name
+        columns.map((column) => {
+          // D194: the steps drawn in this column; more than one where a pathway was moved onto it.
+          const here = new Map<number, string>()
+          data.profiles.forEach((profile, pi) =>
+            profile.points.forEach((pt, i) => {
+              const position = pt.step_position as number
+              if (slotOf(pi, i) === column && !here.has(position)) here.set(position, pt.step_name || `step ${position}`)
+            }),
+          )
+          if (!here.size) return null
+          const name = [...here.entries()]
+            .sort(([a], [b]) => a - b)
+            .map(([, n]) => n)
+            .join(' / ')
           return (
-            <text key={position} x={x(i)} y={H - 12 * s} fontSize={f} textAnchor="middle" fill={soft}>
-              {name || `step ${position}`}
+            <text key={column} x={x(column)} y={H - 12 * s} fontSize={f} textAnchor="middle" fill={soft}>
+              {name}
             </text>
           )
         })}

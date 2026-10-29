@@ -9,6 +9,7 @@ import {
   type Node,
   type EnergyProfile,
   type PathChoice,
+  type PathShift,
   type ProfilePath,
   type Profiles,
   type ProfileRequest,
@@ -34,17 +35,36 @@ import { placeText } from '../subCanvas'
 const NO_BRANCH = '#98a2b3'
 const FALLBACK = ['#2459c6', '#c4320a', '#079455', '#6938ef', '#b54708']
 
-type Path = { ids: string[]; choices: Omit<PathChoice, 'transition_id'>[]; branchId: string | null; shown: boolean }
+type Path = {
+  ids: string[]
+  choices: Omit<PathChoice, 'transition_id'>[]
+  branchId: string | null
+  shown: boolean
+  shifts: PathShift[]
+}
 
 /** D190: a saved profile's pathways in the drawer's form; the choices are asked for (D189). */
 const pathsOf = (profile: EnergyProfile | undefined): Path[] =>
-  profile?.paths.map((p) => ({ ids: p.ids, choices: [], branchId: p.branch_id, shown: p.shown })) ?? []
+  profile?.paths.map((p) => ({ ids: p.ids, choices: [], branchId: p.branch_id, shown: p.shown, shifts: p.shifts ?? [] })) ??
+  []
 /** D190: what is saved of the pathways; never the choices. */
 const storedOf = (paths: Path[]): ProfilePath[] =>
-  paths.map((p) => ({ ids: p.ids, branch_id: p.branchId, shown: p.shown }))
+  paths.map((p) => ({ ids: p.ids, branch_id: p.branchId, shown: p.shown, shifts: p.shifts }))
 
-/** A pathway as the read-only copy exports it (D79, A30). */
-export type DrawerPath = { ids: string[]; branch_id: string | null }
+/** A pathway as the read-only copy exports it (D79, A30), with its steps moved along the axis
+ * (D194; none in copies made before). */
+export type DrawerPath = { ids: string[]; branch_id: string | null; shifts?: PathShift[] }
+
+/** D194: how far one step may be moved, in columns (the backend's `energy_profiles.MAX_SHIFT`). */
+const MAX_SHIFT = 20
+
+/** D194: `path`'s shifts with the step at `at` moved `delta` columns later (earlier when negative);
+ * a step is never moved before where the pathway puts it. */
+function shifted(shifts: PathShift[], at: number, delta: number): PathShift[] {
+  const by = Math.min(MAX_SHIFT, Math.max(0, (shifts.find((s) => s.at === at)?.by ?? 0) + delta))
+  const rest = shifts.filter((s) => s.at !== at)
+  return (by ? [...rest, { at, by }] : rest).sort((a, b) => a.at - b.at)
+}
 
 /** D105: the drawer as the investigation remembers it. */
 export type DrawerView = Omit<ViewState['drawer'], 'open'>
@@ -131,6 +151,8 @@ export function EnergyDrawer({
   const [paths, setPaths] = useState<Path[]>([])
   const [renaming, setRenaming] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // D194: the step each pathway's Move buttons act on, by the pathway's place in `paths`.
+  const [moving, setMoving] = useState<Record<number, number>>({})
   // What the open profile last saved, so a change is saved once and loading saves nothing.
   const lastSaved = useRef<string | null>(null)
   // The open profile for callbacks that finish after a render, such as a pathway being found.
@@ -257,10 +279,11 @@ export function EnergyDrawer({
   const livePaths = drawn.map(({ path }) => path)
   const colours = drawn.map(({ colour }) => colour)
   const names = drawn.map(({ name }) => name)
+  const shifts = drawn.map(({ path }) => path.shifts)
   const onPaths = new Set(livePaths.flatMap((p) => p.ids))
   const reference = referenceId && onPaths.has(referenceId) ? referenceId : (livePaths[0]?.ids[0] ?? null)
 
-  const pathsKey = JSON.stringify(livePaths.map((p) => ({ ids: p.ids, branch_id: p.branchId })))
+  const pathsKey = JSON.stringify(livePaths.map((p) => ({ ids: p.ids, branch_id: p.branchId, shifts: p.shifts })))
   useEffect(() => {
     onPathsChange?.(JSON.parse(pathsKey) as DrawerPath[])
   }, [pathsKey, onPathsChange])
@@ -375,6 +398,7 @@ export function EnergyDrawer({
     openRef.current = profile?.id ?? null
     setOpenId(profile?.id ?? null)
     setPaths(next)
+    setMoving({})
     setRenaming(null)
   }
 
@@ -424,7 +448,7 @@ export function EnergyDrawer({
   const startAtSelection = () => {
     if (!selectedId) return
     api.extendPathway([selectedId]).then(
-      (found) => addPath({ ids: found.path, choices: found.choices, branchId: null, shown: true }),
+      (found) => addPath({ ids: found.path, choices: found.choices, branchId: null, shown: true, shifts: [] }),
       (err: unknown) => setError(errorText(err)),
     )
   }
@@ -435,7 +459,7 @@ export function EnergyDrawer({
 
   const addBranch = (branchId: string) =>
     api.branchPathway(branchId).then(
-      (found) => addPath({ ids: found.path, choices: found.choices, branchId, shown: true }),
+      (found) => addPath({ ids: found.path, choices: found.choices, branchId, shown: true, shifts: [] }),
       (err: unknown) => setError(errorText(err)),
     )
 
@@ -544,7 +568,7 @@ export function EnergyDrawer({
   const dark = useTheme() === 'dark' // D185: on screen only; the saved figure stays light
   // D181: the saved figure is drawn afresh in the style alone, without the screen's text scale,
   // zoom or pointer marks.
-  const figure = () => shownProfiles && figureOf({ data: shownProfiles, colours, names, settings })
+  const figure = () => shownProfiles && figureOf({ data: shownProfiles, colours, names, settings, shifts })
 
   const exportSvg = () => {
     const svg = figure()
@@ -709,7 +733,14 @@ export function EnergyDrawer({
                   <button
                     className="small"
                     disabled={path.ids.length < 2}
-                    onClick={() => replace(index, { ...path, ids: path.ids.slice(0, -1), choices: [] })}
+                    onClick={() =>
+                      replace(index, {
+                        ...path,
+                        ids: path.ids.slice(0, -1),
+                        choices: [],
+                        shifts: path.shifts.filter((shift) => shift.at < path.ids.length - 1),
+                      })
+                    }
                     title="Remove the last node; every way on from the node before is offered again (D189)"
                   >
                     Undo step
@@ -738,6 +769,11 @@ export function EnergyDrawer({
                   {path.ids.map((id, i) => (
                     <span key={i}>
                       {i > 0 && ' → '}
+                      {path.shifts.some((shift) => shift.at === i) && (
+                        <span className="shift-mark" title="Moved later along the axis, with the steps after it (D194)">
+                          {`+${path.shifts.find((shift) => shift.at === i)?.by} `}
+                        </span>
+                      )}
                       <button className="link" onClick={() => onSelectNode(id)}>
                         {labels.get(id)}
                       </button>
@@ -751,6 +787,60 @@ export function EnergyDrawer({
                   ))}
                 </p>
                 {closesCycle(path.ids) && <p className="muted small">Cycle closed.</p>}
+                {path.ids.length > 0 &&
+                  (() => {
+                    // D194: one step, and with it every step after it, moved along the axis.
+                    const at = Math.min(moving[index] ?? 0, path.ids.length - 1)
+                    const by = path.shifts.find((shift) => shift.at === at)?.by ?? 0
+                    const move = (delta: number) => replace(index, { ...path, shifts: shifted(path.shifts, at, delta) })
+                    return (
+                      <div className="pathway-move" role="group" aria-label={`Move ${name} along the axis`}>
+                        <span className="muted small">Move</span>
+                        <select
+                          aria-label="Step to move"
+                          value={at}
+                          onChange={(event) => setMoving((m) => ({ ...m, [index]: Number(event.target.value) }))}
+                          title="This step and every step after it move; the steps before stay put"
+                        >
+                          {path.ids.map((id, i) => {
+                            const moved = path.shifts.find((shift) => shift.at === i)?.by
+                            return (
+                              <option key={i} value={i}>
+                                {`${i + 1}. ${labels.get(id)}${moved ? ` (+${moved})` : ''}`}
+                              </option>
+                            )
+                          })}
+                        </select>
+                        <button
+                          className="small"
+                          disabled={by === 0}
+                          onClick={() => move(-1)}
+                          aria-label="Move back"
+                          title="Move this step and the ones after it one column back"
+                        >
+                          ←
+                        </button>
+                        <button
+                          className="small"
+                          disabled={by >= MAX_SHIFT}
+                          onClick={() => move(1)}
+                          aria-label="Move on"
+                          title="Move this step and the ones after it one column further along"
+                        >
+                          →
+                        </button>
+                        {path.shifts.length > 0 && (
+                          <button
+                            className="small quiet"
+                            onClick={() => replace(index, { ...path, shifts: [] })}
+                            title="Put every step of this pathway back where the pathway places it"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })()}
                 {path.choices.length > 0 && (
                   <div className="choices" role="group" aria-label="Continue with">
                     <span className="muted small">Continue with:</span>
@@ -879,6 +969,7 @@ export function EnergyDrawer({
                 data={shownProfiles}
                 colours={colours}
                 names={names}
+                shifts={shifts}
                 settings={settings}
                 size={zoom === null ? undefined : { width: style.width * zoom, height: style.height * zoom }}
                 textScale={SCREEN_TEXT}
@@ -925,7 +1016,7 @@ export function EnergyDrawer({
       {styling && settings && (
         <ProfileStyleDialog
           settings={settings}
-          preview={shownProfiles ? { data: shownProfiles, colours, names } : null}
+          preview={shownProfiles ? { data: shownProfiles, colours, names, shifts } : null}
           onSave={(profile_style) => api.saveSettings({ profile_style }).then((next) => onSettings?.(next))}
           onClose={() => setStyling(false)}
         />
