@@ -90,7 +90,7 @@ export type PaletteEntry = {
   colour?: string
   run: () => void
 }
-export type PaletteGroup = 'Commands' | 'Nodes' | 'Branches' | 'Steps'
+export type PaletteGroup = 'Commands' | 'Nodes' | 'Sub-investigations' | 'Branches' | 'Steps'
 
 /** Where a query's letters are found in a text, and how well: each word typed as one run (best
  * at the start of a word), else its letters at the starts of the text's words, a word's next

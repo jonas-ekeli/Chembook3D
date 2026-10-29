@@ -28,6 +28,7 @@ import { EquilibriumEditor } from './Equilibrium'
 import { EmptyState } from './EmptyState'
 import { Icon } from '../icons'
 import { PALETTE_KEY, useRequest, type Request } from '../commands'
+import { placed } from '../subCanvas'
 
 // D83: the Analyses view lists the saved selectivities (S7); each one compares outcomes
 // realised by TS nodes or groups at one level and energy type (S1–S6).
@@ -107,7 +108,7 @@ function OutcomeRow({
             <optgroup label="Transition states">
               {ts.map((n) => (
                 <option key={n.id} value={n.id}>
-                  {n.label || 'Untitled node'}
+                  {placed(canvas, n.id, n.label || 'Untitled node')}
                 </option>
               ))}
             </optgroup>
@@ -116,7 +117,7 @@ function OutcomeRow({
             <optgroup label="Groups (all members)">
               {freeGroups.map((g) => (
                 <option key={g.id} value={g.id}>
-                  {g.label || 'Group'}
+                  {placed(canvas, g.id, g.label || 'Group')}
                 </option>
               ))}
             </optgroup>
@@ -125,7 +126,7 @@ function OutcomeRow({
             <optgroup label="Other nodes">
               {others.map((n) => (
                 <option key={n.id} value={n.id}>
-                  {n.label || 'Untitled node'}
+                  {placed(canvas, n.id, n.label || 'Untitled node')}
                 </option>
               ))}
             </optgroup>
@@ -457,7 +458,7 @@ function SelectivityEditor({
               <optgroup label="Nodes">
                 {canvas.nodes.map((n) => (
                   <option key={n.id} value={n.id}>
-                    {n.label || 'Untitled node'}
+                    {placed(canvas, n.id, n.label || 'Untitled node')}
                   </option>
                 ))}
               </optgroup>
@@ -466,7 +467,7 @@ function SelectivityEditor({
               <optgroup label="Groups">
                 {canvas.groups.map((g) => (
                   <option key={g.id} value={g.id}>
-                    {g.label || 'Group'}
+                    {placed(canvas, g.id, g.label || 'Group')}
                   </option>
                 ))}
               </optgroup>

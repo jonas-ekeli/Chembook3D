@@ -75,7 +75,7 @@ import { Menu } from './MoreMenu'
 import { cardEnergy, minus, type CanvasEnergy, type CardEnergy } from '../cardEnergy'
 import { curveOf, LabelPlacer, leaderEnd, pointAt, type Curve, type Rect } from '../labelLayout'
 import { useRequest, type Request } from '../commands'
-import { chainOf, contentsText, placeOf, subName, subsOf, visibleCanvases, canvasName } from '../subCanvas'
+import { chainOf, contentsText, openInside, placeOf, subName, subsOf, visibleCanvases, canvasName } from '../subCanvas'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import type { Rotation } from '../chem'
@@ -190,6 +190,8 @@ type SubData = {
   face: Node | null
   mode: ViewMode
   expanded: boolean
+  /** Nodes and transitions inside with something open (the overview's open items). */
+  open: number
   onToggle: (id: string) => void
   onOpen?: (id: string) => void
 }
@@ -382,7 +384,7 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
 })
 
 const SubBox = memo(function SubBox({ data, selected }: NodeProps<FlowNode<SubData>>) {
-  const { sub, face, mode, expanded, onToggle, onOpen } = data
+  const { sub, face, mode, expanded, open, onToggle, onOpen } = data
   const name = subName(sub)
   return (
     <div
@@ -425,6 +427,11 @@ const SubBox = memo(function SubBox({ data, selected }: NodeProps<FlowNode<SubDa
       {!expanded && (
         <div className="cnode-meta">
           <span className="small">{contentsText(sub)}</span>
+          {open > 0 && (
+            <span className="badge warn" title="Nodes and transitions inside with something open (failed, running, planned, a warning, no TS)">
+              {open} open
+            </span>
+          )}
         </div>
       )}
       {!expanded && face && mode !== 'structure' && (
@@ -944,6 +951,7 @@ function CanvasView({
           face: sub.face_id ? (faces.get(sub.face_id) ?? null) : null,
           mode,
           expanded: open,
+          open: openInside(data, sub.id),
           onToggle: onToggleGroup,
           onOpen: onOpenSub,
         } satisfies SubData,

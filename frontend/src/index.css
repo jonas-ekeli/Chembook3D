@@ -5351,3 +5351,11 @@ table.scan-path-held input.drive-value {
   display: grid;
   gap: 2px;
 }
+.node-place {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+}

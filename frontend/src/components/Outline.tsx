@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
-import { api, STATUS_LABEL, type Canvas, type Node, type Step } from '../api'
+import { api, STATUS_LABEL, type Canvas, type Node, type Step, type SubInvestigation } from '../api'
 import { Icon } from '../icons'
 import { Modal } from './Modal'
 import { NodeRow } from './NodeRow'
+import { contentsText, placeText, subName, subsOf } from '../subCanvas'
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -421,6 +422,7 @@ function FreeSpecies({
 
 /** Search by label, tag or note text (P10); choosing a node selects it and centres the canvas. */
 function NodeSearch({
+  canvas,
   nodes,
   colours,
   selectedId,
@@ -429,6 +431,7 @@ function NodeSearch({
   onSelect,
   onToggle,
 }: {
+  canvas: Canvas
   nodes: Node[]
   colours: Map<string, string>
   selectedId: string | null
@@ -445,6 +448,7 @@ function NodeSearch({
           n.label.toLowerCase().includes(q) ||
           n.notes.toLowerCase().includes(q) ||
           (n.formula ?? '').toLowerCase().includes(q) ||
+          placeText(canvas, n.id).toLowerCase().includes(q) ||
           n.tags.some((t) => t.toLowerCase().includes(q)),
       )
     : nodes
@@ -479,6 +483,8 @@ function NodeSearch({
                     on edge
                   </span>
                 )}
+                {/* D193: where it is, when inside a sub-investigation */}
+                {node.canvas_id && <span className="node-place">{placeText(canvas, node.id)}</span>}
               </NodeRow>
             </button>
           </li>
@@ -490,12 +496,70 @@ function NodeSearch({
   )
 }
 
+/** D193: the sub-investigations as a tree; a click opens one's canvas, the head the main one. */
+function SubInvestigations({
+  canvas,
+  openCanvas,
+  fold,
+  onOpen,
+}: {
+  canvas: Canvas
+  openCanvas: string | null
+  fold: Fold
+  onOpen: (id: string | null) => void
+}) {
+  const subs = subsOf(canvas)
+  const tree: { sub: SubInvestigation; depth: number }[] = []
+  const add = (parent: string | null, depth: number) => {
+    for (const sub of subs.filter((s) => s.parent_id === parent)) {
+      tree.push({ sub, depth })
+      add(sub.id, depth + 1)
+    }
+  }
+  add(null, 0)
+  return (
+    <section className="outline-section" aria-label="Sub-investigations">
+      <SectionHead title="Sub-investigations" count={subs.length} fold={fold} />
+      <ul className="branches" aria-label="Sub-investigation list" hidden={fold.collapsed}>
+        <li>
+          <button
+            className={`branch-item${openCanvas === null ? ' selected' : ''}`}
+            aria-current={openCanvas === null ? 'location' : undefined}
+            onClick={() => onOpen(null)}
+          >
+            <Icon name="layers" />
+            <span className="branch-name">Main canvas</span>
+          </button>
+        </li>
+        {tree.map(({ sub, depth }) => (
+          <li key={sub.id} style={{ paddingLeft: `${Math.min(depth + 1, 6) * 12}px` }}>
+            <button
+              className={`branch-item${sub.id === openCanvas ? ' selected' : ''}`}
+              aria-current={sub.id === openCanvas ? 'location' : undefined}
+              title={`Open ${subName(sub)}: ${contentsText(sub)}`}
+              onClick={() => onOpen(sub.id)}
+            >
+              <Icon name="layers" />
+              <span className="branch-name">{subName(sub)}</span>
+              <span className="count-pill" title="Nodes inside, at any depth">
+                {sub.node_count}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 /** The outline beside the canvas (P6): reaction steps, branches and node search. */
 export function Outline({
   canvas,
   selectedNodeId,
   selectedNodeIds,
   selectedBranchId,
+  openCanvas = null,
+  onOpenCanvas,
   onSelectNode,
   onToggleNode,
   onSelectBranch,
@@ -509,6 +573,9 @@ export function Outline({
   selectedNodeId: string | null
   selectedNodeIds: string[]
   selectedBranchId: string | null
+  /** D193: the sub-investigation open (none: the main canvas), and opening one. */
+  openCanvas?: string | null
+  onOpenCanvas?: (id: string | null) => void
   onSelectNode: (id: string) => void
   onToggleNode: (id: string) => void
   onSelectBranch: (id: string) => void
@@ -563,7 +630,11 @@ export function Outline({
         onAdd={onAddSpecies}
         onImport={onImportSpecies}
       />
+      {onOpenCanvas && subsOf(canvas).length > 0 && (
+        <SubInvestigations canvas={canvas} openCanvas={openCanvas} fold={fold('subs')} onOpen={onOpenCanvas} />
+      )}
       <NodeSearch
+        canvas={canvas}
         nodes={canvas.nodes}
         colours={colours}
         selectedId={selectedNodeId}

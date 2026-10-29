@@ -169,6 +169,7 @@ def test_copy_opens_on_the_view_shown(client, page, tmp_path):
         "edge_energies": False,
         "filters": {"branches": [branch], "statuses": ["rejected"], "steps": []},
         "expanded": [group] if group else [],
+        "canvas": None,
         "drawer": {"open": True, "tab": "table"},
     }
     # Each copy has its own name, so a reader's choices in one are kept for that one alone.

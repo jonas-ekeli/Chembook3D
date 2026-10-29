@@ -7,10 +7,11 @@ import { Modal } from './Modal'
 const SHOWN: Record<PaletteGroup, [number, number]> = {
   Commands: [12, 12],
   Nodes: [6, 10],
+  'Sub-investigations': [4, 6],
   Branches: [4, 6],
   Steps: [4, 6],
 }
-const ORDER: PaletteGroup[] = ['Nodes', 'Branches', 'Steps', 'Commands']
+const ORDER: PaletteGroup[] = ['Nodes', 'Sub-investigations', 'Branches', 'Steps', 'Commands']
 
 type Hit = { entry: PaletteEntry; score: number; marks: number[] }
 
@@ -32,7 +33,7 @@ function Marked({ text, marks }: { text: string; marks: number[] }) {
 
 /**
  * D184: the command palette (Ctrl K, ⌘ K on a Mac). A search over the nodes (label, step, branch,
- * with ΔX), branches, steps and commands (the app bar's and the investigation menu's, the views,
+ * with ΔX, where it is), sub-investigations to open (D193), branches, steps and commands (the app bar's and the investigation menu's, the views,
  * filters, energies, settings sections, and what the selection's panel offers). With nothing
  * typed the commands come first, those for the selection at the top; typed words are found as
  * runs anywhere or as the starts of words, and the groups follow their best match. ↑ and ↓
