@@ -43,9 +43,15 @@ test('the resume overview lists where the investigation stands and opens each it
   ).toContainText('1 planned')
   await expect(branches.getByRole('row').filter({ hasText: 'No branch' })).toBeVisible()
 
-  const planned = overview.getByRole('list', { name: 'Planned' })
+  const planned = overview.getByRole('list', { name: 'Planned', exact: true })
   await expect(planned).toContainText('A-S2')
-  await expect(planned).toContainText('T-S0 → A-S1')
+  await expect(planned).not.toContainText('T-S0 → A-S1')
+  // T-UI-67, D191: planned transitions sit in one closed line at the end.
+  const folded = overview.getByText(/^Planned transitions \(\d+\)$/)
+  const plannedEdges = overview.getByRole('list', { name: 'Planned transitions' })
+  await expect(plannedEdges).toBeHidden()
+  await folded.click()
+  await expect(plannedEdges).toContainText('T-S0 → A-S1')
   const direct = overview.getByRole('list', {
     name: 'Direct connections (no TS)',
   })
