@@ -73,6 +73,7 @@ import { Icon } from '../icons'
 import { EmptyState } from './EmptyState'
 import { Menu } from './MoreMenu'
 import { cardEnergy, minus, type CanvasEnergy, type CardEnergy } from '../cardEnergy'
+import { memberShare, populationSummary } from '../populations'
 import { curveOf, LabelPlacer, leaderEnd, pointAt, type Curve, type Rect } from '../labelLayout'
 import { useRequest, type Request } from '../commands'
 import { chainOf, contentsText, openInside, placeOf, subName, subsOf, visibleCanvases, canvasName } from '../subCanvas'
@@ -156,6 +157,8 @@ type StructureData = {
   /** D85, D87: the notes on the card, on its corners or floating. */
   notes: Note[]
   noteActions: NoteActions
+  /** D197: its population % in its group, when the group shows them. */
+  share?: { text: string; title: string; counted: boolean } | null
 }
 
 const NO_NOTES: Note[] = []
@@ -181,6 +184,8 @@ type GroupData = {
   memberNotes: Note[]
   /** D158: each member's warnings, "label: code: message", marked on the group's head. */
   memberWarnings: string[]
+  /** D197: what its members' population % are of, when it shows them. */
+  population: { text: string; title: string } | null
 }
 /** D193: a sub-investigation's box: closed (its face and what it holds), or expanded in place
  * around its inside. Its own canvas is opened with Open or a double-click (A128). */
@@ -272,6 +277,11 @@ const StructureNode = memo(function StructureNode({ data, selected }: NodeProps<
       <div className="cnode-meta">
         <span className={`status status-${node.status}`}>{STATUS_LABEL[node.status]}</span>
         {stepName && <span className="cnode-step">{stepName}</span>}
+        {data.share && (
+          <span className={`cnode-share${data.share.counted ? '' : ' na'}`} title={data.share.title}>
+            {data.share.text}
+          </span>
+        )}
       </div>
       <CardNotes notes={data.notes} actions={data.noteActions} />
     </div>
@@ -288,7 +298,7 @@ const LAYOUT_BUTTON: Record<GroupLayout, { label: string; icon: string }> = {
 const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<GroupData>>) {
   const { group, colour, stepName, memberCount, representativeLabel, mode, ts, expanded } = data
   const { representativeXyz, representativeRotation } = data
-  const { onToggle, onLayout, onOrder, energy, memberNotes, memberWarnings } = data
+  const { onToggle, onLayout, onOrder, energy, memberNotes, memberWarnings, population } = data
   // A21: the button cycles grid (a new group's layout), vertical line, horizontal line, grid.
   const next: GroupLayout =
     group.layout === 'vertical' ? 'horizontal' : group.layout === 'horizontal' ? 'grid' : 'vertical'
@@ -310,6 +320,11 @@ const GroupBox = memo(function GroupBox({ data, selected }: NodeProps<FlowNode<G
         <span className="muted small">
           {memberCount} member{memberCount === 1 ? '' : 's'}
         </span>
+        {population && (
+          <span className="cgroup-share" role="img" aria-label={`Population basis: ${population.title}`} title={population.title}>
+            {population.text}
+          </span>
+        )}
         {memberWarnings.length > 0 && (
           <span
             className="warn-icon"
@@ -822,9 +837,13 @@ function CanvasView({
   const nodeEnergySource =
     mode === 'energy' || (mode === 'structure' && energy.referenceId) ? energy : null
 
+  // D197: only a group that shows its members' populations rebuilds the cards on a new view.
+  const populations = data.groups.some((g) => g.show_populations) ? energy.view?.populations : undefined
+
   const { flowNodes, flowEdges: plainEdges, origins } = useMemo(() => {
     // D43, D72: ΔX from the reference node (`cardEnergy`).
     const nodeEnergy = (id: string) => cardEnergy(nodeEnergySource, id)
+    const populationOf = (groupId: string) => (populations ? populations[groupId] : undefined)
     const hidden = {
       branches: new Set(filters.branches),
       statuses: new Set(filters.statuses),
@@ -1048,6 +1067,7 @@ function CanvasView({
           memberWarnings: members.flatMap((m) =>
             m.warnings.map((w) => `${m.label || 'Untitled node'}: ${w.code}: ${w.message}`),
           ),
+          population: group.show_populations && populationOf(group.id) ? populationSummary(populationOf(group.id)!) : null,
         } satisfies GroupData,
       })
       drawnAs.set(group.id, group.id)
@@ -1079,6 +1099,7 @@ function CanvasView({
             energy: nodeEnergy(member.id),
             notes: notesOf(member.id),
             noteActions,
+            share: group.show_populations && populationOf(group.id) ? memberShare(populationOf(group.id)!, member.id) : null,
           } satisfies StructureData,
         })
       })
@@ -1240,7 +1261,7 @@ function CanvasView({
         }) ?? null
     }
     return { flowNodes: result, flowEdges: edges, origins }
-  }, [data, mode, nodeEnergySource, filters, expanded, selection, multi, colours, stepNames, onToggleGroup, onGroupLayout, onGroupOrder, notesByNode, noteActions, canvasId, onOpenSub])
+  }, [data, mode, nodeEnergySource, populations, filters, expanded, selection, multi, colours, stepNames, onToggleGroup, onGroupLayout, onGroupOrder, notesByNode, noteActions, canvasId, onOpenSub])
 
   // FR-EN-02: ΔX = X(target) − X(source) on each edge, or n/a (EN-3). D121: the scan path
   // chips, in the energy unit, are always shown (A68) and never feed ΔX.

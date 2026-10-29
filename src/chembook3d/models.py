@@ -435,6 +435,8 @@ class GroupNode(Base):
     pos_y: Mapped[float] = mapped_column(default=0.0)
     # How expanded members are laid out: "grid", "vertical" or "horizontal" (A21).
     layout: Mapped[str] = mapped_column(String(16), default="grid", server_default="grid")
+    # D197: its members' cards show their Boltzmann population % (a view choice, no history).
+    show_populations: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     incoming_branches: Mapped[list[Branch]] = relationship(

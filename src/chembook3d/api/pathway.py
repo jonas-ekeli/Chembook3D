@@ -168,6 +168,7 @@ class GroupOut(BaseModel):
     pos_x: float
     pos_y: float
     layout: str
+    show_populations: bool = False  # D197
 
 
 class GroupIn(BaseModel):
@@ -179,6 +180,7 @@ class GroupIn(BaseModel):
     pos_x: float | None = None
     pos_y: float | None = None
     layout: str | None = None
+    show_populations: bool | None = None  # D197
 
 
 class AddMembersIn(BaseModel):
@@ -450,6 +452,7 @@ def _group_out(session: Session, group: GroupNode) -> GroupOut:
         pos_x=group.pos_x,
         pos_y=group.pos_y,
         layout=group.layout,
+        show_populations=group.show_populations,
     )
 
 

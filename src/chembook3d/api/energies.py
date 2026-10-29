@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from chembook3d import settings as app_settings
 from chembook3d.api.routes import DbSession
-from chembook3d.services import pathways
+from chembook3d.services import group_populations, pathways, thermo_settings
 from chembook3d.services import species as species_service
 from chembook3d.services import transitions as transition_service
 from chembook3d.services.energies import Energies, LevelKey, distinct_temperatures
@@ -85,6 +85,25 @@ class RelativeOut(BaseModel):
     joined: bool  # joined to the reference by transitions; if not, no species are counted
 
 
+class PopulationOut(BaseModel):
+    percent: float | None
+    message: str | None
+
+
+class GroupPopulationOut(BaseModel):
+    """D197: a group's members' Boltzmann shares at the view's level and type."""
+
+    status: str  # "ok", "incomplete" or "refused"
+    message: str | None
+    kind: str  # "conformers" or "transition_states"
+    type: str
+    temperature: float
+    counted: int
+    total: int
+    members: dict[str, PopulationOut]
+    notes: list[str]
+
+
 class EnergyViewOut(BaseModel):
     level: str
     type: str
@@ -96,6 +115,8 @@ class EnergyViewOut(BaseModel):
     # D160: W-TEMP (H or G read at different temperatures) and W-STDSTATE (free species at
     # 1 atm in a solvation model)
     notes: list[IssueOut] = []
+    # D197: by group id, for the groups that show their members' populations
+    populations: dict[str, GroupPopulationOut] = {}
 
 
 class PathIn(BaseModel):
@@ -212,6 +233,15 @@ def view_notes(
     return [IssueOut(**note) for note in found if note is not None]
 
 
+def view_populations(
+    session, energies: Energies, values: dict[str, ValueOut], type: str
+) -> dict[str, GroupPopulationOut]:
+    """D197: the members' populations of every group that shows them."""
+    settings = thermo_settings.settings(session)
+    found = group_populations.of_groups(session, energies, values, type, settings)
+    return {group_id: GroupPopulationOut(**shares) for group_id, shares in found.items()}
+
+
 def relative_values(
     session,
     energies: Energies,
@@ -274,6 +304,7 @@ def energy_view(
         reference_id=reference,
         relative=relative,
         notes=view_notes(session, energies, values, key, type),
+        populations=view_populations(session, energies, values, type),
     )
 
 
