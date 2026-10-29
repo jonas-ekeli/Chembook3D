@@ -56,6 +56,7 @@ class PathIn(BaseModel):
     branch_id: str | None = None
     # D194: the steps moved along the axis, as the drawer's profile holds them.
     shifts: list[dict[str, Any]] = []
+    colour: str | None = None  # D195: the colour chosen for it in the drawer
 
 
 class SnapshotIn(BaseModel):
@@ -109,6 +110,7 @@ def _paths(session: Session, body: SnapshotIn) -> list[dict[str, Any]]:
                 "ids": p.ids,
                 "branch_id": p.branch_id,
                 "shifts": energy_profiles.clean_shifts(p.shifts, len(p.ids)),
+                "colour": energy_profiles.clean_colour(p.colour),
             }
             for p in body.paths
         ]

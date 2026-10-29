@@ -7,7 +7,7 @@ import { Menu } from '../components/MoreMenu'
 import { ProfileChart, SCREEN_TEXT } from '../components/ProfileChart'
 import { Icon } from '../icons'
 import { figureOf } from '../profileFigure'
-import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
+import { pathwayColours, saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
 import { closesCycle, csvTitle, download } from '../util'
 import { tableCsv, type SnapshotData } from './data'
 
@@ -66,9 +66,11 @@ export function SnapshotDrawer({
   })
   const shown = level && reference ? data.profiles[`${level}|${type}|${reference}`] : undefined
   const shifts = paths.map((p) => p.shifts ?? []) // D194
+  const chosen = paths.map((p) => p.colour) // D195
+  const drawnColours = pathwayColours(colours, styleOf(settings), chosen)
 
   // D181: the saved figure is drawn afresh in the style alone, as the app saves it.
-  const figure = () => shown && figureOf({ data: shown.profiles, colours, names, settings, shifts })
+  const figure = () => shown && figureOf({ data: shown.profiles, colours, names, settings, shifts, chosen })
 
   const exportSvg = () => {
     const svg = figure()
@@ -126,7 +128,7 @@ export function SnapshotDrawer({
           {paths.map((path, index) => (
             <div key={index} className="pathway" role="group" aria-label={`Pathway ${names[index]}`}>
               <div className="pathway-head">
-                <span className="swatch" style={{ background: colours[index] }} />
+                <span className="swatch" style={{ background: drawnColours[index] }} />
                 <strong>{names[index]}</strong>
               </div>
               <p className="pathway-nodes">
@@ -177,6 +179,7 @@ export function SnapshotDrawer({
                 colours={colours}
                 names={names}
                 shifts={shifts}
+                chosen={chosen}
                 settings={settings}
                 textScale={SCREEN_TEXT}
                 pointing={{

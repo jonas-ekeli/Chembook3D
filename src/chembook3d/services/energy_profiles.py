@@ -2,7 +2,8 @@
 drawer opens, one at a time. Each pathway keeps its node and group ids, the branch it was added
 for, whether it is drawn ("Show on the figure"; any number may be drawn together) and the steps
 moved along the axis (D194: each a step's index and the columns it, with every later step, is
-moved; only later than where the pathway puts it, so moving back stops there). The
+moved; only later than where the pathway puts it, so moving back stops there) and the colour
+the user chose for it (D195: "#rrggbb", or None for its branch's colour). The
 "Continue with" choices are never stored: the drawer asks `pathways.extend(..., follow=False)`
 for them (D189).
 
@@ -11,6 +12,7 @@ investigation but not in the history, and saving one is not a change other tabs 
 (the drawer saves on every step). A pathway through a node deleted since is dropped when the
 profiles are read, as the remembered view drops it (D105)."""
 
+import re
 from typing import Any
 
 from sqlalchemy import func, select
@@ -23,6 +25,7 @@ from chembook3d.services.records import RecordError, get, text_value
 MAX_PATHS = 50  # as many as the drawer remembered before profiles (D105)
 MAX_IDS = 500  # nodes along one pathway
 MAX_SHIFT = 20  # columns one step may be moved (D194)
+COLOUR = re.compile(r"#[0-9a-fA-F]{6}")  # as the browser's colour field gives it (D195)
 FIRST_NAME = "Profile"
 
 
@@ -60,8 +63,17 @@ def clean_shifts(value: Any, length: int) -> list[dict[str, int]]:
     return [{"at": at, "by": found[at]} for at in sorted(found)]
 
 
+def clean_colour(value: Any) -> str | None:
+    """D195: the colour the user chose for a pathway, in lower case; None: its branch's."""
+    if value is None:
+        return None
+    if not (isinstance(value, str) and COLOUR.fullmatch(value)):
+        raise RecordError("a pathway's colour must be #rrggbb or null")
+    return value.lower()
+
+
 def clean_paths(value: Any) -> list[dict[str, Any]]:
-    """The pathways as stored: ids, branch_id, shown and shifts, nothing else."""
+    """The pathways as stored: ids, branch_id, shown, shifts and colour, nothing else."""
     if not isinstance(value, list):
         raise RecordError("paths must be a list")
     if len(value) > MAX_PATHS:
@@ -78,7 +90,10 @@ def clean_paths(value: Any) -> list[dict[str, Any]]:
             raise RecordError("a pathway's shown must be true or false")
         ids = _ids(path.get("ids"))
         shifts = clean_shifts(path.get("shifts", []), len(ids))
-        paths.append({"ids": ids, "branch_id": branch_id, "shown": shown, "shifts": shifts})
+        colour = clean_colour(path.get("colour"))
+        paths.append(
+            {"ids": ids, "branch_id": branch_id, "shown": shown, "shifts": shifts, "colour": colour}
+        )
     return paths
 
 
@@ -92,8 +107,8 @@ def current_paths(session: Session, paths: list[dict[str, Any]]) -> list[dict[st
         if not all(i in on_canvas for i in path["ids"]):
             continue
         branch_id = path["branch_id"] if path["branch_id"] in branches else None
-        # Stored before D194: no step moved.
-        kept.append({"shifts": [], **path, "branch_id": branch_id})
+        # Stored before D194: no step moved; before D195: the branch's colour.
+        kept.append({"shifts": [], "colour": None, **path, "branch_id": branch_id})
     return kept
 
 

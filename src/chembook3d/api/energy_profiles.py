@@ -24,6 +24,7 @@ class ProfilePathOut(BaseModel):
     branch_id: str | None
     shown: bool
     shifts: list[PathShiftOut] = []
+    colour: str | None = None  # D195: chosen by the user; None: the branch's colour
 
 
 class EnergyProfileOut(BaseModel):
@@ -35,7 +36,8 @@ class EnergyProfileOut(BaseModel):
 class EnergyProfileIn(BaseModel):
     name: str | None = None
     # Each {"ids": [...], "branch_id": ... or null, "shown": true or false, "shifts": [{"at": a
-    # step's index, "by": columns later}]} (D194: optional, none moved).
+    # step's index, "by": columns later}] (D194: optional, none moved), "colour": "#rrggbb" or
+    # null (D195: optional, the branch's colour)}.
     paths: list[dict[str, Any]] | None = None
 
 

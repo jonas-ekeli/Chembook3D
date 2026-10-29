@@ -18,7 +18,7 @@ import {
 } from '../api'
 import { Icon } from '../icons'
 import { figureOf } from '../profileFigure'
-import { saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
+import { pathwayColours, saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
 import { closesCycle, csvTitle, download } from '../util'
 import { EmptyState } from './EmptyState'
 import { EnergyNotes } from './EnergyNotes'
@@ -28,6 +28,7 @@ import { Modal } from './Modal'
 import { Menu } from './MoreMenu'
 import { ProfileChart, SCREEN_TEXT } from './ProfileChart'
 import { ProfileStyleDialog } from './ProfileStyleDialog'
+import { PathwayColour } from './PathwayColour'
 import { CompareStericsDialog } from './Sterics'
 import { useRequest, type Request } from '../commands'
 import { placeText } from '../subCanvas'
@@ -41,19 +42,27 @@ type Path = {
   branchId: string | null
   shown: boolean
   shifts: PathShift[]
+  /** D195: the colour the user chose; null: the branch's. */
+  colour: string | null
 }
 
 /** D190: a saved profile's pathways in the drawer's form; the choices are asked for (D189). */
 const pathsOf = (profile: EnergyProfile | undefined): Path[] =>
-  profile?.paths.map((p) => ({ ids: p.ids, choices: [], branchId: p.branch_id, shown: p.shown, shifts: p.shifts ?? [] })) ??
-  []
+  profile?.paths.map((p) => ({
+    ids: p.ids,
+    choices: [],
+    branchId: p.branch_id,
+    shown: p.shown,
+    shifts: p.shifts ?? [],
+    colour: p.colour ?? null,
+  })) ?? []
 /** D190: what is saved of the pathways; never the choices. */
 const storedOf = (paths: Path[]): ProfilePath[] =>
-  paths.map((p) => ({ ids: p.ids, branch_id: p.branchId, shown: p.shown, shifts: p.shifts }))
+  paths.map((p) => ({ ids: p.ids, branch_id: p.branchId, shown: p.shown, shifts: p.shifts, colour: p.colour }))
 
 /** A pathway as the read-only copy exports it (D79, A30), with its steps moved along the axis
- * (D194; none in copies made before). */
-export type DrawerPath = { ids: string[]; branch_id: string | null; shifts?: PathShift[] }
+ * (D194) and the colour chosen for it (D195); neither in copies made before. */
+export type DrawerPath = { ids: string[]; branch_id: string | null; shifts?: PathShift[]; colour?: string | null }
 
 /** D194: how far one step may be moved, in columns (the backend's `energy_profiles.MAX_SHIFT`). */
 const MAX_SHIFT = 20
@@ -272,7 +281,7 @@ export function EnergyDrawer({
       const name = branch
         ? `${branch.name || 'Unnamed branch'}`
         : `${labels.get(path.ids[0])} → ${labels.get(path.ids.at(-1)!)}`
-      return { path, at, colour, name }
+      return { path, at, colour, name, branched: Boolean(branchId) }
     })
     .filter(({ path }) => path.ids.every((id) => labels.has(id)))
   const drawn = listed.filter(({ path }) => path.shown)
@@ -280,10 +289,19 @@ export function EnergyDrawer({
   const colours = drawn.map(({ colour }) => colour)
   const names = drawn.map(({ name }) => name)
   const shifts = drawn.map(({ path }) => path.shifts)
+  const chosen = drawn.map(({ path }) => path.colour)
+  // D195: each pathway's swatch in the colour it is drawn in (a hidden one: as if alone).
+  const drawnColours = pathwayColours(colours, style, chosen)
+  const swatchOf = (at: number, colour: string, path: Path) => {
+    const i = drawn.findIndex((d) => d.at === at)
+    return i >= 0 ? drawnColours[i] : (path.colour ?? pathwayColours([colour], style)[0])
+  }
   const onPaths = new Set(livePaths.flatMap((p) => p.ids))
   const reference = referenceId && onPaths.has(referenceId) ? referenceId : (livePaths[0]?.ids[0] ?? null)
 
-  const pathsKey = JSON.stringify(livePaths.map((p) => ({ ids: p.ids, branch_id: p.branchId, shifts: p.shifts })))
+  const pathsKey = JSON.stringify(
+    livePaths.map((p) => ({ ids: p.ids, branch_id: p.branchId, shifts: p.shifts, colour: p.colour })),
+  )
   useEffect(() => {
     onPathsChange?.(JSON.parse(pathsKey) as DrawerPath[])
   }, [pathsKey, onPathsChange])
@@ -448,7 +466,8 @@ export function EnergyDrawer({
   const startAtSelection = () => {
     if (!selectedId) return
     api.extendPathway([selectedId]).then(
-      (found) => addPath({ ids: found.path, choices: found.choices, branchId: null, shown: true, shifts: [] }),
+      (found) =>
+        addPath({ ids: found.path, choices: found.choices, branchId: null, shown: true, shifts: [], colour: null }),
       (err: unknown) => setError(errorText(err)),
     )
   }
@@ -459,7 +478,7 @@ export function EnergyDrawer({
 
   const addBranch = (branchId: string) =>
     api.branchPathway(branchId).then(
-      (found) => addPath({ ids: found.path, choices: found.choices, branchId, shown: true, shifts: [] }),
+      (found) => addPath({ ids: found.path, choices: found.choices, branchId, shown: true, shifts: [], colour: null }),
       (err: unknown) => setError(errorText(err)),
     )
 
@@ -568,7 +587,7 @@ export function EnergyDrawer({
   const dark = useTheme() === 'dark' // D185: on screen only; the saved figure stays light
   // D181: the saved figure is drawn afresh in the style alone, without the screen's text scale,
   // zoom or pointer marks.
-  const figure = () => shownProfiles && figureOf({ data: shownProfiles, colours, names, settings, shifts })
+  const figure = () => shownProfiles && figureOf({ data: shownProfiles, colours, names, settings, shifts, chosen })
 
   const exportSvg = () => {
     const svg = figure()
@@ -712,7 +731,7 @@ export function EnergyDrawer({
         {layout.pathways && (
           <div className="pathways" aria-label="Pathways">
             {profilePicker}
-            {listed.map(({ path, at: index, colour, name }) => (
+            {listed.map(({ path, at: index, colour, name, branched }) => (
               <div
                 key={index}
                 className={`pathway${path.shown ? '' : ' hidden-path'}`}
@@ -727,7 +746,13 @@ export function EnergyDrawer({
                     aria-label={`Show ${name} on the figure`}
                     title="Show on the figure; any number of pathways may be drawn together (D190)"
                   />
-                  <span className="swatch" style={{ background: colour }} />
+                  <PathwayColour
+                    name={name}
+                    colour={swatchOf(index, colour, path)}
+                    chosen={path.colour}
+                    fallback={branched ? 'Branch colour' : 'Default colour'}
+                    onChange={(next) => replace(index, { ...path, colour: next })}
+                  />
                   <strong>{name}</strong>
                   <span className="spacer" />
                   <button
@@ -970,6 +995,7 @@ export function EnergyDrawer({
                 colours={colours}
                 names={names}
                 shifts={shifts}
+                chosen={chosen}
                 settings={settings}
                 size={zoom === null ? undefined : { width: style.width * zoom, height: style.height * zoom }}
                 textScale={SCREEN_TEXT}
@@ -1016,7 +1042,7 @@ export function EnergyDrawer({
       {styling && settings && (
         <ProfileStyleDialog
           settings={settings}
-          preview={shownProfiles ? { data: shownProfiles, colours, names, shifts } : null}
+          preview={shownProfiles ? { data: shownProfiles, colours, names, shifts, chosen } : null}
           onSave={(profile_style) => api.saveSettings({ profile_style }).then((next) => onSettings?.(next))}
           onClose={() => setStyling(false)}
         />
