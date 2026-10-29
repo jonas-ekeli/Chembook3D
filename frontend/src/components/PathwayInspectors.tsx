@@ -27,6 +27,7 @@ import { MAX_OVERLAY, OverlayDialog } from './OverlayDialog'
 import { CompareStericsDialog } from './Sterics'
 import { useRequest, type Request } from '../commands'
 import { groupActions, scanPathEnds, selectionActions } from '../panelActions'
+import { memberShare, populationSummary } from '../populations'
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -779,6 +780,8 @@ export function GroupInspector({
   const valueOf = (id: string) => energy.view?.values[id]?.value ?? null
   const known = listed.map((m) => valueOf(m.id)).filter((v): v is number => v !== null)
   const lowest = known.length ? Math.min(...known) : null
+  // D197: the members' populations, when the group shows them.
+  const shares = group.show_populations ? (energy.view?.populations?.[group.id] ?? null) : null
   // D80: the members with coordinates, the representative first so it is the reference.
   const shapes = listed
     .filter((n) => n.xyz)
@@ -859,6 +862,19 @@ export function GroupInspector({
             <span>Sort by {energy.typeName}</span>
           </label>
         )}
+        <label className="check" title="The Boltzmann share of each member at the canvas's level and energy type (D197)">
+          <input
+            type="checkbox"
+            checked={!!group.show_populations}
+            onChange={(event) => update({ show_populations: event.target.checked })}
+          />
+          <span>Show populations on member cards</span>
+        </label>
+        {shares && (
+          <p className={shares.status === 'ok' ? 'muted small' : 'notice'} role="status" aria-label="Populations">
+            {populationSummary(shares).title}
+          </p>
+        )}
         <table className="members">
           <thead>
             <tr>
@@ -866,6 +882,7 @@ export function GroupInspector({
               <th>Node</th>
               <th>Branch</th>
               {energy.view && <th>Δ{energy.typeName} from lowest</th>}
+              {shares && <th>{shares.kind === 'transition_states' ? 'Flux share' : 'Population'}</th>}
               <th />
             </tr>
           </thead>
@@ -881,7 +898,7 @@ export function GroupInspector({
                   onChange={() => update({ representative_id: null })}
                 />
               </td>
-              <td colSpan={energy.view ? 4 : 3} className="muted">
+              <td colSpan={(energy.view ? 4 : 3) + (shares ? 1 : 0)} className="muted">
                 none
               </td>
             </tr>
@@ -908,6 +925,11 @@ export function GroupInspector({
                       valueOf(m.id) !== null && lowest !== null ? (valueOf(m.id) as number) - lowest : null,
                       energy.settings,
                     )}
+                  </td>
+                )}
+                {shares && (
+                  <td className="mono" title={memberShare(shares, m.id).title}>
+                    {memberShare(shares, m.id).text}
                   </td>
                 )}
                 <td>

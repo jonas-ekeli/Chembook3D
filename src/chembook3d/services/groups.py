@@ -249,6 +249,11 @@ def update(session: Session, group_id: str, changes: dict[str, Any]) -> GroupNod
                 raise RecordError(f"layout must be one of {', '.join(LAYOUTS)}")
             group.layout = value
             continue
+        if field == "show_populations":  # D197: a view choice, so not recorded in history
+            if not isinstance(value, bool):
+                raise RecordError("show_populations must be true or false")
+            group.show_populations = value
+            continue
         if field in ("label", "notes"):
             value = text_value(field, value)
             value = value.strip() if field == "label" else value

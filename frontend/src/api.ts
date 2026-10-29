@@ -292,6 +292,8 @@ export type Group = {
   pos_y: number
   /** How the members are laid out when the group is expanded (A21). */
   layout: GroupLayout
+  /** D197: its members' cards show their Boltzmann population %. */
+  show_populations?: boolean
 }
 
 /** D193: a box on a canvas holding a canvas of its own, for a side mechanism. It has no energy
@@ -329,7 +331,7 @@ export type SubDeletePreview = {
 export type GroupLayout = 'grid' | 'vertical' | 'horizontal'
 
 export type GroupFields = Partial<
-  Pick<Group, 'label' | 'notes' | 'step_id' | 'representative_id' | 'outgoing_branch_id' | 'pos_x' | 'pos_y' | 'layout'>
+  Pick<Group, 'label' | 'notes' | 'step_id' | 'representative_id' | 'outgoing_branch_id' | 'pos_x' | 'pos_y' | 'layout' | 'show_populations'>
 >
 
 export type Canvas = {
@@ -1533,6 +1535,23 @@ export type EnergyView = {
   /** ΔX of each node and group from the reference, with the species that balance it (D72). */
   relative: Record<string, { value: number | null; species: SpeciesCount[]; message: string | null; joined: boolean }>
   notes?: EnergyNote[]
+  /** D197: by group id, for the groups that show their members' populations. */
+  populations?: Record<string, GroupPopulation>
+}
+
+/** D197: a group's members' Boltzmann shares at the view's level and type. */
+export type GroupPopulation = {
+  status: 'ok' | 'incomplete' | 'refused'
+  message: string | null
+  /** Transition states share the flux over them, not a population. */
+  kind: 'conformers' | 'transition_states'
+  type: EnergyType
+  temperature: number
+  counted: number
+  total: number
+  /** Percent of the members counted; null with why for one not counted. */
+  members: Record<string, { percent: number | null; message: string | null }>
+  notes: string[]
 }
 
 export type PathChoice = {

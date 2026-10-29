@@ -35,6 +35,8 @@ export type SharedView = {
   relative: Record<string, EnergyView['relative']>
   /** D160: W-TEMP and W-STDSTATE; copies made before have none. */
   notes?: EnergyView['notes']
+  /** D197: the members' populations of the groups that show them; copies made before have none. */
+  populations?: EnergyView['populations']
 }
 
 export type SnapshotData = {
@@ -231,6 +233,7 @@ export function energyView(
     reference_id: relative ? referenceId : null,
     relative: relative ?? {},
     notes: found.notes ?? [],
+    populations: found.populations ?? {},
   }
 }
 
