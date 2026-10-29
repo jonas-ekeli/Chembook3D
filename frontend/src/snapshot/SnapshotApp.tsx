@@ -11,6 +11,7 @@ import { NodeRow } from '../components/NodeRow'
 import { HydrogenDisplay } from '../display'
 import { Icon } from '../icons'
 import { NoteImageSource } from '../notes'
+import { canvasName, canvasOf, chainOf, contentsText, placeText, subName, subsOf, transitionCanvas, visibleCanvases } from '../subCanvas'
 import { energyView, openingView, referenceIds, rememberView, sharedSettings, type SnapshotData } from './data'
 import { SnapshotDrawer } from './Drawer'
 import { AboutPanel, BranchPanel, GroupPanel, NodePanel, TransitionPanel } from './Panels'
@@ -21,13 +22,17 @@ type PanelSelection = Selection | { kind: 'branch'; id: string }
 function SharedOutline({
   canvas,
   selectedId,
+  openCanvas,
   onSelectNode,
   onSelectBranch,
+  onOpenCanvas,
 }: {
   canvas: Canvas
   selectedId: string | null
+  openCanvas: string | null
   onSelectNode: (id: string) => void
   onSelectBranch: (id: string) => void
+  onOpenCanvas: (id: string | null) => void
 }) {
   const [query, setQuery] = useState('')
   const q = query.trim().toLowerCase()
@@ -37,9 +42,11 @@ function SharedOutline({
           n.label.toLowerCase().includes(q) ||
           n.notes.toLowerCase().includes(q) ||
           (n.formula ?? '').toLowerCase().includes(q) ||
+          placeText(canvas, n.id).toLowerCase().includes(q) ||
           n.tags.some((t) => t.toLowerCase().includes(q)),
       )
     : canvas.nodes
+  const subs = subsOf(canvas)
   const colours = new Map(canvas.branches.map((b) => [b.id, b.colour]))
   return (
     <aside className="outline" aria-label="Outline">
@@ -68,6 +75,31 @@ function SharedOutline({
           {canvas.branches.length === 0 && <li className="muted small">None.</li>}
         </ul>
       </section>
+      {subs.length > 0 && (
+        // D193: the sub-investigations; a click opens one's canvas.
+        <section className="outline-section" aria-label="Sub-investigations">
+          <h3>Sub-investigations</h3>
+          <ul className="plain">
+            <li>
+              <button className="link" aria-current={openCanvas === null ? 'location' : undefined} onClick={() => onOpenCanvas(null)}>
+                Main canvas
+              </button>
+            </li>
+            {subs.map((sub) => (
+              <li key={sub.id} style={{ paddingLeft: `${Math.min(chainOf(subs, sub.id).length, 6) * 12}px` }}>
+                <button
+                  className="link"
+                  aria-current={sub.id === openCanvas ? 'location' : undefined}
+                  onClick={() => onOpenCanvas(sub.id)}
+                >
+                  {subName(sub)}
+                </button>{' '}
+                <span className="muted small">{sub.node_count}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {canvas.species.length > 0 && (
         <section className="outline-section" aria-label="Free species">
           <h3>Free species</h3>
@@ -103,7 +135,9 @@ function SharedOutline({
                 aria-current={node.id === selectedId}
                 onClick={() => onSelectNode(node.id)}
               >
-                <NodeRow node={node} colour={colours.get(node.branch_id ?? '')} />
+                <NodeRow node={node} colour={colours.get(node.branch_id ?? '')}>
+                  {node.canvas_id && <span className="node-place">{placeText(canvas, node.id)}</span>}
+                </NodeRow>
               </button>
             </li>
           ))}
@@ -128,6 +162,7 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
   const [mode, setMode] = useState<ViewMode>(opening.mode)
   const [filters, setFilters] = useState<Filters>(opening.filters)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(opening.expanded))
+  const [canvasId, setCanvasId] = useState<string | null>(opening.canvas)
   const [hydrogens, setHydrogens] = useState<HydrogenMode>(opening.hydrogens)
   const noteImage = useCallback((id: string) => data.note_images?.[id], [data])
   const [energyLevel, setEnergyLevel] = useState<string | null>(opening.level)
@@ -172,11 +207,12 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
       referenceId,
       filters,
       expanded: [...expanded],
+      canvas: canvasId,
       drawerOpen,
       drawerTab,
       hydrogens,
     })
-  }, [data, mode, energyLevel, energyType, edgeEnergies, referenceId, filters, expanded, drawerOpen, drawerTab, hydrogens])
+  }, [data, mode, energyLevel, energyType, edgeEnergies, referenceId, filters, expanded, canvasId, drawerOpen, drawerTab, hydrogens])
 
   const toggleGroup = useCallback((id: string) => {
     setExpanded((current) => {
@@ -192,16 +228,32 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
   }, [])
   const ignore = useCallback(() => undefined, [])
 
+  // D193: as in the app, showing a record opens its canvas unless the open one draws it.
+  const subs = subsOf(canvas)
+  const openCanvas = canvasId !== null && subs.some((b) => b.id === canvasId) ? canvasId : null
+  const reveal = (on: string | null | undefined) => {
+    if (on !== undefined && !visibleCanvases(subs, openCanvas, expanded).has(on)) setCanvasId(on)
+  }
   const selectNode = (id: string) => {
     setSelection({ kind: 'node', id })
     const onCanvas = canvas.nodes.find((n) => n.id === id)
+    if (onCanvas) reveal(canvasOf(canvas, id))
     if (onCanvas) setFocus({ id: onCanvas.group_id ?? id, n: Date.now() })
   }
   const selectGroup = (id: string) => {
     setSelection({ kind: 'group', id })
+    reveal(canvasOf(canvas, id))
+    setFocus({ id, n: Date.now() })
+  }
+  const openRecord = (id: string) => {
+    const on = canvasOf(canvas, id)
+    if (on === undefined) return
+    setCanvasId(on)
+    setSelection({ kind: canvas.groups.some((g) => g.id === id) ? 'group' : 'node', id })
     setFocus({ id, n: Date.now() })
   }
   const selectTransition = (id: string) => {
+    if (canvas.transitions.some((t) => t.id === id)) reveal(transitionCanvas(canvas, id))
     setSelection({ kind: 'edge', id })
     const edge = canvas.transitions.find((t) => t.id === id)
     const source = edge && canvas.nodes.find((n) => n.id === edge.source_id)
@@ -228,9 +280,31 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
   const selectedGroup = selection?.kind === 'group' ? canvas.groups.find((g) => g.id === selection.id) : undefined
   const selectedEdge = selection?.kind === 'edge' ? canvas.transitions.find((t) => t.id === selection.id) : undefined
   const selectedBranch = selection?.kind === 'branch' ? canvas.branches.find((b) => b.id === selection.id) : undefined
+  const selectedSub = selection?.kind === 'sub' ? subs.find((b) => b.id === selection.id) : undefined
 
   let panel
-  if (selectedNode) {
+  if (selectedSub) {
+    // D193: a sub-investigation's box: what it is and holds, and the ways to open it.
+    panel = (
+      <div className="inspector" aria-label="Sub-investigation panel">
+        <div className="inspector-head">
+          <h2>
+            <Icon name="layers" /> {subName(selectedSub)}
+          </h2>
+          <span className="spacer" />
+          <button onClick={() => toggleGroup(selectedSub.id)}>{expanded.has(selectedSub.id) ? 'Collapse' : 'Expand here'}</button>
+          <button className="primary" onClick={() => setCanvasId(selectedSub.id)}>
+            <Icon name="enter" />
+            Open
+          </button>
+        </div>
+        <p>
+          {contentsText(selectedSub)} · on {canvasName(subs, selectedSub.parent_id)}
+        </p>
+        {selectedSub.notes && <p className="notes-text">{selectedSub.notes}</p>}
+      </div>
+    )
+  } else if (selectedNode) {
     panel = (
       <NodePanel
         key={selectedNode.id}
@@ -284,6 +358,26 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
               Overview
             </button>
           </nav>
+          {openCanvas !== null && (
+            // D193: where the open canvas is; each part opens that canvas.
+            <nav className="crumbs" aria-label="Canvas">
+              <button className="quiet" onClick={() => setCanvasId(null)}>
+                Main canvas
+              </button>
+              {chainOf(subs, openCanvas).map((b) => (
+                <span key={b.id} className="crumb">
+                  <Icon name="chevronright" />
+                  <button
+                    className="quiet"
+                    aria-current={b.id === openCanvas ? 'location' : undefined}
+                    onClick={() => setCanvasId(b.id)}
+                  >
+                    {subName(b)}
+                  </button>
+                </span>
+              ))}
+            </nav>
+          )}
           <div className="segmented" role="group" aria-label="Node view">
             <button aria-pressed={mode === 'compact'} onClick={() => setMode('compact')}>
               Compact
@@ -365,8 +459,13 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
             <SharedOutline
               canvas={canvas}
               selectedId={selection?.kind === 'node' ? selection.id : null}
+              openCanvas={openCanvas}
               onSelectNode={selectNode}
               onSelectBranch={select.onSelectBranch}
+              onOpenCanvas={(id) => {
+                setCanvasId(id)
+                setSelection(null)
+              }}
             />
             <ReactFlowProvider>
               <CanvasPane
@@ -378,6 +477,9 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
                 multi={[]}
                 focus={focus}
                 expanded={expanded}
+                canvasId={openCanvas}
+                onOpenSub={setCanvasId}
+                onOpenRecord={openRecord}
                 onToggleGroup={toggleGroup}
                 onGroupLayout={setGroupLayout}
                 onSelect={setSelection}

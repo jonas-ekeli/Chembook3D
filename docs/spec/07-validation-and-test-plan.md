@@ -454,6 +454,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-66 | On the demo, add pathways A and B; untick and tick them; New, add B, Rename to "Only B"; switch profiles; reload; open Profile 1 from the Analyses view; Duplicate and Delete the copy | Adding A makes "Profile 1"; both are drawn together, an unticked one leaves the figure but stays listed, none ticked says so; switching keeps each profile as left; the drawer reopens on "Only B"; Analyses lists both with their shown counts and opens Profile 1 in the drawer; the copy is "Profile 1 (copy)" and is gone after Delete (D190) |
 | T-UI-67 | Open the demo's overview; open "Planned transitions" | The Planned list holds the planned nodes and no transitions; "Planned transitions (N)" is closed at the end of the open items and, opened, lists T-S0 → A-S1 (D191) |
 | T-UI-68 | On the demo, right-click A-S2 → Move into new sub-investigation…, name it; Expand here, Collapse; Open; click the stub of A-S1; double-click the box, reload, press Esc; Remove… → Dissolve | The box stands where the node was with "1 node · 1 TS"; Expand here draws A-S2 and A-S1 in place; Open shows A-S2 with a breadcrumb and a faded stub "Outside: A-S1", the stub opens the main canvas with A-S1 selected; the open canvas survives a reload and Esc goes back up; Dissolve puts A-S2 back on the main canvas (D193, FR-SUB-01..04) |
+| T-UI-69 | Move A-S2 into a box "Side path"; look at the box, the overview, the outline and Ctrl K; share a read-only copy with the box open | The box counts what is open inside; the overview's open item reads "A-S2 in Side path" and opens that canvas with A-S2 selected; the outline's Sub-investigations section opens each canvas and Main canvas goes back; the node search row says "in Side path"; Ctrl K lists "Side path" under Sub-investigations and opens it; the copy opens on the box, Main canvas leaves it and a double-click opens it again (D193, FR-SUB-05) |
 
 ### Sub-investigations (D193)
 
@@ -467,6 +468,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-SUB-06 | Preview and delete a box holding two nodes, a group of two, a nested box and three edges; delete an empty box; delete the node that is a face | The preview counts 4 nodes, 1 TS, 1 group, 1 box, 3 edges; all of them go, each in the history; the empty box goes; the face is cleared |
 | T-SUB-07 | Add a node with `canvas_id`, an unknown one, change it by PATCH; derive a node from it; import a file with `canvas_id`; make the node a free species | It is in the box; unknown and PATCH refused; the derived node and the import land in the box; the species leaves its canvas and the face (A128) |
 | T-SUB-08 | Save the view with a box open and expanded, then delete the box | The view keeps both; after the delete both are dropped (D105) |
+| T-SUB-09 | Share a read-only copy with a box open, then with a canvas that no longer exists | The copy carries the boxes and opens on the one open; an unknown one opens on the main canvas (D128) |
 
 ## 8. Performance observation (no targets)
 

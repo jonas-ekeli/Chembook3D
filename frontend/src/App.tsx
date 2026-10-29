@@ -33,7 +33,7 @@ import {
 import { NO_FILTERS, type Filters, type Selection, type ViewMode } from './canvasView'
 import { BasisSetsDialog } from './components/BasisSets'
 import { BoxEndDialog, MoveToDialog, NewSubDialog, SubInspector } from './components/SubInvestigations'
-import { canvasOf, chainOf, subName, subsOf, visibleCanvases } from './subCanvas'
+import { canvasOf, chainOf, contentsText, placeText, subName, subsOf, transitionCanvas, visibleCanvases } from './subCanvas'
 import { CloudJobsDialog } from './components/CloudJobsDialog'
 import { useScanPathImports } from './cloudJobs'
 import { CanvasPane, type CanvasEnergy, type CanvasContextMenu, type CanvasTarget } from './components/Canvas'
@@ -749,6 +749,7 @@ function App() {
       edge_energies: edgeEnergies,
       filters,
       expanded: [...expanded],
+      canvas: openCanvas,
       drawer: { open: drawerOpen, tab: drawerView?.tab ?? 'profile' },
     }
     api.exportSnapshot(drawerPaths, referenceId, view).then(
@@ -1182,7 +1183,12 @@ function App() {
       return base.includes(id) ? base.filter((x) => x !== id) : [...base, id]
     })
   const selectBranch = (id: string) => choose({ kind: 'branch', id })
-  const selectEdge = (id: string) => choose({ kind: 'edge', id })
+  const selectEdge = (id: string) => {
+    choose({ kind: 'edge', id })
+    // D193: the canvas that draws it with both ends.
+    const on = transitionCanvas(canvas, id)
+    if (canvas.transitions.some((t) => t.id === id) && !visibleCanvases(subs, openCanvas, expanded).has(on)) setCanvasId(on)
+  }
   const cleared = () => {
     choose(null)
     reload()
@@ -1735,9 +1741,11 @@ function App() {
     for (const node of [...canvas.nodes, ...canvas.species]) {
       const energy = node.kind === 'species' ? null : cardEnergy(canvasEnergy, node.id)
       const branch = branchName(node.branch_id)
+      const place = node.kind === 'species' ? '' : placeText(canvas, node.id)
       const detail = [
         node.kind === 'species' ? 'free species' : stepName(node.step_id),
         branch && `branch ${branch}`,
+        place,
         energy?.value != null && energy.value !== '…' ? `${energy.type} ${minus(energy.value)}` : null,
       ].filter(Boolean)
       entries.push({
@@ -1752,11 +1760,29 @@ function App() {
           branch,
           node.role === 'transition_state' ? 'TS transition state' : null,
           node.formula,
+          place,
           ...node.tags,
         ]
           .filter(Boolean)
           .join(' '),
         run: () => selectNode(node.id, true),
+      })
+    }
+    // D193: a sub-investigation opens its canvas.
+    for (const sub of subs) {
+      const place = placeText(canvas, sub.id)
+      entries.push({
+        id: `sub:${sub.id}`,
+        group: 'Sub-investigations',
+        label: subName(sub),
+        icon: 'layers',
+        detail: [contentsText(sub), place].filter(Boolean).join(' · '),
+        keywords: `sub-investigation open ${place}`,
+        run: () => {
+          setView('canvas')
+          setCanvasId(sub.id)
+          choose(null)
+        },
       })
     }
     for (const branch of canvas.branches) {
@@ -2222,6 +2248,11 @@ function App() {
                 canvas={canvas}
                 selectedNodeId={selection?.kind === 'node' ? selection.id : null}
                 selectedBranchId={selection?.kind === 'branch' ? selection.id : null}
+                openCanvas={openCanvas}
+                onOpenCanvas={(id) => {
+                  setView('canvas')
+                  setCanvasId(id)
+                }}
                 onSelectNode={(id) => selectNode(id, true)}
                 onToggleNode={toggleNode}
                 selectedNodeIds={multi}

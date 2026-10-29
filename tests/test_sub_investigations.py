@@ -1,10 +1,13 @@
 """Sub-investigations (D193, FR-SUB-01…05): a box holding a canvas of its own. Test IDs from
 docs/spec/07 are named in each test."""
 
+import pytest
+
 from tests.conftest import WATER
 from tests.test_import import TS, commit, fixture, named, upload
 from tests.test_live import ask
 from tests.test_pathway import edge, get, history, node, patch, post
+from tests.test_snapshot import data_of, export, page  # noqa: F401 (the viewer page fixture)
 
 
 def subs(client) -> dict[str, dict]:
@@ -281,6 +284,18 @@ def test_the_view_remembers_the_open_canvas(open_client):
     open_client.delete(f"/api/sub-investigations/{sub['id']}")
     after = get(open_client, "/view-state")
     assert after["canvas"] is None and after["expanded"] == []
+
+
+@pytest.mark.usefixtures("page")
+def test_the_read_only_copy_opens_on_the_open_canvas(open_client):
+    # T-SUB-09, D128: the copy carries the boxes and opens on the one the app had open.
+    sub = post(open_client, "/sub-investigations", {"label": "S"})
+    shared = data_of(export(open_client, {"view": {"canvas": sub["id"], "expanded": [sub["id"]]}}))
+    assert shared["view"]["canvas"] == sub["id"]
+    assert shared["view"]["expanded"] == [sub["id"]]
+    assert [s["label"] for s in shared["canvas"]["sub_investigations"]] == ["S"]
+    gone = data_of(export(open_client, {"view": {"canvas": "gone"}}))
+    assert gone["view"]["canvas"] is None
 
 
 def test_claude_is_asked_before_deleting_or_dissolving(open_client):

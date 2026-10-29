@@ -78,12 +78,6 @@ export function canvasName(subs: SubInvestigation[], id: string | null): string 
 
 export const subName = (sub: SubInvestigation) => sub.label || 'Sub-investigation'
 
-/** "in Ru-14e rotations", or "" on the main canvas: where a record is, for lists and pickers. */
-export function whereText(canvas: Canvas, id: string): string {
-  const on = canvasOf(canvas, id)
-  return on ? `in ${canvasName(subsOf(canvas), on)}` : ''
-}
-
 /** What a box holds, as its card's line: "7 nodes · 3 TSs · 1 group". */
 export function contentsText(sub: SubInvestigation): string {
   const parts = [`${sub.node_count} node${sub.node_count === 1 ? '' : 's'}`]
@@ -97,4 +91,44 @@ export function contentsText(sub: SubInvestigation): string {
 export function nodesInside(canvas: Canvas, id: string): Node[] {
   const subs = subsOf(canvas)
   return canvas.nodes.filter((n) => isWithin(subs, n.canvas_id ?? null, id))
+}
+
+/** The canvas a transition is drawn on with both its ends: the innermost canvas holding both
+ * (an end deeper inside is drawn as its box there). */
+export function transitionCanvas(canvas: Canvas, id: string): string | null {
+  const t = canvas.transitions.find((x) => x.id === id)
+  if (!t) return null
+  const subs = subsOf(canvas)
+  const a = chainOf(subs, canvasOf(canvas, t.source_id) ?? null)
+  const b = chainOf(subs, canvasOf(canvas, t.target_id) ?? null)
+  let common: string | null = null
+  for (let i = 0; i < Math.min(a.length, b.length) && a[i].id === b[i].id; i++) common = a[i].id
+  return common
+}
+
+/** Where a node, group, box or transition is, as "in <name>"; "" on the main canvas. */
+export function placeText(canvas: Canvas, id: string): string {
+  const on = canvas.transitions.some((t) => t.id === id) ? transitionCanvas(canvas, id) : canvasOf(canvas, id)
+  return on ? `in ${canvasName(subsOf(canvas), on)}` : ''
+}
+
+const OPEN_STATUSES = new Set(['failed', 'running_externally', 'planned'])
+
+/** How many nodes and transitions inside a box have something open (as the overview's open
+ * items: failed, running, planned, a warning, an edge with no TS), for its card. */
+export function openInside(canvas: Canvas, box: string): number {
+  const subs = subsOf(canvas)
+  const nodes = canvas.nodes.filter(
+    (n) => isWithin(subs, n.canvas_id ?? null, box) && (OPEN_STATUSES.has(n.status) || n.warnings.length > 0),
+  )
+  const edges = canvas.transitions.filter(
+    (t) => isWithin(subs, transitionCanvas(canvas, t.id), box) && (OPEN_STATUSES.has(t.status) || t.direct),
+  )
+  return nodes.length + edges.length
+}
+
+/** A record's name with where it is, for pickers: "Ru-14e-3 (in Ru-14e rotations)". */
+export function placed(canvas: Canvas, id: string, label: string): string {
+  const place = placeText(canvas, id)
+  return place ? `${label} (${place})` : label
 }

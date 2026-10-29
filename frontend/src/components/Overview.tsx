@@ -7,6 +7,7 @@ import {
   type Overview as OverviewData,
 } from "../api";
 import { HistoryList, type Names } from "./HistoryList";
+import { placeText } from "../subCanvas";
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -54,6 +55,10 @@ export function OverviewSections({
           </button>
           {item.kind === "transition" && kindNote && (
             <span className="muted"> (transition)</span>
+          )}
+          {/* D193: where it is, when inside a sub-investigation */}
+          {placeText(canvas, item.id) && (
+            <span className="muted small"> {placeText(canvas, item.id)}</span>
           )}
           {item.detail && <span className="badge warn">{item.detail}</span>}
           {item.branch_ids.length > 0 && (

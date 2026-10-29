@@ -129,6 +129,7 @@ def _view(session: Session, body: SnapshotIn) -> dict[str, Any]:
         "edge_energies": state["edge_energies"],
         "filters": state["filters"],
         "expanded": state["expanded"],
+        "canvas": state["canvas"],  # D193: the sub-investigation open
         "drawer": {"open": state["drawer"]["open"], "tab": state["drawer"]["tab"]},
     }
 

@@ -29,6 +29,7 @@ import { ProfileChart, SCREEN_TEXT } from './ProfileChart'
 import { ProfileStyleDialog } from './ProfileStyleDialog'
 import { CompareStericsDialog } from './Sterics'
 import { useRequest, type Request } from '../commands'
+import { placeText } from '../subCanvas'
 
 const NO_BRANCH = '#98a2b3'
 const FALLBACK = ['#2459c6', '#c4320a', '#079455', '#6938ef', '#b54708']
@@ -769,6 +770,10 @@ export function EnergyDrawer({
                         {choice.label}
                         {choice.kind === 'group' && <span className="muted"> (group)</span>}
                         {choice.group_label && <span className="muted"> in {choice.group_label}</span>}
+                        {/* D193: where it is, when inside a sub-investigation */}
+                        {placeText(canvas, choice.node_id) && (
+                          <span className="muted"> {placeText(canvas, choice.node_id)}</span>
+                        )}
                       </button>
                     ))}
                   </div>

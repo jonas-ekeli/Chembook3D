@@ -130,6 +130,8 @@ export type ReaderView = {
   referenceId: string | null
   filters: Filters
   expanded: string[]
+  /** D193: the sub-investigation whose canvas is open; none: the main canvas. */
+  canvas: string | null
   drawerOpen: boolean
   drawerTab: 'profile' | 'table'
   hydrogens: HydrogenMode
@@ -166,6 +168,7 @@ function storedView(data: SnapshotData): Partial<ReaderView> {
   }
   const expanded = strings(stored.expanded)
   if (expanded) found.expanded = expanded
+  if (stored.canvas === null || typeof stored.canvas === 'string') found.canvas = stored.canvas
   if (typeof stored.drawerOpen === 'boolean') found.drawerOpen = stored.drawerOpen
   if (stored.drawerTab === 'profile' || stored.drawerTab === 'table') found.drawerTab = stored.drawerTab
   if (stored.hydrogens === 'all' || stored.hydrogens === 'polar' || stored.hydrogens === 'none')
@@ -185,13 +188,19 @@ export function openingView(data: SnapshotData): ReaderView {
     referenceId: data.reference_id,
     filters: view?.filters ?? NO_FILTERS,
     expanded: view?.expanded ?? [],
+    canvas: view?.canvas ?? null,
     drawerOpen: view?.drawer.open ?? false,
     drawerTab: view?.drawer.tab ?? 'profile',
     hydrogens: data.settings.hydrogens,
   }
   const opened = { ...shown, ...storedView(data) }
-  const groups = new Set(data.canvas.groups.map((g) => g.id))
-  return { ...opened, expanded: opened.expanded.filter((id) => groups.has(id)) }
+  const subs = new Set((data.canvas.sub_investigations ?? []).map((s) => s.id))
+  const boxes = new Set([...data.canvas.groups.map((g) => g.id), ...subs])
+  return {
+    ...opened,
+    expanded: opened.expanded.filter((id) => boxes.has(id)),
+    canvas: opened.canvas !== null && subs.has(opened.canvas) ? opened.canvas : null,
+  }
 }
 
 /** Remembers the reader's choices for this copy in their browser (a convenience only). */
