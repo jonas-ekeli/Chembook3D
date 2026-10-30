@@ -261,7 +261,7 @@ def test_group_members_keep_their_order_on_upgrade(tmp_path):
 
 
 def test_profiles_take_the_views_reference_on_upgrade(tmp_path):
-    # D199: profiles made before each kept its own reference start from the energy view's.
+    # D205: profiles made before each kept its own reference start from the energy view's.
     folder = tmp_path / "pre-d199"
     folder.mkdir()
     engine = inv._make_engine(folder / inv.DB_NAME)

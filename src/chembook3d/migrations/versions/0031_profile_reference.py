@@ -4,7 +4,7 @@ Revision ID: 0031
 Revises: 0030
 Create Date: 2026-10-30
 
-D199: an energy profile keeps its own reference node, shared by all its pathways and apart
+D205: an energy profile keeps its own reference node, shared by all its pathways and apart
 from the reference of the node cards. Existing profiles start from the reference the energy
 view had, which they used until now; one not on a profile's pathways is ignored when read.
 """

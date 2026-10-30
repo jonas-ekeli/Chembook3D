@@ -1581,7 +1581,7 @@ export type EnergyProfile = {
   id: string
   name: string
   paths: ProfilePath[]
-  /** D199: the node or group all its pathways are relative to; null: the first node shown. */
+  /** D205: the node or group all its pathways are relative to; null: the first node shown. */
   reference_id?: string | null
 }
 

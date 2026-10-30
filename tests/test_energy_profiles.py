@@ -131,7 +131,7 @@ def test_a_pathways_chosen_colour_is_kept(open_client, example):  # noqa: F811
 
 
 def test_each_profile_keeps_its_own_reference(open_client, example):  # noqa: F811
-    """D199, T-EN-50: a profile keeps one reference for all its pathways, apart from the node
+    """D205, T-EN-50: a profile keeps one reference for all its pathways, apart from the node
     cards' (the view state's); it must be on one of its pathways, stays when another pathway
     is added, is copied by a duplicate and is dropped when its last pathway is taken out or
     its node deleted."""
@@ -230,7 +230,7 @@ def test_the_drawers_pathways_become_profile_1(open_client, example, tmp_path): 
 
     [profile] = get(open_client, "/energy-profiles")
     assert profile["name"] == "Profile 1"
-    assert profile["reference_id"] == ids["A1-S1"]  # D199: the reference it was shown with
+    assert profile["reference_id"] == ids["A1-S1"]  # D205: the reference it was shown with
     assert profile["paths"] == [
         {
             "ids": old[0]["ids"],

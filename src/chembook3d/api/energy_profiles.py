@@ -31,7 +31,7 @@ class EnergyProfileOut(BaseModel):
     id: str
     name: str
     paths: list[ProfilePathOut]
-    # D199: the node or group all its pathways are relative to; None: the first node shown.
+    # D205: the node or group all its pathways are relative to; None: the first node shown.
     reference_id: str | None = None
 
 
@@ -41,7 +41,7 @@ class EnergyProfileIn(BaseModel):
     # step's index, "by": columns later}] (D194: optional, none moved), "colour": "#rrggbb" or
     # null (D195: optional, the branch's colour)}.
     paths: list[dict[str, Any]] | None = None
-    # D199: a node or group on one of its pathways, or null for the first node shown.
+    # D205: a node or group on one of its pathways, or null for the first node shown.
     reference_id: str | None = None
 
 

@@ -981,7 +981,7 @@ export function AnalysesView({
     api.energyProfiles().then(setProfiles, () => setProfiles([]))
   }, [refreshKey])
 
-  // D199: a profile's reference by name.
+  // D205: a profile's reference by name.
   const labelOf = (id: string) =>
     canvas.nodes.find((n) => n.id === id)?.label ?? canvas.groups.find((g) => g.id === id)?.label
 

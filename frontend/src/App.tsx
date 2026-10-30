@@ -308,7 +308,7 @@ function App() {
   }, [loadRemote])
   // D79: the read-only copy exports the drawer's pathways, or one per branch (A30).
   const [drawerPaths, setDrawerPaths] = useState<DrawerPath[]>([])
-  // D199: the reference of the drawer's open profile, apart from the node cards' `referenceId`.
+  // D205: the reference of the drawer's open profile, apart from the node cards' `referenceId`.
   const [drawerReference, setDrawerReference] = useState<string | null>(null)
   const drawerShown = useCallback((paths: DrawerPath[], reference: string | null) => {
     setDrawerPaths(paths)

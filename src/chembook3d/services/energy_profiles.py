@@ -4,7 +4,7 @@ for, whether it is drawn ("Show on the figure"; any number may be drawn together
 moved along the axis (D194: each a step's index and the columns it, with every later step, is
 moved; only later than where the pathway puts it, so moving back stops there) and the colour
 the user chose for it (D195: "#rrggbb", or None for its branch's colour). A profile also keeps
-its own reference (D199), one node or group on its pathways that all of them are relative to,
+its own reference (D205), one node or group on its pathways that all of them are relative to,
 whatever the node cards' reference is; it stays when pathways are added or hidden. The
 "Continue with" choices are never stored: the drawer asks `pathways.extend(..., follow=False)`
 for them (D189).
@@ -119,7 +119,7 @@ def _on(paths: list[dict[str, Any]]) -> set[str]:
 
 
 def clean_reference(value: Any, paths: list[dict[str, Any]]) -> str | None:
-    """D199: the profile's reference, a node or group on one of its pathways, or None."""
+    """D205: the profile's reference, a node or group on one of its pathways, or None."""
     if value is None:
         return None
     if not (isinstance(value, str) and 0 < len(value) <= 64):
@@ -242,7 +242,7 @@ def from_drawer(session: Session) -> int:
             continue
     if not paths or list_profiles(session):
         return 0
-    # D199: it keeps the reference the energy view had, which its pathways used until now.
+    # D205: it keeps the reference the energy view had, which its pathways used until now.
     reference = state.get("reference_id")
     on = reference if isinstance(reference, str) and reference in _on(paths) else None
     profile = create(session, paths=paths, reference_id=on)

@@ -138,7 +138,7 @@ test('the copy holds the pathways in the drawer', async ({ page }) => {
   const shared = page.getByLabel('Energy drawer')
   await expect(shared.getByRole('group', { name: /^Pathway / })).toHaveCount(1)
   await expect(shared.getByRole('group', { name: 'Pathway B' })).toBeVisible()
-  // Any node on the pathway can be the profile's reference (D199: the node cards keep theirs).
+  // Any node on the pathway can be the profile's reference (D205: the node cards keep theirs).
   await shared.getByLabel('Reference node').selectOption({ label: 'B-S1' })
   await shared.getByRole('button', { name: 'Table', exact: true }).click()
   const table = shared.getByRole('table', { name: 'Energy table' })

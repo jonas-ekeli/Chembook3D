@@ -62,7 +62,7 @@ class PathIn(BaseModel):
 class SnapshotIn(BaseModel):
     paths: list[PathIn] = []  # the drawer's pathways; none: one per branch (A30)
     reference_id: str | None = None
-    # D199: the reference of the drawer's open profile, which its pathways are relative to.
+    # D205: the reference of the drawer's open profile, which its pathways are relative to.
     profile_reference_id: str | None = None
     # D128: what the app shows, as saved for D105 plus the node view; none: the saved view.
     view: dict[str, Any] | None = None

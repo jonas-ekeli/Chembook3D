@@ -438,7 +438,7 @@ function hexToRgb(hex: string): string {
   return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
 }
 
-// T-UI-75, D199: each profile keeps its own reference for all its pathways, apart from the node
+// T-UI-77, D205: each profile keeps its own reference for all its pathways, apart from the node
 // cards' reference; it stays when a pathway is added, when profiles are switched and after a reload.
 test('energy drawer: each profile keeps its own reference', async ({ page }) => {
   try {

@@ -72,7 +72,7 @@ export type SnapshotData = {
   views: Record<string, SharedView>
   paths: DrawerPath[]
   reference_id: string | null
-  /** D199: the reference of the profile the drawer had open; copies made before share the cards'. */
+  /** D205: the reference of the profile the drawer had open; copies made before share the cards'. */
   profile_reference_id?: string | null
   /** D128: the view the app showed when the copy was made; copies made before have none. */
   view?: SharedViewState
@@ -132,7 +132,7 @@ export type ReaderView = {
   energyType: EnergyType
   edgeEnergies: boolean
   referenceId: string | null
-  /** D199: the drawer's reference, apart from the node cards'. */
+  /** D205: the drawer's reference, apart from the node cards'. */
   profileReferenceId: string | null
   filters: Filters
   expanded: string[]

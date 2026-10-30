@@ -134,14 +134,14 @@ export function EnergyDrawer({
   /** D161: add each node's counterpoise BSSE at the level. */
   bsse?: boolean
   type: EnergyType
-  /** The node cards' reference: a profile's first reference when it is on its pathways (D199). */
+  /** The node cards' reference: a profile's first reference when it is on its pathways (D205). */
   referenceId: string | null
   selectedId: string | null
   refreshKey: number
   onSelectNode: (id: string) => void
   /** D106: the app's settings after the profile style was saved. */
   onSettings?: (settings: Settings) => void
-  /** The pathways shown and the open profile's reference (D199), for the read-only copy (D79). */
+  /** The pathways shown and the open profile's reference (D205), for the read-only copy (D79). */
   onPathsChange?: (paths: DrawerPath[], referenceId: string | null) => void
   /** D86: a saved turnover from a closed pathway, opened in the Analyses view. */
   onTurnover?: (ids: string[], name: string) => void
@@ -157,7 +157,7 @@ export function EnergyDrawer({
   const [stored, setStored] = useState<EnergyProfile[] | null>(null)
   const [openId, setOpenId] = useState<string | null>(saved?.profile_id ?? null)
   const [paths, setPaths] = useState<Path[]>([])
-  // D199: the open profile's own reference, shared by all its pathways; not the node cards'.
+  // D205: the open profile's own reference, shared by all its pathways; not the node cards'.
   const [profileRef, setProfileRef] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -298,7 +298,7 @@ export function EnergyDrawer({
     return i >= 0 ? drawnColours[i] : (path.colour ?? pathwayColours([colour], style)[0])
   }
   const onPaths = new Set(livePaths.flatMap((p) => p.ids))
-  // D199: the profile's reference while it is on a pathway in it; one on a hidden pathway is
+  // D205: the profile's reference while it is on a pathway in it; one on a hidden pathway is
   // kept for when that is shown again. Without one: the cards' reference when it is on a shown
   // pathway, else the first node shown, which then becomes the profile's own.
   const kept = profileRef && paths.some((p) => p.ids.includes(profileRef)) ? profileRef : null
@@ -437,7 +437,7 @@ export function EnergyDrawer({
     setRenaming(null)
   }
 
-  // D190: every change to the open profile's pathways (and its reference, D199) is saved at
+  // D190: every change to the open profile's pathways (and its reference, D205) is saved at
   // once, one save after the other, so leaving the drawer or the app loses nothing.
   const storedKey = JSON.stringify({ paths: storedOf(paths), reference_id: kept })
   useEffect(() => {
@@ -935,7 +935,7 @@ export function EnergyDrawer({
                 <select
                   aria-label="Reference node"
                   value={reference ?? ''}
-                  title="The node every pathway in this profile is relative to; the node cards keep their own (D199)"
+                  title="The node every pathway in this profile is relative to; the node cards keep their own (D205)"
                   onChange={(event) => setProfileRef(event.target.value || null)}
                 >
                   {[...onPaths].map((id) => (

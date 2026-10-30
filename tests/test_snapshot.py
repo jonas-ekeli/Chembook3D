@@ -145,7 +145,7 @@ def test_drawer_pathways_are_exported_and_checked(client, page, tmp_path):
     assert data["reference_id"] is None
     assert data["profile_reference_id"] is None
     assert {k.rsplit("|", 1)[1] for k in data["profiles"]} == set(path)
-    # D199: the open profile's own reference, kept only when it is on the exported pathways.
+    # D205: the open profile's own reference, kept only when it is on the exported pathways.
     body = {"paths": [moved], "reference_id": ids["T-S0"], "profile_reference_id": ids["B-S1"]}
     both = data_of(export(client, body))
     assert (both["reference_id"], both["profile_reference_id"]) == (ids["T-S0"], ids["B-S1"])
