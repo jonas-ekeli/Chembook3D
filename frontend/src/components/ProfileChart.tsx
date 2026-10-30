@@ -79,6 +79,50 @@ function textWidth(text: string, size: number, family: string, weight = 400): nu
   return measure.measureText(text).width
 }
 
+/** D198: `text` broken into lines no wider than `width`, after a space, `_`, `-`, `/` or `.`
+ * where it can, and inside a word only when the word alone is wider than a line. The lines joined
+ * give the text back (a space at a break ends its line and is not counted in its width). */
+function wrapText(text: string, width: number, size: number, family: string): string[] {
+  const fits = (line: string) => textWidth(line.trimEnd(), size, family) <= width
+  if (fits(text)) return [text]
+  const lines: string[] = []
+  let line = ''
+  for (const piece of text.match(/[^ _\-/.]+[ _\-/.]*|[ _\-/.]+/g) ?? []) {
+    if (fits(line + piece)) {
+      line += piece
+      continue
+    }
+    // A piece wider than a line is cut where the line is full; any other starts a new line.
+    if (fits(piece) && line) {
+      lines.push(line)
+      line = ''
+    }
+    for (const char of piece) {
+      if (line && !fits(line + char)) {
+        lines.push(line)
+        line = ''
+      }
+      line += char
+    }
+  }
+  if (line) lines.push(line)
+  return lines
+}
+
+/** D198: the lines of a wrapped text, each under the one before, in its `<text>`. */
+function Lines({ lines, x, row }: { lines: string[]; x: number; row: number }) {
+  if (lines.length === 1) return <>{lines[0]}</>
+  return (
+    <>
+      {lines.map((line, k) => (
+        <tspan key={k} x={x} dy={k ? row : 0}>
+          {line}
+        </tspan>
+      ))}
+    </>
+  )
+}
+
 /** D181: the drawer's text on screen, larger than the figure's own, since a figure fitted to the
  * drawer is drawn smaller than its size; never in a saved PNG or SVG (`profileFigure.figureOf`). */
 export const SCREEN_TEXT = 1.25
@@ -213,33 +257,61 @@ export function ProfileChart({
   const shared = (pi: number, i: number) => (pathwaysAt.get(placeOf(pi, i))?.size ?? 0) > 1
   const colourAt = (pi: number, i: number) => (shared(pi, i) ? ink : colours[pi])
 
-  // D109: node names along the bottom, one line per node in each column (a node shared by
-  // overlaid pathways once), in its pathway's colour where a column holds more than one.
-  const bottomNames = columns.map(() => [] as { id: string; name: string; colour: string }[])
+  const plotW = W - left - right
+  const slotW = plotW / Math.max(1, columns.length)
+  // D198: a name or step name along the bottom wider than its column wraps onto more lines, so
+  // neighbouring columns never overlap.
+  const fitted = (text: string) => wrapText(text, Math.max(slotW - 4 * s, f), f, family)
+
+  // D109: node names along the bottom, one per node in each column (a node shared by overlaid
+  // pathways once), in its pathway's colour where a column holds more than one.
+  const bottomNames = columns.map(() => [] as { id: string; lines: string[]; colour: string }[])
   if (style.name_position === 'bottom')
     data.profiles.forEach((profile, pi) =>
       profile.points.forEach((point, i) => {
         const here = bottomNames[slotOf(pi, i)]
         if (!here.some((h) => h.id === point.id))
-          here.push({ id: point.id, name: pointName(pi, i), colour: colourAt(pi, i) })
+          here.push({
+            id: point.id,
+            lines: fitted(pointName(pi, i)),
+            colour: colourAt(pi, i),
+          })
       }),
     )
-  const bottomRows = Math.max(0, ...bottomNames.map((h) => h.length))
+  const bottomRows = Math.max(0, ...bottomNames.map((here) => here.reduce((sum, h) => sum + h.lines.length, 0)))
+  // D194: the steps drawn in each column; more than one where a pathway was moved onto it.
+  const stepLines = columns.map((column) => {
+    if (!byStep || !style.step_names) return []
+    const here = new Map<number, string>()
+    data.profiles.forEach((profile, pi) =>
+      profile.points.forEach((pt, i) => {
+        const position = pt.step_position as number
+        if (slotOf(pi, i) === column && !here.has(position)) here.set(position, pt.step_name || `step ${position}`)
+      }),
+    )
+    if (!here.size) return []
+    return fitted(
+      [...here.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, n]) => n)
+        .join(' / '),
+    )
+  })
   const stepNames = byStep && style.step_names
+  const stepRows = Math.max(1, ...stepLines.map((lines) => lines.length))
+  const stepsBelow = stepNames ? stepRows * row + 4 * s : 0 // the room the step names take
   const margin = {
     left,
     right,
     top: Math.max(style.title ? 48 * s : 20 * s, legendRows ? legendTop + legendRows * row + 8 * s : 0),
     // D110: names along the bottom start just under the plot, with the step names under them.
     bottom: bottomRows
-      ? 16 * s + f + (bottomRows - 1) * row + (stepNames ? row + 4 * s : 0)
+      ? 16 * s + f + (bottomRows - 1) * row + stepsBelow
       : stepNames
-        ? 56 * s
+        ? 56 * s + (stepRows - 1) * row
         : 28 * s,
   }
-  const plotW = W - margin.left - margin.right
   const plotH = H - margin.top - margin.bottom
-  const slotW = plotW / Math.max(1, columns.length)
   const half = Math.min(style.level_width / 2, slotW * 0.45)
   const x = (slot: number) => margin.left + slotW * (slot + 0.5)
 
@@ -440,40 +512,38 @@ export function ProfileChart({
         </text>
       )}
       {bottomNames.map((here, slot) =>
-        here.map((h, k) => (
-          <text
-            key={`${slot}:${h.id}`}
-            x={x(slot)}
-            y={H - 12 * s - (stepNames ? row + 4 * s : 0) - (here.length - 1 - k) * row}
-            fontSize={f}
-            textAnchor="middle"
-            fill={here.length > 1 ? h.colour : ink}
-          >
-            {h.name}
-          </text>
-        )),
-      )}
-      {stepNames &&
-        columns.map((column) => {
-          // D194: the steps drawn in this column; more than one where a pathway was moved onto it.
-          const here = new Map<number, string>()
-          data.profiles.forEach((profile, pi) =>
-            profile.points.forEach((pt, i) => {
-              const position = pt.step_position as number
-              if (slotOf(pi, i) === column && !here.has(position)) here.set(position, pt.step_name || `step ${position}`)
-            }),
-          )
-          if (!here.size) return null
-          const name = [...here.entries()]
-            .sort(([a], [b]) => a - b)
-            .map(([, n]) => n)
-            .join(' / ')
+        here.map((h, k) => {
+          // The column's names end just over the step names; the lines after this name's under it.
+          const after = here.slice(k + 1).reduce((sum, later) => sum + later.lines.length, 0)
           return (
-            <text key={column} x={x(column)} y={H - 12 * s} fontSize={f} textAnchor="middle" fill={soft}>
-              {name}
+            <text
+              key={`${slot}:${h.id}`}
+              x={x(slot)}
+              y={H - 12 * s - stepsBelow - (after + h.lines.length - 1) * row}
+              fontSize={f}
+              textAnchor="middle"
+              fill={here.length > 1 ? h.colour : ink}
+            >
+              <Lines lines={h.lines} x={x(slot)} row={row} />
             </text>
           )
-        })}
+        }),
+      )}
+      {stepLines.map(
+        (lines, column) =>
+          lines.length > 0 && (
+            <text
+              key={column}
+              x={x(column)}
+              y={H - 12 * s - (stepRows - 1) * row}
+              fontSize={f}
+              textAnchor="middle"
+              fill={soft}
+            >
+              <Lines lines={lines} x={x(column)} row={row} />
+            </text>
+          ),
+      )}
       {data.profiles.map((profile, pi) => (
         <g key={pi} aria-label={`Profile ${names[pi]}`}>
           {profile.segments.map((segment, si) => {
