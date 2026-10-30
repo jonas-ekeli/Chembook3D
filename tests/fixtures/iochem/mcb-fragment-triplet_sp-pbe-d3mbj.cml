@@ -1,0 +1,1433 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module xmlns="http://www.xml-cml.org/schema"
+        xmlns:cc="http://www.xml-cml.org/dictionary/compchem/"
+        xmlns:cml="http://www.xml-cml.org/schema"
+        xmlns:cmlx="http://www.xml-cml.org/schema/cmlx"
+        xmlns:compchem="http://www.xml-cml.org/dictionary/compchem/"
+        xmlns:convention="http://www.xml-cml.org/convention/"
+        xmlns:g="http://www.iochem-bd.org/dictionary/gaussian/"
+        xmlns:nonsi="http://www.xml-cml.org/unit/nonSi/"
+        xmlns:nonsi2="http://www.iochem-bd.org/unit/nonSi2/"
+        xmlns:si="http://www.xml-cml.org/unit/si/"
+        xmlns:xi="http://www.w3.org/2001/XInclude"
+        xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+        convention="convention:compchem"
+        id="gaussian.log">
+   <module dictRef="cc:jobList" id="jobList1">
+      <module cmlx:templateRef="job" dictRef="cc:job" id="job">
+         <module dictRef="cc:environment" id="environment">
+            <parameterList>
+               <parameter dictRef="cc:program">
+                  <scalar dataType="xsd:string">Gaussian 16</scalar>
+               </parameter>
+               <parameter dictRef="cc:hostname">
+                  <scalar dataType="xsd:string">GINC-C12-3</scalar>
+               </parameter>
+               <parameter dictRef="cc:jobname">
+                  <scalar dataType="xsd:string">GIOCCHI</scalar>
+               </parameter>
+               <parameter dictRef="cc:title">
+                  <scalar dataType="xsd:string">MCB_fragment_t_SP, SP CHLOROFORM</scalar>
+               </parameter>
+               <parameter dictRef="cc:version">
+                  <scalar dataType="xsd:string">ES64L-G16RevB.01</scalar>
+               </parameter>
+               <parameter dictRef="cc:run.date">
+                  <scalar dataType="xsd:string">21-Oct-2020</scalar>
+               </parameter>
+               <parameter dictRef="cc:program">
+                  <scalar dataType="xsd:string">Gaussian 16</scalar>
+               </parameter>
+               <parameter dictRef="cc:program.date">
+                  <scalar dataType="xsd:string">20-Dec-2017</scalar>
+               </parameter>
+               <parameter dictRef="cc:version">
+                  <scalar dataType="xsd:string">ES64L-G16RevB.01</scalar>
+               </parameter>
+            </parameterList>
+         </module>
+         <module dictRef="cc:initialization" id="initialization">
+            <parameterList>
+               <parameter dictRef="cc:method">
+                  <scalar dataType="xsd:string">UPBEPBE</scalar>
+               </parameter>
+               <parameter dictRef="cc:basis">
+                  <scalar dataType="xsd:string">GenECP</scalar>
+               </parameter>
+               <parameter dictRef="g:operation">
+                  <scalar dataType="xsd:string">SP</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#P</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">PBEPBE/GENECP</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">5D</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">7F</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">IOp(3/174=1000000,3/175=358940,3/177=12092,3/178=5938951)</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">GEOM=CHECK</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">GUESS=READ</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">GFINPUT</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">NOSYMM</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">INT=ULTRAFINE</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">EMPIRICALDISPERSION=GD3BJ</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">SCRF=(PCM,SOLVENT=CHLOROFORM,READ)#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">SCF=(VSHIFT=800,NOVARACC,MAXCYCLE=180,CONVER=5)</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">SP</scalar>
+               </parameter>
+            </parameterList>
+            <molecule cmlx:templateRef="atom"
+                      formalCharge="0"
+                      id="mol.l202.orient"
+                      spinMultiplicity="3">
+               <atomArray>
+                  <atom elementType="Ru"
+                        id="a1"
+                        x3="-1.17194"
+                        y3="0.858279"
+                        z3="0.302114">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="Cl"
+                        id="a2"
+                        x3="0.323568"
+                        y3="2.401657"
+                        z3="1.026012">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="Cl"
+                        id="a3"
+                        x3="-2.023001"
+                        y3="-1.060094"
+                        z3="-0.554046">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a4"
+                        x3="-2.616213"
+                        y3="1.312306"
+                        z3="1.686922">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a5"
+                        x3="-2.152573"
+                        y3="1.551144"
+                        z3="2.667112">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a6"
+                        x3="-3.270178"
+                        y3="0.416146"
+                        z3="1.758345">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a7"
+                        x3="-3.200941"
+                        y3="2.480313"
+                        z3="0.88132">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a8"
+                        x3="-2.887114"
+                        y3="3.456589"
+                        z3="1.307958">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a9"
+                        x3="-4.312826"
+                        y3="2.455838"
+                        z3="0.814708">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a10"
+                        x3="-2.507009"
+                        y3="2.215603"
+                        z3="-0.462178">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a11"
+                        x3="-1.968743"
+                        y3="3.065751"
+                        z3="-0.931693">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a12"
+                        x3="-3.120006"
+                        y3="1.665536"
+                        z3="-1.208612">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+               </atomArray>
+               <bondArray>
+                  <bond atomRefs2="a1 a2" order="S"/>
+                  <bond atomRefs2="a1 a3" order="S"/>
+                  <bond atomRefs2="a1 a4" order="S"/>
+                  <bond atomRefs2="a1 a10" order="S"/>
+                  <bond atomRefs2="a4 a7" order="S"/>
+                  <bond atomRefs2="a4 a6" order="S"/>
+                  <bond atomRefs2="a4 a5" order="S"/>
+                  <bond atomRefs2="a7 a10" order="S"/>
+                  <bond atomRefs2="a7 a9" order="S"/>
+                  <bond atomRefs2="a7 a8" order="S"/>
+                  <bond atomRefs2="a10 a12" order="S"/>
+                  <bond atomRefs2="a10 a11" order="S"/>
+               </bondArray>
+               <formula concise="C3H6Cl2Ru"/>
+               <property dictRef="cml:molmass">
+                  <scalar units="unit:dalton">208.00809999999996</scalar>
+               </property>
+               <formula convention="iupac:inchi"
+                        inline="InChI=1S/C3H6.2ClH.Ru/c1-3-2;;;/h1-3H2;2*1H;/q;;;+2/p-2">
+                  <scalar dataType="xsd:integer" id="auxInfo">AuxInfo=1/1/N:4,10,7;2;3;1/E:(1,2);;;/CRV:1.3,2.3;;;/rA:12RuClClCHHCHHCHH/rB:s1;s1;s1;s4;s4;s4;s7;s7;s1s7;s10;s10;/rC:;;;;;;;;;;;;</scalar>
+               </formula>
+            </molecule>
+            <module dictRef="cc:userDefinedModule" id="otherComponents">
+               <module cmlx:templateRef="entering" dictRef="cc:userDefinedModule">
+                  <scalar dataType="xsd:string" dictRef="g:link0">g16</scalar>
+                  <array dataType="xsd:string" dictRef="g:command" size="3">/global/hds/software/cpu/non-eb/Gaussian/g16_B.01/l1.exe "/global/work/giocchi/2825528/MCB_fragment_t_SP/Gau-17671.inp" -scrdir="/global/work/giocchi/2825528/MCB_fragment_t_SP/"</array>
+               </module>
+               <module cmlx:templateRef="l1" dictRef="cc:userDefinedModule">
+                  <module cmlx:templateRef="l1.end">
+                     <array dataType="xsd:string" dictRef="g:kk" size="1">MEM=15000MB</array>
+                     <array dataType="xsd:string" dictRef="g:kk" size="1">NPROCSHARED=5</array>
+                     <array dataType="xsd:string" dictRef="g:kk" size="1">LINDAWORKERS=cib12-3,cib12-13,cib12-15,cib12-16</array>
+                     <array dataType="xsd:string" dictRef="g:kk" size="1">chk=MCB_fragment_t_SP</array>
+                     <scalar cmlx:templateRef="title" dataType="xsd:string" dictRef="cc:title">#P # PBEPBE/GENECP 5D 7F # IOp(3/174=1000000,3/175=358940,3/177=12092,</scalar>
+                     <list cmlx:templateRef="control">
+                        <scalar dataType="xsd:string" dictRef="g:control">1/29=2,38=1,40=2,172=1/1</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:control">2/12=2,15=1,40=1/2</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:control">3/5=7,8=11,11=2,14=-4,16=1,17=8,24=10,25=1,30=1,70=2203,72=7,74=1009,75=-5,116=-2,124=41,174=1000000,175=358940,177=12092,178=5938951/1,2,3</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:control">4/5=1/1</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:control">5/5=2,6=5,7=180,10=800,38=6,53=7/2</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:control">6/7=2,8=2,9=2,10=2,28=1/1</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:control">99/5=1,9=1/99</scalar>
+                     </list>
+                  </module>
+               </module>
+               <module cmlx:templateRef="l101" dictRef="cc:userDefinedModule">
+                  <module cmlx:templateRef="l101.title">
+                     <scalar cmlx:templateRef="title" dataType="xsd:string" dictRef="cc:title">MCB_fragment_t_SP, SP CHLOROFORM</scalar>
+                  </module>
+                  <module cmlx:templateRef="l101.isotope2">
+                     <array cmlx:templateRef="atom"
+                            dataType="xsd:integer"
+                            dictRef="x:x"
+                            size="12">1 2 3 4 5 6 7 8 9 10 11 12</array>
+                     <array cmlx:templateRef="iatwgt"
+                            dataType="xsd:integer"
+                            dictRef="x:x"
+                            size="12">102 35 35 12 1 1 12 1 1 12 1 1</array>
+                     <array cmlx:templateRef="atmwgt"
+                            dataType="xsd:double"
+                            dictRef="x:x"
+                            size="12">101.9037000 34.9688527 34.9688527 12.0000000 1.0078250 1.0078250 12.0000000 1.0078250 1.0078250 12.0000000 1.0078250 1.0078250</array>
+                     <array cmlx:templateRef="nucspn"
+                            dataType="xsd:integer"
+                            dictRef="x:x"
+                            size="12">0 3 3 0 1 1 0 1 1 0 1 1</array>
+                     <array cmlx:templateRef="atzeff"
+                            dataType="xsd:double"
+                            dictRef="x:x"
+                            size="12">221.7600000 14.2400000 14.2400000 3.6000000 1.0000000 1.0000000 3.6000000 1.0000000 1.0000000 3.6000000 1.0000000 1.0000000</array>
+                  </module>
+                  <list cmlx:templateRef="rest">
+                     <scalar dataType="xsd:string" dictRef="x:l101">(Enter /global/hds/software/cpu/non-eb/Gaussian/g16_B.01/l101.exe)</scalar>
+                  </list>
+               </module>
+               <module cmlx:templateRef="l302.basis" dictRef="cc:userDefinedModule">
+                  <list cmlx:templateRef="basis">
+                     <array dataType="xsd:string" dictRef="g:basis" size="11">NPDir=0 NMtPBC= 1 NCelOv= 1 NCel= 1 NClECP= 1 NCelD= 1</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="8">NCelK= 1 NCelE2= 1 NClLst= 1 CellRange= 0.0.</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="5">One-electron integrals computed using PRISM.</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="6">1 Symmetry operations used in ECPInt.</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="9">ECPInt: NShTT= 14878 NPrTT= 73531 LenC2= 14599 LenP2D= 55679.</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="5">LDataN: DoStor=T MaxTD1=10 Len= 848</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="8">NBasis= 612 RedAO= T EigKep= 4.76D-05 NBF= 612</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="7">NBsUse= 612 1.00D-06 EigRej= -1.00D+00 NBFU= 612</array>
+                  </list>
+               </module>
+            </module>
+         </module>
+         <module dictRef="cc:calculation" id="calculation">
+            <module dictRef="cc:userDefinedModule" id="otherComponents">
+               <module cmlx:templateRef="l301">
+                  <module cmlx:templateRef="l301.basis2">
+                     <scalar dataType="xsd:string" dictRef="cc:diffuse">(5D, 7F)</scalar>
+                     <module cmlx:templateRef="centers">
+                        <array dataType="xsd:integer" dictRef="cc:atomcount" size="6">5 6 8 9 11 12</array>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">3</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="3">8.2640000000e+01 1.2410000000e+01 2.8240000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="3">2.0060000000e-03 1.5343000000e-02 7.5579000000e-02</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">7.9770000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.5810000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">8.9890000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.2920000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">8.3800000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.9200000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.0620000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">6.6200000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">F</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">1.3970000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="centers">
+                        <array dataType="xsd:integer" dictRef="cc:atomcount" size="3">4 7 10</array>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">9</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="9">3.3980000000e+04 5.0890000000e+03 1.1570000000e+03 3.2660000000e+02 1.0610000000e+02 3.8110000000e+01 1.4750000000e+01 6.0350000000e+00 2.5300000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="9">9.1000000000e-05 7.0400000000e-04 3.6930000000e-03 1.5360000000e-02 5.2929000000e-02 1.4704300000e-01 3.0563100000e-01 3.9934500000e-01 2.1705100000e-01</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">9</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="9">3.3980000000e+04 5.0890000000e+03 1.1570000000e+03 3.2660000000e+02 1.0610000000e+02 3.8110000000e+01 1.4750000000e+01 6.0350000000e+00 2.5300000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="9">-1.9000000000e-05 -1.5100000000e-04 -7.8500000000e-04 -3.3240000000e-03 -1.1512000000e-02 -3.4160000000e-02 -7.7173000000e-02 -1.4149300000e-01 -1.1801900000e-01</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">7.3550000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.9050000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">1.1110000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">3</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="3">3.4510000000e+01 7.9150000000e+00 2.3680000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="3">5.3780000000e-03 3.6132000000e-02 1.4249300000e-01</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">8.1320000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.8900000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">1.0070000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">1.8480000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">6.4900000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.2800000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">F</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">1.4190000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">F</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">4.8500000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">G</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">1.0110000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="centers">
+                        <array dataType="xsd:integer" dictRef="cc:atomcount" size="2">2 3</array>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">13</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="13">8.3490000000e+05 1.2500000000e+05 2.8430000000e+04 8.0330000000e+03 2.6080000000e+03 9.3390000000e+02 3.6000000000e+02 1.4700000000e+02 6.2880000000e+01 2.7600000000e+01 1.1080000000e+01 5.0750000000e+00 2.2780000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="13">2.3168800000e-05 1.8015400000e-04 9.4778200000e-04 4.0013900000e-03 1.4462900000e-02 4.5658600000e-02 1.2324800000e-01 2.6436900000e-01 3.8298900000e-01 2.7093400000e-01 4.7140400000e-02 -3.7176600000e-03 2.1915800000e-03</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">13</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="13">8.3490000000e+05 1.2500000000e+05 2.8430000000e+04 8.0330000000e+03 2.6080000000e+03 9.3390000000e+02 3.6000000000e+02 1.4700000000e+02 6.2880000000e+01 2.7600000000e+01 1.1080000000e+01 5.0750000000e+00 2.2780000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="13">-6.4964900000e-06 -5.0489500000e-05 -2.6611300000e-04 -1.1249900000e-03 -4.1049700000e-03 -1.3198700000e-02 -3.7534200000e-02 -8.9723300000e-02 -1.6767100000e-01 -1.7476300000e-01 1.1490900000e-01 5.6361800000e-01 4.4160600000e-01</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">13</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="13">8.3490000000e+05 1.2500000000e+05 2.8430000000e+04 8.0330000000e+03 2.6080000000e+03 9.3390000000e+02 3.6000000000e+02 1.4700000000e+02 6.2880000000e+01 2.7600000000e+01 1.1080000000e+01 5.0750000000e+00 2.2780000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="13">1.9664500000e-06 1.5262000000e-05 8.0608600000e-05 3.3996000000e-04 1.2455100000e-03 3.9961200000e-03 1.1475100000e-02 2.7550400000e-02 5.3291700000e-02 5.7124600000e-02 -3.9520100000e-02 -2.6434300000e-01 -3.4929100000e-01</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">7.7750000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">3.5270000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">1.4310000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">5.1900000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">8</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="8">1.7030000000e+03 4.0360000000e+02 1.3030000000e+02 4.9050000000e+01 2.0260000000e+01 8.7870000000e+00 3.9190000000e+00 1.7650000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="8">4.7403900000e-04 4.0641200000e-03 2.1335500000e-02 7.9461100000e-02 2.0892700000e-01 3.6494500000e-01 3.7172500000e-01 1.4629200000e-01</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">8</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="8">1.7030000000e+03 4.0360000000e+02 1.3030000000e+02 4.9050000000e+01 2.0260000000e+01 8.7870000000e+00 3.9190000000e+00 1.7650000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="8">-1.2826600000e-04 -1.0935600000e-03 -5.8342900000e-03 -2.1925800000e-02 -6.0138500000e-02 -1.0692900000e-01 -1.2245400000e-01 3.8361900000e-02</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">7.2070000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.8390000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">1.0600000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">3.7600000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.5400000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">6.2800000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">1.5510000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">9.5200000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">F</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">4.2300000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">F</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">1.0890000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">F</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.1700000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">G</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">8.2700000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">G</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">3.7800000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="centers">
+                        <array dataType="xsd:integer" dictRef="cc:atomcount" size="1">1</array>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">14</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="14">7.2698900000e+03 1.0878400000e+03 2.4178700000e+02 3.5452500000e+01 2.2141500000e+01 1.3829200000e+01 5.1321300000e+00 3.1705900000e+00 1.4948700000e+00 8.0053000000e-01 4.1163800000e-01 1.4241700000e-01 6.3563000000e-02 2.8296000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="14">1.1000000000e-05 7.8000000000e-05 3.1100000000e-04 8.7340000000e-03 -6.3604000000e-02 1.8571500000e-01 -4.5449000000e-01 -2.5634200000e-01 5.3304500000e-01 6.3997200000e-01 2.1527300000e-01 1.1261000000e-02 -9.5000000000e-05 1.1070000000e-03</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">14</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="14">7.2698900000e+03 1.0878400000e+03 2.4178700000e+02 3.5452500000e+01 2.2141500000e+01 1.3829200000e+01 5.1321300000e+00 3.1705900000e+00 1.4948700000e+00 8.0053000000e-01 4.1163800000e-01 1.4241700000e-01 6.3563000000e-02 2.8296000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="14">-4.0000000000e-06 -2.5000000000e-05 -1.0600000000e-04 -2.4970000000e-03 1.8842000000e-02 -5.7581000000e-02 1.6045800000e-01 6.9126000000e-02 -2.0397900000e-01 -3.2049800000e-01 -1.7465600000e-01 3.3269600000e-01 6.3032100000e-01 2.4640700000e-01</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">14</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="14">7.2698900000e+03 1.0878400000e+03 2.4178700000e+02 3.5452500000e+01 2.2141500000e+01 1.3829200000e+01 5.1321300000e+00 3.1705900000e+00 1.4948700000e+00 8.0053000000e-01 4.1163800000e-01 1.4241700000e-01 6.3563000000e-02 2.8296000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="14">-7.0000000000e-06 -6.5000000000e-05 -1.7400000000e-04 -8.3680000000e-03 5.1785000000e-02 -1.4177100000e-01 4.1442700000e-01 7.8473000000e-02 -4.4468800000e-01 -1.4550350000e+00 1.2722320000e+00 1.4072450000e+00 -9.9964400000e-01 -4.6140700000e-01</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">14</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="14">7.2698900000e+03 1.0878400000e+03 2.4178700000e+02 3.5452500000e+01 2.2141500000e+01 1.3829200000e+01 5.1321300000e+00 3.1705900000e+00 1.4948700000e+00 8.0053000000e-01 4.1163800000e-01 1.4241700000e-01 6.3563000000e-02 2.8296000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="14">-1.2000000000e-05 -8.4000000000e-05 -3.6200000000e-04 -7.6580000000e-03 5.8439000000e-02 -1.8623700000e-01 5.7496600000e-01 4.0155200000e-01 -2.1997860000e+00 -4.3552200000e-01 3.4276070000e+00 -2.4454790000e+00 -1.4994300000e-01 1.0823060000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">14</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="14">7.2698900000e+03 1.0878400000e+03 2.4178700000e+02 3.5452500000e+01 2.2141500000e+01 1.3829200000e+01 5.1321300000e+00 3.1705900000e+00 1.4948700000e+00 8.0053000000e-01 4.1163800000e-01 1.4241700000e-01 6.3563000000e-02 2.8296000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="14">-1.6000000000e-05 -1.8100000000e-04 -3.3200000000e-04 -2.5429000000e-02 1.4439700000e-01 -3.8364400000e-01 1.3902860000e+00 1.2715400000e-01 -6.8551520000e+00 9.6961050000e+00 -4.7399940000e+00 -9.2146600000e-01 3.0543570000e+00 -1.8558670000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">S</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.8296000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">11</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="11">1.7430700000e+02 1.1504000000e+01 7.1917600000e+00 3.5749800000e+00 2.1307800000e+00 1.0892200000e+00 5.5863700000e-01 2.7047700000e-01 1.2389600000e-01 5.5823000000e-02 2.4842000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="11">1.0300000000e-04 5.3994000000e-02 -1.6101200000e-01 -1.2903800000e-01 3.1476300000e-01 5.0414100000e-01 3.2527100000e-01 7.8702000000e-02 3.7630000000e-03 1.2860000000e-03 -2.1500000000e-04</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">11</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="11">1.7430700000e+02 1.1504000000e+01 7.1917600000e+00 3.5749800000e+00 2.1307800000e+00 1.0892200000e+00 5.5863700000e-01 2.7047700000e-01 1.2389600000e-01 5.5823000000e-02 2.4842000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="11">-3.3000000000e-05 -1.5713000000e-02 4.8772000000e-02 3.5193000000e-02 -1.0322300000e-01 -1.8111500000e-01 -1.2438800000e-01 1.1202800000e-01 4.2251100000e-01 4.7723100000e-01 1.5682000000e-01</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">11</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="11">1.7430700000e+02 1.1504000000e+01 7.1917600000e+00 3.5749800000e+00 2.1307800000e+00 1.0892200000e+00 5.5863700000e-01 2.7047700000e-01 1.2389600000e-01 5.5823000000e-02 2.4842000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="11">-6.1000000000e-05 -2.8785000000e-02 8.9305000000e-02 7.0717000000e-02 -2.0474700000e-01 -3.7151100000e-01 -1.4363500000e-01 4.6222100000e-01 5.8558100000e-01 1.5074900000e-01 4.5640000000e-03</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">11</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="11">1.7430700000e+02 1.1504000000e+01 7.1917600000e+00 3.5749800000e+00 2.1307800000e+00 1.0892200000e+00 5.5863700000e-01 2.7047700000e-01 1.2389600000e-01 5.5823000000e-02 2.4842000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="11">1.1200000000e-04 4.9262000000e-02 -1.5382000000e-01 -1.7315200000e-01 5.3097500000e-01 8.1762600000e-01 -7.8673200000e-01 -1.0474860000e+00 7.5490800000e-01 4.6325100000e-01 5.5220000000e-03</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">11</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="11">1.7430700000e+02 1.1504000000e+01 7.1917600000e+00 3.5749800000e+00 2.1307800000e+00 1.0892200000e+00 5.5863700000e-01 2.7047700000e-01 1.2389600000e-01 5.5823000000e-02 2.4842000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="11">-2.5000000000e-04 -6.2992000000e-02 1.9162100000e-01 6.5282900000e-01 -2.1533740000e+00 4.0944200000e-01 2.4570950000e+00 -2.2868480000e+00 7.7769000000e-02 7.6560400000e-01 -2.2730000000e-03</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">P</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.4842000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">10</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="10">7.5375100000e+01 1.9890100000e+01 7.8792400000e+00 2.9083400000e+00 1.6388300000e+00 8.7573000000e-01 4.5048300000e-01 2.2277000000e-01 1.0534200000e-01 4.6455000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="10">1.8000000000e-04 2.0840000000e-03 -1.8671000000e-02 7.8054000000e-02 2.2632800000e-01 3.1710000000e-01 3.0503600000e-01 2.1515000000e-01 9.9758000000e-02 1.9451000000e-02</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">10</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="10">7.5375100000e+01 1.9890100000e+01 7.8792400000e+00 2.9083400000e+00 1.6388300000e+00 8.7573000000e-01 4.5048300000e-01 2.2277000000e-01 1.0534200000e-01 4.6455000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="10">-2.0300000000e-04 -2.0860000000e-03 1.9428000000e-02 -8.7106000000e-02 -2.8641300000e-01 -3.3190800000e-01 -2.1210000000e-03 4.0235500000e-01 4.5433200000e-01 1.6126800000e-01</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">10</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="10">7.5375100000e+01 1.9890100000e+01 7.8792400000e+00 2.9083400000e+00 1.6388300000e+00 8.7573000000e-01 4.5048300000e-01 2.2277000000e-01 1.0534200000e-01 4.6455000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="10">-3.5500000000e-04 -3.1930000000e-03 3.1956000000e-02 -1.8559900000e-01 -5.8318500000e-01 -7.2766000000e-02 7.9870700000e-01 3.0163600000e-01 -5.4096800000e-01 -3.5606000000e-01</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">10</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="10">7.5375100000e+01 1.9890100000e+01 7.8792400000e+00 2.9083400000e+00 1.6388300000e+00 8.7573000000e-01 4.5048300000e-01 2.2277000000e-01 1.0534200000e-01 4.6455000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="10">-1.8200000000e-04 -7.2830000000e-03 6.1663000000e-02 -4.4416800000e-01 -7.9983900000e-01 1.3061620000e+00 3.4708800000e-01 -1.2223020000e+00 1.7440000000e-01 6.2628100000e-01</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">D</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">4.6455000000e-02</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">F</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">2.8980000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">F</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">9.5880000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">F</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">3.1720000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">G</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">1.7100000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">G</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">5.7780000000e-01</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                        <list cmlx:templateRef="shell">
+                           <scalar dataType="xsd:string" dictRef="x:itype">H</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:ngauss">1</scalar>
+                           <scalar dataType="xsd:double" dictRef="x:scale">1.00</scalar>
+                           <array dataType="xsd:double" dictRef="x:exponent" size="1">1.1646000000e+00</array>
+                           <array dataType="xsd:double" dictRef="x:coeficient" size="1">1.0000000000e+00</array>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="pseudopot">
+                        <module cmlx:templateRef="atom">
+                           <scalar dataType="xsd:integer" dictRef="cc:serial">1</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:elementType">44</scalar>
+                           <scalar dataType="xsd:integer" dictRef="x:valelectrons">16</scalar>
+                           <module cmlx:templateRef="header">
+                              <module cmlx:templateRef="params">
+                                 <scalar dataType="xsd:string" dictRef="cc:angmomentum">G and up</scalar>
+                                 <array dataType="xsd:integer" dictRef="g:powerofr" size="1">2</array>
+                                 <array dataType="xsd:double" dictRef="cc:basisexponent" size="1">1.0000000</array>
+                                 <array dataType="xsd:double" dictRef="cc:expcoeff" size="1">0.00000000</array>
+                                 <array dataType="xsd:double" dictRef="g:socoeff" size="1">0.00000000</array>
+                              </module>
+                              <module cmlx:templateRef="params">
+                                 <scalar dataType="xsd:string" dictRef="cc:angmomentum">S - G</scalar>
+                                 <array dataType="xsd:integer" dictRef="g:powerofr" size="2">2 2</array>
+                                 <array dataType="xsd:double" dictRef="cc:basisexponent" size="2">11.5005900 5.0685750</array>
+                                 <array dataType="xsd:double" dictRef="cc:expcoeff" size="2">209.78649300 30.21430700</array>
+                                 <array dataType="xsd:double" dictRef="g:socoeff" size="2">0.00000000 0.00000000</array>
+                              </module>
+                              <module cmlx:templateRef="params">
+                                 <scalar dataType="xsd:string" dictRef="cc:angmomentum">P - G</scalar>
+                                 <array dataType="xsd:integer" dictRef="g:powerofr" size="4">2 2 2 2</array>
+                                 <array dataType="xsd:double" dictRef="cc:basisexponent" size="4">10.5326340 10.1920100 4.7348920 4.5090650</array>
+                                 <array dataType="xsd:double" dictRef="cc:expcoeff" size="4">48.75124400 97.49652900 7.86018800 15.32975100</array>
+                                 <array dataType="xsd:double" dictRef="g:socoeff" size="4">0.00000000 0.00000000 0.00000000 0.00000000</array>
+                              </module>
+                              <module cmlx:templateRef="params">
+                                 <scalar dataType="xsd:string" dictRef="cc:angmomentum">D - G</scalar>
+                                 <array dataType="xsd:integer" dictRef="g:powerofr" size="4">2 2 2 2</array>
+                                 <array dataType="xsd:double" dictRef="cc:basisexponent" size="4">8.8779770 8.7661220 3.1701960 3.2288510</array>
+                                 <array dataType="xsd:double" dictRef="cc:expcoeff" size="4">26.96750600 40.43230300 3.34075800 5.25635200</array>
+                                 <array dataType="xsd:double" dictRef="g:socoeff" size="4">0.00000000 0.00000000 0.00000000 0.00000000</array>
+                              </module>
+                              <module cmlx:templateRef="params">
+                                 <scalar dataType="xsd:string" dictRef="cc:angmomentum">F - G</scalar>
+                                 <array dataType="xsd:integer" dictRef="g:powerofr" size="2">2 2</array>
+                                 <array dataType="xsd:double" dictRef="cc:basisexponent" size="2">7.8202490 7.8396470</array>
+                                 <array dataType="xsd:double" dictRef="cc:expcoeff" size="2">-8.84752500 -11.83551800</array>
+                                 <array dataType="xsd:double" dictRef="g:socoeff" size="2">0.00000000 0.00000000</array>
+                              </module>
+                           </module>
+                        </module>
+                        <module cmlx:templateRef="atom">
+                           <scalar dataType="xsd:integer" dictRef="cc:serial">2</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:elementType">17</scalar>
+                           <scalar dataType="xsd:string" dictRef="cc:nopseudo">No pseudopotential on this center.</scalar>
+                        </module>
+                        <module cmlx:templateRef="atom">
+                           <scalar dataType="xsd:integer" dictRef="cc:serial">3</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:elementType">17</scalar>
+                           <scalar dataType="xsd:string" dictRef="cc:nopseudo">No pseudopotential on this center.</scalar>
+                        </module>
+                        <module cmlx:templateRef="atom">
+                           <scalar dataType="xsd:integer" dictRef="cc:serial">4</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:elementType">6</scalar>
+                           <scalar dataType="xsd:string" dictRef="cc:nopseudo">No pseudopotential on this center.</scalar>
+                        </module>
+                        <module cmlx:templateRef="atom">
+                           <scalar dataType="xsd:integer" dictRef="cc:serial">5</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:elementType">1</scalar>
+                           <scalar dataType="xsd:string" dictRef="cc:nopseudo">No pseudopotential on this center.</scalar>
+                        </module>
+                        <module cmlx:templateRef="atom">
+                           <scalar dataType="xsd:integer" dictRef="cc:serial">6</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:elementType">1</scalar>
+                           <scalar dataType="xsd:string" dictRef="cc:nopseudo">No pseudopotential on this center.</scalar>
+                        </module>
+                        <module cmlx:templateRef="atom">
+                           <scalar dataType="xsd:integer" dictRef="cc:serial">7</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:elementType">6</scalar>
+                           <scalar dataType="xsd:string" dictRef="cc:nopseudo">No pseudopotential on this center.</scalar>
+                        </module>
+                        <module cmlx:templateRef="atom">
+                           <scalar dataType="xsd:integer" dictRef="cc:serial">8</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:elementType">1</scalar>
+                           <scalar dataType="xsd:string" dictRef="cc:nopseudo">No pseudopotential on this center.</scalar>
+                        </module>
+                        <module cmlx:templateRef="atom">
+                           <scalar dataType="xsd:integer" dictRef="cc:serial">9</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:elementType">1</scalar>
+                           <scalar dataType="xsd:string" dictRef="cc:nopseudo">No pseudopotential on this center.</scalar>
+                        </module>
+                        <module cmlx:templateRef="atom">
+                           <scalar dataType="xsd:integer" dictRef="cc:serial">10</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:elementType">6</scalar>
+                           <scalar dataType="xsd:string" dictRef="cc:nopseudo">No pseudopotential on this center.</scalar>
+                        </module>
+                        <module cmlx:templateRef="atom">
+                           <scalar dataType="xsd:integer" dictRef="cc:serial">11</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:elementType">1</scalar>
+                           <scalar dataType="xsd:string" dictRef="cc:nopseudo">No pseudopotential on this center.</scalar>
+                        </module>
+                        <module cmlx:templateRef="atom">
+                           <scalar dataType="xsd:integer" dictRef="cc:serial">12</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:elementType">1</scalar>
+                           <scalar dataType="xsd:string" dictRef="cc:nopseudo">No pseudopotential on this center.</scalar>
+                        </module>
+                     </module>
+                     <module cmlx:templateRef="ernie">
+                        <scalar dataType="xsd:double" dictRef="g:thresh">0.10000e-02</scalar>
+                        <scalar dataType="xsd:double" dictRef="g:tol">0.10000e-05</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:strict">F</scalar>
+                     </module>
+                     <module cmlx:templateRef="erniedeleted">
+                        <list cmlx:templateRef="deleted">
+                           <list>
+                              <scalar dataType="xsd:integer" dictRef="g:erniedeleted">108</scalar>
+                              <scalar dataType="xsd:integer" dictRef="g:ernietotal">489</scalar>
+                           </list>
+                        </list>
+                     </module>
+                     <scalar dataType="xsd:string" dictRef="g:misc">IExCor= 1009 DFT=T Ex=PBE Corr=PBE ExCW=0 ScaHFX=  0.000000</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:misc">ScaDFX=  1.000000  1.000000  1.000000  1.000000 ScalE2=  1.000000  1.000000</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:misc">IRadAn=      5 IRanWt=     -1 IRanGd=            0 ICorTp=0 IEmpDi=141</scalar>
+                     <module cmlx:templateRef="natoms">
+                        <list cmlx:templateRef="natoms">
+                           <list>
+                              <scalar dataType="xsd:integer" dictRef="cc:natoms">12</scalar>
+                              <scalar dataType="xsd:integer" dictRef="cc:nactiveatoms">12</scalar>
+                              <scalar dataType="xsd:integer" dictRef="cc:uniqatoms">12</scalar>
+                              <scalar dataType="xsd:double" dictRef="g:sfac">1.00e+00</scalar>
+                              <scalar dataType="xsd:integer" dictRef="g:natfmm">60</scalar>
+                              <scalar dataType="xsd:string" dictRef="g:big">F</scalar>
+                           </list>
+                        </list>
+                     </module>
+                  </module>
+                  <module cmlx:templateRef="l301.dispersion">
+                     <scalar dataType="xsd:string" dictRef="g:empdispersion">Grimme-D3(BJ)</scalar>
+                     <scalar dataType="xsd:double" dictRef="g:dispenergy" units="nonsi:hartree">-0.0312742457</scalar>
+                  </module>
+                  <module cmlx:templateRef="l301.pcm.standard">
+                     <scalar dataType="xsd:string" dictRef="g:model">PCM</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:atomicradii">UAHF</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:polarcharges">Total charges</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:chargecompensation">None</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:solutionmethod">On-the-fly selection</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:solvent">Chloroform</scalar>
+                     <scalar dataType="xsd:double" dictRef="g:eps">4.711300</scalar>
+                     <scalar dataType="xsd:double" dictRef="g:epsinfinity">2.090627</scalar>
+                  </module>
+               </module>
+               <module cmlx:templateRef="l202" dictRef="cc:userDefinedModule">
+                  <module cmlx:templateRef="l202.distmat">
+                     <array dataType="xsd:double" dictRef="cc:distance" size="78">0.000000 2.267728 0.000000 2.266598 4.470647 0.000000 2.051770 3.204029 3.316944 0.000000 2.652343 3.089961 4.148640 1.110306 0.000000 2.592044 4.170560 3.013617 1.111698 1.833881 0.000000 2.661451 3.528355 3.997787 1.534647 2.269689 2.243825 0.000000 3.271812 3.391290 4.961267 2.194299 2.453074 3.097398 1.110685 0.000000 3.560914 4.641523 4.413453 2.224166 2.986062 2.477480 1.114147 1.810374 0.000000 2.051555 3.203357 3.312536 2.333774 3.218632 2.958241 1.535122 2.194973 2.224663 0.000000 2.651435 3.086798 4.143448 3.217287 3.908866 3.993800 2.268935 2.451978 2.986074 1.110373 0.000000 2.594016 4.170566 3.010139 2.960185 3.996280 3.222787 2.244599 3.097617 2.478148 1.111532 1.833765 0.000000</array>
+                  </module>
+                  <module cmlx:templateRef="l202.rotconst">
+                     <array cmlx:templateRef="rotconst"
+                            dataType="xsd:double"
+                            dictRef="cc:rotconst"
+                            size="3">2.2750521 1.2516601 0.9451964</array>
+                  </module>
+               </module>
+               <module cmlx:templateRef="l302">
+                  <module cmlx:templateRef="l302.basis2">
+                     <list cmlx:templateRef="basis">
+                        <array dataType="xsd:string" dictRef="g:basis" size="5">Precomputing XC quadrature grid using</array>
+                        <array dataType="xsd:string" dictRef="g:basis" size="10">IXCGrd= 4 IRadAn= 5 IRanWt= -1 IRanGd= 0 AccXCQ= 0.00D+00.</array>
+                        <array dataType="xsd:string" dictRef="g:basis" size="8">Defaulting to unpruned grid for atomic number 44.</array>
+                        <array dataType="xsd:string" dictRef="g:basis" size="9">Generated NRdTot= 0 NPtTot= 0 NUsed= 0 NTot= 32</array>
+                        <array dataType="xsd:string" dictRef="g:basis" size="10">NSgBfM= 773 773 773 773 773 MxSgAt= 12 MxSgA2= 12.</array>
+                     </list>
+                  </module>
+               </module>
+               <module cmlx:templateRef="l303.basis">
+                  <list cmlx:templateRef="l303">
+                     <scalar dataType="xsd:integer" dictRef="g:dipdrv">1</scalar>
+                  </list>
+               </module>
+               <module cmlx:templateRef="l502">
+                  <scalar dataType="xsd:string" dictRef="g:l502.type">open</scalar>
+                  <module cmlx:templateRef="l502.cycle">
+                     <list cmlx:templateRef="cycle">
+                        <list>
+                           <scalar dataType="xsd:integer" dictRef="cc:cycle">1</scalar>
+                           <scalar dataType="xsd:integer" dictRef="g:pass">1</scalar>
+                           <scalar dataType="xsd:integer" dictRef="g:idiag">1</scalar>
+                        </list>
+                     </list>
+                     <module cmlx:templateRef="l502.e">
+                        <list cmlx:templateRef="l502.e">
+                           <scalar dataType="xsd:double" dictRef="g:l502.e">-1132.56257743203</scalar>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="l502.ediff">
+                        <list cmlx:templateRef="l502.ediff">
+                           <list>
+                              <scalar dataType="xsd:double" dictRef="g:l502.e">-1132.56905737425</scalar>
+                              <scalar dataType="xsd:double" dictRef="g:l502.deltae">-0.006479942230</scalar>
+                           </list>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="l502.ediff">
+                        <list cmlx:templateRef="l502.ediff">
+                           <list>
+                              <scalar dataType="xsd:double" dictRef="g:l502.e">-1132.61767918614</scalar>
+                              <scalar dataType="xsd:double" dictRef="g:l502.deltae">-0.048621811889</scalar>
+                           </list>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="l502.ediff">
+                        <list cmlx:templateRef="l502.ediff">
+                           <list>
+                              <scalar dataType="xsd:double" dictRef="g:l502.e">-1132.61847387116</scalar>
+                              <scalar dataType="xsd:double" dictRef="g:l502.deltae">-0.000794685019</scalar>
+                           </list>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="l502.ediff">
+                        <list cmlx:templateRef="l502.ediff">
+                           <list>
+                              <scalar dataType="xsd:double" dictRef="g:l502.e">-1132.61878464322</scalar>
+                              <scalar dataType="xsd:double" dictRef="g:l502.deltae">-0.000310772061</scalar>
+                           </list>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="l502.ediff">
+                        <list cmlx:templateRef="l502.ediff">
+                           <list>
+                              <scalar dataType="xsd:double" dictRef="g:l502.e">-1132.61891937573</scalar>
+                              <scalar dataType="xsd:double" dictRef="g:l502.deltae">-0.000134732510</scalar>
+                           </list>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="l502.ediff">
+                        <list cmlx:templateRef="l502.ediff">
+                           <list>
+                              <scalar dataType="xsd:double" dictRef="g:l502.e">-1132.61898212665</scalar>
+                              <scalar dataType="xsd:double" dictRef="g:l502.deltae">-0.000062750911</scalar>
+                           </list>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="l502.ediff">
+                        <list cmlx:templateRef="l502.ediff">
+                           <list>
+                              <scalar dataType="xsd:double" dictRef="g:l502.e">-1132.61901296689</scalar>
+                              <scalar dataType="xsd:double" dictRef="g:l502.deltae">-0.000030840248</scalar>
+                           </list>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="l502.ediff">
+                        <list cmlx:templateRef="l502.ediff">
+                           <list>
+                              <scalar dataType="xsd:double" dictRef="g:l502.e">-1132.61902856480</scalar>
+                              <scalar dataType="xsd:double" dictRef="g:l502.deltae">-0.000015597902</scalar>
+                           </list>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="l502.ediff">
+                        <list cmlx:templateRef="l502.ediff">
+                           <list>
+                              <scalar dataType="xsd:double" dictRef="g:l502.e">-1132.61903668169</scalar>
+                              <scalar dataType="xsd:double" dictRef="g:l502.deltae">-0.000008116890</scalar>
+                           </list>
+                        </list>
+                     </module>
+                  </module>
+                  <module cmlx:templateRef="l502.footer">
+                     <list cmlx:templateRef="scfdone">
+                        <list>
+                           <scalar dataType="xsd:double" dictRef="g:rbhflyp" units="nonsi:hartree">-1132.61903668</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:ncycle">10</scalar>
+                        </list>
+                     </list>
+                     <module cmlx:templateRef="ssquared">
+                        <list cmlx:templateRef="ssquared">
+                           <scalar dataType="xsd:double" dictRef="g:ssquared">2.0130</scalar>
+                        </list>
+                     </module>
+                     <module cmlx:templateRef="scfdone">
+                        <list cmlx:templateRef="scfdone">
+                           <list>
+                              <scalar dataType="xsd:double" dictRef="cc:kinener">1.068646932204e+03</scalar>
+                              <scalar dataType="xsd:double" dictRef="cc:potener">-3.538576149796e+03</scalar>
+                              <scalar dataType="xsd:double" dictRef="cc:eener">8.970948021491e+02</scalar>
+                           </list>
+                        </list>
+                     </module>
+                  </module>
+                  <list cmlx:templateRef="l502">
+                     <scalar dataType="xsd:string" dictRef="g:l502">Using DIIS extrapolation, IDIIS=  1040.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">NGot=  1966080000 LenX=  1964875877 LenY=  1964277575</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">Requested convergence on RMS density matrix=1.00D-05 within 180 cycles.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">Requested convergence on MAX density matrix=1.00D-03.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">Requested convergence on             energy=1.00D-03.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">Virtual orbitals will be shifted by   0.800 hartree.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">No special actions if energy rises.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">Fock matrices will be formed incrementally for  20 cycles.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502"/>
+                  </list>
+               </module>
+               <module cmlx:templateRef="l502.footer2">
+                  <scalar dataType="xsd:double" dictRef="cc:spincontamination">2.0130</scalar>
+               </module>
+               <module cmlx:templateRef="l601.fermi">
+                  <list cmlx:templateRef="fermi.atom">
+                     <array dataType="xsd:integer" dictRef="cc:serial" size="12">1 2 3 4 5 6 7 8 9 10 11 12</array>
+                     <array dataType="xsd:string" dictRef="x:elementType" size="12">Ru Cl Cl C H H C H H C H H</array>
+                     <array dataType="xsd:integer" dictRef="x:isotopeNumber" size="12">99 35 35 13 1 1 13 1 1 13 1 1</array>
+                     <array dataType="xsd:double" dictRef="cc:coupling" size="12">0.00000 0.01678 0.01838 -0.02467 0.00546 0.01121 0.00021 -0.00009 -0.00173 -0.02473 0.00548 0.01116</array>
+                     <array dataType="xsd:double" dictRef="cc:coupling" size="12">-0.00001 3.67957 4.02885 -13.86784 12.20826 25.05874 0.12050 -0.19085 -3.87690 -13.89948 12.23662 24.93367</array>
+                     <array dataType="xsd:double" dictRef="cc:coupling" size="12">-0.00000 1.31296 1.43759 -4.94839 4.35621 8.94158 0.04300 -0.06810 -1.38337 -4.95968 4.36633 8.89695</array>
+                     <array dataType="xsd:double" dictRef="cc:coupling" size="12">-0.00000 1.22737 1.34388 -4.62581 4.07224 8.35870 0.04020 -0.06366 -1.29319 -4.63637 4.08170 8.31698</array>
+                  </list>
+                  <list cmlx:templateRef="fermi.spindipole">
+                     <array dataType="xsd:integer" dictRef="cc:serial" size="12">1 2 3 4 5 6 7 8 9 10 11 12</array>
+                     <array dataType="xsd:double" dictRef="g:spindipole.xx" size="12">-0.064090 -0.487788 0.345709 -0.013266 -0.007172 0.011557 0.006157 0.000554 0.006565 -0.011251 -0.009278 0.008250</array>
+                     <array dataType="xsd:double" dictRef="g:spindipole.yy" size="12">0.168493 0.184744 -0.519810 0.017812 -0.007401 -0.012842 0.004087 0.005050 -0.001465 0.004696 0.010653 -0.007514</array>
+                     <array dataType="xsd:double" dictRef="g:spindipole.zz" size="12">-0.104403 0.303044 0.174101 -0.004546 0.014573 0.001285 -0.010245 -0.005604 -0.005100 0.006554 -0.001375 -0.000735</array>
+                  </list>
+                  <list cmlx:templateRef="fermi.spindipole">
+                     <array dataType="xsd:integer" dictRef="cc:serial" size="12">1 2 3 4 5 6 7 8 9 10 11 12</array>
+                     <array dataType="xsd:double" dictRef="g:spindipole.xy" size="12">0.219406 -0.368389 0.075820 0.021572 -0.003196 0.003146 -0.013695 -0.008870 -0.006441 0.028444 -0.010870 -0.010072</array>
+                     <array dataType="xsd:double" dictRef="g:spindipole.xz" size="12">0.097872 -0.194620 0.032928 0.019427 -0.014387 -0.017221 -0.004802 -0.003325 -0.002091 0.000718 0.006816 0.014983</array>
+                     <array dataType="xsd:double" dictRef="g:spindipole.yz" size="12">0.155008 -0.085062 -0.357785 0.000535 0.005963 -0.002652 0.006314 0.004814 0.001403 0.013508 -0.012146 -0.008543</array>
+                  </list>
+               </module>
+               <module cmlx:templateRef="l601.anisospin">
+                  <module cmlx:templateRef="atom">
+                     <matrix cmlx:templateRef="baa"
+                             cols="3"
+                             dataType="xsd:double"
+                             dictRef="g:axis"
+                             rows="3">0.8746 -0.4589 -0.1566 -0.04 -0.3902 0.9199 0.4832 0.7982 0.3596</matrix>
+                     <vector3 dictRef="g:coupling.au">-0.1967 -0.1744 0.3712</vector3>
+                     <vector3 dictRef="g:coupling.mhz">4.821 4.274 -9.095</vector3>
+                     <vector3 dictRef="g:coupling.g">1.72 1.525 -3.245</vector3>
+                     <vector3 dictRef="g:coupling.ten">1.608 1.426 -3.034</vector3>
+                     <scalar dataType="xsd:integer" dictRef="x:serial">1</scalar>
+                     <scalar dataType="xsd:string" dictRef="x:elementType">Ru</scalar>
+                     <scalar dataType="xsd:integer" dictRef="x:isotopeNumber">99</scalar>
+                  </module>
+                  <module cmlx:templateRef="atom">
+                     <matrix cmlx:templateRef="baa"
+                             cols="3"
+                             dataType="xsd:double"
+                             dictRef="g:axis"
+                             rows="3">0.895 0.3947 0.2081 -0.2669 0.8473 -0.4591 -0.3575 0.3553 0.8637</matrix>
+                     <vector3 dictRef="g:coupling.au">-0.6955 0.3469 0.3486</vector3>
+                     <vector3 dictRef="g:coupling.mhz">-36.4 18.155 18.245</vector3>
+                     <vector3 dictRef="g:coupling.g">-12.988 6.478 6.51</vector3>
+                     <vector3 dictRef="g:coupling.ten">-12.142 6.056 6.086</vector3>
+                     <scalar dataType="xsd:integer" dictRef="x:serial">2</scalar>
+                     <scalar dataType="xsd:string" dictRef="x:elementType">Cl</scalar>
+                     <scalar dataType="xsd:integer" dictRef="x:isotopeNumber">35</scalar>
+                  </module>
+                  <module cmlx:templateRef="atom">
+                     <matrix cmlx:templateRef="baa"
+                             cols="3"
+                             dataType="xsd:double"
+                             dictRef="g:axis"
+                             rows="3">-0.0805 0.9179 0.3886 -0.0285 -0.3918 0.9196 0.9963 0.063 0.0577</matrix>
+                     <vector3 dictRef="g:coupling.au">-0.6779 0.3255 0.3524</vector3>
+                     <vector3 dictRef="g:coupling.mhz">-35.481 17.036 18.444</vector3>
+                     <vector3 dictRef="g:coupling.g">-12.66 6.079 6.581</vector3>
+                     <vector3 dictRef="g:coupling.ten">-11.835 5.683 6.152</vector3>
+                     <scalar dataType="xsd:integer" dictRef="x:serial">3</scalar>
+                     <scalar dataType="xsd:string" dictRef="x:elementType">Cl</scalar>
+                     <scalar dataType="xsd:integer" dictRef="x:isotopeNumber">35</scalar>
+                  </module>
+                  <module cmlx:templateRef="atom">
+                     <matrix cmlx:templateRef="baa"
+                             cols="3"
+                             dataType="xsd:double"
+                             dictRef="g:axis"
+                             rows="3">0.7965 -0.3233 -0.511 0.3208 -0.4905 0.8103 0.5126 0.8093 0.287</matrix>
+                     <vector3 dictRef="g:coupling.au">-0.0345 0.0028 0.0317</vector3>
+                     <vector3 dictRef="g:coupling.mhz">-4.628 0.378 4.249</vector3>
+                     <vector3 dictRef="g:coupling.g">-1.651 0.135 1.516</vector3>
+                     <vector3 dictRef="g:coupling.ten">-1.544 0.126 1.417</vector3>
+                     <scalar dataType="xsd:integer" dictRef="x:serial">4</scalar>
+                     <scalar dataType="xsd:string" dictRef="x:elementType">C</scalar>
+                     <scalar dataType="xsd:integer" dictRef="x:isotopeNumber">13</scalar>
+                  </module>
+                  <module cmlx:templateRef="atom">
+                     <matrix cmlx:templateRef="baa"
+                             cols="3"
+                             dataType="xsd:double"
+                             dictRef="g:axis"
+                             rows="3">0.8976 0.0359 0.4392 0.0633 0.9758 -0.2092 -0.4361 0.2156 0.8737</matrix>
+                     <vector3 dictRef="g:coupling.au">-0.0143 -0.0089 0.0232</vector3>
+                     <vector3 dictRef="g:coupling.mhz">-7.651 -4.742 12.393</vector3>
+                     <vector3 dictRef="g:coupling.g">-2.73 -1.692 4.422</vector3>
+                     <vector3 dictRef="g:coupling.ten">-2.552 -1.582 4.134</vector3>
+                     <scalar dataType="xsd:integer" dictRef="x:serial">5</scalar>
+                     <scalar dataType="xsd:string" dictRef="x:elementType">H</scalar>
+                     <scalar dataType="xsd:integer" dictRef="x:isotopeNumber">1</scalar>
+                  </module>
+                  <module cmlx:templateRef="atom">
+                     <matrix cmlx:templateRef="baa"
+                             cols="3"
+                             dataType="xsd:double"
+                             dictRef="g:axis"
+                             rows="3">-0.0042 0.9848 0.1739 0.6044 -0.136 0.785 0.7966 0.1084 -0.5947</matrix>
+                     <vector3 dictRef="g:coupling.au">-0.0133 -0.0115 0.0248</vector3>
+                     <vector3 dictRef="g:coupling.mhz">-7.109 -6.144 13.253</vector3>
+                     <vector3 dictRef="g:coupling.g">-2.537 -2.192 4.729</vector3>
+                     <vector3 dictRef="g:coupling.ten">-2.371 -2.049 4.421</vector3>
+                     <scalar dataType="xsd:integer" dictRef="x:serial">6</scalar>
+                     <scalar dataType="xsd:string" dictRef="x:elementType">H</scalar>
+                     <scalar dataType="xsd:integer" dictRef="x:isotopeNumber">1</scalar>
+                  </module>
+                  <module cmlx:templateRef="atom">
+                     <matrix cmlx:templateRef="baa"
+                             cols="3"
+                             dataType="xsd:double"
+                             dictRef="g:axis"
+                             rows="3">-0.0444 -0.3843 0.9221 0.7095 0.6377 0.2999 0.7033 -0.6676 -0.2444</matrix>
+                     <vector3 dictRef="g:coupling.au">-0.0126 -0.0082 0.0208</vector3>
+                     <vector3 dictRef="g:coupling.mhz">-1.697 -1.098 2.795</vector3>
+                     <vector3 dictRef="g:coupling.g">-0.605 -0.392 0.997</vector3>
+                     <vector3 dictRef="g:coupling.ten">-0.566 -0.366 0.932</vector3>
+                     <scalar dataType="xsd:integer" dictRef="x:serial">7</scalar>
+                     <scalar dataType="xsd:string" dictRef="x:elementType">C</scalar>
+                     <scalar dataType="xsd:integer" dictRef="x:isotopeNumber">13</scalar>
+                  </module>
+                  <module cmlx:templateRef="atom">
+                     <matrix cmlx:templateRef="baa"
+                             cols="3"
+                             dataType="xsd:double"
+                             dictRef="g:axis"
+                             rows="3">-0.0466 -0.3873 0.9208 0.8104 0.5243 0.2616 -0.5841 0.7584 0.2894</matrix>
+                     <vector3 dictRef="g:coupling.au">-0.0075 -0.0063 0.0137</vector3>
+                     <vector3 dictRef="g:coupling.mhz">-3.981 -3.339 7.32</vector3>
+                     <vector3 dictRef="g:coupling.g">-1.42 -1.191 2.612</vector3>
+                     <vector3 dictRef="g:coupling.ten">-1.328 -1.114 2.442</vector3>
+                     <scalar dataType="xsd:integer" dictRef="x:serial">8</scalar>
+                     <scalar dataType="xsd:string" dictRef="x:elementType">H</scalar>
+                     <scalar dataType="xsd:integer" dictRef="x:isotopeNumber">1</scalar>
+                  </module>
+                  <module cmlx:templateRef="atom">
+                     <matrix cmlx:templateRef="baa"
+                             cols="3"
+                             dataType="xsd:double"
+                             dictRef="g:axis"
+                             rows="3">-0.0464 -0.3866 0.9211 0.5043 0.7869 0.3557 0.8623 -0.481 -0.1584</matrix>
+                     <vector3 dictRef="g:coupling.au">-0.0056 -0.005 0.0105</vector3>
+                     <vector3 dictRef="g:coupling.mhz">-2.979 -2.646 5.625</vector3>
+                     <vector3 dictRef="g:coupling.g">-1.063 -0.944 2.007</vector3>
+                     <vector3 dictRef="g:coupling.ten">-0.994 -0.883 1.876</vector3>
+                     <scalar dataType="xsd:integer" dictRef="x:serial">9</scalar>
+                     <scalar dataType="xsd:string" dictRef="x:elementType">H</scalar>
+                     <scalar dataType="xsd:integer" dictRef="x:isotopeNumber">1</scalar>
+                  </module>
+                  <module cmlx:templateRef="atom">
+                     <matrix cmlx:templateRef="baa"
+                             cols="3"
+                             dataType="xsd:double"
+                             dictRef="g:axis"
+                             rows="3">0.7601 -0.6208 0.1919 -0.4061 -0.2233 0.8861 0.5073 0.7515 0.4218</matrix>
+                     <vector3 dictRef="g:coupling.au">-0.0343 0.0028 0.0315</vector3>
+                     <vector3 dictRef="g:coupling.mhz">-4.603 0.379 4.224</vector3>
+                     <vector3 dictRef="g:coupling.g">-1.643 0.135 1.507</vector3>
+                     <vector3 dictRef="g:coupling.ten">-1.535 0.126 1.409</vector3>
+                     <scalar dataType="xsd:integer" dictRef="x:serial">10</scalar>
+                     <scalar dataType="xsd:string" dictRef="x:elementType">C</scalar>
+                     <scalar dataType="xsd:integer" dictRef="x:isotopeNumber">13</scalar>
+                  </module>
+                  <module cmlx:templateRef="atom">
+                     <matrix cmlx:templateRef="baa"
+                             cols="3"
+                             dataType="xsd:double"
+                             dictRef="g:axis"
+                             rows="3">0.9302 0.3064 -0.202 0.0091 0.531 0.8473 -0.3669 0.79 -0.4912</matrix>
+                     <vector3 dictRef="g:coupling.au">-0.0143 -0.0089 0.0233</vector3>
+                     <vector3 dictRef="g:coupling.mhz">-7.651 -4.756 12.407</vector3>
+                     <vector3 dictRef="g:coupling.g">-2.73 -1.697 4.427</vector3>
+                     <vector3 dictRef="g:coupling.ten">-2.552 -1.586 4.138</vector3>
+                     <scalar dataType="xsd:integer" dictRef="x:serial">11</scalar>
+                     <scalar dataType="xsd:string" dictRef="x:elementType">H</scalar>
+                     <scalar dataType="xsd:integer" dictRef="x:isotopeNumber">1</scalar>
+                  </module>
+               </module>
+            </module>
+         </module>
+         <module dictRef="cc:finalization" id="finalization">
+            <propertyList>
+               <property dictRef="cc:jobtime">
+                  <scalar dataType="xsd:string">PT9.500S</scalar>
+               </property>
+               <property dictRef="cc:jobdatetime.end">
+                  <scalar dataType="xsd:date">2020-10-22T15:11:56.000+02:00</scalar>
+               </property>
+            </propertyList>
+            <module dictRef="cc:userDefinedModule" id="otherComponents">
+               <module cmlx:templateRef="l9999.archive" dictRef="cc:userDefinedModule">
+                  <scalar dataType="xsd:string" dictRef="g:zmat">0</scalar>
+                  <scalar dataType="xsd:double" dictRef="cc:hfenergy" units="nonsi:hartree">-1132.6190367</scalar>
+                  <scalar dataType="xsd:string" dictRef="x:S2">2.012981</scalar>
+                  <scalar dataType="xsd:string" dictRef="x:S2-1">0.</scalar>
+                  <scalar dataType="xsd:string" dictRef="x:S2A">2.000084</scalar>
+                  <scalar dataType="xsd:double" dictRef="cc:rmsd" units="nonsi:unknown">7.555E-6</scalar>
+                  <scalar dataType="xsd:string" dictRef="x:Quadrupole">2.8670034,-2.8539483,-0.0130551,-6.789508,-2.7766818,-1.9384312</scalar>
+                  <scalar dataType="xsd:string" dictRef="cc:pointgroup">C01 [X(C3H6Cl2Ru1)]</scalar>
+                  <array dataType="xsd:double"
+                         dictRef="cc:dipole"
+                         size="3"
+                         units="nonsi:debye">-0.7076022 0.4382418 0.155569</array>
+               </module>
+            </module>
+            <molecule formalCharge="0" id="mol9999" spinMultiplicity="3">
+               <atomArray>
+                  <atom elementType="Ru"
+                        id="a1"
+                        x3="-1.17194029"
+                        y3="0.85827902"
+                        z3="0.3021135"/>
+                  <atom elementType="Cl"
+                        id="a2"
+                        x3="0.32356792"
+                        y3="2.40165733"
+                        z3="1.02601209"/>
+                  <atom elementType="Cl"
+                        id="a3"
+                        x3="-2.02300053"
+                        y3="-1.06009371"
+                        z3="-0.55404647"/>
+                  <atom elementType="C"
+                        id="a4"
+                        x3="-2.61621329"
+                        y3="1.31230581"
+                        z3="1.68692173"/>
+                  <atom elementType="H"
+                        id="a5"
+                        x3="-2.1525732"
+                        y3="1.55114386"
+                        z3="2.66711249"/>
+                  <atom elementType="H"
+                        id="a6"
+                        x3="-3.27017755"
+                        y3="0.4161464"
+                        z3="1.7583445"/>
+                  <atom elementType="C"
+                        id="a7"
+                        x3="-3.20094142"
+                        y3="2.48031335"
+                        z3="0.88131992"/>
+                  <atom elementType="H"
+                        id="a8"
+                        x3="-2.88711388"
+                        y3="3.45658871"
+                        z3="1.30795762"/>
+                  <atom elementType="H"
+                        id="a9"
+                        x3="-4.31282608"
+                        y3="2.45583767"
+                        z3="0.81470826"/>
+                  <atom elementType="C"
+                        id="a10"
+                        x3="-2.50700934"
+                        y3="2.21560295"
+                        z3="-0.46217786"/>
+                  <atom elementType="H"
+                        id="a11"
+                        x3="-1.96874283"
+                        y3="3.06575148"
+                        z3="-0.9316931"/>
+                  <atom elementType="H"
+                        id="a12"
+                        x3="-3.1200065"
+                        y3="1.66553613"
+                        z3="-1.20861168"/>
+               </atomArray>
+               <bondArray>
+                  <bond atomRefs2="a1 a2" order="S"/>
+                  <bond atomRefs2="a1 a3" order="S"/>
+                  <bond atomRefs2="a1 a4" order="S"/>
+                  <bond atomRefs2="a1 a10" order="S"/>
+                  <bond atomRefs2="a4 a7" order="S"/>
+                  <bond atomRefs2="a4 a6" order="S"/>
+                  <bond atomRefs2="a4 a5" order="S"/>
+                  <bond atomRefs2="a7 a10" order="S"/>
+                  <bond atomRefs2="a7 a9" order="S"/>
+                  <bond atomRefs2="a7 a8" order="S"/>
+                  <bond atomRefs2="a10 a12" order="S"/>
+                  <bond atomRefs2="a10 a11" order="S"/>
+               </bondArray>
+               <property dictRef="cml:molmass">
+                  <scalar units="unit:dalton">208.00809999999996</scalar>
+               </property>
+               <formula convention="iupac:inchi"
+                        inline="InChI=1S/C3H6.2ClH.Ru/c1-3-2;;;/h1-3H2;2*1H;/q;;;+2/p-2">
+                  <scalar dataType="xsd:integer" id="auxInfo">AuxInfo=1/1/N:4,10,7;2;3;1/E:(1,2);;;/CRV:1.3,2.3;;;/rA:12RuClClCHHCHHCHH/rB:s1;s1;s1;s4;s4;s4;s7;s7;s1s7;s10;s10;/rC:;;;;;;;;;;;;</scalar>
+               </formula>
+            </molecule>
+         </module>
+      </module>
+   </module>
+</module>

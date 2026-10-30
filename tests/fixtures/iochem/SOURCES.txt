@@ -1,0 +1,19 @@
+These files are ioChem-BD's CML conversions (each item's output.cml, renamed here) of
+Gaussian 16 calculations by Giovanni Occhipinti, Daniel L. Nascimento, Marco Foscato,
+Deryn E. Fogg and Vidar R. Jensen, published with
+
+  G. Occhipinti, D. L. Nascimento, M. Foscato, D. E. Fogg, V. R. Jensen, "The Janus face
+  of high trans-effect carbenes in olefin metathesis: gateway to both productivity and
+  decomposition", Chem. Sci. 2022, 13, 5107. doi:10.1039/D2SC00855F
+
+Collection: beta_H_elimination_NHC_vs_CAAC, ioChem-BD, doi:10.19061/iochem-bd-6-113
+Licence: Creative Commons Attribution 4.0 International (CC BY 4.0),
+https://creativecommons.org/licenses/by/4.0/
+The files are unchanged; only their names differ.
+
+File                                   Item (https://iochem-bd.bsc.es/browse/handle/...)
+ts2prime-2_caac1_opt-freq.cml          100/199926  GeomOpt_PBEPBE, TS2'-2, CAAC1 (C1Ph)
+ts2prime-2_caac1_sp-pbe-d3mbj.cml      100/199841  SP_PBEPBE_GD3MBJ_CHCl3, same structure
+ts2prime-2_caac1_sp-m06l-d3.cml        100/199759  SP_M06L_GD3_CHCl3, same structure
+ethylene_opt-freq.cml                  100/200014  GeomOpt_PBEPBE, ethylene
+mcb-fragment-triplet_sp-pbe-d3mbj.cml  100/199849  SP_PBEPBE_GD3MBJ_CHCl3, triplet fragment
