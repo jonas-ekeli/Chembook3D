@@ -3400,10 +3400,14 @@ table.overlay-legend td {
 }
 .pathway-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem;
 }
+/* A138: the name keeps room for a few words; when the buttons leave less, they move to the
+   next line instead of squeezing the name to a letter per line. */
 .pathway-head strong {
+  flex: 1 1 7rem;
   min-width: 0;
   overflow-wrap: anywhere;
 }
