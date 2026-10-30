@@ -277,3 +277,33 @@ test('Tidy with springs in place keeps the cards near their places', async ({ pa
   expect(Math.max(...arrows) / Math.min(...arrows)).toBeLessThan(1.5)
   await expect.poll(() => overlapping(page)).toEqual([])
 })
+
+// T-UI-81 (D210): the canvas toolbar expands every group on the canvas at once while any is
+// collapsed, then collapses them all.
+test('Expand and collapse all groups from the toolbar', async ({ page }) => {
+  original = {}
+  const folder = join(E2E_DIR, `groups-${Date.now()}`)
+  await page.request.post('/api/investigations', { data: { folder, name: 'Groups' } })
+  const ids: string[] = []
+  for (const [i, label] of ['a1', 'a2', 'b1', 'b2'].entries()) {
+    const made = await page.request.post('/api/nodes', { data: { label, pos_x: i * 300, pos_y: 0 } })
+    ids.push(((await made.json()) as { id: string }).id)
+  }
+  await page.request.post('/api/groups/reconnect', { data: { member_ids: ids.slice(0, 2), label: 'GA' } })
+  await page.request.post('/api/groups/reconnect', { data: { member_ids: ids.slice(2), label: 'GB' } })
+  await page.goto('/')
+  const toolbar = page.locator('.canvasbar')
+  const group = (label: string) => page.getByRole('group', { name: `Group ${label}` })
+  await expect(group('GA')).toBeVisible()
+  await expect(card(page, 'a1')).toHaveCount(0)
+
+  // One group open by hand: the button still expands the rest.
+  await group('GA').getByRole('button', { name: 'Expand group' }).click()
+  await expect(card(page, 'a1')).toBeVisible()
+  await toolbar.getByRole('button', { name: 'Expand all groups' }).click()
+  for (const label of ['a1', 'a2', 'b1', 'b2']) await expect(card(page, label)).toBeVisible()
+
+  await toolbar.getByRole('button', { name: 'Collapse all groups' }).click()
+  for (const label of ['a1', 'a2', 'b1', 'b2']) await expect(card(page, label)).toHaveCount(0)
+  await expect(toolbar.getByRole('button', { name: 'Expand all groups' })).toBeVisible()
+})

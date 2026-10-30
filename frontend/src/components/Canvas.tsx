@@ -755,6 +755,8 @@ function CanvasView({
   onOpenRecord,
   onTidy,
   onUndoTidy,
+  groupsToOpen,
+  onGroupsOpen,
   springLayout,
 }: {
   data: CanvasData
@@ -804,6 +806,10 @@ function CanvasView({
   onTidy?: (before: Positions, after: Positions, sides?: TidySides) => void
   /** D199: puts the last Tidy's cards back; only while there is one to undo. */
   onUndoTidy?: () => void
+  /** D210: whether the groups button expands them all (some is collapsed) or collapses them;
+   * no button when the open canvas shows no group. */
+  groupsToOpen?: boolean
+  onGroupsOpen?: (open: boolean) => void
   /** D207: the springs layout (ELK), handed in by the app so the read-only copy, which has no
    * Tidy, does not carry it. */
   springLayout?: (boxes: TidyBox[], links: TidyLink[], inPlace: boolean) => Promise<Positions>
@@ -1542,6 +1548,17 @@ function CanvasView({
         <button className={toolClass} title="Undo tidy: put the cards back where they were" aria-label="Undo tidy" onClick={onUndoTidy}>
           <Icon name="undo" />
           <span className="tb-label">Undo tidy</span>
+        </button>
+      )}
+      {groupsToOpen !== undefined && onGroupsOpen && (
+        <button
+          className={toolClass}
+          title={groupsToOpen ? 'Expand every group on this canvas' : 'Collapse every group on this canvas'}
+          aria-label={groupsToOpen ? 'Expand all groups' : 'Collapse all groups'}
+          onClick={() => onGroupsOpen(groupsToOpen)}
+        >
+          <Icon name="group" />
+          <span className="tb-label">{groupsToOpen ? 'Expand groups' : 'Collapse groups'}</span>
         </button>
       )}
       <Menu

@@ -791,6 +791,32 @@ function App() {
     })
   }, [])
 
+  // D210: every group drawn on the open canvas (in it, or in a sub-investigation expanded on it)
+  // expanded or collapsed at once, from the toolbar (it expands them while any is collapsed) or
+  // the palette.
+  const shownGroups = canvas.groups.filter((g) => visibleCanvases(subs, openCanvas, expanded).has(g.canvas_id ?? null))
+  const groupsToOpen = shownGroups.some((g) => !expanded.has(g.id))
+  const setGroupsOpen = (open: boolean) =>
+    setExpanded((current) => {
+      const next = new Set(current)
+      for (const g of shownGroups) {
+        if (open) next.add(g.id)
+        else next.delete(g.id)
+      }
+      return next
+    })
+  const groupsItems: MenuItem[] = shownGroups.length
+    ? [
+        { label: 'Expand all groups', icon: 'group', disabled: !groupsToOpen, onSelect: () => setGroupsOpen(true) },
+        {
+          label: 'Collapse all groups',
+          icon: 'group',
+          disabled: shownGroups.every((g) => !expanded.has(g.id)),
+          onSelect: () => setGroupsOpen(false),
+        },
+      ]
+    : []
+
   const chooseMode = (next: ViewMode) => {
     setMode(next)
     try {
@@ -1739,6 +1765,11 @@ function App() {
         keywords: 'layout arrange overlap columns springs force cycle',
       })
     if (tidyUndo) command('undo-tidy', 'Undo tidy', 'undo', onCanvas(undoTidy), { keywords: 'layout positions' })
+    for (const item of groupsItems)
+      if (!item.disabled)
+        command(item.label.toLowerCase().replaceAll(' ', '-'), item.label, 'group', onCanvas(item.onSelect), {
+          keywords: 'open close fold unfold members',
+        })
     const drawer = drawerOpen ? 'Hide profile and table' : 'Show profile and table'
     command('drawer', drawer, 'bottompanel', onCanvas(() => setDrawerOpen(!drawerOpen)), {
       shortcut: 'P',
@@ -2380,6 +2411,8 @@ function App() {
                   onTidy={tidy}
                   springLayout={springLayout}
                   onUndoTidy={tidyUndo ? undoTidy : undefined}
+                  groupsToOpen={shownGroups.length ? groupsToOpen : undefined}
+                  onGroupsOpen={setGroupsOpen}
                   onError={setError}
                   onOpenNote={openNote}
                   onLayoutNote={layoutNote}
