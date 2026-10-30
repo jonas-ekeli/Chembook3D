@@ -473,6 +473,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-73 | Group two demo minima, tick "Show populations on member cards", expand it; reject one member; untick | 86 % and 14 % on the cards and in the panel, "%" on the head; "% n/a" with the reason; nothing shown (FR-GRP-12) |
 | T-UI-74 | On the demo with the profile style 480 wide and node names along the bottom, rename A-S1, B-S1, B-S2 and B-S3 to labels of 28 to 32 characters with underscores; open pathways A and B in the drawer | Each long name is one text of several lines that joined give the label back; no line of a name or step name shares any width with one in another column where they share height; the two names in the π-complex column stack, with its step name under both (D198) |
 | T-UI-77 | On the demo, add pathway A, set the drawer's reference to A-S1, add pathway B; New, add B, set B-S1; switch profiles back and forth; reload | The first profile starts at T-S0, its table has A-S1 at 0.00 and keeps A-S1 when B is added; the second starts at T-S0 and has B-S1 at 0.00; each profile shows its own after switching and after the reload; the saved view's (cards') reference stays unset (D205) |
+| T-UI-78 | On the demo, draw an edge B-S3 → T-S0; select B-S3, open the drawer, start a pathway at the selected node and continue with B-S1 until the cycle closes | Turnover is offered; the pathway's name "B-S3 → B-S3" is one line high, and Undo step, Turnover and Sterics end inside the pathways list (D188, A138) |
 
 ### Sub-investigations (D193)
 
