@@ -1578,7 +1578,13 @@ export type ProfilePath = {
   colour?: string | null
 }
 /** D190: a saved energy profile, a named figure of pathways the drawer opens. */
-export type EnergyProfile = { id: string; name: string; paths: ProfilePath[] }
+export type EnergyProfile = {
+  id: string
+  name: string
+  paths: ProfilePath[]
+  /** D205: the node or group all its pathways are relative to; null: the first node shown. */
+  reference_id?: string | null
+}
 
 export type ProfilePoint = EnergyValue & {
   id: string
@@ -2451,11 +2457,12 @@ export const api = {
     paths: { ids: string[]; branch_id: string | null; shifts?: PathShift[]; colour?: string | null }[],
     referenceId: string | null,
     view: SharedViewState,
+    profileReferenceId: string | null = null,
   ): Promise<{ blob: Blob; name: string }> => {
     const response = await fetch('/api/snapshot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths, reference_id: referenceId, view }),
+      body: JSON.stringify({ paths, reference_id: referenceId, view, profile_reference_id: profileReferenceId }),
     })
     if (!response.ok) {
       let detail: unknown = null
@@ -2515,9 +2522,9 @@ export const api = {
   atomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>
     request<AtomMatch>('POST', '/atom-match', { start_id: startId, end_id: endId, pairs }),
   energyProfiles: () => request<EnergyProfile[]>('GET', '/energy-profiles'),
-  createEnergyProfile: (body: { name?: string; paths?: ProfilePath[] }) =>
+  createEnergyProfile: (body: { name?: string; paths?: ProfilePath[]; reference_id?: string | null }) =>
     request<EnergyProfile>('POST', '/energy-profiles', body),
-  updateEnergyProfile: (id: string, body: { name?: string; paths?: ProfilePath[] }) =>
+  updateEnergyProfile: (id: string, body: { name?: string; paths?: ProfilePath[]; reference_id?: string | null }) =>
     request<EnergyProfile>('PATCH', `/energy-profiles/${id}`, body),
   duplicateEnergyProfile: (id: string) => request<EnergyProfile>('POST', `/energy-profiles/${id}/duplicate`),
   deleteEnergyProfile: (id: string) => request<void>('DELETE', `/energy-profiles/${id}`),

@@ -164,6 +164,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-EN-19 | The energy drawer keeps any number of named energy profiles, saved as they are built; the user opens one with a picker, makes, renames, duplicates and deletes them, and ticks which of its pathways are drawn on the figure, several at once. The drawer opens on the profile it had open, and the Analyses view lists them (D190). |
 | FR-EN-20 | In a saved energy profile the user picks a pathway's step and moves it, with every step after it, whole columns later along the profile's axis, and back again; the steps before it stay put. Saved with the profile and drawn in the drawer, the saved images and the read-only copy (D194). |
 | FR-EN-21 | The user changes the colour of any pathway in a saved energy profile, with or without a branch, by clicking its swatch in the pathways list, and can go back to the branch's colour. Saved with the profile and drawn in the drawer, the saved images and the read-only copy (D195). |
+| FR-EN-22 | Each saved energy profile has its own reference node, chosen in the drawer and kept for all its pathways, apart from the node cards' reference; it stays when pathways are added or hidden and when profiles are switched (D205). |
 
 **AC:**
 - Nodes X and Y have G at level L1, and Y also at L2. With L2 selected, the edge X→Y shows "n/a".

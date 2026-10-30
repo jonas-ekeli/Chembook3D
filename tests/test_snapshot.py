@@ -143,7 +143,14 @@ def test_drawer_pathways_are_exported_and_checked(client, page, tmp_path):
     export(client, {"paths": [{**moved, "shifts": [{"at": 9, "by": 1}]}]}, status=422)
     export(client, {"paths": [{**moved, "colour": "blue"}]}, status=422)
     assert data["reference_id"] is None
+    assert data["profile_reference_id"] is None
     assert {k.rsplit("|", 1)[1] for k in data["profiles"]} == set(path)
+    # D205: the open profile's own reference, kept only when it is on the exported pathways.
+    body = {"paths": [moved], "reference_id": ids["T-S0"], "profile_reference_id": ids["B-S1"]}
+    both = data_of(export(client, body))
+    assert (both["reference_id"], both["profile_reference_id"]) == (ids["T-S0"], ids["B-S1"])
+    off = data_of(export(client, {**body, "profile_reference_id": ids["A-S1"]}))
+    assert off["profile_reference_id"] is None
     # A pathway with a gap is refused (INV-2).
     export(client, {"paths": [{"ids": [ids["T-S0"], ids["B-S3"]]}]}, status=422)
 

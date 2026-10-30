@@ -128,7 +128,8 @@ uv run python scripts/build_frontend.py
 supervisor or co-author. It opens in a current browser by double-click, offline, with nothing to
 install, and nothing in it can be changed. It shows the canvas, notes, calculations, 3D
 structures, and energies at every level. The energy profile and table show the pathways shown in
-the profile open under **Profile and table**, or one pathway per branch if none is shown. It leaves out
+the profile open under **Profile and table**, relative to that profile's own reference node, or
+one pathway per branch if none is shown. It leaves out
 the folders and file paths on your computer, the output files themselves and the change history.
 
 After updating Chembook3D, build the interface again (`uv run python scripts/build_frontend.py`),
