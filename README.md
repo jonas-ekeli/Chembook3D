@@ -82,6 +82,14 @@ To try it with some data, create a demo investigation and open that folder from 
 uv run python scripts/make_demo.py demo-investigation
 ```
 
+For a real catalytic cycle, `scripts/make_showcase_demo.py` builds one from published calculations: olefin metathesis with the Ru catalysts H2IMes and C1Ph (a CAAC) from Occhipinti et al., *Chem. Sci.* 2022, 13, 5107, deposited in ioChem-BD ([doi:10.19061/iochem-bd-6-113](https://doi.org/10.19061/iochem-bd-6-113)) under CC BY 4.0. It downloads about 40 MB once, checks every file against `scripts/showcase_manifest.json`, and builds both branches with rotamer groups, ethylene joining and leaving, the closed cycle, energy profiles, the energetic span, two selectivities, a rotamer equilibrium, steric maps and notes:
+
+```sh
+uv run python scripts/make_showcase_demo.py showcase-investigation
+```
+
+Add `--copy showcase.html` to also write its read-only copy, once the interface is built.
+
 Then import an output file with **Import file…** (or drop it on the node list). To import a whole folder of results at once, browse to it in that dialog and press **Import this folder…**: every output gets a proposed node (by geometry, by a planned node's guess or by file name), which you can check and change before anything is written. Sample outputs are in `tests/fixtures/`. In WSL, the folder and file pickers show the WSL file system; Windows drives are under `/mnt/c`, `/mnt/d` and so on.
 
 ## Sync investigations between computers

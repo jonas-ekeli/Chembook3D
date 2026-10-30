@@ -134,7 +134,7 @@ def test_custom_basis_is_read_from_the_checkpoint_in_later_steps():
     assert "ECP" in opt.resolved_basis_definition["I"]
     assert "ECP" not in opt.resolved_basis_definition["C"]
     assert opt.route.dispersion == "GD3BJ"
-    assert gaussian.dispersion_iops(opt.route.iops) == {
+    assert gaussian.dispersion_iops(opt.route.iops, opt.route.dispersion) == {
         "3/174": "1000000",
         "3/175": "358940",
         "3/177": "12092",
@@ -147,11 +147,23 @@ def test_ts_chain_iops_that_are_not_part_of_the_level():
     ts = gaussian.parse(g.custom_chain(ts=True))
     opt, freq = ts.steps[3], ts.steps[4]
     assert opt.job_type == "ts_optimization"
-    assert gaussian.dispersion_iops(opt.route.iops) == gaussian.dispersion_iops(
-        ts.steps[1].route.iops
-    )
+    assert gaussian.dispersion_iops(
+        opt.route.iops, opt.route.dispersion
+    ) == gaussian.dispersion_iops(ts.steps[1].route.iops, ts.steps[1].route.dispersion)
     assert opt.route.iops["1/8"] == "2"  # not a level-of-theory IOp (D59)
     assert freq.imaginary_count == 1
+
+
+def test_dispersion_iops_need_a_dispersion_model():
+    # T-IMP-61, D203: without EmpiricalDispersion or IOp(3/124) Gaussian adds no dispersion,
+    # so parameters set by IOp(3/174-178) are not part of the level.
+    iops = {"3/174": "1000000", "3/175": "358940", "3/177": "12092", "3/178": "5938951"}
+    assert gaussian.dispersion_iops({**iops, "1/8": "2"}, None) == {}
+    assert gaussian.dispersion_iops(iops, "GD3BJ") == iops
+    assert gaussian.dispersion_iops({**iops, "3/124": "40"}, None) == {"3/124": "40", **iops}
+    route = gaussian.parse_route(f"#P PBEPBE/ChkBasis Opt {g.GD3MBJ_IOPS}")
+    assert route.dispersion is None
+    assert gaussian.dispersion_iops(route.iops, route.dispersion) == {}
 
 
 def test_separate_single_point_defines_its_own_basis():

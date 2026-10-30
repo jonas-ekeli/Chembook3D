@@ -449,7 +449,7 @@ def _resolve_level(
             known.name if known else f"?{levels.definition_key(step.basis_fingerprints)}"
         )
     dispersion = route.dispersion or ""
-    iops = gaussian.dispersion_iops(route.iops)
+    iops = gaussian.dispersion_iops(route.iops, route.dispersion)
     if iops:
         key = levels.definition_key({"base": dispersion, "iops": iops})
         known = levels.find_dispersion(session, dispersion, iops)
@@ -494,7 +494,11 @@ def _level_label(fields: dict[str, str] | None, step: ParsedStep) -> str:
         shown["basis"] = step.resolved_basis or "?"
         if shown["basis"] in ("GEN", "GENECP"):
             shown["basis"] += " (unnamed)"
-    if not shown["dispersion"] and step.route and gaussian.dispersion_iops(step.route.iops):
+    if (
+        not shown["dispersion"]
+        and step.route
+        and gaussian.dispersion_iops(step.route.iops, step.route.dispersion)
+    ):
         shown["dispersion"] = f"{step.route.dispersion or ''}+IOp (unnamed)"
     level = levels.LevelOfTheory(**shown)
     return levels.label(level) or ""
@@ -678,7 +682,7 @@ def _names(
                         for s in written
                         if any(r.key == request.key for r in resolved[s.index].names)
                     )
-                    iops = gaussian.dispersion_iops(route.iops)
+                    iops = gaussian.dispersion_iops(route.iops, route.dispersion)
                     if store_names:
                         levels.register_dispersion(
                             session, request.name, route.dispersion or "", iops
@@ -1816,7 +1820,7 @@ def commit(
             # geometry; one that prints no coordinates is at the node's geometry (A15).
             ended: list[tuple[Any, levels.LevelOfTheory | None]] = []
             if owner is target:
-                ended = [(c.geometry, c.level) for c in levels.optimizations(owner)]
+                ended = [(c.geometry, c.level) for c in levels.geometry_sources(owner)]
             for step_plan in plan_.steps:
                 if step_plan.assignment != destination:
                     continue
@@ -1867,15 +1871,14 @@ def _create_calculation(
     route = step.route
     parsed_level = None
     if route is not None:
+        dispersion_iops = gaussian.dispersion_iops(route.iops, route.dispersion)
         parsed_level = {
             **(step_plan.level or {}),
             "basis_written": route.basis,
             "basis_resolved": step.resolved_basis,
             "dispersion_written": route.dispersion,
-            "dispersion_iops": gaussian.dispersion_iops(route.iops),
-            "other_iops": {
-                k: v for k, v in route.iops.items() if k not in gaussian.DISPERSION_IOPS
-            },
+            "dispersion_iops": dispersion_iops,
+            "other_iops": {k: v for k, v in route.iops.items() if k not in dispersion_iops},
         }
         if step_plan.basis_given:
             # D104: the file names no basis; the one given at import is the level's, and the
