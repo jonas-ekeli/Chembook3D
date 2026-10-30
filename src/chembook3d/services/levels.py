@@ -142,7 +142,7 @@ def _unheld_frequency(calculation: Calculation) -> bool:
 
 def geometry_sources(node: Node) -> list[Calculation]:
     """D100: the calculations a geometry level comes from, oldest first: the node's
-    optimizations (D157: never a held one). D200: a node with none, whose optimization was run
+    optimizations (D157: never a held one). D204: a node with none, whose optimization was run
     elsewhere and only its frequency job imported, takes its frequency jobs; one whose
     stationary-point check failed still does, and W-FREQ-NONSTAT marks its values (D158)."""
     found = optimizations(node)
@@ -156,7 +156,7 @@ def optimization_at(
     node: Node | None, rows: list[Any] | None, tolerance: float | None = None
 ) -> Calculation | None:
     """D100: the optimization on the node that ended on this geometry, the latest if several
-    did (D200: or the frequency job at it, on a node without optimizations). A single point
+    did (D204: or the frequency job at it, on a node without optimizations). A single point
     or frequency job takes its geometry level from it."""
     if node is None or not rows:
         return None

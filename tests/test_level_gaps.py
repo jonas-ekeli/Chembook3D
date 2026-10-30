@@ -1,6 +1,6 @@
 """Two gaps in how levels of theory were told apart, found on published outputs: dispersion
-parameters set by IOp with no dispersion model (D199), and a node whose optimization was run
-elsewhere, with only its frequency job imported (D200)."""
+parameters set by IOp with no dispersion model (D203), and a node whose optimization was run
+elsewhere, with only its frequency job imported (D204)."""
 
 from chembook3d import investigation as inv
 from chembook3d.models import (
@@ -34,7 +34,7 @@ def opt_freq(route_words: str = "") -> str:
 
 
 def frequency_only(stationary: bool = True) -> str:
-    """D200: a frequency job run from an optimization's checkpoint, the optimization not
+    """D204: a frequency job run from an optimization's checkpoint, the optimization not
     imported."""
     after = [] if stationary else g.convergence_table(False)
     return g.output(
@@ -47,7 +47,7 @@ def frequency_only(stationary: bool = True) -> str:
     )
 
 
-# ---------- D199: dispersion IOps without a dispersion model (T-IMP-61) ----------
+# ---------- D203: dispersion IOps without a dispersion model (T-IMP-61) ----------
 
 
 def test_iops_without_a_dispersion_model_name_no_dispersion(open_client):
@@ -98,7 +98,7 @@ def test_opening_an_older_notebook_drops_the_dispersion(open_client):
         opened.close()
 
 
-# ---------- D200: a frequency job without its optimization (T-IMP-63) ----------
+# ---------- D204: a frequency job without its optimization (T-IMP-63) ----------
 
 
 def test_a_frequency_job_gives_the_geometry_level_on_a_node_without_optimization(open_client):

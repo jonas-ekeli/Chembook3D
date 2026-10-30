@@ -155,7 +155,7 @@ def test_ts_chain_iops_that_are_not_part_of_the_level():
 
 
 def test_dispersion_iops_need_a_dispersion_model():
-    # T-IMP-61, D199: without EmpiricalDispersion or IOp(3/124) Gaussian adds no dispersion,
+    # T-IMP-61, D203: without EmpiricalDispersion or IOp(3/124) Gaussian adds no dispersion,
     # so parameters set by IOp(3/174-178) are not part of the level.
     iops = {"3/174": "1000000", "3/175": "358940", "3/177": "12092", "3/178": "5938951"}
     assert gaussian.dispersion_iops({**iops, "1/8": "2"}, None) == {}

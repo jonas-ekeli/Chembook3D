@@ -220,7 +220,7 @@ def parse_route(text: str) -> Route:
 def dispersion_iops(iops: dict[str, str], dispersion: str | None) -> dict[str, str]:
     """The IOps that change the dispersion (D59). Without a dispersion model, from
     EmpiricalDispersion or IOp(3/124), Gaussian adds none, and parameters set by IOp(3/174–179)
-    change nothing: they are left out (D199)."""
+    change nothing: they are left out (D203)."""
     if not dispersion and "3/124" not in iops:
         return {}
     return {k: v for k, v in sorted(iops.items()) if k in DISPERSION_IOPS}
