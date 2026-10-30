@@ -12,8 +12,9 @@
 import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk-api'
 import { COLUMN_GAP, settle, type Positions, type Rect, type TidyBox, type TidyLink } from './tidy'
 
-/** Room between two joined boxes for the arrow's labels (D98: energies, species, scan chips). */
-const LABEL_ROOM = 220
+/** Room between two joined boxes for the arrow and its labels (D98: energies, species, scan
+ * chips), unless the settings give another (D209). */
+export const ARROW_ROOM = 220
 
 const OPTIONS = {
   'elk.algorithm': 'stress',
@@ -22,8 +23,8 @@ const OPTIONS = {
 
 /** An arrow's length, centre to centre: half of each box's diagonal plus room for its labels,
  * so wide group boxes get arrows as long as small cards do between their edges (D208). */
-function edgeLength(a: TidyBox, b: TidyBox) {
-  return Math.round((Math.hypot(a.w, a.h) + Math.hypot(b.w, b.h)) / 2 + LABEL_ROOM)
+function edgeLength(a: TidyBox, b: TidyBox, room: number) {
+  return Math.round((Math.hypot(a.w, a.h) + Math.hypot(b.w, b.h)) / 2 + room)
 }
 
 let loading: Promise<{ layout: (graph: ElkNode) => Promise<ElkNode> }> | null = null
@@ -32,7 +33,12 @@ function elk() {
   return loading
 }
 
-export async function springTidy(boxes: TidyBox[], links: TidyLink[], inPlace = false): Promise<Positions> {
+export async function springTidy(
+  boxes: TidyBox[],
+  links: TidyLink[],
+  inPlace = false,
+  room = ARROW_ROOM,
+): Promise<Positions> {
   const moving = boxes.filter((b) => b.moves)
   if (!moving.length) return {}
   const byId = new Map(moving.map((b) => [b.id, b]))
@@ -42,7 +48,7 @@ export async function springTidy(boxes: TidyBox[], links: TidyLink[], inPlace = 
       id: `e${i}`,
       sources: [l.source],
       targets: [l.target],
-      layoutOptions: { 'elk.stress.desiredEdgeLength': String(edgeLength(byId.get(l.source)!, byId.get(l.target)!)) },
+      layoutOptions: { 'elk.stress.desiredEdgeLength': String(edgeLength(byId.get(l.source)!, byId.get(l.target)!, room)) },
     }))
   const children: ElkNode[] = moving.map((b) => ({ id: b.id, x: b.x, y: b.y, width: b.w, height: b.h }))
   const layoutOptions = inPlace ? { ...OPTIONS, 'elk.interactive': 'true' } : OPTIONS

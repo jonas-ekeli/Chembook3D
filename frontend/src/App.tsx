@@ -66,7 +66,7 @@ import { HPC, hpcLabel } from './hpc'
 import { LaunchNotices, ShutDownDialog } from './components/ShutDown'
 import { StartPage } from './components/StartPage'
 import { Menu, type MenuItem } from './components/MoreMenu'
-import { TIDY_MODES, type Positions } from './tidy'
+import { TIDY_MODES, type Positions, type TidyBox, type TidyLink } from './tidy'
 import { ContextMenu, type MenuHeading } from './components/ContextMenu'
 import { CommandPalette, KeyListener, ShortcutsDialog } from './components/CommandPalette'
 import {
@@ -751,10 +751,13 @@ function App() {
     saveSides(Object.fromEntries(Object.entries(tidyUndo.sides).filter(([id]) => edges.has(id))))
     setTidied(null)
   }
-  // D207: the springs layout (ELK), loaded when first used.
+  // D207: the springs layout (ELK), loaded when first used, with the arrow room from the
+  // settings (D209).
+  const arrowRoom = settings?.tidy_arrow_room
   const springLayout = useCallback(
-    async (...args: Parameters<typeof import('./elkTidy').springTidy>) => (await import('./elkTidy')).springTidy(...args),
-    [],
+    async (boxes: TidyBox[], links: TidyLink[], inPlace: boolean) =>
+      (await import('./elkTidy')).springTidy(boxes, links, inPlace, arrowRoom),
+    [arrowRoom],
   )
   // Moving a card by hand ends what Undo tidy would put back.
   const dragged = (positions: Record<string, { x: number; y: number }>) => {

@@ -5,5 +5,6 @@ export const SETTINGS_SECTIONS = {
   structures: 'Structures',
   sterics: 'Steric maps',
   crest: 'CREST import',
+  canvas: 'Canvas',
   thermochemistry: 'Thermochemistry',
 }

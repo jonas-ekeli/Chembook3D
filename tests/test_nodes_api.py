@@ -288,6 +288,17 @@ def test_steric_map_colours_setting(open_client):
     assert open_client.put("/api/settings", json={"steric_colours": "pink"}).status_code == 422
 
 
+def test_tidy_arrow_room_setting(open_client):
+    # D209: the room Tidy with springs leaves between joined boxes is an app setting, 220 px
+    # unless changed, from 40 to 1000 px.
+    assert open_client.get("/api/settings").json()["tidy_arrow_room"] == 220
+    response = open_client.put("/api/settings", json={"tidy_arrow_room": 400})
+    assert response.json()["tidy_arrow_room"] == 400
+    assert open_client.get("/api/settings").json()["tidy_arrow_room"] == 400
+    assert open_client.put("/api/settings", json={"tidy_arrow_room": 10}).status_code == 422
+    assert open_client.put("/api/settings", json={"tidy_arrow_room": 5000}).status_code == 422
+
+
 def test_theme_setting(open_client):
     # D185: light, dark or follow the system (the default), kept with the app's settings; a
     # settings file with an unknown theme falls back to the default.

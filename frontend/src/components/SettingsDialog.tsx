@@ -247,6 +247,29 @@ export function SettingsDialog({
         },
       ],
     },
+    {
+      id: 'canvas',
+      title: SETTINGS_SECTIONS.canvas,
+      icon: 'tidy',
+      scope: 'computer',
+      badge: 'All investigations',
+      rows: [
+        {
+          // D209
+          name: 'Arrow length for Tidy with springs',
+          help: 'Room between two boxes an arrow joins, for the arrow and its labels. More spreads the canvas out.',
+          more: 'From 40 to 1000 px; the default is 220. Tidy in step columns keeps its own spacing.',
+          control: (
+            <NumberSetting
+              label="Arrow length for Tidy with springs (px)"
+              unit="px"
+              value={settings.tidy_arrow_room}
+              onSave={(room) => save({ tidy_arrow_room: Math.min(1000, Math.max(40, Math.round(room))) })}
+            />
+          ),
+        },
+      ],
+    },
   ]
   // D159: with no investigation open, the thermochemistry is this computer's default for new ones.
   const own = thermo.scope === 'investigation'

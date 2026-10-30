@@ -199,6 +199,32 @@ test('Tidy with springs draws a cycle as a loop', async ({ page }) => {
   await expect.poll(async () => (await places(page))['MCB']).toEqual(before['MCB'])
   expect(await places(page)).toEqual(before)
   await expect.poll(async () => (await sides()).every((t) => t.sides.join() === 'right,left')).toBe(true)
+
+  // D209: a longer arrow length in the settings spreads the loop out.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Canvas' }).click()
+  const room = settings.getByLabel('Arrow length for Tidy with springs (px)')
+  await expect(room).toHaveValue('220')
+  await room.fill('600')
+  await room.blur()
+  await expect.poll(async () => ((await (await page.request.get('/api/settings')).json()) as { tidy_arrow_room: number }).tidy_arrow_room).toBe(600)
+  await page.keyboard.press('Escape')
+  await expect(settings).toHaveCount(0)
+  try {
+    await toolbar.getByRole('button', { name: 'Tidy ▾' }).click()
+    await page.getByRole('menuitem', { name: 'With springs', exact: true }).click()
+    await expect.poll(async () => (await places(page))['MCB']).not.toEqual(before['MCB'])
+    const longer = await places(page)
+    const length = (p: typeof longer) =>
+      labels.reduce((sum, l, i) => {
+        const [a, b] = [p[l], p[labels[(i + 1) % 6]]]
+        return sum + Math.hypot(a.x - b.x, a.y - b.y)
+      }, 0)
+    expect(length(longer) / length(after)).toBeGreaterThan(1.5)
+  } finally {
+    await page.request.put('/api/settings', { data: { tidy_arrow_room: 220 } })
+  }
 })
 
 // T-UI-80 (D208): Tidy with springs, in place, starts from where the cards are: a cycle drawn
