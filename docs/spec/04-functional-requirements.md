@@ -204,6 +204,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-CAN-09 | A scan path is shown on the edge it was run on as a chip with the path's own top (xTB, from its first kept point), which opens the path's chart and movie in the edge panel; the path node can be shown on its edge only. The chip never feeds any energy of the edge. A Gaussian or ORCA scan imported as its own node is shown the same way (D200). | D121, D200 | 4 |
 | FR-CAN-10 | An edge whose ends are on the same side of two boxes lined up on that side is drawn bowing out from that side, not as a straight line along the boxes. | D147 | 4 |
 | FR-CAN-11 | A right-click on a node, a group, an arrow, the empty canvas or a multi-selection opens a menu of the actions that fit it; a command palette (Ctrl K) finds nodes, branches, steps and commands; single keys work while the canvas has the focus. Each runs an action the app already has, by pointer or keyboard; the read-only copy has none. | D184 | 5 |
+| FR-CAN-12 | Tidy lays out the selection, or the whole open canvas, in reaction-step columns for all branches, ordered to cut down crossing arrows and with no boxes overlapping; boxes not tidied stay put and are kept clear of; groups and sub-investigation boxes move whole; one-step Undo tidy. | D199 | 4 |
 
 ## FR-SUB · Sub-investigations (D193)
 

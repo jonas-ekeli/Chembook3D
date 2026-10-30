@@ -76,7 +76,8 @@ import { cardEnergy, minus, type CanvasEnergy, type CardEnergy } from '../cardEn
 import { memberShare, populationSummary } from '../populations'
 import { curveOf, LabelPlacer, leaderEnd, pointAt, type Curve, type Rect } from '../labelLayout'
 import { useRequest, type Request } from '../commands'
-import { chainOf, contentsText, openInside, placeOf, subName, subsOf, visibleCanvases, canvasName } from '../subCanvas'
+import { chainOf, contentsText, isWithin, openInside, placeOf, subName, subsOf, visibleCanvases, canvasName } from '../subCanvas'
+import { tidy, type Positions, type TidyBox } from '../tidy'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import type { Rotation } from '../chem'
@@ -750,6 +751,8 @@ function CanvasView({
   canvasId = null,
   onOpenSub,
   onOpenRecord,
+  onTidy,
+  onUndoTidy,
 }: {
   data: CanvasData
   mode: ViewMode
@@ -794,6 +797,10 @@ function CanvasView({
   onOpenSub?: (id: string) => void
   /** D193: a rim stub's record, outside the open canvas: go out to it. */
   onOpenRecord?: (id: string) => void
+  /** D199: Tidy moved these records (their places before and after); none in the read-only copy. */
+  onTidy?: (before: Positions, after: Positions) => void
+  /** D199: puts the last Tidy's cards back; only while there is one to undo. */
+  onUndoTidy?: () => void
 }) {
   const flow = useReactFlow()
   const theme = useTheme() // D185: React Flow's own colours follow the theme
@@ -1351,8 +1358,78 @@ function CanvasView({
   // The Controls' fit (everything), and the toolbar's Fit (the selection).
   const fitAll = () => flow.fitView({ duration: 300, maxZoom: 1.2, padding: 0.15 })
   const fitSelection = () => flow.fitView({ nodes: flow.getNodes().filter((n) => n.selected), duration: 300, maxZoom: 1.5 })
+  /**
+   * D199: Tidy the selection (two or more boxes on the open canvas), else everything on it. The
+   * boxes are the cards drawn at the top of the open canvas at their measured size: a group or an
+   * expanded sub-investigation moves whole, so its inside keeps its own layout; rim stubs are
+   * not records of this canvas and stay out. The cards not tidied stay put and are kept clear of.
+   */
+  const tidyUp = (all: boolean) => {
+    if (!onTidy) return
+    const drawn = flow.getNodes()
+    const byId = new Map(drawn.map((n) => [n.id, n]))
+    const topOf = (id: string) => {
+      let node = byId.get(id)
+      while (node?.parentId) node = byId.get(node.parentId)
+      return node
+    }
+    const top = drawn.filter((n) => !n.parentId && !n.hidden && n.type !== 'stub')
+    const chosen = new Set(drawn.filter((n) => n.selected).map((n) => topOf(n.id)?.id))
+    const some = !all && top.filter((n) => chosen.has(n.id)).length >= 2
+    const stepOrder = new Map(data.steps.map((s, i) => [s.id, i]))
+    const place = (stepId: string | null | undefined) => (stepId ? (stepOrder.get(stepId) ?? null) : null)
+    const groupsById = new Map(data.groups.map((g) => [g.id, g]))
+    const subs = subsOf(data)
+    const stepOf = (n: FlowNode): number | null => {
+      if (n.type === 'cgroup') return place((n.data as GroupData).group.step_id)
+      if (n.type === 'csub') {
+        // A box takes the earliest step of what is inside it, at any depth.
+        const inside = [...data.nodes, ...data.groups]
+          .filter((r) => r.canvas_id && isWithin(subs, r.canvas_id, n.id))
+          .map((r) => place(r.step_id))
+          .filter((p): p is number => p !== null)
+        return inside.length ? Math.min(...inside) : null
+      }
+      const { node, standsFor } = n.data as StructureData
+      return place(standsFor ? groupsById.get(standsFor)?.step_id : node.step_id)
+    }
+    const boxes: TidyBox[] = top.map((n) => {
+      const measured = flow.getInternalNode(n.id)?.measured
+      const styled = (v: unknown) => (typeof v === 'number' ? v : undefined)
+      return {
+        id: n.id,
+        x: n.position.x,
+        y: n.position.y,
+        w: measured?.width ?? styled(n.style?.width) ?? NODE_WIDTH,
+        h: measured?.height ?? styled(n.style?.height) ?? CARD_HEIGHT[mode],
+        step: stepOf(n),
+        moves: !some || chosen.has(n.id),
+      }
+    })
+    const links = plainEdges.flatMap((e) => {
+      const source = topOf(e.source)?.id
+      const target = topOf(e.target)?.id
+      return source && target ? [{ source, target }] : []
+    })
+    const placed = tidy(boxes, links)
+    // Saved under the record each box stands for: a node drawn in place of its group moves the group (A23).
+    const record = (id: string) => (byId.get(id)?.data as { standsFor?: string } | undefined)?.standsFor ?? id
+    const before: Positions = {}
+    const after: Positions = {}
+    for (const b of boxes) {
+      const to = placed[b.id]
+      if (!to || (Math.abs(to.x - b.x) < 0.5 && Math.abs(to.y - b.y) < 0.5)) continue
+      before[record(b.id)] = { x: b.x, y: b.y }
+      after[record(b.id)] = to
+    }
+    onTidy(before, after)
+  }
+  const tidySelection = () => tidyUp(false)
+
   useRequest(asked, 'canvas', (action) => {
-    if (action.startsWith('fit:'))
+    if (action === 'tidy') tidyUp(false)
+    else if (action === 'tidy-all') tidyUp(true)
+    else if (action.startsWith('fit:'))
       void flow.fitView({ nodes: action.slice(4).split(',').map((id) => ({ id })), duration: 300, maxZoom: 1.5 })
     else if (action === 'fit-all' || (action === 'fit' && !flow.getNodes().some((n) => n.selected))) void fitAll()
     else if (action === 'fit') void fitSelection()
@@ -1408,6 +1485,23 @@ function CanvasView({
         <Icon name="fit" />
         <span className="tb-label">Fit</span>
       </button>
+      {onTidy && !readOnly && (
+        <button
+          className={toolClass}
+          title="Tidy: lay out the selection, or the whole canvas, in step columns with fewer crossing arrows and no overlaps"
+          aria-label="Tidy"
+          onClick={tidySelection}
+        >
+          <Icon name="tidy" />
+          <span className="tb-label">Tidy</span>
+        </button>
+      )}
+      {onUndoTidy && !readOnly && (
+        <button className={toolClass} title="Undo tidy: put the cards back where they were" aria-label="Undo tidy" onClick={onUndoTidy}>
+          <Icon name="undo" />
+          <span className="tb-label">Undo tidy</span>
+        </button>
+      )}
       <Menu
         label="Export image"
         buttonClass={toolClass}
