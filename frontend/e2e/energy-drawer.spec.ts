@@ -311,7 +311,10 @@ test('energy drawer: saved profiles with pathways shown on the figure', async ({
     // The Analyses view lists the profiles and opens one in the drawer.
     await page.getByRole('button', { name: 'Analyses' }).click()
     const list = page.getByRole('navigation', { name: 'Analyses' }).getByRole('list', { name: 'Energy profiles' })
-    await expect(list.getByRole('listitem')).toHaveText(['Profile 1 2 of 2 pathways shown', 'Only B 1 of 1 pathway shown'])
+    await expect(list.getByRole('listitem')).toHaveText([
+      'Profile 1 2 of 2 pathways shown · relative to T-S0',
+      'Only B 1 of 1 pathway shown · relative to T-S0',
+    ])
     await list.getByRole('button', { name: 'Profile 1' }).click()
     await expect(picker.locator('option:checked')).toHaveText('Profile 1')
     await expect(drawer.getByRole('group', { name: /^Pathway / })).toHaveCount(2)
@@ -434,3 +437,58 @@ function hexToRgb(hex: string): string {
   const n = parseInt(hex.slice(1), 16)
   return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
 }
+
+// T-UI-75, D199: each profile keeps its own reference for all its pathways, apart from the node
+// cards' reference; it stays when a pathway is added, when profiles are switched and after a reload.
+test('energy drawer: each profile keeps its own reference', async ({ page }) => {
+  try {
+    await openDemo(page)
+    await page.getByRole('button', { name: 'Profile and table' }).click()
+    const drawer = page.getByLabel('Energy drawer')
+    const picker = drawer.getByRole('combobox', { name: 'Open profile' })
+    const reference = drawer.getByLabel('Reference node')
+    const idOf = async (label: string) =>
+      ((await (await page.request.get('/api/canvas')).json()).nodes as { id: string; label: string }[]).find(
+        (n) => n.label === label,
+      )!.id
+    const table = drawer.getByRole('table', { name: 'Energy table' })
+    const zeroAt = async (label: string) => {
+      await drawer.getByRole('button', { name: 'Table', exact: true }).click()
+      await expect(table.locator('tbody tr').filter({ hasText: label }).first()).toContainText('0.00')
+      await drawer.getByRole('button', { name: 'Profile', exact: true }).click()
+    }
+
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'A' })
+    await expect(picker.locator('option:checked')).toHaveText('Profile 1')
+    await expect(reference).toHaveValue(await idOf('T-S0'))
+    await reference.selectOption({ label: 'A-S1' })
+    await zeroAt('A-S1')
+    // Another pathway joins the profile at the same reference.
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+    await expect(drawer.getByRole('group', { name: 'Pathway B' })).toContainText('T-S0 → B-S1')
+    await expect(reference).toHaveValue(await idOf('A-S1'))
+
+    // A second profile has its own.
+    await drawer.getByRole('button', { name: 'New', exact: true }).click()
+    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+    await expect(reference).toHaveValue(await idOf('T-S0'))
+    await reference.selectOption({ label: 'B-S1' })
+    await zeroAt('B-S1')
+    await picker.selectOption({ label: 'Profile 1' })
+    await expect(reference).toHaveValue(await idOf('A-S1'))
+    await picker.selectOption({ label: 'Profile 2' })
+    await expect(reference).toHaveValue(await idOf('B-S1'))
+
+    // The node cards keep theirs: none was set.
+    await expect
+      .poll(async () => ((await (await page.request.get('/api/energy-profiles')).json()) as { reference_id: string }[]).map((p) => p.reference_id))
+      .toEqual([await idOf('A-S1'), await idOf('B-S1')])
+    expect((await (await page.request.get('/api/view-state')).json()).reference_id).toBeNull()
+
+    await page.reload()
+    await expect(picker.locator('option:checked')).toHaveText('Profile 2')
+    await expect(reference).toHaveValue(await idOf('B-S1'))
+  } finally {
+    await forgetView(page.request, join(E2E_DIR, 'demo'))
+  }
+})

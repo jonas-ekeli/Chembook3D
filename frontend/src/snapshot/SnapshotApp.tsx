@@ -169,6 +169,8 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
   const [energyType, setEnergyType] = useState<EnergyType>(opening.energyType)
   const [edgeEnergies, setEdgeEnergies] = useState(opening.edgeEnergies)
   const [referenceId, setReferenceId] = useState<string | null>(opening.referenceId)
+  // D199: the drawer's profile keeps its own reference, apart from the node cards'.
+  const [profileReferenceId, setProfileReferenceId] = useState<string | null>(opening.profileReferenceId)
   const [drawerOpen, setDrawerOpen] = useState(opening.drawerOpen)
   const [drawerTab, setDrawerTab] = useState(opening.drawerTab)
   const [inspectorWidth, setInspectorWidth] = useState(520)
@@ -205,6 +207,7 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
       energyType,
       edgeEnergies,
       referenceId,
+      profileReferenceId,
       filters,
       expanded: [...expanded],
       canvas: canvasId,
@@ -212,7 +215,7 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
       drawerTab,
       hydrogens,
     })
-  }, [data, mode, energyLevel, energyType, edgeEnergies, referenceId, filters, expanded, canvasId, drawerOpen, drawerTab, hydrogens])
+  }, [data, mode, energyLevel, energyType, edgeEnergies, referenceId, profileReferenceId, filters, expanded, canvasId, drawerOpen, drawerTab, hydrogens])
 
   const toggleGroup = useCallback((id: string) => {
     setExpanded((current) => {
@@ -522,8 +525,8 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
               level={levelKey}
               levelLabel={levelOption?.label ?? ''}
               type={shownType}
-              referenceId={referenceId}
-              onReference={setReferenceId}
+              referenceId={profileReferenceId}
+              onReference={setProfileReferenceId}
               tab={drawerTab}
               onTab={setDrawerTab}
               onSelectNode={selectPoint}

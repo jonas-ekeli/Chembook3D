@@ -62,6 +62,8 @@ class PathIn(BaseModel):
 class SnapshotIn(BaseModel):
     paths: list[PathIn] = []  # the drawer's pathways; none: one per branch (A30)
     reference_id: str | None = None
+    # D199: the reference of the drawer's open profile, which its pathways are relative to.
+    profile_reference_id: str | None = None
     # D128: what the app shows, as saved for D105 plus the node view; none: the saved view.
     view: dict[str, Any] | None = None
 
@@ -262,6 +264,9 @@ def snapshot_data(request: Request, session: Session, body: SnapshotIn) -> dict[
         "views": views,
         "paths": paths,
         "reference_id": body.reference_id if body.reference_id in known else None,
+        "profile_reference_id": (
+            body.profile_reference_id if body.profile_reference_id in on_paths else None
+        ),
         "view": _view(session, body),
         "profiles": profiles,
     }

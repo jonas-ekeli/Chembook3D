@@ -308,6 +308,12 @@ function App() {
   }, [loadRemote])
   // D79: the read-only copy exports the drawer's pathways, or one per branch (A30).
   const [drawerPaths, setDrawerPaths] = useState<DrawerPath[]>([])
+  // D199: the reference of the drawer's open profile, apart from the node cards' `referenceId`.
+  const [drawerReference, setDrawerReference] = useState<string | null>(null)
+  const drawerShown = useCallback((paths: DrawerPath[], reference: string | null) => {
+    setDrawerPaths(paths)
+    setDrawerReference(reference)
+  }, [])
   // D105: the drawer's tab and pathways, kept here so they outlast the drawer (History,
   // Analyses) and are remembered in the investigation; `drawerKey` starts it anew from them.
   const [drawerView, setDrawerView] = useState<DrawerView | null>(null)
@@ -752,7 +758,7 @@ function App() {
       canvas: openCanvas,
       drawer: { open: drawerOpen, tab: drawerView?.tab ?? 'profile' },
     }
-    api.exportSnapshot(drawerPaths, referenceId, view).then(
+    api.exportSnapshot(drawerPaths, referenceId, view, drawerReference).then(
       ({ blob, name }) => {
         const url = URL.createObjectURL(blob)
         download(url, name)
@@ -2342,8 +2348,7 @@ function App() {
                 referenceId={referenceId}
                 selectedId={selection && selection.kind !== 'edge' && selection.kind !== 'branch' ? selection.id : null}
                 refreshKey={refreshKey}
-                onReference={setReferenceId}
-                onPathsChange={setDrawerPaths}
+                onPathsChange={drawerShown}
                 key={drawerKey}
                 saved={drawerView ?? undefined}
                 onViewChange={setDrawerView}

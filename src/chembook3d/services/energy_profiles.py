@@ -3,7 +3,9 @@ drawer opens, one at a time. Each pathway keeps its node and group ids, the bran
 for, whether it is drawn ("Show on the figure"; any number may be drawn together) and the steps
 moved along the axis (D194: each a step's index and the columns it, with every later step, is
 moved; only later than where the pathway puts it, so moving back stops there) and the colour
-the user chose for it (D195: "#rrggbb", or None for its branch's colour). The
+the user chose for it (D195: "#rrggbb", or None for its branch's colour). A profile also keeps
+its own reference (D199), one node or group on its pathways that all of them are relative to,
+whatever the node cards' reference is; it stays when pathways are added or hidden. The
 "Continue with" choices are never stored: the drawer asks `pathways.extend(..., follow=False)`
 for them (D189).
 
@@ -112,6 +114,26 @@ def current_paths(session: Session, paths: list[dict[str, Any]]) -> list[dict[st
     return kept
 
 
+def _on(paths: list[dict[str, Any]]) -> set[str]:
+    return {i for path in paths for i in path["ids"]}
+
+
+def clean_reference(value: Any, paths: list[dict[str, Any]]) -> str | None:
+    """D199: the profile's reference, a node or group on one of its pathways, or None."""
+    if value is None:
+        return None
+    if not (isinstance(value, str) and 0 < len(value) <= 64):
+        raise RecordError("a profile's reference_id must be a record id or null")
+    if value not in _on(paths):
+        raise RecordError("a profile's reference must be on one of its pathways")
+    return value
+
+
+def current_reference(profile: EnergyProfile, paths: list[dict[str, Any]]) -> str | None:
+    """The profile's reference as read: None once it is on none of its `current_paths`."""
+    return profile.reference_id if profile.reference_id in _on(paths) else None
+
+
 def list_profiles(session: Session) -> list[EnergyProfile]:
     return list(session.scalars(select(EnergyProfile).order_by(EnergyProfile.seq)))
 
@@ -154,11 +176,15 @@ def _added(session: Session, profile: EnergyProfile) -> EnergyProfile:
     return profile
 
 
-def create(session: Session, name: Any = None, paths: Any = None) -> EnergyProfile:
+def create(
+    session: Session, name: Any = None, paths: Any = None, reference_id: Any = None
+) -> EnergyProfile:
     """A new profile; without a name the first free "Profile N"."""
+    cleaned = clean_paths(paths if paths is not None else [])
     profile = EnergyProfile(
         name=_free_name(session) if name is None else _name(session, name),
-        paths=clean_paths(paths if paths is not None else []),
+        paths=cleaned,
+        reference_id=clean_reference(reference_id, cleaned),
     )
     return _added(session, profile)
 
@@ -169,6 +195,10 @@ def update(session: Session, profile_id: str, changes: dict[str, Any]) -> Energy
         profile.name = _name(session, changes["name"], profile.id)
     if "paths" in changes:
         profile.paths = clean_paths(changes["paths"])
+    if "reference_id" in changes:
+        profile.reference_id = clean_reference(changes["reference_id"], profile.paths)
+    elif profile.reference_id not in _on(profile.paths):
+        profile.reference_id = None  # its last pathway through the reference was taken out
     session.flush()
     return profile
 
@@ -182,7 +212,12 @@ def duplicate(session: Session, profile_id: str) -> EnergyProfile:
     while name.lower() in taken:
         name = f"{original.name} (copy {n})"
         n += 1
-    return _added(session, EnergyProfile(name=name[:200], paths=[dict(p) for p in original.paths]))
+    copy = EnergyProfile(
+        name=name[:200],
+        paths=[dict(p) for p in original.paths],
+        reference_id=original.reference_id,
+    )
+    return _added(session, copy)
 
 
 def delete(session: Session, profile_id: str) -> None:
@@ -207,7 +242,10 @@ def from_drawer(session: Session) -> int:
             continue
     if not paths or list_profiles(session):
         return 0
-    profile = create(session, paths=paths)
+    # D199: it keeps the reference the energy view had, which its pathways used until now.
+    reference = state.get("reference_id")
+    on = reference if isinstance(reference, str) and reference in _on(paths) else None
+    profile = create(session, paths=paths, reference_id=on)
     if info is not None:
         rest = {k: v for k, v in drawer.items() if k != "paths"}
         info.view_state = {**state, "drawer": {**rest, "profile_id": profile.id}}

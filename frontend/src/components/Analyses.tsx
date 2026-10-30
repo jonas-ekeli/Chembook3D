@@ -981,6 +981,10 @@ export function AnalysesView({
     api.energyProfiles().then(setProfiles, () => setProfiles([]))
   }, [refreshKey])
 
+  // D199: a profile's reference by name.
+  const labelOf = (id: string) =>
+    canvas.nodes.find((n) => n.id === id)?.label ?? canvas.groups.find((g) => g.id === id)?.label
+
   const freeName = (taken: Set<string>, base: string, start: number) => {
     let n = start
     while (taken.has(`${base} ${n}`)) n++
@@ -1147,6 +1151,7 @@ export function AnalysesView({
                   </button>{' '}
                   <span className="muted small">
                     {shown} of {p.paths.length} {p.paths.length === 1 ? 'pathway' : 'pathways'} shown
+                    {p.reference_id && labelOf(p.reference_id) ? ` · relative to ${labelOf(p.reference_id)}` : ''}
                   </span>
                 </li>
               )

@@ -138,11 +138,13 @@ test('the copy holds the pathways in the drawer', async ({ page }) => {
   const shared = page.getByLabel('Energy drawer')
   await expect(shared.getByRole('group', { name: /^Pathway / })).toHaveCount(1)
   await expect(shared.getByRole('group', { name: 'Pathway B' })).toBeVisible()
-  // Any node on the pathway can be the reference.
+  // Any node on the pathway can be the profile's reference (D199: the node cards keep theirs).
   await shared.getByLabel('Reference node').selectOption({ label: 'B-S1' })
-  await expect(canvasNode(page, 'B-S1')).toBeVisible()
+  await shared.getByRole('button', { name: 'Table', exact: true }).click()
+  const table = shared.getByRole('table', { name: 'Energy table' })
+  await expect(table.locator('tbody tr').filter({ hasText: 'B-S1' }).first()).toContainText('0.00')
   await page.getByRole('button', { name: 'Energy', exact: true }).click()
-  await expect(canvasNode(page, 'B-S1')).toContainText('ΔG 0.00')
+  await expect(canvasNode(page, 'B-S1')).not.toContainText('ΔG 0.00')
 })
 
 test('the copy opens on the view the app showed, then on the reader\'s own choices', async ({ page }) => {

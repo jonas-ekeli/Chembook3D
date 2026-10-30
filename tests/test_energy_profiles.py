@@ -130,6 +130,48 @@ def test_a_pathways_chosen_colour_is_kept(open_client, example):  # noqa: F811
         assert response.status_code == 422, bad
 
 
+def test_each_profile_keeps_its_own_reference(open_client, example):  # noqa: F811
+    """D199, T-EN-50: a profile keeps one reference for all its pathways, apart from the node
+    cards' (the view state's); it must be on one of its pathways, stays when another pathway
+    is added, is copied by a duplicate and is dropped when its last pathway is taken out or
+    its node deleted."""
+    ids = example.nodes
+    a = [ids["T-pre"], ids["A1-S1"], ids["A1-S2"]]
+    b = [ids["T-pre"], ids["B1-S1"]]
+    open_client.put("/api/view-state", json={"reference_id": ids["T-pre"]})
+    first = post(open_client, "/energy-profiles", {"paths": [{"ids": a}]})
+    assert first["reference_id"] is None
+    url = f"/energy-profiles/{first['id']}"
+    chosen = patch(open_client, url, {"reference_id": ids["A1-S1"]})
+    assert chosen["reference_id"] == ids["A1-S1"]
+    other = post(
+        open_client, "/energy-profiles", {"paths": [{"ids": b}], "reference_id": ids["B1-S1"]}
+    )
+    assert other["reference_id"] == ids["B1-S1"]
+    assert get(open_client, "/view-state")["reference_id"] == ids["T-pre"]
+
+    added = patch(open_client, url, {"paths": [{"ids": a}, {"ids": b, "shown": False}]})
+    assert added["reference_id"] == ids["A1-S1"]
+    copy = post(open_client, f"{url}/duplicate", status=200)
+    assert copy["reference_id"] == ids["A1-S1"]
+    response = open_client.patch(f"/api{url}", json={"reference_id": ids["B2-S1"]})
+    assert response.status_code == 422 and "pathways" in response.json()["detail"]
+    for bad in (3, "", ["x"]):
+        response = open_client.patch(f"/api{url}", json={"reference_id": bad})
+        assert response.status_code == 422, bad
+    assert patch(open_client, url, {"paths": [{"ids": b}]})["reference_id"] is None
+    assert patch(open_client, url, {"reference_id": ids["B1-S1"]})["reference_id"] == ids["B1-S1"]
+    assert patch(open_client, url, {"reference_id": None})["reference_id"] is None
+
+    gone = node(open_client, label="Gone")["id"]
+    edge(open_client, ids["B1-S1"], gone)
+    path = patch(open_client, url, {"paths": [{"ids": [*b, gone]}], "reference_id": gone})
+    assert path["reference_id"] == gone
+    open_client.delete(f"/api/nodes/{gone}")
+    found = next(p for p in get(open_client, "/energy-profiles") if p["id"] == first["id"])
+    assert found["paths"] == [] and found["reference_id"] is None
+
+
 def test_a_deleted_node_drops_its_pathways(open_client, example):  # noqa: F811
     ids = example.nodes
     gone = node(open_client, label="Gone")["id"]
@@ -177,7 +219,10 @@ def test_the_drawers_pathways_become_profile_1(open_client, example, tmp_path): 
     investigation = open_client.app.state.investigation
     with investigation.sessions.begin() as session:
         info = session.get(InvestigationInfo, 1)
-        info.view_state = {"drawer": {"open": True, "tab": "table", "paths": old}}
+        info.view_state = {
+            "reference_id": ids["A1-S1"],
+            "drawer": {"open": True, "tab": "table", "paths": old},
+        }
         info.repairs = [r for r in info.repairs if r != "energy_profiles"]
     open_client.post("/api/investigations/close")
     response = open_client.post("/api/investigations/open", json={"folder": str(tmp_path / "inv")})
@@ -185,6 +230,7 @@ def test_the_drawers_pathways_become_profile_1(open_client, example, tmp_path): 
 
     [profile] = get(open_client, "/energy-profiles")
     assert profile["name"] == "Profile 1"
+    assert profile["reference_id"] == ids["A1-S1"]  # D199: the reference it was shown with
     assert profile["paths"] == [
         {
             "ids": old[0]["ids"],
