@@ -119,7 +119,11 @@ test('Tidy lays the canvas out in step columns; Undo tidy and a selection', asyn
   for (const label of Object.keys(muddled))
     if (label !== 'A-S3' && label !== 'B-S3') expect(selected[label], label).toEqual(muddled[label])
   expect(selected['A-S3'].x).toBe(selected['B-S3'].x)
-  await expect.poll(() => overlapping(page)).toEqual([])
+  // Earlier tests leave cards of their own on the shared demo, which may lie on each other and
+  // stay put: only the two tidied cards must be clear.
+  const tidiedCards = async () =>
+    (await overlapping(page)).filter((pair) => pair.split(' / ').some((name) => name === 'A-S3' || name === 'B-S3'))
+  await expect.poll(tidiedCards).toEqual([])
 
   // Moving a card by hand ends what Undo tidy would put back.
   await expect(toolbar.getByRole('button', { name: 'Undo tidy' })).toBeVisible()
