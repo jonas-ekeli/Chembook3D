@@ -112,9 +112,23 @@ def test_a_frequency_job_gives_the_geometry_level_on_a_node_without_optimization
     assert values[node_id]["value"] is not None  # E of the single point, G from the frequencies
 
 
-def test_a_frequency_job_that_found_no_stationary_point_gives_none(open_client):
+def test_a_frequency_job_that_found_no_stationary_point_still_does(open_client):
+    # Its values carry W-FREQ-NONSTAT (D158) instead.
     node_id = import_file(open_client, "freq.log", frequency_only(stationary=False))["node_id"]
+    (frequency,) = calculations(open_client, node_id)
     sp = g.single_point(END, route="#P B3LYP/def2TZVP SP", energy=-76.45)
     import_file(open_client, "sp.log", sp, node_id)
-    # Its geometry level stays unknown until set by hand (D100), as before D200.
-    assert " // " not in calculations(open_client, node_id)[-1]["composite_label"]
+    label = calculations(open_client, node_id)[-1]["composite_label"]
+    assert label.endswith(f" // {frequency['composite_label']}")
+    value = view(open_client, level_key(open_client, label), "G")["values"][node_id]
+    assert "W-FREQ-NONSTAT" in [issue["code"] for issue in value["check"]["issues"]]
+
+
+def test_an_optimization_on_the_node_comes_first(open_client):
+    node_id = import_file(open_client, "opt.log", opt_freq())["node_id"]
+    optimization = calculations(open_client, node_id)[0]
+    import_file(open_client, "freq.log", frequency_only(), node_id)
+    sp = g.single_point(END, route="#P B3LYP/def2TZVP SP", energy=-76.45)
+    import_file(open_client, "sp.log", sp, node_id)
+    label = calculations(open_client, node_id)[-1]["composite_label"]
+    assert label.endswith(f" // {optimization['composite_label']}")

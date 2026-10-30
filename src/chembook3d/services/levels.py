@@ -22,7 +22,6 @@ from chembook3d.models import (
     LevelOfTheory,
     Node,
 )
-from chembook3d.parsers.common import NOT_STATIONARY
 from chembook3d.services import geometry, history
 
 LEVEL_FIELDS = ("program", "method", "basis", "dispersion", "solvation_model", "solvent")
@@ -132,27 +131,24 @@ def optimizations(node: Node) -> list[Calculation]:
     return sorted(found, key=lambda c: (c.created_at, c.step_index or 0))
 
 
-def _stationary_frequency(calculation: Calculation) -> bool:
-    result = calculation.result
+def _unheld_frequency(calculation: Calculation) -> bool:
     return (
         calculation.type == CalculationType.FREQUENCY
         and calculation.level is not None
         and not calculation.constraints
         and bool(calculation.geometry)
-        and result is not None
-        and NOT_STATIONARY not in (result.printed or {})
     )
 
 
 def geometry_sources(node: Node) -> list[Calculation]:
     """D100: the calculations a geometry level comes from, oldest first: the node's
     optimizations (D157: never a held one). D200: a node with none, whose optimization was run
-    elsewhere and only its frequency job imported, takes its frequency jobs that found a
-    stationary point (none of them W-FREQ-NONSTAT)."""
+    elsewhere and only its frequency job imported, takes its frequency jobs; one whose
+    stationary-point check failed still does, and W-FREQ-NONSTAT marks its values (D158)."""
     found = optimizations(node)
     if found:
         return found
-    found = [c for c in node.calculations if _stationary_frequency(c)]
+    found = [c for c in node.calculations if _unheld_frequency(c)]
     return sorted(found, key=lambda c: (c.created_at, c.step_index or 0))
 
 
