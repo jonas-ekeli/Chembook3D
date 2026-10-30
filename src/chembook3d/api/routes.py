@@ -148,7 +148,7 @@ class NodeOut(BaseModel):
     view_rotation: list[float] | None
     # D121: the edge a scan path node is shown on; set to show only there; and whether its box
     # is off the canvas now (set so, and still only a scan path with no edges or group).
-    scan_path: bool = False  # D112: it has a scan path calculation, so it can be shown on an edge
+    scan_path: bool = False  # D112, D200: a scan path or a scan, so it can be shown on an edge
     path_edge_id: str | None = None
     on_edge_only: bool = False
     on_edge: bool = False
@@ -528,7 +528,7 @@ def _node_out(session: Session, node: Node) -> NodeOut:
         pos_x=node.pos_x,
         pos_y=node.pos_y,
         view_rotation=node.view_rotation,
-        scan_path=scan_edges.has_scan_path(session, node.id),
+        scan_path=scan_edges.has_scan_path(node),
         path_edge_id=node.path_edge_id,
         on_edge_only=node.on_edge_only,
         on_edge=scan_edges.on_edge(session, node),

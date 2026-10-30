@@ -620,8 +620,9 @@ TOOLS: list[ToolSpec] = [
         "write",
         "PUT",
         "/api/nodes/{node_id}/path-edge",
-        "Show a scan path node (one with an xTB path.xyz or xtbscan.log) on the edge it was run "
-        "on, as a chip there (D121), or on none with edge_id null. on_edge_only true takes its "
+        "Show a scan path node (one with an xTB path.xyz or xtbscan.log, a joined scan, or a "
+        "Gaussian or ORCA scan, D200) on the edge it was run on, as a chip there (D121), or on "
+        "none with edge_id null. on_edge_only true takes its "
         "box off the canvas so the chip stands for it; false puts it back. Nothing is rewired.",
         help={
             "edge_id": "Id of the transition, or null to unlink.",

@@ -109,7 +109,8 @@ export type Node = {
   pos_y: number
   /** The orientation saved from the 3D view, used by the structure-mode card. */
   view_rotation: Rotation | null
-  /** D112: it has a scan path (an xTB path.xyz or xtbscan.log), so it can be shown on an edge. */
+  /** D112: it has a scan path (an xTB path.xyz or xtbscan.log, a joined scan, or D200 a Gaussian
+   * or ORCA scan), so it can be shown on an edge. */
   scan_path: boolean
   /** D121: the edge a scan path node is shown on, as a chip there. */
   path_edge_id: string | null
@@ -236,7 +237,7 @@ export function pathChip(paths: PathOnEdge[], settings: Settings | null): { text
   lines.push(
     programs.every((p) => p === 'xTB')
       ? 'GFN2-xTB scan path, measured from its first kept point; not the edge’s barrier. Click to open.'
-      : 'Scan path, measured from its first kept point at its own level; not the edge’s barrier. Click to open.',
+      : 'Scan path, measured from its first kept (for a scan, first converged) point at its own level; not the edge’s barrier. Click to open.',
   )
   return { text, title: lines.join('\n'), missed: paths.some(pathMissed) }
 }

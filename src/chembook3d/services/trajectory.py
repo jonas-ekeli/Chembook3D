@@ -232,6 +232,21 @@ def is_joined_scan(calculation: Calculation) -> bool:
     return calculation.type == CalculationType.OTHER and calculation.route.startswith(joined.ROUTE)
 
 
+def is_held_scan(calculation: Calculation) -> bool:
+    """D200: a scan read from a program's own output (a Gaussian or ORCA relaxed or rigid
+    scan, or xTB's `$scan`), known by the scan D157 notes in its constraints. It can be shown
+    on an edge as a path is (D121); its energies are a calculation's like any other."""
+    return names_scan(calculation.constraints or [])
+
+
+def names_scan(constraints: list[Any]) -> bool:
+    """D157's constraints name a scan: `scan <coordinate>`, or the kind of scan alone."""
+    return any(
+        isinstance(c, str) and (c.startswith("scan ") or c in ("relaxed scan", "rigid scan"))
+        for c in constraints
+    )
+
+
 def changes_in_place(node: Node) -> bool:
     """D112: a scan path node, whose calculations are all such scans, takes a structure of
     its movie in place; no other result belongs to its coordinates."""

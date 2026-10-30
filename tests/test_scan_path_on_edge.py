@@ -1,6 +1,7 @@
 """A scan path shown on the edge it was run on (D121, A68; T-PATH-27…31): the path node
 remembers its edge, the edge lists it with the path's own top, and "on the edge only" takes
-its box off the canvas. Nothing is rewired and no edge energy changes."""
+its box off the canvas. Nothing is rewired and no edge energy changes. D200 (T-PATH-33): a
+Gaussian or ORCA scan is shown on an edge the same way."""
 
 import json
 
@@ -8,6 +9,7 @@ import pytest
 
 from chembook3d import investigation as inv
 from chembook3d.models import InvestigationInfo, Node
+from chembook3d.parsers import xtb
 from tests import gaussian_text
 from tests.test_cloud_jobs import (  # noqa: F401  (fixtures)
     app_client,
@@ -18,7 +20,10 @@ from tests.test_cloud_jobs import (  # noqa: F401  (fixtures)
     linked_client,
     remote,
 )
-from tests.test_import import calculations, commit, folder, upload
+from tests.test_constrained import MODREDUNDANT
+from tests.test_constrained import SCAN as GAUSSIAN_SCAN
+from tests.test_gaussian_parser import FIXTURES
+from tests.test_import import calculations, commit, fixture, folder, upload
 from tests.test_overlay import xyz_text
 from tests.test_scan_path_import import ENERGIES, RESULT, cloud_returns, path_text, setup
 from tests.test_scan_path_trim import scan_path, trim
@@ -102,7 +107,7 @@ def test_link_by_hand_and_the_chip_follows_the_trim(open_client):
     assert edge_of(client, edge)["scan_paths"] == []
 
     plain = client.post("/api/nodes", json={"label": "plain"}).json()["id"]
-    assert "Only a node with a scan path" in link(client, plain, edge, status=422)["detail"]
+    assert "Only a node with a scan" in link(client, plain, edge, status=422)["detail"]
     assert "Transition not found" in link(client, node_id, "nope", status=422)["detail"]
     assert "on an edge first" in link(client, node_id, None, 422, on_edge_only=True)["detail"]
 
@@ -243,3 +248,53 @@ def test_paths_imported_before_are_linked_once(open_client):
     (path,) = edge_of(client, edge)["scan_paths"]
     assert path["gate"] == "passed" and path["on_edge"] is False
     assert steps(client, path["calculation_id"])["trim"] is not None
+
+
+def test_a_gaussian_or_orca_scan_is_shown_on_an_edge(open_client):
+    # T-PATH-33 (D200, A134): a scan imported from a program's own output is linked like a
+    # path: its top is measured over its converged points; it is not trimmed and "Use this
+    # structure" still makes a derived node; a calculation that is not a scan brings its box
+    # back.
+    client = open_client
+    a, b, edge = ends(client)
+    node_id = commit(client, upload(client, GAUSSIAN_SCAN, fixture(GAUSSIAN_SCAN)))["node_id"]
+    (calc,) = calculations(client, node_id)
+    assert node_of(client, node_id)["scan_path"] is True
+
+    linked = link(client, node_id, edge, on_edge_only=True)
+    assert linked["path_edge_id"] == edge and linked["on_edge"] is True
+    (path,) = edge_of(client, edge)["scan_paths"]
+    movie = steps(client, calc["id"])
+    energies = [f["energy"] for f in movie["frames"] if f["converged"]]
+    assert path["program"] == "Gaussian" and path["calculation_id"] == calc["id"]
+    assert path["top"] == pytest.approx(energies[xtb.representative(energies)] - energies[0])
+    assert path["top"] > 0 and path["gate"] is None
+    assert movie["trim"] is None and movie["in_place"] is False
+
+    numbers = {"C": 6, "H": 1}
+    lines = node_of(client, node_id)["xyz"].splitlines()[2:]
+    atoms = [(e, numbers[e], *map(float, xyz)) for e, *xyz in (line.split() for line in lines)]
+    plan = upload(client, "sp.log", gaussian_text.single_point(atoms), node_id)
+    commit(client, plan, target_node_id=node_id)
+    node = node_of(client, node_id)
+    assert node["on_edge_only"] is False and node["on_edge"] is False
+    assert node["path_edge_id"] == edge
+
+    orca_scan = (FIXTURES.parent / "orca" / "dvb_scan_unrelaxed.out").read_text("utf-8")
+    orca_node = commit(client, upload(client, "dvb_scan_unrelaxed.out", orca_scan))["node_id"]
+    assert node_of(client, orca_node)["scan_path"] is True
+    link(client, orca_node, edge)
+    assert {p["program"] for p in edge_of(client, edge)["scan_paths"]} == {"Gaussian", "ORCA"}
+
+    # An optimization held by a frozen coordinate is not a scan.
+    held = gaussian_text.output(
+        gaussian_text.step(
+            "#P B3LYP/6-31G(d) Opt=ModRedundant",
+            [gaussian_text.moved(gaussian_text.WATER, 0.05), gaussian_text.WATER],
+            converged=True,
+            body=MODREDUNDANT,
+        )
+    )
+    held_node = commit(client, upload(client, "held.log", held))["node_id"]
+    assert node_of(client, held_node)["scan_path"] is False
+    assert "Only a node with a scan" in link(client, held_node, edge, status=422)["detail"]

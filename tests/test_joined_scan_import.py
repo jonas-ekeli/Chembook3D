@@ -142,5 +142,5 @@ def test_an_imported_joined_scan_counts_as_a_scan_path(open_client):
         from chembook3d.services import scan_edges, trajectory
 
         assert trajectory.changes_in_place(node)
-        assert scan_edges.has_scan_path(session, node_id)
+        assert scan_edges.has_scan_path(node)
     assert imports.read_file(_joined(), "a.xyz").program == "Gaussian"
