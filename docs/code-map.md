@@ -164,4 +164,4 @@ Starting and stopping (D107, A54): `launcher.py` is what the shortcut runs, by i
 
 ## Scripts
 
-`scripts/make_demo.py`: builds a small demo investigation (used by the UI tests too). `scripts/build_frontend.py` runs `npm ci` and `npm run build` the same way on Windows, Linux and WSL, and refuses a Windows Node.js found through the PATH under WSL.
+`scripts/make_demo.py`: builds a small demo investigation (used by the UI tests too). `scripts/make_showcase_demo.py` builds the showcase demo (D170) from published ioChem-BD CML files, downloaded into a cache and checked against `scripts/showcase_manifest.json`; it drives the app's own HTTP API through a TestClient, so it shows what a user's clicks would do (tests in `tests/test_showcase_demo.py`). `scripts/build_frontend.py` runs `npm ci` and `npm run build` the same way on Windows, Linux and WSL, and refuses a Windows Node.js found through the PATH under WSL.
