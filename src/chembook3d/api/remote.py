@@ -335,7 +335,7 @@ async def new_shell(server_id: str, body: ShellIn, request: Request) -> None:
 
 # Names of files the import dialog reads (Gaussian, ORCA, xTB, CREST); the list shows the
 # others only when asked.
-OUTPUT_ENDINGS = (".log", ".out", ".output", ".xyz")
+OUTPUT_ENDINGS = (".log", ".out", ".output", ".xyz", ".cml")
 
 
 class RemoteEntry(BaseModel):

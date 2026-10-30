@@ -1,0 +1,1168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module xmlns="http://www.xml-cml.org/schema"
+        xmlns:cc="http://www.xml-cml.org/dictionary/compchem/"
+        xmlns:cml="http://www.xml-cml.org/schema"
+        xmlns:cmlx="http://www.xml-cml.org/schema/cmlx"
+        xmlns:compchem="http://www.xml-cml.org/dictionary/compchem/"
+        xmlns:convention="http://www.xml-cml.org/convention/"
+        xmlns:g="http://www.iochem-bd.org/dictionary/gaussian/"
+        xmlns:nonsi="http://www.xml-cml.org/unit/nonSi/"
+        xmlns:nonsi2="http://www.iochem-bd.org/unit/nonSi2/"
+        xmlns:si="http://www.xml-cml.org/unit/si/"
+        xmlns:xi="http://www.w3.org/2001/XInclude"
+        xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+        convention="convention:compchem"
+        id="gaussian.log">
+   <module dictRef="cc:jobList" id="jobList1">
+      <module cmlx:templateRef="job" dictRef="cc:job" id="job">
+         <module dictRef="cc:environment" id="environment">
+            <parameterList>
+               <parameter dictRef="cc:program">
+                  <scalar dataType="xsd:string">Gaussian 16</scalar>
+               </parameter>
+               <parameter dictRef="cc:hostname">
+                  <scalar dataType="xsd:string">GINC-C79-9</scalar>
+               </parameter>
+               <parameter dictRef="cc:jobname">
+                  <scalar dataType="xsd:string">GIOCCHI</scalar>
+               </parameter>
+               <parameter dictRef="cc:title">
+                  <scalar dataType="xsd:string">CAAC1_CH2_TS_rotation_F1_ALL_SP, SP M06L-GD3, chloroform</scalar>
+               </parameter>
+               <parameter dictRef="cc:version">
+                  <scalar dataType="xsd:string">ES64L-G16RevC.01</scalar>
+               </parameter>
+               <parameter dictRef="cc:run.date">
+                  <scalar dataType="xsd:string">11-Jun-2021</scalar>
+               </parameter>
+               <parameter dictRef="cc:program">
+                  <scalar dataType="xsd:string">Gaussian 16</scalar>
+               </parameter>
+               <parameter dictRef="cc:program.date">
+                  <scalar dataType="xsd:string">3-Jul-2019</scalar>
+               </parameter>
+               <parameter dictRef="cc:version">
+                  <scalar dataType="xsd:string">ES64L-G16RevC.01</scalar>
+               </parameter>
+            </parameterList>
+         </module>
+         <module dictRef="cc:initialization" id="initialization">
+            <parameterList>
+               <parameter dictRef="cc:method">
+                  <scalar dataType="xsd:string">RM06L</scalar>
+               </parameter>
+               <parameter dictRef="cc:basis">
+                  <scalar dataType="xsd:string">Gen</scalar>
+               </parameter>
+               <parameter dictRef="g:operation">
+                  <scalar dataType="xsd:string">SP</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#P</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#M06L/CHKBASIS</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">5D</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">7F</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">GEOM=CHECK</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">GUESS=READ</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">GFINPUT</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">NOSYMM</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">INT=ULTRAFINE</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">EMPIRICALDISPERSION=GD3</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">SCRF=(PCM,SOLVENT=CHLOROFORM,READ)</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">SCF=(VSHIFT=800,NOVARACC,MAXCYCLE=180,CONVER=5)</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">#</scalar>
+               </parameter>
+               <parameter dictRef="g:keyword">
+                  <scalar dataType="xsd:string">SP</scalar>
+               </parameter>
+            </parameterList>
+            <molecule cmlx:templateRef="atom"
+                      formalCharge="0"
+                      id="mol.l202.orient"
+                      spinMultiplicity="1">
+               <atomArray>
+                  <atom elementType="Ru"
+                        id="a1"
+                        x3="-3.039421"
+                        y3="0.384511"
+                        z3="-0.938223">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a2"
+                        x3="-1.755322"
+                        y3="1.875985"
+                        z3="1.429059">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="N"
+                        id="a3"
+                        x3="-0.227389"
+                        y3="0.813631"
+                        z3="-0.015996">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a4"
+                        x3="-1.570534"
+                        y3="1.024217"
+                        z3="0.140773">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a5"
+                        x3="0.66181"
+                        y3="1.713145"
+                        z3="0.854045">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a6"
+                        x3="-0.388695"
+                        y3="2.579131"
+                        z3="1.567321">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a7"
+                        x3="-0.449153"
+                        y3="3.580366"
+                        z3="1.066875">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a8"
+                        x3="-0.121335"
+                        y3="2.752547"
+                        z3="2.641507">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a9"
+                        x3="1.602317"
+                        y3="2.577984"
+                        z3="0.003377">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a10"
+                        x3="1.049375"
+                        y3="3.240697"
+                        z3="-0.68835">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a11"
+                        x3="2.326972"
+                        y3="1.966965"
+                        z3="-0.571812">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a12"
+                        x3="2.184115"
+                        y3="3.225522"
+                        z3="0.692728">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a13"
+                        x3="1.530297"
+                        y3="0.921796"
+                        z3="1.839325">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a14"
+                        x3="2.131102"
+                        y3="1.650816"
+                        z3="2.421567">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a15"
+                        x3="2.239686"
+                        y3="0.258074"
+                        z3="1.309708">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a16"
+                        x3="0.939926"
+                        y3="0.325052"
+                        z3="2.558213">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a17"
+                        x3="-2.031327"
+                        y3="0.885011"
+                        z3="2.583983">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a18"
+                        x3="-2.10012"
+                        y3="1.443222"
+                        z3="3.542456">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a19"
+                        x3="-1.237866"
+                        y3="0.118152"
+                        z3="2.685171">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a20"
+                        x3="-2.996829"
+                        y3="0.358027"
+                        z3="2.428923">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a21"
+                        x3="0.365822"
+                        y3="-0.215172"
+                        z3="-0.869046">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a22"
+                        x3="0.75562"
+                        y3="0.111928"
+                        z3="-2.19913">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a23"
+                        x3="1.244756"
+                        y3="-0.910421"
+                        z3="-3.036654">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a24"
+                        x3="1.52286"
+                        y3="-0.653552"
+                        z3="-4.072638">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a25"
+                        x3="1.375903"
+                        y3="-2.222935"
+                        z3="-2.58036">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a26"
+                        x3="1.046384"
+                        y3="-2.519909"
+                        z3="-1.256047">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a27"
+                        x3="1.175489"
+                        y3="-3.550385"
+                        z3="-0.888116">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a28"
+                        x3="0.550828"
+                        y3="-1.54397"
+                        z3="-0.368977">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a29"
+                        x3="0.720371"
+                        y3="1.497988"
+                        z3="-2.799975">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a30"
+                        x3="0.280035"
+                        y3="1.465161"
+                        z3="-3.818122">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a31"
+                        x3="0.350823"
+                        y3="-1.987933"
+                        z3="1.084648">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="Cl"
+                        id="a32"
+                        x3="-2.6487"
+                        y3="-1.881487"
+                        z3="-1.049455">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="Cl"
+                        id="a33"
+                        x3="-4.934239"
+                        y3="1.716982"
+                        z3="-0.630094">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a34"
+                        x3="-2.439019"
+                        y3="1.033381"
+                        z3="-2.512655">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a35"
+                        x3="-1.662587"
+                        y3="1.805361"
+                        z3="-2.656531">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a36"
+                        x3="-2.965949"
+                        y3="0.678865"
+                        z3="-3.432541">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a37"
+                        x3="-0.058895"
+                        y3="-1.129788"
+                        z3="1.654178">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a38"
+                        x3="1.753476"
+                        y3="1.892239"
+                        z3="-2.913095">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a39"
+                        x3="-0.622252"
+                        y3="-3.165945"
+                        z3="1.275886">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a40"
+                        x3="-0.319252"
+                        y3="-4.047773"
+                        z3="0.671739">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a41"
+                        x3="-1.657899"
+                        y3="-2.904042"
+                        z3="0.998293">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a42"
+                        x3="-0.609255"
+                        y3="-3.480785"
+                        z3="2.341411">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a43"
+                        x3="-2.853017"
+                        y3="2.946334"
+                        z3="1.432479">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a44"
+                        x3="-2.821669"
+                        y3="3.574064"
+                        z3="0.5193">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a45"
+                        x3="-2.684633"
+                        y3="3.607961"
+                        z3="2.309648">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a46"
+                        x3="-3.867141"
+                        y3="2.518406"
+                        z3="1.520313">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="C"
+                        id="a47"
+                        x3="1.707086"
+                        y3="-2.400474"
+                        z3="1.701965">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a48"
+                        x3="2.043836"
+                        y3="-3.372578"
+                        z3="1.282266">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a49"
+                        x3="1.606343"
+                        y3="-2.533025"
+                        z3="2.800372">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a50"
+                        x3="2.514537"
+                        y3="-1.665729"
+                        z3="1.516718">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a51"
+                        x3="0.156092"
+                        y3="2.229445"
+                        z3="-2.198496">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+                  <atom elementType="H"
+                        id="a52"
+                        x3="1.747886"
+                        y3="-3.013248"
+                        z3="-3.252881">
+                     <property dictRef="g:atomicType">
+                        <scalar dataType="xsd:integer">0</scalar>
+                     </property>
+                  </atom>
+               </atomArray>
+               <bondArray>
+                  <bond atomRefs2="a1 a33" order="S"/>
+                  <bond atomRefs2="a1 a32" order="S"/>
+                  <bond atomRefs2="a1 a4" order="S"/>
+                  <bond atomRefs2="a1 a34" order="S"/>
+                  <bond atomRefs2="a2 a4" order="S"/>
+                  <bond atomRefs2="a2 a17" order="S"/>
+                  <bond atomRefs2="a2 a6" order="S"/>
+                  <bond atomRefs2="a2 a43" order="S"/>
+                  <bond atomRefs2="a3 a5" order="S"/>
+                  <bond atomRefs2="a3 a21" order="S"/>
+                  <bond atomRefs2="a3 a4" order="S"/>
+                  <bond atomRefs2="a5 a6" order="S"/>
+                  <bond atomRefs2="a5 a9" order="S"/>
+                  <bond atomRefs2="a5 a13" order="S"/>
+                  <bond atomRefs2="a6 a7" order="S"/>
+                  <bond atomRefs2="a6 a8" order="S"/>
+                  <bond atomRefs2="a9 a12" order="S"/>
+                  <bond atomRefs2="a9 a11" order="S"/>
+                  <bond atomRefs2="a9 a10" order="S"/>
+                  <bond atomRefs2="a13 a14" order="S"/>
+                  <bond atomRefs2="a13 a15" order="S"/>
+                  <bond atomRefs2="a13 a16" order="S"/>
+                  <bond atomRefs2="a17 a18" order="S"/>
+                  <bond atomRefs2="a17 a20" order="S"/>
+                  <bond atomRefs2="a17 a19" order="S"/>
+                  <bond atomRefs2="a21 a28" order="S"/>
+                  <bond atomRefs2="a21 a22" order="S"/>
+                  <bond atomRefs2="a22 a29" order="S"/>
+                  <bond atomRefs2="a22 a23" order="S"/>
+                  <bond atomRefs2="a23 a25" order="S"/>
+                  <bond atomRefs2="a23 a24" order="S"/>
+                  <bond atomRefs2="a25 a26" order="S"/>
+                  <bond atomRefs2="a25 a52" order="S"/>
+                  <bond atomRefs2="a26 a28" order="S"/>
+                  <bond atomRefs2="a26 a27" order="S"/>
+                  <bond atomRefs2="a28 a31" order="S"/>
+                  <bond atomRefs2="a29 a38" order="S"/>
+                  <bond atomRefs2="a29 a30" order="S"/>
+                  <bond atomRefs2="a29 a51" order="S"/>
+                  <bond atomRefs2="a31 a47" order="S"/>
+                  <bond atomRefs2="a31 a39" order="S"/>
+                  <bond atomRefs2="a31 a37" order="S"/>
+                  <bond atomRefs2="a34 a36" order="S"/>
+                  <bond atomRefs2="a34 a35" order="S"/>
+                  <bond atomRefs2="a39 a42" order="S"/>
+                  <bond atomRefs2="a39 a40" order="S"/>
+                  <bond atomRefs2="a39 a41" order="S"/>
+                  <bond atomRefs2="a43 a45" order="S"/>
+                  <bond atomRefs2="a43 a44" order="S"/>
+                  <bond atomRefs2="a43 a46" order="S"/>
+                  <bond atomRefs2="a47 a48" order="S"/>
+                  <bond atomRefs2="a47 a49" order="S"/>
+                  <bond atomRefs2="a47 a50" order="S"/>
+               </bondArray>
+               <formula concise="C19H29Cl2NRu"/>
+               <property dictRef="cml:molmass">
+                  <scalar units="unit:dalton">414.1859999999997</scalar>
+               </property>
+               <formula convention="iupac:inchi"
+                        inline="InChI=1S/C18H27N.CH2.2ClH.Ru/c1-13(2)15-10-8-9-14(3)16(15)19-12-17(4,5)11-18(19,6)7;;;;/h8-10,13H,11H2,1-7H3;1H2;2*1H;/q;;;;+2/p-2">
+                  <scalar dataType="xsd:integer" id="auxInfo">AuxInfo=1/1/N:39,47,29,17,43,9,13,25,23,26,6,4,31,22,28,21,2,5,3;34;32;33;1/E:(1,2)(4,5)(6,7);;;;/CRV:8.3,9.3,10.3,12.2,14.3,15.3,16.3;1.2;;;/rA:52RuCNC3CCHHCHHHCHHHCHHHC3C3C3HC3C3HC3CHCClClC3HHHHCHHHCHHHCHHHHH/rB:;;s1s2s3;s3;s2s5;s6;s6;s5;s9;s9;s9;s5;s13;s13;s13;s2;s17;s17;s17;s3;s21;s22;s23;s23;s25;s26;s21s26;s22;s29;s28;s1;s1;s1;s34;s34;s31;s29;s31;s39;s39;s39;s2;s43;s43;s43;s31;s47;s47;s47;s29;s25;/rC:;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;</scalar>
+               </formula>
+            </molecule>
+            <module dictRef="cc:userDefinedModule" id="otherComponents">
+               <module cmlx:templateRef="l1" dictRef="cc:userDefinedModule">
+                  <module cmlx:templateRef="l1.end">
+                     <array dataType="xsd:string" dictRef="g:kk" size="1">NPROCSHARED=16</array>
+                     <array dataType="xsd:string" dictRef="g:kk" size="1">LINDAWORKERS=cib79-9:2,cib80-9:2,cib80-10:2,cib85-6:2</array>
+                     <array dataType="xsd:string" dictRef="g:kk" size="1">MEM=19666MB</array>
+                     <array dataType="xsd:string" dictRef="g:kk" size="1">chk=CAAC1_CH2_TS_rotation_F1_ALL_SP</array>
+                     <scalar cmlx:templateRef="title" dataType="xsd:string" dictRef="cc:title">#P # M06L/CHKBASIS 5D 7F # GEOM=CHECK # GUESS=READ # GFINPUT # NOSYMM</scalar>
+                     <list cmlx:templateRef="control">
+                        <scalar dataType="xsd:string" dictRef="g:control">1/29=2,38=1,40=2,172=1/1</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:control">2/12=2,15=1,40=1/2</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:control">3/5=7,6=2,8=11,11=2,14=-4,24=10,25=1,30=1,67=1,70=2203,72=7,74=-53,75=-5,116=-2,124=31/1,2,3</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:control">4/5=1/1</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:control">5/5=2,6=5,7=180,10=800,38=6,53=7/2</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:control">6/7=2,8=2,9=2,10=2,28=1/1</scalar>
+                        <scalar dataType="xsd:string" dictRef="g:control">99/5=1,9=1/99</scalar>
+                     </list>
+                  </module>
+               </module>
+               <module cmlx:templateRef="l101" dictRef="cc:userDefinedModule">
+                  <module cmlx:templateRef="l101.title">
+                     <scalar cmlx:templateRef="title" dataType="xsd:string" dictRef="cc:title">CAAC1_CH2_TS_rotation_F1_ALL_SP, SP M06L-GD3, chloroform</scalar>
+                  </module>
+                  <module cmlx:templateRef="l101.isotope2">
+                     <array cmlx:templateRef="atom"
+                            dataType="xsd:integer"
+                            dictRef="x:x"
+                            size="52">1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52</array>
+                     <array cmlx:templateRef="iatwgt"
+                            dataType="xsd:integer"
+                            dictRef="x:x"
+                            size="52">102 12 14 12 12 12 1 1 12 1 1 1 12 1 1 1 12 1 1 1 12 12 12 1 12 12 1 12 12 1 12 35 35 12 1 1 1 1 12 1 1 1 12 1 1 1 12 1 1 1 1 1</array>
+                     <array cmlx:templateRef="atmwgt"
+                            dataType="xsd:double"
+                            dictRef="x:x"
+                            size="52">101.9037000 12.0000000 14.0030740 12.0000000 12.0000000 12.0000000 1.0078250 1.0078250 12.0000000 1.0078250 1.0078250 1.0078250 12.0000000 1.0078250 1.0078250 1.0078250 12.0000000 1.0078250 1.0078250 1.0078250 12.0000000 12.0000000 12.0000000 1.0078250 12.0000000 12.0000000 1.0078250 12.0000000 12.0000000 1.0078250 12.0000000 34.9688527 34.9688527 12.0000000 1.0078250 1.0078250 1.0078250 1.0078250 12.0000000 1.0078250 1.0078250 1.0078250 12.0000000 1.0078250 1.0078250 1.0078250 12.0000000 1.0078250 1.0078250 1.0078250 1.0078250 1.0078250</array>
+                     <array cmlx:templateRef="nucspn"
+                            dataType="xsd:integer"
+                            dictRef="x:x"
+                            size="52">0 0 2 0 0 0 1 1 0 1 1 1 0 1 1 1 0 1 1 1 0 0 0 1 0 0 1 0 0 1 0 3 3 0 1 1 1 1 0 1 1 1 0 1 1 1 0 1 1 1 1 1</array>
+                     <array cmlx:templateRef="atzeff"
+                            dataType="xsd:double"
+                            dictRef="x:x"
+                            size="52">221.7600000 3.6000000 4.5500000 3.6000000 3.6000000 3.6000000 1.0000000 1.0000000 3.6000000 1.0000000 1.0000000 1.0000000 3.6000000 1.0000000 1.0000000 1.0000000 3.6000000 1.0000000 1.0000000 1.0000000 3.6000000 3.6000000 3.6000000 1.0000000 3.6000000 3.6000000 1.0000000 3.6000000 3.6000000 1.0000000 3.6000000 14.2400000 14.2400000 3.6000000 1.0000000 1.0000000 1.0000000 1.0000000 3.6000000 1.0000000 1.0000000 1.0000000 3.6000000 1.0000000 1.0000000 1.0000000 3.6000000 1.0000000 1.0000000 1.0000000 1.0000000 1.0000000</array>
+                  </module>
+                  <list cmlx:templateRef="rest">
+                     <scalar dataType="xsd:string" dictRef="x:l101">(Enter /cluster/software/Gaussian/g16_C.01/l101.exe)</scalar>
+                  </list>
+               </module>
+               <module cmlx:templateRef="l302.basis" dictRef="cc:userDefinedModule">
+                  <list cmlx:templateRef="basis">
+                     <array dataType="xsd:string" dictRef="g:basis" size="11">NPDir=0 NMtPBC= 1 NCelOv= 1 NCel= 1 NClECP= 1 NCelD= 1</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="8">NCelK= 1 NCelE2= 1 NClLst= 1 CellRange= 0.0.</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="5">One-electron integrals computed using PRISM.</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="6">1 Symmetry operations used in ECPInt.</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="9">ECPInt: NShTT= 219453 NPrTT= 689091 LenC2= 185232 LenP2D= 400422.</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="5">LDataN: DoStor=T MaxTD1=10 Len= 848</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="8">NBasis= 2262 RedAO= T EigKep= 1.44D-06 NBF= 2262</array>
+                     <array dataType="xsd:string" dictRef="g:basis" size="7">NBsUse= 2262 1.00D-06 EigRej= -1.00D+00 NBFU= 2262</array>
+                  </list>
+               </module>
+            </module>
+         </module>
+         <module dictRef="cc:calculation" id="calculation">
+            <module dictRef="cc:userDefinedModule" id="otherComponents">
+               <module cmlx:templateRef="l301">
+                  <module cmlx:templateRef="l301.dispersion">
+                     <scalar dataType="xsd:string" dictRef="g:empdispersion">Grimme-D3</scalar>
+                     <scalar dataType="xsd:double" dictRef="g:dispenergy" units="nonsi:hartree">-0.0061529962</scalar>
+                  </module>
+                  <module cmlx:templateRef="l301.pcm.standard">
+                     <scalar dataType="xsd:string" dictRef="g:model">PCM</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:atomicradii">UAHF</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:polarcharges">Total charges</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:chargecompensation">None</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:solutionmethod">On-the-fly selection</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:solvent">Chloroform</scalar>
+                     <scalar dataType="xsd:double" dictRef="g:eps">4.711300</scalar>
+                     <scalar dataType="xsd:double" dictRef="g:epsinfinity">2.090627</scalar>
+                  </module>
+               </module>
+               <module cmlx:templateRef="l202" dictRef="cc:userDefinedModule">
+                  <module cmlx:templateRef="l202.rotconst">
+                     <array cmlx:templateRef="rotconst"
+                            dataType="xsd:double"
+                            dictRef="cc:rotconst"
+                            size="3">0.2550560 0.1754994 0.1547316</array>
+                  </module>
+               </module>
+               <module cmlx:templateRef="l302">
+                  <module cmlx:templateRef="l302.basis2">
+                     <list cmlx:templateRef="basis">
+                        <array dataType="xsd:string" dictRef="g:basis" size="5">Precomputing XC quadrature grid using</array>
+                        <array dataType="xsd:string" dictRef="g:basis" size="10">IXCGrd= 4 IRadAn= 5 IRanWt= -1 IRanGd= 0 AccXCQ= 0.00D+00.</array>
+                        <array dataType="xsd:string" dictRef="g:basis" size="8">Defaulting to unpruned grid for atomic number 44.</array>
+                        <array dataType="xsd:string" dictRef="g:basis" size="9">Generated NRdTot= 0 NPtTot= 0 NUsed= 0 NTot= 32</array>
+                        <array dataType="xsd:string" dictRef="g:basis" size="10">NSgBfM= 2771 2771 2771 2771 2771 MxSgAt= 52 MxSgA2= 52.</array>
+                     </list>
+                  </module>
+               </module>
+               <module cmlx:templateRef="l303.basis">
+                  <list cmlx:templateRef="l303">
+                     <scalar dataType="xsd:integer" dictRef="g:dipdrv">1</scalar>
+                  </list>
+               </module>
+               <module cmlx:templateRef="l502">
+                  <scalar dataType="xsd:string" dictRef="g:l502.type">Closed</scalar>
+                  <module cmlx:templateRef="l502.cycle">
+                     <list cmlx:templateRef="cycle">
+                        <list>
+                           <scalar dataType="xsd:integer" dictRef="cc:cycle">1</scalar>
+                           <scalar dataType="xsd:integer" dictRef="g:pass">1</scalar>
+                           <scalar dataType="xsd:integer" dictRef="g:idiag">1</scalar>
+                        </list>
+                     </list>
+                     <module cmlx:templateRef="l502.e">
+                        <list cmlx:templateRef="l502.e">
+                           <scalar dataType="xsd:double" dictRef="g:l502.e">-1811.63176584270</scalar>
+                        </list>
+                     </module>
+                  </module>
+                  <module cmlx:templateRef="l502.footer">
+                     <list cmlx:templateRef="scfdone">
+                        <list>
+                           <scalar dataType="xsd:double" dictRef="g:rbhflyp" units="nonsi:hartree">-1811.63176584</scalar>
+                           <scalar dataType="xsd:integer" dictRef="cc:ncycle">1</scalar>
+                        </list>
+                     </list>
+                     <module cmlx:templateRef="scfdone">
+                        <list cmlx:templateRef="scfdone">
+                           <list>
+                              <scalar dataType="xsd:double" dictRef="cc:kinener">1.744234579177e+03</scalar>
+                              <scalar dataType="xsd:double" dictRef="cc:potener">-9.683571768901e+03</scalar>
+                              <scalar dataType="xsd:double" dictRef="cc:eener">3.402109002585e+03</scalar>
+                           </list>
+                        </list>
+                     </module>
+                  </module>
+                  <list cmlx:templateRef="l502">
+                     <scalar dataType="xsd:string" dictRef="g:l502">Using DIIS extrapolation, IDIIS=  1040.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">NGot=  2577661952 LenX=  2561886497 LenY=  2554026885</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">Requested convergence on RMS density matrix=1.00D-05 within 180 cycles.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">Requested convergence on MAX density matrix=1.00D-03.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">Requested convergence on             energy=1.00D-03.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">Virtual orbitals will be shifted by   0.800 hartree.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">No special actions if energy rises.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502">Fock matrices will be formed incrementally for  20 cycles.</scalar>
+                     <scalar dataType="xsd:string" dictRef="g:l502"/>
+                  </list>
+               </module>
+            </module>
+         </module>
+         <module dictRef="cc:finalization" id="finalization">
+            <propertyList>
+               <property dictRef="cc:jobtime">
+                  <scalar dataType="xsd:string">PT78S</scalar>
+               </property>
+               <property dictRef="cc:jobdatetime.end">
+                  <scalar dataType="xsd:date">2021-06-11T21:54:28.000+02:00</scalar>
+               </property>
+            </propertyList>
+            <module dictRef="cc:userDefinedModule" id="otherComponents">
+               <module cmlx:templateRef="l9999.archive" dictRef="cc:userDefinedModule">
+                  <scalar dataType="xsd:string" dictRef="g:zmat">0</scalar>
+                  <scalar dataType="xsd:double" dictRef="cc:hfenergy" units="nonsi:hartree">-1811.6317658</scalar>
+                  <scalar dataType="xsd:double" dictRef="cc:rmsd" units="nonsi:unknown">2.321E-6</scalar>
+                  <scalar dataType="xsd:string" dictRef="x:Quadrupole">-21.8756993,6.3662847,15.5094147,3.5878316,-5.9396157,0.223725</scalar>
+                  <scalar dataType="xsd:string" dictRef="cc:pointgroup">C01 [X(C19H29Cl2N1Ru1)]</scalar>
+                  <array dataType="xsd:double"
+                         dictRef="cc:dipole"
+                         size="3"
+                         units="nonsi:debye">3.3308904 1.2024877 0.8790754</array>
+               </module>
+            </module>
+            <molecule formalCharge="0" id="mol9999" spinMultiplicity="1">
+               <atomArray>
+                  <atom elementType="Ru"
+                        id="a1"
+                        x3="-3.03942134"
+                        y3="0.38451128"
+                        z3="-0.93822269"/>
+                  <atom elementType="C"
+                        id="a2"
+                        x3="-1.7553223"
+                        y3="1.87598544"
+                        z3="1.42905853"/>
+                  <atom elementType="N"
+                        id="a3"
+                        x3="-0.22738854"
+                        y3="0.81363071"
+                        z3="-0.01599583"/>
+                  <atom elementType="C"
+                        id="a4"
+                        x3="-1.57053384"
+                        y3="1.02421674"
+                        z3="0.14077316"/>
+                  <atom elementType="C"
+                        id="a5"
+                        x3="0.66180955"
+                        y3="1.71314454"
+                        z3="0.8540449"/>
+                  <atom elementType="C"
+                        id="a6"
+                        x3="-0.38869463"
+                        y3="2.5791307"
+                        z3="1.56732095"/>
+                  <atom elementType="H"
+                        id="a7"
+                        x3="-0.44915339"
+                        y3="3.58036603"
+                        z3="1.06687514"/>
+                  <atom elementType="H"
+                        id="a8"
+                        x3="-0.1213353"
+                        y3="2.75254743"
+                        z3="2.64150667"/>
+                  <atom elementType="C"
+                        id="a9"
+                        x3="1.60231719"
+                        y3="2.57798354"
+                        z3="0.00337677"/>
+                  <atom elementType="H"
+                        id="a10"
+                        x3="1.04937454"
+                        y3="3.24069681"
+                        z3="-0.68834991"/>
+                  <atom elementType="H"
+                        id="a11"
+                        x3="2.32697234"
+                        y3="1.96696536"
+                        z3="-0.57181188"/>
+                  <atom elementType="H"
+                        id="a12"
+                        x3="2.18411529"
+                        y3="3.22552153"
+                        z3="0.69272813"/>
+                  <atom elementType="C"
+                        id="a13"
+                        x3="1.53029732"
+                        y3="0.92179629"
+                        z3="1.83932498"/>
+                  <atom elementType="H"
+                        id="a14"
+                        x3="2.13110186"
+                        y3="1.65081636"
+                        z3="2.42156653"/>
+                  <atom elementType="H"
+                        id="a15"
+                        x3="2.23968598"
+                        y3="0.25807448"
+                        z3="1.30970813"/>
+                  <atom elementType="H"
+                        id="a16"
+                        x3="0.93992572"
+                        y3="0.32505206"
+                        z3="2.55821317"/>
+                  <atom elementType="C"
+                        id="a17"
+                        x3="-2.03132685"
+                        y3="0.8850112"
+                        z3="2.58398327"/>
+                  <atom elementType="H"
+                        id="a18"
+                        x3="-2.10012027"
+                        y3="1.44322233"
+                        z3="3.5424563"/>
+                  <atom elementType="H"
+                        id="a19"
+                        x3="-1.23786628"
+                        y3="0.11815189"
+                        z3="2.68517059"/>
+                  <atom elementType="H"
+                        id="a20"
+                        x3="-2.9968288"
+                        y3="0.3580265"
+                        z3="2.42892335"/>
+                  <atom elementType="C"
+                        id="a21"
+                        x3="0.36582243"
+                        y3="-0.21517191"
+                        z3="-0.86904615"/>
+                  <atom elementType="C"
+                        id="a22"
+                        x3="0.75562039"
+                        y3="0.11192779"
+                        z3="-2.19912952"/>
+                  <atom elementType="C"
+                        id="a23"
+                        x3="1.244756"
+                        y3="-0.9104206"
+                        z3="-3.0366539"/>
+                  <atom elementType="H"
+                        id="a24"
+                        x3="1.52285994"
+                        y3="-0.6535519"
+                        z3="-4.07263769"/>
+                  <atom elementType="C"
+                        id="a25"
+                        x3="1.37590325"
+                        y3="-2.22293549"
+                        z3="-2.58036023"/>
+                  <atom elementType="C"
+                        id="a26"
+                        x3="1.04638376"
+                        y3="-2.51990922"
+                        z3="-1.25604732"/>
+                  <atom elementType="H"
+                        id="a27"
+                        x3="1.17548902"
+                        y3="-3.55038467"
+                        z3="-0.88811634"/>
+                  <atom elementType="C"
+                        id="a28"
+                        x3="0.55082772"
+                        y3="-1.54397"
+                        z3="-0.3689769"/>
+                  <atom elementType="C"
+                        id="a29"
+                        x3="0.72037093"
+                        y3="1.4979884"
+                        z3="-2.79997535"/>
+                  <atom elementType="H"
+                        id="a30"
+                        x3="0.28003482"
+                        y3="1.46516115"
+                        z3="-3.81812164"/>
+                  <atom elementType="C"
+                        id="a31"
+                        x3="0.35082321"
+                        y3="-1.98793279"
+                        z3="1.08464805"/>
+                  <atom elementType="Cl"
+                        id="a32"
+                        x3="-2.64870011"
+                        y3="-1.88148658"
+                        z3="-1.04945468"/>
+                  <atom elementType="Cl"
+                        id="a33"
+                        x3="-4.9342387"
+                        y3="1.71698157"
+                        z3="-0.63009418"/>
+                  <atom elementType="C"
+                        id="a34"
+                        x3="-2.43901862"
+                        y3="1.03338096"
+                        z3="-2.51265535"/>
+                  <atom elementType="H"
+                        id="a35"
+                        x3="-1.6625865"
+                        y3="1.80536099"
+                        z3="-2.65653105"/>
+                  <atom elementType="H"
+                        id="a36"
+                        x3="-2.96594858"
+                        y3="0.67886485"
+                        z3="-3.43254117"/>
+                  <atom elementType="H"
+                        id="a37"
+                        x3="-0.05889516"
+                        y3="-1.12978766"
+                        z3="1.65417846"/>
+                  <atom elementType="H"
+                        id="a38"
+                        x3="1.75347611"
+                        y3="1.89223863"
+                        z3="-2.91309533"/>
+                  <atom elementType="C"
+                        id="a39"
+                        x3="-0.62225238"
+                        y3="-3.16594456"
+                        z3="1.27588646"/>
+                  <atom elementType="H"
+                        id="a40"
+                        x3="-0.31925167"
+                        y3="-4.04777269"
+                        z3="0.6717395"/>
+                  <atom elementType="H"
+                        id="a41"
+                        x3="-1.65789876"
+                        y3="-2.90404241"
+                        z3="0.99829337"/>
+                  <atom elementType="H"
+                        id="a42"
+                        x3="-0.60925488"
+                        y3="-3.48078538"
+                        z3="2.34141146"/>
+                  <atom elementType="C"
+                        id="a43"
+                        x3="-2.85301723"
+                        y3="2.9463336"
+                        z3="1.43247865"/>
+                  <atom elementType="H"
+                        id="a44"
+                        x3="-2.82166912"
+                        y3="3.5740645"
+                        z3="0.51929983"/>
+                  <atom elementType="H"
+                        id="a45"
+                        x3="-2.68463315"
+                        y3="3.60796053"
+                        z3="2.30964765"/>
+                  <atom elementType="H"
+                        id="a46"
+                        x3="-3.86714081"
+                        y3="2.5184059"
+                        z3="1.52031307"/>
+                  <atom elementType="C"
+                        id="a47"
+                        x3="1.7070863"
+                        y3="-2.40047419"
+                        z3="1.70196545"/>
+                  <atom elementType="H"
+                        id="a48"
+                        x3="2.04383633"
+                        y3="-3.37257764"
+                        z3="1.28226638"/>
+                  <atom elementType="H"
+                        id="a49"
+                        x3="1.60634277"
+                        y3="-2.53302513"
+                        z3="2.80037211"/>
+                  <atom elementType="H"
+                        id="a50"
+                        x3="2.51453716"
+                        y3="-1.66572916"
+                        z3="1.5167184"/>
+                  <atom elementType="H"
+                        id="a51"
+                        x3="0.15609162"
+                        y3="2.22944467"
+                        z3="-2.198496"/>
+                  <atom elementType="H"
+                        id="a52"
+                        x3="1.74788564"
+                        y3="-3.01324781"
+                        z3="-3.25288134"/>
+               </atomArray>
+               <bondArray>
+                  <bond atomRefs2="a1 a33" order="S"/>
+                  <bond atomRefs2="a1 a32" order="S"/>
+                  <bond atomRefs2="a1 a4" order="S"/>
+                  <bond atomRefs2="a1 a34" order="S"/>
+                  <bond atomRefs2="a2 a4" order="S"/>
+                  <bond atomRefs2="a2 a17" order="S"/>
+                  <bond atomRefs2="a2 a6" order="S"/>
+                  <bond atomRefs2="a2 a43" order="S"/>
+                  <bond atomRefs2="a3 a5" order="S"/>
+                  <bond atomRefs2="a3 a21" order="S"/>
+                  <bond atomRefs2="a3 a4" order="S"/>
+                  <bond atomRefs2="a5 a6" order="S"/>
+                  <bond atomRefs2="a5 a9" order="S"/>
+                  <bond atomRefs2="a5 a13" order="S"/>
+                  <bond atomRefs2="a6 a7" order="S"/>
+                  <bond atomRefs2="a6 a8" order="S"/>
+                  <bond atomRefs2="a9 a12" order="S"/>
+                  <bond atomRefs2="a9 a11" order="S"/>
+                  <bond atomRefs2="a9 a10" order="S"/>
+                  <bond atomRefs2="a13 a14" order="S"/>
+                  <bond atomRefs2="a13 a15" order="S"/>
+                  <bond atomRefs2="a13 a16" order="S"/>
+                  <bond atomRefs2="a17 a18" order="S"/>
+                  <bond atomRefs2="a17 a20" order="S"/>
+                  <bond atomRefs2="a17 a19" order="S"/>
+                  <bond atomRefs2="a21 a28" order="S"/>
+                  <bond atomRefs2="a21 a22" order="S"/>
+                  <bond atomRefs2="a22 a29" order="S"/>
+                  <bond atomRefs2="a22 a23" order="S"/>
+                  <bond atomRefs2="a23 a25" order="S"/>
+                  <bond atomRefs2="a23 a24" order="S"/>
+                  <bond atomRefs2="a25 a26" order="S"/>
+                  <bond atomRefs2="a25 a52" order="S"/>
+                  <bond atomRefs2="a26 a28" order="S"/>
+                  <bond atomRefs2="a26 a27" order="S"/>
+                  <bond atomRefs2="a28 a31" order="S"/>
+                  <bond atomRefs2="a29 a38" order="S"/>
+                  <bond atomRefs2="a29 a30" order="S"/>
+                  <bond atomRefs2="a29 a51" order="S"/>
+                  <bond atomRefs2="a31 a47" order="S"/>
+                  <bond atomRefs2="a31 a39" order="S"/>
+                  <bond atomRefs2="a31 a37" order="S"/>
+                  <bond atomRefs2="a34 a36" order="S"/>
+                  <bond atomRefs2="a34 a35" order="S"/>
+                  <bond atomRefs2="a39 a42" order="S"/>
+                  <bond atomRefs2="a39 a40" order="S"/>
+                  <bond atomRefs2="a39 a41" order="S"/>
+                  <bond atomRefs2="a43 a45" order="S"/>
+                  <bond atomRefs2="a43 a44" order="S"/>
+                  <bond atomRefs2="a43 a46" order="S"/>
+                  <bond atomRefs2="a47 a48" order="S"/>
+                  <bond atomRefs2="a47 a49" order="S"/>
+                  <bond atomRefs2="a47 a50" order="S"/>
+               </bondArray>
+               <property dictRef="cml:molmass">
+                  <scalar units="unit:dalton">414.1859999999997</scalar>
+               </property>
+               <formula convention="iupac:inchi"
+                        inline="InChI=1S/C18H27N.CH2.2ClH.Ru/c1-13(2)15-10-8-9-14(3)16(15)19-12-17(4,5)11-18(19,6)7;;;;/h8-10,13H,11H2,1-7H3;1H2;2*1H;/q;;;;+2/p-2">
+                  <scalar dataType="xsd:integer" id="auxInfo">AuxInfo=1/1/N:39,47,29,17,43,9,13,25,23,26,6,4,31,22,28,21,2,5,3;34;32;33;1/E:(1,2)(4,5)(6,7);;;;/CRV:8.3,9.3,10.3,12.2,14.3,15.3,16.3;1.2;;;/rA:52RuCNC3CCHHCHHHCHHHCHHHC3C3C3HC3C3HC3CHCClClC3HHHHCHHHCHHHCHHHHH/rB:;;s1s2s3;s3;s2s5;s6;s6;s5;s9;s9;s9;s5;s13;s13;s13;s2;s17;s17;s17;s3;s21;s22;s23;s23;s25;s26;s21s26;s22;s29;s28;s1;s1;s1;s34;s34;s31;s29;s31;s39;s39;s39;s2;s43;s43;s43;s31;s47;s47;s47;s29;s25;/rC:;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;</scalar>
+               </formula>
+            </molecule>
+         </module>
+      </module>
+   </module>
+</module>
