@@ -19,7 +19,7 @@ metathesis cycle; its conformers of TS4-5, 5, TS5-6 and 6 are groups. Ethylene i
 species. On top: the energy profiles, the energetic span of the cycle, the selectivity between
 metathesis and decomposition at 4, the rotamer equilibrium of 2' and 2, steric maps of the two
 carbenes, and notes. There is no IRC in the deposit and none was run (D172), nor any scan of our
-own (D205). With --copy it also writes the investigation's read-only copy (D79), which needs the
+own (D206). With --copy it also writes the investigation's read-only copy (D79), which needs the
 interface built (scripts/build_frontend.py).
 """
 
@@ -85,7 +85,7 @@ NODES = {
     "C1Ph_TS4-3_2": ("TS4-3 C1Ph 2", "C1Ph", 2, TS),
     # The deposit's TS4-5 C1Ph C is left out: its single points were run on a structure
     # 0.002 Å from its optimization's, so they would go to a derived node (ID-5) and C would
-    # have no energy at the paper's level (A137).
+    # have no energy at the paper's level (A139).
     **{f"C1Ph_TS4-5_{c}": (f"TS4-5 C1Ph {c}", "C1Ph", 4, TS) for c in "ABD"},
     **{f"C1Ph_5_{c}": (f"5 C1Ph {c}", "C1Ph", 5, MIN) for c in "ABCD"},
     **{f"C1Ph_TS5-6_{c}": (f"TS5-6 C1Ph {c}", "C1Ph", 6, TS) for c in "ABCD"},
