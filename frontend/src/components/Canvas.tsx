@@ -806,7 +806,7 @@ function CanvasView({
   onUndoTidy?: () => void
   /** D207: the springs layout (ELK), handed in by the app so the read-only copy, which has no
    * Tidy, does not carry it. */
-  springLayout?: (boxes: TidyBox[], links: TidyLink[]) => Promise<Positions>
+  springLayout?: (boxes: TidyBox[], links: TidyLink[], inPlace: boolean) => Promise<Positions>
 }) {
   const flow = useReactFlow()
   const theme = useTheme() // D185: React Flow's own colours follow the theme
@@ -1424,8 +1424,9 @@ function CanvasView({
     })
     let placed: Positions
     try {
-      if (layout === 'springs' && !springLayout) return
-      placed = layout === 'springs' ? await springLayout!(boxes, links) : tidy(boxes, links)
+      if (layout === 'columns') placed = tidy(boxes, links)
+      else if (springLayout) placed = await springLayout(boxes, links, layout === 'settle')
+      else return
     } catch (err) {
       onError(`Could not tidy the canvas: ${String(err)}`)
       return
@@ -1443,7 +1444,7 @@ function CanvasView({
     // D207: with springs the boxes sit at every angle, so each arrow between two tidied boxes is
     // turned to leave and arrive on the sides that face each other.
     let sides: TidySides | undefined
-    if (layout === 'springs') {
+    if (layout !== 'columns') {
       sides = { before: {}, after: {} }
       const moved = new Set(boxes.filter((b) => b.moves).map((b) => b.id))
       const rect = new Map(boxes.map((b) => [b.id, { ...b, ...(placed[b.id] ?? {}) }]))

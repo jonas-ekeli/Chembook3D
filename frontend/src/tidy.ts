@@ -15,11 +15,17 @@ export type TidyBox = { id: string; x: number; y: number; w: number; h: number; 
 export type TidyLink = { source: string; target: string; sourceSide?: Side; targetSide?: Side }
 export type Side = 'top' | 'right' | 'bottom' | 'left'
 export type Positions = Record<string, { x: number; y: number }>
-/** D199 step columns (this module), or D207 springs (ELK's stress layout, `elkTidy.ts`). */
-export type TidyMode = 'columns' | 'springs'
+/** D199 step columns (this module), or D207 springs (ELK's stress layout, `elkTidy.ts`): a new
+ * layout, or (D208) settled from where the boxes are. */
+export type TidyMode = 'columns' | 'springs' | 'settle'
 export const TIDY_MODES: { mode: TidyMode; label: string; title: string }[] = [
   { mode: 'columns', label: 'In step columns', title: 'One column per reaction step, fewer crossings, no overlaps (D199)' },
-  { mode: 'springs', label: 'With springs', title: 'Arrows as springs of one length, for big canvases: a cycle comes out as a loop (D207)' },
+  { mode: 'springs', label: 'With springs', title: 'Arrows as springs, for big canvases: a new layout where a cycle comes out as a loop (D207)' },
+  {
+    mode: 'settle',
+    label: 'With springs, in place',
+    title: 'Arrows as springs, starting from where the boxes are: they settle near their places (D208)',
+  },
 ]
 
 /** Room between columns, for the arrows and their labels (D98), and between cards in a column. */
