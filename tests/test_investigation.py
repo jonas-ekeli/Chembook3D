@@ -92,7 +92,7 @@ def test_schema_upgrade_backs_up_the_database_first(tmp_path, monkeypatch):
 
     assert upgrades == ["head"]
     backups = list((folder / inv.BACKUP_DIR).iterdir())
-    assert len(backups) == 1 and backups[0].name.startswith("investigation.sqlite.0030.")
+    assert len(backups) == 1 and backups[0].name.startswith("investigation.sqlite.0031.")
     assert b"keep me" in backups[0].read_bytes()
 
 
@@ -258,6 +258,27 @@ def test_group_members_keep_their_order_on_upgrade(tmp_path):
             assert positions == {"a": 2, "b": 1, "c": 3, "d": 1, "e": None}
     finally:
         investigation.close()
+
+
+def test_profiles_take_the_views_reference_on_upgrade(tmp_path):
+    # D205: profiles made before each kept its own reference start from the energy view's.
+    folder = tmp_path / "pre-d199"
+    folder.mkdir()
+    engine = inv._make_engine(folder / inv.DB_NAME)
+    with engine.begin() as connection:
+        inv.command.upgrade(inv._alembic_config(connection), "0030")
+        sql = connection.exec_driver_sql
+        sql("INSERT INTO investigation_info (id, name, created_at) VALUES (1, 'Old', '2026-10-01')")
+        sql("""UPDATE investigation_info SET view_state = '{"reference_id": "n1"}'""")
+        sql(
+            "INSERT INTO energy_profiles (id, seq, name, paths, created_at, updated_at) VALUES"
+            """ ('p1', 1, 'Profile 1', '[{"ids": ["n1"]}]', '2026-10-01', '2026-10-01')"""
+        )
+    with engine.begin() as connection:
+        inv.command.upgrade(inv._alembic_config(connection), "0031")
+        found = connection.exec_driver_sql("SELECT reference_id FROM energy_profiles").scalar()
+    engine.dispose()
+    assert found == "n1"
 
 
 def test_recent_list_remembers_opened_folders(tmp_path, client):

@@ -371,9 +371,10 @@ TOOLS: list[ToolSpec] = [
         "The saved energy profiles of the drawer (D190): each a named figure of pathways (node "
         "and group ids in order, the branch, `shown`: drawn on the figure, and `shifts`: steps "
         "moved later along the axis by whole columns with every step after them, D194, and "
-        "`colour`: the user's choice or null for the branch's, D195). Value "
-        "them with "
-        "get_energy_profile; they are made and changed in the page only.",
+        "`colour`: the user's choice or null for the branch's, D195) with its own "
+        "`reference_id`, which every pathway in it is relative to (D205; null: the first node "
+        "shown; not the node cards' reference). Value them with get_energy_profile, passing "
+        "that reference_id; they are made and changed in the page only.",
     ),
     T(
         "list_alignment_sets",

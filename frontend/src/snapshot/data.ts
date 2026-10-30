@@ -72,6 +72,8 @@ export type SnapshotData = {
   views: Record<string, SharedView>
   paths: DrawerPath[]
   reference_id: string | null
+  /** D205: the reference of the profile the drawer had open; copies made before share the cards'. */
+  profile_reference_id?: string | null
   /** D128: the view the app showed when the copy was made; copies made before have none. */
   view?: SharedViewState
   /** By "level|type|reference". */
@@ -130,6 +132,8 @@ export type ReaderView = {
   energyType: EnergyType
   edgeEnergies: boolean
   referenceId: string | null
+  /** D205: the drawer's reference, apart from the node cards'. */
+  profileReferenceId: string | null
   filters: Filters
   expanded: string[]
   /** D193: the sub-investigation whose canvas is open; none: the main canvas. */
@@ -163,6 +167,9 @@ function storedView(data: SnapshotData): Partial<ReaderView> {
   if (typeof stored.edgeEnergies === 'boolean') found.edgeEnergies = stored.edgeEnergies
   if (stored.referenceId === null || (typeof stored.referenceId === 'string' && referenceIds(data).has(stored.referenceId)))
     found.referenceId = stored.referenceId
+  const onPaths = new Set(data.paths.flatMap((p) => p.ids))
+  if (stored.profileReferenceId === null || (typeof stored.profileReferenceId === 'string' && onPaths.has(stored.profileReferenceId)))
+    found.profileReferenceId = stored.profileReferenceId
   const filters = stored.filters as Record<string, unknown> | null | undefined
   if (filters && typeof filters === 'object') {
     const [branches, statuses, steps] = [strings(filters.branches), strings(filters.statuses), strings(filters.steps)]
@@ -188,6 +195,7 @@ export function openingView(data: SnapshotData): ReaderView {
     energyType: view?.energy_type ?? 'G',
     edgeEnergies: view?.edge_energies ?? true,
     referenceId: data.reference_id,
+    profileReferenceId: data.profile_reference_id === undefined ? data.reference_id : data.profile_reference_id,
     filters: view?.filters ?? NO_FILTERS,
     expanded: view?.expanded ?? [],
     canvas: view?.canvas ?? null,

@@ -31,6 +31,8 @@ class EnergyProfileOut(BaseModel):
     id: str
     name: str
     paths: list[ProfilePathOut]
+    # D205: the node or group all its pathways are relative to; None: the first node shown.
+    reference_id: str | None = None
 
 
 class EnergyProfileIn(BaseModel):
@@ -39,12 +41,17 @@ class EnergyProfileIn(BaseModel):
     # step's index, "by": columns later}] (D194: optional, none moved), "colour": "#rrggbb" or
     # null (D195: optional, the branch's colour)}.
     paths: list[dict[str, Any]] | None = None
+    # D205: a node or group on one of its pathways, or null for the first node shown.
+    reference_id: str | None = None
 
 
 def _out(session: DbSession, profile: EnergyProfile) -> EnergyProfileOut:
     paths = profile_service.current_paths(session, profile.paths or [])
     return EnergyProfileOut(
-        id=profile.id, name=profile.name, paths=[ProfilePathOut(**p) for p in paths]
+        id=profile.id,
+        name=profile.name,
+        paths=[ProfilePathOut(**p) for p in paths],
+        reference_id=profile_service.current_reference(profile, paths),
     )
 
 
@@ -55,7 +62,7 @@ def list_energy_profiles(session: DbSession):
 
 @router.post("/energy-profiles", response_model=EnergyProfileOut, status_code=201)
 def create_energy_profile(body: EnergyProfileIn, session: DbSession):
-    return _out(session, profile_service.create(session, body.name, body.paths))
+    return _out(session, profile_service.create(session, body.name, body.paths, body.reference_id))
 
 
 @router.patch("/energy-profiles/{profile_id}", response_model=EnergyProfileOut)
