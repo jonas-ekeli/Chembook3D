@@ -199,6 +199,42 @@ test('energy drawer: a long node label wraps instead of hiding the pathway butto
   }
 })
 
+// T-UI-78, A138: a pathway that closes a cycle shows Turnover beside Undo step, Sterics and the
+// remove button; its name keeps its width and the buttons wrap to the next line instead.
+test('energy drawer: a pathway name is not squeezed by its buttons', async ({ page }) => {
+  let closing = ''
+  try {
+    await openDemo(page)
+    const canvas = await (await page.request.get('/api/canvas')).json()
+    const id = (label: string) => canvas.nodes.find((n: { label: string }) => n.label === label).id
+    const response = await page.request.post('/api/transitions', { data: { source_id: id('B-S3'), target_id: id('T-S0') } })
+    closing = (await response.json()).id
+    await page.getByRole('group', { name: 'Node B-S3', exact: true }).click()
+    await page.getByRole('button', { name: 'Profile and table' }).click()
+    const drawer = page.getByLabel('Energy drawer')
+    await drawer.getByRole('button', { name: 'Start at selected node', exact: true }).click()
+    const pathway = drawer.getByRole('group', { name: /^Pathway / })
+    // Single edges are followed: B-S3 → T-S0, then B-S1 on to the cycle's close at B-S3.
+    await pathway.getByRole('group', { name: 'Continue with' }).getByRole('button', { name: 'B-S1' }).click()
+    await expect(pathway).toContainText('Cycle closed.')
+    await expect(pathway.getByRole('button', { name: 'Turnover' })).toBeVisible()
+
+    const name = pathway.locator('.pathway-head strong')
+    await expect(name).toHaveText('B-S3 → B-S3')
+    const box = (await name.boundingBox())!
+    const lineHeight = parseFloat(await name.evaluate((el) => getComputedStyle(el).lineHeight))
+    expect(box.height).toBeLessThan(lineHeight * 1.5) // one line
+    const list = (await drawer.getByLabel('Pathways', { exact: true }).boundingBox())!
+    for (const label of ['Undo step', 'Turnover', 'Sterics']) {
+      const button = (await pathway.getByRole('button', { name: label }).boundingBox())!
+      expect(button.x + button.width).toBeLessThanOrEqual(list.x + list.width)
+    }
+  } finally {
+    if (closing) await page.request.delete(`/api/transitions/${closing}`)
+    await forgetView(page.request, join(E2E_DIR, 'demo'))
+  }
+})
+
 // T-UI-65, D189: Undo step offers every way on from the node before, so a fork can be taken
 // the other way, and an edge drawn after a pathway stopped is offered when you come back.
 test('energy drawer: a pathway can always go on after Undo step or a new edge', async ({ page }) => {
@@ -304,7 +340,13 @@ test('energy drawer: saved profiles with pathways shown on the figure', async ({
     await picker.selectOption({ label: 'Only B' })
     await expect(drawer.getByRole('group', { name: /^Pathway / })).toHaveCount(1)
 
-    // After a reload the drawer opens on the profile it had open.
+    // After a reload the drawer opens on the profile it had open, once the view is saved (a
+    // reload cancels a save still on its way, which a slow runner showed).
+    const profiles = (await (await page.request.get('/api/energy-profiles')).json()) as { id: string; name: string }[]
+    const onlyB = profiles.find((profile) => profile.name === 'Only B')!.id
+    await expect
+      .poll(async () => (await (await page.request.get('/api/view-state')).json()).drawer?.profile_id)
+      .toBe(onlyB)
     await page.reload()
     await expect(picker.locator('option:checked')).toHaveText('Only B')
 
