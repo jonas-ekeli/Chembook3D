@@ -22,6 +22,7 @@ from chembook3d.models import (
     LevelOfTheory,
     Node,
 )
+from chembook3d.parsers.common import NOT_STATIONARY
 from chembook3d.services import geometry, history
 
 LEVEL_FIELDS = ("program", "method", "basis", "dispersion", "solvation_model", "solvent")
@@ -131,16 +132,41 @@ def optimizations(node: Node) -> list[Calculation]:
     return sorted(found, key=lambda c: (c.created_at, c.step_index or 0))
 
 
+def _stationary_frequency(calculation: Calculation) -> bool:
+    result = calculation.result
+    return (
+        calculation.type == CalculationType.FREQUENCY
+        and calculation.level is not None
+        and not calculation.constraints
+        and bool(calculation.geometry)
+        and result is not None
+        and NOT_STATIONARY not in (result.printed or {})
+    )
+
+
+def geometry_sources(node: Node) -> list[Calculation]:
+    """D100: the calculations a geometry level comes from, oldest first: the node's
+    optimizations (D157: never a held one). D200: a node with none, whose optimization was run
+    elsewhere and only its frequency job imported, takes its frequency jobs that found a
+    stationary point (none of them W-FREQ-NONSTAT)."""
+    found = optimizations(node)
+    if found:
+        return found
+    found = [c for c in node.calculations if _stationary_frequency(c)]
+    return sorted(found, key=lambda c: (c.created_at, c.step_index or 0))
+
+
 def optimization_at(
     node: Node | None, rows: list[Any] | None, tolerance: float | None = None
 ) -> Calculation | None:
     """D100: the optimization on the node that ended on this geometry, the latest if several
-    did. A single point or frequency job takes its geometry level from it."""
+    did (D200: or the frequency job at it, on a node without optimizations). A single point
+    or frequency job takes its geometry level from it."""
     if node is None or not rows:
         return None
     if tolerance is None:
         tolerance = app_settings.load().geometry_tolerance
-    matching = [c for c in optimizations(node) if geometry.matches(c.geometry, rows, tolerance)]
+    matching = [c for c in geometry_sources(node) if geometry.matches(c.geometry, rows, tolerance)]
     return matching[-1] if matching else None
 
 
@@ -198,7 +224,7 @@ def node_geometry_optimization(
     if node is None:
         return None
     return optimization_at(node, node.geometry, tolerance) or next(
-        reversed(optimizations(node)), None
+        reversed(geometry_sources(node)), None
     )
 
 
