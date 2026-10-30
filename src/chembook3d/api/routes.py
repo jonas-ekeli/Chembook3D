@@ -528,7 +528,7 @@ def _node_out(session: Session, node: Node) -> NodeOut:
         pos_x=node.pos_x,
         pos_y=node.pos_y,
         view_rotation=node.view_rotation,
-        scan_path=scan_edges.has_scan_path(session, node.id),
+        scan_path=scan_edges.has_scan_path(node),
         path_edge_id=node.path_edge_id,
         on_edge_only=node.on_edge_only,
         on_edge=scan_edges.on_edge(session, node),

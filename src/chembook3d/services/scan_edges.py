@@ -24,12 +24,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from chembook3d import cloud_jobs
-from chembook3d.models import Calculation, CalculationType, GroupNode, Node, NodeKind, Transition
-from chembook3d.parsers import joined, xtb
+from chembook3d.models import Calculation, GroupNode, Node, NodeKind, Transition
+from chembook3d.parsers import xtb
 from chembook3d.services import history, trajectory
 from chembook3d.services.records import RecordError
 
@@ -53,26 +53,10 @@ def paths_only(node: Node) -> bool:
     return bool(node.calculations) and all(is_path(c) for c in node.calculations)
 
 
-def has_scan_path(session: Session, node_id: str) -> bool:
-    """`scan_paths` without loading the node's calculations (asked for every node shown);
-    only their constraints are read for D200's scans."""
-    query = (
-        select(Calculation.id)
-        .where(
-            Calculation.node_id == node_id,
-            Calculation.type == CalculationType.OTHER,
-            or_(
-                (Calculation.program == xtb.PROGRAM)
-                & Calculation.route.startswith(xtb.SCAN_ROUTE, autoescape=True),
-                Calculation.route.startswith(joined.ROUTE, autoescape=True),
-            ),
-        )
-        .limit(1)
-    )
-    if session.scalar(query) is not None:
-        return True
-    held = session.scalars(select(Calculation.constraints).where(Calculation.node_id == node_id))
-    return any(trajectory.names_scan(constraints or []) for constraints in held)
+def has_scan_path(node: Node) -> bool:
+    """`scan_paths` is not empty: the node's panel offers to show it on an edge. The node's
+    calculations are loaded already for its warnings, so this asks the database nothing."""
+    return any(is_path(c) for c in node.calculations)
 
 
 def linked(session: Session, transition_id: str) -> list[Node]:
