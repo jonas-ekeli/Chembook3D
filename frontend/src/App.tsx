@@ -36,7 +36,7 @@ import { BoxEndDialog, MoveToDialog, NewSubDialog, SubInspector } from './compon
 import { canvasOf, chainOf, contentsText, placeText, subName, subsOf, transitionCanvas, visibleCanvases } from './subCanvas'
 import { CloudJobsDialog } from './components/CloudJobsDialog'
 import { useScanPathImports } from './cloudJobs'
-import { CanvasPane, type CanvasEnergy, type CanvasContextMenu, type CanvasTarget } from './components/Canvas'
+import { CanvasPane, type CanvasEnergy, type CanvasContextMenu, type CanvasTarget, type TidySides } from './components/Canvas'
 import { EnergyDrawer, type DrawerPath, type DrawerView } from './components/EnergyDrawer'
 import { download } from './util'
 import { FilterMenu } from './components/FilterMenu'
@@ -66,7 +66,7 @@ import { HPC, hpcLabel } from './hpc'
 import { LaunchNotices, ShutDownDialog } from './components/ShutDown'
 import { StartPage } from './components/StartPage'
 import { Menu, type MenuItem } from './components/MoreMenu'
-import type { Positions } from './tidy'
+import { TIDY_MODES, type Positions } from './tidy'
 import { ContextMenu, type MenuHeading } from './components/ContextMenu'
 import { CommandPalette, KeyListener, ShortcutsDialog } from './components/CommandPalette'
 import {
@@ -711,25 +711,51 @@ function App() {
   }
 
   // D199: the last Tidy's earlier positions, for its one-step Undo tidy, while its canvas is the
-  // one open. Positions are not in the history, so History cannot put them back.
-  const [tidied, setTidied] = useState<{ folder: string | null; canvas: string | null; before: Positions } | null>(null)
-  const tidyUndo = tidied && tidied.folder === shownFolder && tidied.canvas === openCanvas ? tidied.before : null
-  const tidy = (before: Positions, after: Positions) => {
-    if (!Object.keys(after).length) {
+  // one open. Positions are not in the history, so History cannot put them back. D207: with the
+  // arrow sides a springs Tidy turned (those are in the history, as any change of sides).
+  const [tidied, setTidied] = useState<{
+    folder: string | null
+    canvas: string | null
+    before: Positions
+    sides: Record<string, TransitionSides>
+  } | null>(null)
+  const tidyUndo = tidied && tidied.folder === shownFolder && tidied.canvas === openCanvas ? tidied : null
+  const saveSides = (sides: Record<string, TransitionSides>) => {
+    if (!Object.keys(sides).length) return
+    // Shown at once, like positions; saved one transition at a time.
+    setCanvas((current) => ({
+      ...current,
+      transitions: current.transitions.map((t) => (sides[t.id] ? { ...t, ...sides[t.id] } : t)),
+    }))
+    Promise.all(Object.entries(sides).map(([id, s]) => api.updateTransition(id, s))).catch((err: unknown) => {
+      setError(errorText(err))
+      reload()
+    })
+  }
+  const tidy = (before: Positions, after: Positions, sides?: TidySides) => {
+    if (!Object.keys(after).length && !Object.keys(sides?.after ?? {}).length) {
       setNotice('Already tidy: nothing to move.')
       return
     }
     setNotice(null)
     savePositions(after)
-    setTidied({ folder: shownFolder, canvas: openCanvas, before })
+    saveSides(sides?.after ?? {})
+    setTidied({ folder: shownFolder, canvas: openCanvas, before, sides: sides?.before ?? {} })
   }
   const undoTidy = () => {
     if (!tidyUndo) return
     // Records deleted since the tidy are left out.
     const known = new Set([...canvas.nodes, ...canvas.groups, ...subs].map((r) => r.id))
-    savePositions(Object.fromEntries(Object.entries(tidyUndo).filter(([id]) => known.has(id))))
+    savePositions(Object.fromEntries(Object.entries(tidyUndo.before).filter(([id]) => known.has(id))))
+    const edges = new Set(canvas.transitions.map((t) => t.id))
+    saveSides(Object.fromEntries(Object.entries(tidyUndo.sides).filter(([id]) => edges.has(id))))
     setTidied(null)
   }
+  // D207: the springs layout (ELK), loaded when first used.
+  const springLayout = useCallback(
+    async (...args: Parameters<typeof import('./elkTidy').springTidy>) => (await import('./elkTidy')).springTidy(...args),
+    [],
+  )
   // Moving a card by hand ends what Undo tidy would put back.
   const dragged = (positions: Record<string, { x: number; y: number }>) => {
     setTidied(null)
@@ -1533,6 +1559,9 @@ function App() {
     selectivity: 'chart',
     equilibrium: 'chart',
   }
+  // D199, D207: each way Tidy can lay the cards out.
+  const tidyItems = (what: 'tidy' | 'tidy-all'): MenuItem[] =>
+    TIDY_MODES.map(({ mode: layout, label, title }) => ({ label, title, onSelect: () => ask('canvas', `${what}:${layout}`) }))
   const selectionItems = (): MenuItem[] => [
     ...(multiNodes.length + multiGroups.length >= 2 ? selectionActions(multiNodes, multiGroups, canvas) : []).map(
       (action): MenuItem => ({
@@ -1546,7 +1575,7 @@ function App() {
     ),
     ...moveItems(multi),
     { label: 'Fit to selection', icon: 'fit', shortcut: 'F', separated: true, onSelect: () => ask('canvas', 'fit') },
-    { label: 'Tidy selection', icon: 'tidy', onSelect: () => ask('canvas', 'tidy') },
+    { label: 'Tidy selection', icon: 'tidy', onSelect: () => ask('canvas', 'tidy'), items: tidyItems('tidy') },
     ...(tidyUndo ? [{ label: 'Undo tidy', icon: 'undo', onSelect: undoTidy } satisfies MenuItem] : []),
   ]
 
@@ -1558,7 +1587,7 @@ function App() {
       onSelect: () => setImportRequest({ targetId: null, files: [], position: at }),
     },
     { label: 'Fit view', icon: 'fit', shortcut: 'F', separated: true, onSelect: () => ask('canvas', 'fit-all') },
-    { label: 'Tidy canvas', icon: 'tidy', onSelect: () => ask('canvas', 'tidy-all') },
+    { label: 'Tidy canvas', icon: 'tidy', onSelect: () => ask('canvas', 'tidy-all'), items: tidyItems('tidy-all') },
     ...(tidyUndo ? [{ label: 'Undo tidy', icon: 'undo', onSelect: undoTidy } satisfies MenuItem] : []),
     { label: 'Search and commands…', icon: 'search', shortcut: PALETTE_KEY, onSelect: () => setPalette(true) },
     { label: 'Keyboard shortcuts', icon: 'keyboard', shortcut: '?', onSelect: () => setShortcuts(true) },
@@ -1702,9 +1731,10 @@ function App() {
       if (mode !== value)
         command(`mode-${value}`, `Node view: ${label}`, 'cube', onCanvas(() => chooseMode(value)), { shortcut: key })
     command('fit', 'Fit view', 'fit', onCanvas(() => ask('canvas', 'fit')), { shortcut: 'F', keywords: 'zoom' })
-    command('tidy', 'Tidy canvas', 'tidy', onCanvas(() => ask('canvas', 'tidy-all')), {
-      keywords: 'layout arrange columns overlap',
-    })
+    for (const { mode: layout, label } of TIDY_MODES)
+      command(`tidy-${layout}`, `Tidy canvas: ${label}`, 'tidy', onCanvas(() => ask('canvas', `tidy-all:${layout}`)), {
+        keywords: 'layout arrange overlap columns springs force cycle',
+      })
     if (tidyUndo) command('undo-tidy', 'Undo tidy', 'undo', onCanvas(undoTidy), { keywords: 'layout positions' })
     const drawer = drawerOpen ? 'Hide profile and table' : 'Show profile and table'
     command('drawer', drawer, 'bottompanel', onCanvas(() => setDrawerOpen(!drawerOpen)), {
@@ -2345,6 +2375,7 @@ function App() {
                   onDropFiles={(files, targetId, position) => setImportRequest({ targetId, files, position })}
                   onPositions={dragged}
                   onTidy={tidy}
+                  springLayout={springLayout}
                   onUndoTidy={tidyUndo ? undoTidy : undefined}
                   onError={setError}
                   onOpenNote={openNote}

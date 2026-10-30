@@ -10,6 +10,7 @@ const DEMO = join(E2E_DIR, 'demo')
 
 type Canvas = { nodes: { id: string; label: string; pos_x: number; pos_y: number }[] }
 type Places = Record<string, { x: number; y: number }>
+type Edges = { transitions: { source_id: string; target_id: string; source_side: string; target_side: string }[] }
 
 const card = (page: Page, label: string) => page.getByRole('group', { name: `Node ${label}`, exact: true })
 
@@ -80,7 +81,8 @@ test('Tidy lays the canvas out in step columns; Undo tidy and a selection', asyn
   // Tidy with nothing selected: the whole canvas.
   const toolbar = page.locator('.canvasbar')
   await expect(toolbar.getByRole('button', { name: 'Undo tidy' })).toHaveCount(0)
-  await toolbar.getByRole('button', { name: 'Tidy', exact: true }).click()
+  await toolbar.getByRole('button', { name: 'Tidy ▾' }).click()
+  await page.getByRole('menuitem', { name: 'In step columns' }).click()
   await expect.poll(async () => (await places(page))['B-S3'].x).not.toBe(muddled['B-S3'].x)
   const tidied = await places(page)
   // One column per step, in step order, for both branches.
@@ -114,6 +116,7 @@ test('Tidy lays the canvas out in step columns; Undo tidy and a selection', asyn
   await card(page, 'B-S3').click({ modifiers: ['Control'], position: await corner() })
   await card(page, 'B-S3').click({ button: 'right', position: await corner() })
   await page.getByRole('menu', { name: 'Selection actions' }).getByRole('menuitem', { name: 'Tidy selection' }).click()
+  await page.getByRole('menu', { name: 'Tidy selection' }).getByRole('menuitem', { name: 'In step columns' }).click()
   await expect.poll(async () => (await places(page))['B-S3']).not.toEqual(muddled['B-S3'])
   const selected = await places(page)
   for (const label of Object.keys(muddled))
@@ -133,4 +136,67 @@ test('Tidy lays the canvas out in step columns; Undo tidy and a selection', asyn
   await page.mouse.move(t0.x + 30, t0.y - 60, { steps: 5 })
   await page.mouse.up()
   await expect(toolbar.getByRole('button', { name: 'Undo tidy' })).toHaveCount(0)
+})
+
+// T-UI-79 (D207): Tidy with springs (ELK's stress layout) draws a catalytic cycle as a loop: every
+// card about as far from the middle as the others, every arrow about as long, nothing on anything;
+// each arrow leaves and arrives on the sides that face each other; Undo tidy puts every card and
+// every side back.
+test('Tidy with springs draws a cycle as a loop', async ({ page }) => {
+  original = {}
+  const folder = join(E2E_DIR, `springs-${Date.now()}`)
+  await page.request.post('/api/investigations', { data: { folder, name: 'Springs' } })
+  const labels = ['14e', 'π', 'TS1', 'MCB', 'TS2', 'product π']
+  const ids: string[] = []
+  // All on one row, out of order: the cycle tangled up on itself.
+  for (const [i, label] of labels.entries()) {
+    const made = await page.request.post('/api/nodes', { data: { label, pos_x: [0, 600, 240, 960, 480, 720][i], pos_y: 0 } })
+    ids.push(((await made.json()) as { id: string }).id)
+  }
+  for (let i = 0; i < ids.length; i++)
+    await page.request.post('/api/transitions', { data: { source_id: ids[i], target_id: ids[(i + 1) % ids.length] } })
+  await page.request.post('/api/nodes', { data: { label: 'scratch', pos_x: 240, pos_y: 10 } })
+  await page.goto('/')
+  await expect(card(page, '14e')).toBeVisible()
+  const before = await places(page)
+
+  const toolbar = page.locator('.canvasbar')
+  await toolbar.getByRole('button', { name: 'Tidy ▾' }).click()
+  await page.getByRole('menuitem', { name: 'With springs' }).click()
+  await expect(toolbar.getByRole('button', { name: 'Undo tidy' })).toBeVisible()
+  await expect.poll(async () => (await places(page))['MCB']).not.toEqual(before['MCB'])
+  const after = await places(page)
+  const centre = (label: string) => ({ x: after[label].x + 94, y: after[label].y + 39 })
+  const mid = labels.reduce((m, l) => ({ x: m.x + centre(l).x / 6, y: m.y + centre(l).y / 6 }), { x: 0, y: 0 })
+  const radii = labels.map((l) => Math.hypot(centre(l).x - mid.x, centre(l).y - mid.y))
+  expect(Math.max(...radii) / Math.min(...radii)).toBeLessThan(1.5)
+  const arrows = labels.map((l, i) => {
+    const [a, b] = [centre(l), centre(labels[(i + 1) % 6])]
+    return Math.hypot(a.x - b.x, a.y - b.y)
+  })
+  expect(Math.max(...arrows) / Math.min(...arrows)).toBeLessThan(1.5)
+  await expect.poll(() => overlapping(page)).toEqual([])
+  // Each arrow on the sides facing the other card: across when the cards are further apart
+  // across than up and down.
+  const facing = (from: string, to: string) => {
+    const [a, b] = [centre(from), centre(to)]
+    const across = Math.abs(b.x - a.x) - 188
+    const upDown = Math.abs(b.y - a.y) - 78
+    if (across >= upDown) return b.x >= a.x ? ['right', 'left'] : ['left', 'right']
+    return b.y >= a.y ? ['bottom', 'top'] : ['top', 'bottom']
+  }
+  const label = new Map(Object.entries(after).map(([l, p]) => [p.id, l]))
+  const sides = async () =>
+    ((await (await page.request.get('/api/canvas')).json()) as Edges).transitions.map((t) => ({
+      from: label.get(t.source_id)!,
+      to: label.get(t.target_id)!,
+      sides: [t.source_side, t.target_side],
+    }))
+  await expect.poll(async () => (await sides()).every((t) => t.sides.join() === facing(t.from, t.to).join())).toBe(true)
+  expect(new Set((await sides()).map((t) => t.sides.join())).size).toBeGreaterThan(1)
+
+  await toolbar.getByRole('button', { name: 'Undo tidy' }).click()
+  await expect.poll(async () => (await places(page))['MCB']).toEqual(before['MCB'])
+  expect(await places(page)).toEqual(before)
+  await expect.poll(async () => (await sides()).every((t) => t.sides.join() === 'right,left')).toBe(true)
 })
