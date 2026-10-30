@@ -165,6 +165,7 @@ test('right-click menus on a node, an arrow, the canvas and a selection', async 
       'Add node here',
       'Import file here…',
       'Fit viewF',
+      'Tidy canvas',
       'Search and commands…Ctrl K',
       'Keyboard shortcuts?',
     ])
@@ -181,7 +182,7 @@ test('right-click menus on a node, an arrow, the canvas and a selection', async 
     await card(page, 'B-S2').click({ button: 'right' })
     const selectionMenu = menu(page, 'Selection actions')
     await expect(selectionMenu.locator('.context-heading')).toHaveText('2 nodes selected')
-    await expect(entries(selectionMenu)).toHaveText([...buttons, 'Move to…', 'Move into new sub-investigation…', 'Fit to selectionF'])
+    await expect(entries(selectionMenu)).toHaveText([...buttons, 'Move to…', 'Move into new sub-investigation…', 'Fit to selectionF', 'Tidy selection'])
     await expect(selectionMenu.getByRole('menuitem', { name: 'Scan path…' })).toBeDisabled()
     await selectionMenu.getByRole('menuitem', { name: 'Overlay in 3D' }).click()
     await expect(page.getByRole('dialog', { name: 'Overlay in 3D' })).toBeVisible()

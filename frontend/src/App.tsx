@@ -66,6 +66,7 @@ import { HPC, hpcLabel } from './hpc'
 import { LaunchNotices, ShutDownDialog } from './components/ShutDown'
 import { StartPage } from './components/StartPage'
 import { Menu, type MenuItem } from './components/MoreMenu'
+import type { Positions } from './tidy'
 import { ContextMenu, type MenuHeading } from './components/ContextMenu'
 import { CommandPalette, KeyListener, ShortcutsDialog } from './components/CommandPalette'
 import {
@@ -707,6 +708,32 @@ function App() {
       ),
     }))
     api.savePositions(positions).catch((err: unknown) => setError(errorText(err)))
+  }
+
+  // D199: the last Tidy's earlier positions, for its one-step Undo tidy, while its canvas is the
+  // one open. Positions are not in the history, so History cannot put them back.
+  const [tidied, setTidied] = useState<{ folder: string | null; canvas: string | null; before: Positions } | null>(null)
+  const tidyUndo = tidied && tidied.folder === shownFolder && tidied.canvas === openCanvas ? tidied.before : null
+  const tidy = (before: Positions, after: Positions) => {
+    if (!Object.keys(after).length) {
+      setNotice('Already tidy: nothing to move.')
+      return
+    }
+    setNotice(null)
+    savePositions(after)
+    setTidied({ folder: shownFolder, canvas: openCanvas, before })
+  }
+  const undoTidy = () => {
+    if (!tidyUndo) return
+    // Records deleted since the tidy are left out.
+    const known = new Set([...canvas.nodes, ...canvas.groups, ...subs].map((r) => r.id))
+    savePositions(Object.fromEntries(Object.entries(tidyUndo).filter(([id]) => known.has(id))))
+    setTidied(null)
+  }
+  // Moving a card by hand ends what Undo tidy would put back.
+  const dragged = (positions: Record<string, { x: number; y: number }>) => {
+    setTidied(null)
+    savePositions(positions)
   }
 
   const setGroupLayout = useCallback((id: string, layout: GroupLayout) => {
@@ -1519,6 +1546,8 @@ function App() {
     ),
     ...moveItems(multi),
     { label: 'Fit to selection', icon: 'fit', shortcut: 'F', separated: true, onSelect: () => ask('canvas', 'fit') },
+    { label: 'Tidy selection', icon: 'tidy', onSelect: () => ask('canvas', 'tidy') },
+    ...(tidyUndo ? [{ label: 'Undo tidy', icon: 'undo', onSelect: undoTidy } satisfies MenuItem] : []),
   ]
 
   const paneItems = (at: { x: number; y: number }): MenuItem[] => [
@@ -1529,6 +1558,8 @@ function App() {
       onSelect: () => setImportRequest({ targetId: null, files: [], position: at }),
     },
     { label: 'Fit view', icon: 'fit', shortcut: 'F', separated: true, onSelect: () => ask('canvas', 'fit-all') },
+    { label: 'Tidy canvas', icon: 'tidy', onSelect: () => ask('canvas', 'tidy-all') },
+    ...(tidyUndo ? [{ label: 'Undo tidy', icon: 'undo', onSelect: undoTidy } satisfies MenuItem] : []),
     { label: 'Search and commands…', icon: 'search', shortcut: PALETTE_KEY, onSelect: () => setPalette(true) },
     { label: 'Keyboard shortcuts', icon: 'keyboard', shortcut: '?', onSelect: () => setShortcuts(true) },
   ]
@@ -1671,6 +1702,10 @@ function App() {
       if (mode !== value)
         command(`mode-${value}`, `Node view: ${label}`, 'cube', onCanvas(() => chooseMode(value)), { shortcut: key })
     command('fit', 'Fit view', 'fit', onCanvas(() => ask('canvas', 'fit')), { shortcut: 'F', keywords: 'zoom' })
+    command('tidy', 'Tidy canvas', 'tidy', onCanvas(() => ask('canvas', 'tidy-all')), {
+      keywords: 'layout arrange columns overlap',
+    })
+    if (tidyUndo) command('undo-tidy', 'Undo tidy', 'undo', onCanvas(undoTidy), { keywords: 'layout positions' })
     const drawer = drawerOpen ? 'Hide profile and table' : 'Show profile and table'
     command('drawer', drawer, 'bottompanel', onCanvas(() => setDrawerOpen(!drawerOpen)), {
       shortcut: 'P',
@@ -2308,7 +2343,9 @@ function App() {
                   onAddNode={addNode}
                   onImport={() => setImportRequest({ targetId: null, files: [], position: null })}
                   onDropFiles={(files, targetId, position) => setImportRequest({ targetId, files, position })}
-                  onPositions={savePositions}
+                  onPositions={dragged}
+                  onTidy={tidy}
+                  onUndoTidy={tidyUndo ? undoTidy : undefined}
                   onError={setError}
                   onOpenNote={openNote}
                   onLayoutNote={layoutNote}
