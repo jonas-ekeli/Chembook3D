@@ -201,6 +201,14 @@ const SHAPES = {
       <line x1="3" y1="21" x2="10" y2="14" />
     </>
   ),
+  // D199: Tidy (Lucide "columns-3"), and putting its positions back (Lucide "undo-2")
+  tidy: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M9 3v18M15 3v18" />
+    </>
+  ),
+  undo: <path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />,
   keyboard: (
     <>
       <rect x="2" y="4" width="20" height="16" rx="2" />
