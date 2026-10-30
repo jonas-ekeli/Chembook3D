@@ -2130,7 +2130,7 @@ export type RemoteEntry = {
   kind: 'file' | 'directory'
   size: number | null
   modified: number | null
-  /** Named as an output the import reads (.log, .out, .output, .xyz). */
+  /** Named as an output the import reads (.log, .out, .output, .xyz, .cml). */
   output: boolean
 }
 export type RemoteListing = { server: string; path: string; entries: RemoteEntry[] }
