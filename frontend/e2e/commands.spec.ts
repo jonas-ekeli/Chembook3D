@@ -197,6 +197,8 @@ test('the command palette and the canvas keys', async ({ page }) => {
   await page.getByRole('button', { name: 'Energy', exact: true }).click()
   await card(page, 'T-S0').click()
   await page.getByLabel('Node inspector').getByRole('button', { name: 'Use as energy reference' }).click()
+  // The palette reads its entries once as it opens, so wait for the cards' energies first.
+  await expect(card(page, 'T-S0')).toContainText('ΔG 0.00')
 
   // The app bar shows the way in and its key.
   const search = page.getByRole('button', { name: 'Search and commands' })
