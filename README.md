@@ -301,7 +301,7 @@ uv run ruff check .
 uv run pytest
 ```
 
-See [CLAUDE.md](CLAUDE.md) for the layout and the full list of commands.
+See [CLAUDE.md](CLAUDE.md) for the commands and [docs/code-map.md](docs/code-map.md) for where each feature lives.
 
 ## Specification
 
