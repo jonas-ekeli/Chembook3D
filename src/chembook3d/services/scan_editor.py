@@ -294,7 +294,11 @@ def _level(program: str, step: ParsedStep) -> tuple[dict[str, Any], str, bool]:
     method = route.method or ""
     if program == gaussian.PROGRAM:
         method = levels.canonical_method(method, step.multiplicity)
-    iops = gaussian.dispersion_iops(route.iops) if program == gaussian.PROGRAM else {}
+    iops = (
+        gaussian.dispersion_iops(route.iops, route.dispersion)
+        if program == gaussian.PROGRAM
+        else {}
+    )
     fields = {
         "program": program,
         "method": method,

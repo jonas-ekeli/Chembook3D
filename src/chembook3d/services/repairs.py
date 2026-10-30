@@ -15,9 +15,14 @@ from chembook3d import settings as app_settings
 from chembook3d.models import (
     Calculation,
     CalculationType,
+    ConformerEquilibrium,
+    CustomDispersion,
     HistoryEntry,
     InvestigationInfo,
+    LevelOfTheory,
     Node,
+    Selectivity,
+    Turnover,
 )
 from chembook3d.parsers.common import (
     BSSE,
@@ -371,6 +376,74 @@ def drawer_profiles(session: Session, folder: Path) -> int:
     return energy_profiles.from_drawer(session)
 
 
+def _rekeyed(key: str | None, moved: dict[str, str]) -> str | None:
+    """A composite level key `levelId~geometryLevelId` with moved levels replaced."""
+    if not key:
+        return key
+    return "~".join(moved.get(part, part) for part in key.split("~"))
+
+
+def dispersion_without_model(session: Session, folder: Path) -> dict[str, int]:
+    """D203: a Gaussian route with dispersion parameters set by IOp(3/174–179) but no
+    dispersion model (no EmpiricalDispersion and no IOp(3/124)) adds no dispersion, yet the
+    app named those IOps as a dispersion (D59). Each such level becomes the same level
+    without dispersion, for every calculation and every saved level key (selectivities,
+    turnovers, conformer equilibria and the remembered view); the name and the old levels go."""
+    names = [
+        d
+        for d in session.scalars(select(CustomDispersion))
+        if not d.base and "3/124" not in (d.iops or {})
+    ]
+    counts = {"dispersions": 0, "levels": 0, "calculations": 0}
+    moved: dict[str, str] = {}
+    for dispersion in names:
+        for level in session.scalars(
+            select(LevelOfTheory).where(LevelOfTheory.dispersion == dispersion.name)
+        ).all():
+            plain = levels.get_or_create(session, {**levels.fields_of(level), "dispersion": ""})
+            moved[level.id] = plain.id
+            counts["levels"] += 1
+        counts["dispersions"] += 1
+    if not moved:
+        return counts
+    for calculation in session.scalars(
+        select(Calculation).where(
+            Calculation.level_id.in_(moved) | Calculation.geometry_level_id.in_(moved)
+        )
+    ).all():
+        for field in ("level", "geometry_level"):
+            old = getattr(calculation, field)
+            if old is None or old.id not in moved:
+                continue
+            new = session.get(LevelOfTheory, moved[old.id])
+            history.record(
+                session,
+                "calculation",
+                calculation.id,
+                "update",
+                field,
+                levels.label(old),
+                levels.label(new),
+                source=SOURCE,
+            )
+            setattr(calculation, f"{field}_id", new.id)
+        counts["calculations"] += 1
+    for model in (Selectivity, Turnover, ConformerEquilibrium):
+        for record in session.scalars(select(model)):
+            record.level = _rekeyed(record.level, moved)
+    info = session.get(InvestigationInfo, 1)
+    if info is not None and isinstance(info.view_state, dict) and info.view_state.get("level"):
+        info.view_state = {**info.view_state, "level": _rekeyed(info.view_state["level"], moved)}
+    session.flush()
+    for level_id in moved:
+        level = session.get(LevelOfTheory, level_id)
+        if level is not None:
+            session.delete(level)
+    for dispersion in names:
+        session.delete(dispersion)
+    return counts
+
+
 REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "geometry_levels": geometry_levels,
     "scan_path_edges": scan_path_edges,
@@ -382,6 +455,7 @@ REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "thermo_models": thermo_models,
     "start_geometries": start_geometries,
     "energy_profiles": drawer_profiles,
+    "dispersion_without_model": dispersion_without_model,
 }
 
 
