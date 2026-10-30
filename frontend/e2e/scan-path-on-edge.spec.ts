@@ -82,3 +82,40 @@ test('a scan path shown as a chip on its edge, opened from there', async ({ page
   await expect(page.locator('.react-flow__node')).toHaveCount(3)
   await expect(chip).toHaveCount(0)
 })
+
+test('a Gaussian scan imported as a node is shown on an edge', async ({ page }) => {
+  // D200, A134, T-UI-76
+  test.slow()
+  await newInvestigation(page, 'Gaussian scan on edge')
+  const ids: string[] = []
+  for (const [label, x, y] of [
+    ['Start', 0, 0],
+    ['End', 700, 0],
+  ] as const) {
+    const response = await page.request.post('/api/nodes', { data: { label, pos_x: x, pos_y: y } })
+    expect(response.ok()).toBe(true)
+    ids.push((await response.json()).id)
+  }
+  expect((await page.request.post('/api/transitions', { data: { source_id: ids[0], target_id: ids[1] } })).ok()).toBe(true)
+  await page.reload()
+  await expect(page.locator('.react-flow__node')).toHaveCount(2)
+
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Upload a file').setInputFiles(join(FIXTURES, 'gaussian', 'dvb_scan_relaxed.log'))
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  const inspector = page.getByLabel('Node inspector')
+  await expect(inspector.getByRole('heading', { name: 'dvb_scan_relaxed' })).toBeVisible()
+  const section = inspector.getByLabel('Scan path on an edge')
+  await section.getByLabel('Show path on edge').selectOption({ label: 'Start → End' })
+  await expect(page.getByRole('status')).toContainText('Shown as a chip on its edge.')
+  const chip = page.locator('.edge-label .scan-path-chip')
+  await expect(chip).toHaveText(/^Gaussian path · top \+\d+\.\d+ kcal\/mol$/)
+
+  await section.getByLabel('On that edge only').click()
+  await expect(page.locator('.react-flow__node')).toHaveCount(2)
+  await chip.click()
+  const paths = page.getByLabel('Transition inspector').getByLabel('Scan paths')
+  await expect(paths.getByRole('button', { name: 'dvb_scan_relaxed' })).toBeVisible()
+  await expect(paths.getByLabel('Optimization steps')).toBeVisible()
+})

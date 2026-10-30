@@ -61,9 +61,9 @@ export function ScanPathsSection({
       <p className="muted">
         {paths.every((p) => (p.program || 'xTB') === 'xTB')
           ? 'GFN2-xTB paths run on this edge.'
-          : 'Scan paths run on this edge (xTB, or joined in the scan editor at their own level).'}{' '}
-        Each top is measured from that path’s first kept point; it is not this edge’s barrier and never enters ΔX or
-        profiles.
+          : 'Scan paths run on this edge (xTB, joined in the scan editor, or a Gaussian or ORCA scan, each at its own level).'}{' '}
+        Each top is measured from that path’s first kept (for a scan, first converged) point; it is not this edge’s
+        barrier and never enters ΔX or profiles.
       </p>
       <ul className="plain scan-path-rows">
         {paths.map((p) => {
@@ -139,6 +139,7 @@ export function ScanPathsSection({
 /**
  * D121: in a scan path node's panel, the edge it is shown on: choose one, unlink it, and show
  * it on that edge only (its box off the canvas). A path imported from a file starts unlinked.
+ * D200: a node holding a Gaussian or ORCA scan (`node.scan_path`) has it too.
  */
 export function PathEdgeSection({
   node,

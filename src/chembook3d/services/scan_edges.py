@@ -11,6 +11,11 @@ like A29): its box leaves the canvas and the chip stands for it. The box comes b
 itself when the node gets a calculation that is not a scan path (it is becoming the TS), when
 its edge is deleted, when it is unlinked, and while it has edges or a group of its own (so
 nothing drawn goes missing).
+
+D200: a scan imported from a program's own output (a Gaussian or ORCA scan,
+`trajectory.is_held_scan`) is linked the same way. Its chip's top is measured over its
+converged points; it is not trimmed (D117 stays with xTB paths and joined scans) and its
+"Use this structure" still makes a derived node, since its energies are the node's (D157).
 """
 
 import json
@@ -33,13 +38,24 @@ log = logging.getLogger(__name__)
 FIELD = "path_edge_id"
 
 
+def is_path(calculation: Calculation) -> bool:
+    """What can be shown on an edge: a scan path (D112, D137) or a program's scan (D200)."""
+    return trajectory.is_scan_path(calculation) or trajectory.is_held_scan(calculation)
+
+
 def scan_paths(node: Node) -> list[Any]:
-    """The node's scan path calculations (D112), oldest first."""
-    return [c for c in node.calculations if trajectory.is_scan_path(c)]
+    """The node's scan path calculations (D112) and scans (D200), oldest first."""
+    return [c for c in node.calculations if is_path(c)]
+
+
+def paths_only(node: Node) -> bool:
+    """D121, D200: every calculation on the node is a path that can be shown on an edge."""
+    return bool(node.calculations) and all(is_path(c) for c in node.calculations)
 
 
 def has_scan_path(session: Session, node_id: str) -> bool:
-    """`scan_paths` without loading the node's calculations (asked for every node shown)."""
+    """`scan_paths` without loading the node's calculations (asked for every node shown);
+    only their constraints are read for D200's scans."""
     query = (
         select(Calculation.id)
         .where(
@@ -53,7 +69,10 @@ def has_scan_path(session: Session, node_id: str) -> bool:
         )
         .limit(1)
     )
-    return session.scalar(query) is not None
+    if session.scalar(query) is not None:
+        return True
+    held = session.scalars(select(Calculation.constraints).where(Calculation.node_id == node_id))
+    return any(trajectory.names_scan(constraints or []) for constraints in held)
 
 
 def linked(session: Session, transition_id: str) -> list[Node]:
@@ -76,12 +95,12 @@ def _has_edges(session: Session, node: Node) -> bool:
 
 def on_edge(session: Session, node: Node) -> bool:
     """D121: the node's box is off the canvas and its edge's chip stands for it: it is set so,
-    linked, still only a scan path (`changes_in_place`), and has no edges or group of its own."""
+    linked, still only paths (`paths_only`), and has no edges or group of its own."""
     return (
         node.on_edge_only
         and node.path_edge_id is not None
         and node.group_id is None
-        and trajectory.changes_in_place(node)
+        and paths_only(node)
         and not _has_edges(session, node)
     )
 
@@ -130,8 +149,8 @@ def link(
             raise RecordError("A free species has no scan path (D69)")
         if not scan_paths(node):
             raise RecordError(
-                "Only a node with a scan path (an xTB path.xyz or xtbscan.log) can be shown on "
-                "an edge"
+                "Only a node with a scan (an xTB path.xyz or xtbscan.log, a joined scan, or a "
+                "Gaussian or ORCA scan) can be shown on an edge"
             )
         if session.get(Transition, edge_id) is None:
             raise RecordError("Transition not found")
@@ -169,7 +188,7 @@ def after_import(session: Session, node: Node) -> None:
     if not node.on_edge_only:
         return
     session.expire(node, ["calculations"])  # the import added them by id
-    if not trajectory.changes_in_place(node):
+    if not paths_only(node):
         transition = session.get(Transition, node.path_edge_id) if node.path_edge_id else None
         place = _middle(session, transition) if transition is not None else None
         if place:
@@ -185,7 +204,8 @@ class PathOnEdge:
     node_id: str
     label: str
     calculation_id: str | None  # the scan path whose movie the edge panel plays
-    top: float | None  # hartree: the path's top above its first kept point (D117's barrier)
+    top: float | None  # hartree: the path's top above its first kept point (D117's barrier);
+    # for a program's scan (D200), above its first converged point
     gate: str | None  # "passed" or "missed" (D116, D118); None when no job says
     reached_end: bool | None
     active_rmsd: float | None  # Å, the end's RMSD over the reacting atoms (D118)
@@ -218,14 +238,27 @@ def _number(value: Any) -> float | None:
     return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
 
 
+def _top(steps: trajectory.Steps) -> float | None:
+    """The chip's top: a scan path's D117 barrier; for a program's scan (D200) the highest
+    top over its converged points (`xtb.representative`, as a path's) above the first."""
+    if steps.trim is not None:
+        return steps.trim.barrier
+    energies = [f.energy for f in steps.frames if f.converged]
+    if len(energies) < 2 or None in energies:
+        return None
+    high = energies[xtb.representative(energies)]
+    low = energies[0]
+    assert high is not None and low is not None
+    return high - low
+
+
 def describe(session: Session, folder: Path | None, node: Node, path: dict[str, Any]) -> PathOnEdge:
     calculations = scan_paths(node)
     calculation = calculations[0] if calculations else None
     top = None
     if calculation is not None and folder is not None:
         try:
-            trim = trajectory.read_steps(folder, calculation).trim
-            top = trim.barrier if trim else None
+            top = _top(trajectory.read_steps(folder, calculation))
         except trajectory.StepsUnavailable:
             top = None
     gate = path.get("gate") if path.get("gate") in ("passed", "missed") else None
