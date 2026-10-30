@@ -1003,6 +1003,8 @@ export type Settings = {
   hydrogen_modes: HydrogenMode[]
   /** D84: the colours of the steric maps. */
   steric_colours: StericColours
+  /** D209: room between two joined boxes when Tidy uses springs, in px. */
+  tidy_arrow_room: number
   /** D185: the app's colours: light, dark or as the system prefers. */
   theme: ThemeChoice
   themes: ThemeChoice[]
@@ -2317,6 +2319,7 @@ export const api = {
         | 'crest_count'
         | 'hydrogens'
         | 'steric_colours'
+        | 'tidy_arrow_room'
         | 'theme'
         | 'profile_style'
       >

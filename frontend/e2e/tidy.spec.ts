@@ -162,7 +162,7 @@ test('Tidy with springs draws a cycle as a loop', async ({ page }) => {
 
   const toolbar = page.locator('.canvasbar')
   await toolbar.getByRole('button', { name: 'Tidy ▾' }).click()
-  await page.getByRole('menuitem', { name: 'With springs' }).click()
+  await page.getByRole('menuitem', { name: 'With springs', exact: true }).click()
   await expect(toolbar.getByRole('button', { name: 'Undo tidy' })).toBeVisible()
   await expect.poll(async () => (await places(page))['MCB']).not.toEqual(before['MCB'])
   const after = await places(page)
@@ -199,4 +199,111 @@ test('Tidy with springs draws a cycle as a loop', async ({ page }) => {
   await expect.poll(async () => (await places(page))['MCB']).toEqual(before['MCB'])
   expect(await places(page)).toEqual(before)
   await expect.poll(async () => (await sides()).every((t) => t.sides.join() === 'right,left')).toBe(true)
+
+  // D209: a longer arrow length in the settings spreads the loop out.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Canvas' }).click()
+  const room = settings.getByLabel('Arrow length for Tidy with springs (px)')
+  await expect(room).toHaveValue('220')
+  await room.fill('600')
+  await room.blur()
+  await expect.poll(async () => ((await (await page.request.get('/api/settings')).json()) as { tidy_arrow_room: number }).tidy_arrow_room).toBe(600)
+  await page.keyboard.press('Escape')
+  await expect(settings).toHaveCount(0)
+  try {
+    await toolbar.getByRole('button', { name: 'Tidy ▾' }).click()
+    await page.getByRole('menuitem', { name: 'With springs', exact: true }).click()
+    await expect.poll(async () => (await places(page))['MCB']).not.toEqual(before['MCB'])
+    const longer = await places(page)
+    const length = (p: typeof longer) =>
+      labels.reduce((sum, l, i) => {
+        const [a, b] = [p[l], p[labels[(i + 1) % 6]]]
+        return sum + Math.hypot(a.x - b.x, a.y - b.y)
+      }, 0)
+    expect(length(longer) / length(after)).toBeGreaterThan(1.5)
+  } finally {
+    await page.request.put('/api/settings', { data: { tidy_arrow_room: 220 } })
+  }
+})
+
+// T-UI-80 (D208): Tidy with springs, in place, starts from where the cards are: a cycle drawn
+// round with one card dragged far out settles into an even loop in the same order round its
+// middle, about where it was, with nothing on anything.
+test('Tidy with springs in place keeps the cards near their places', async ({ page }) => {
+  original = {}
+  const folder = join(E2E_DIR, `settle-${Date.now()}`)
+  await page.request.post('/api/investigations', { data: { folder, name: 'Settle' } })
+  const labels = ['14e', 'π', 'TS1', 'MCB', 'TS2', 'product π']
+  const ids: string[] = []
+  // Round a circle, MCB pulled far out.
+  const at = (i: number) => {
+    const r = i === 3 ? 1400 : 500
+    return { x: 2000 + r * Math.cos((i * Math.PI) / 3), y: 1500 + r * Math.sin((i * Math.PI) / 3) }
+  }
+  for (const [i, label] of labels.entries()) {
+    const { x, y } = at(i)
+    const made = await page.request.post('/api/nodes', { data: { label, pos_x: Math.round(x), pos_y: Math.round(y) } })
+    ids.push(((await made.json()) as { id: string }).id)
+  }
+  for (let i = 0; i < ids.length; i++)
+    await page.request.post('/api/transitions', { data: { source_id: ids[i], target_id: ids[(i + 1) % ids.length] } })
+  await page.goto('/')
+  await expect(card(page, '14e')).toBeVisible()
+  const before = await places(page)
+
+  const toolbar = page.locator('.canvasbar')
+  await toolbar.getByRole('button', { name: 'Tidy ▾' }).click()
+  await page.getByRole('menuitem', { name: 'With springs, in place' }).click()
+  await expect(toolbar.getByRole('button', { name: 'Undo tidy' })).toBeVisible()
+  await expect.poll(async () => (await places(page))['MCB']).not.toEqual(before['MCB'])
+  const after = await places(page)
+  const centre = (p: Record<string, { x: number; y: number }>, label: string) => ({ x: p[label].x + 94, y: p[label].y + 39 })
+  const middle = (p: Record<string, { x: number; y: number }>) =>
+    labels.reduce((m, l) => ({ x: m.x + centre(p, l).x / 6, y: m.y + centre(p, l).y / 6 }), { x: 0, y: 0 })
+  // The middle stays put, and the cards keep their order round it.
+  const [m0, m1] = [middle(before), middle(after)]
+  expect(Math.hypot(m1.x - m0.x, m1.y - m0.y)).toBeLessThan(150)
+  const turn = (p: Record<string, { x: number; y: number }>, m: { x: number; y: number }) => {
+    const angles = labels.map((l) => Math.atan2(centre(p, l).y - m.y, centre(p, l).x - m.x))
+    const first = angles.indexOf(Math.min(...angles))
+    return [...labels.keys()].sort((a, b) => angles[a] - angles[b]).map((i) => (i - first + 6) % 6)
+  }
+  expect(turn(after, m1)).toEqual(turn(before, m0))
+  const arrows = labels.map((l, i) => {
+    const [a, b] = [centre(after, l), centre(after, labels[(i + 1) % 6])]
+    return Math.hypot(a.x - b.x, a.y - b.y)
+  })
+  expect(Math.max(...arrows) / Math.min(...arrows)).toBeLessThan(1.5)
+  await expect.poll(() => overlapping(page)).toEqual([])
+})
+
+// T-UI-81 (D210): the canvas toolbar expands every group on the canvas at once while any is
+// collapsed, then collapses them all.
+test('Expand and collapse all groups from the toolbar', async ({ page }) => {
+  original = {}
+  const folder = join(E2E_DIR, `groups-${Date.now()}`)
+  await page.request.post('/api/investigations', { data: { folder, name: 'Groups' } })
+  const ids: string[] = []
+  for (const [i, label] of ['a1', 'a2', 'b1', 'b2'].entries()) {
+    const made = await page.request.post('/api/nodes', { data: { label, pos_x: i * 300, pos_y: 0 } })
+    ids.push(((await made.json()) as { id: string }).id)
+  }
+  await page.request.post('/api/groups/reconnect', { data: { member_ids: ids.slice(0, 2), label: 'GA' } })
+  await page.request.post('/api/groups/reconnect', { data: { member_ids: ids.slice(2), label: 'GB' } })
+  await page.goto('/')
+  const toolbar = page.locator('.canvasbar')
+  const group = (label: string) => page.getByRole('group', { name: `Group ${label}` })
+  await expect(group('GA')).toBeVisible()
+  await expect(card(page, 'a1')).toHaveCount(0)
+
+  // One group open by hand: the button still expands the rest.
+  await group('GA').getByRole('button', { name: 'Expand group' }).click()
+  await expect(card(page, 'a1')).toBeVisible()
+  await toolbar.getByRole('button', { name: 'Expand all groups' }).click()
+  for (const label of ['a1', 'a2', 'b1', 'b2']) await expect(card(page, label)).toBeVisible()
+
+  await toolbar.getByRole('button', { name: 'Collapse all groups' }).click()
+  for (const label of ['a1', 'a2', 'b1', 'b2']) await expect(card(page, label)).toHaveCount(0)
+  await expect(toolbar.getByRole('button', { name: 'Expand all groups' })).toBeVisible()
 })

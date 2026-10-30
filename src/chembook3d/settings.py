@@ -119,6 +119,10 @@ def config_dir() -> Path:
     return Path(override) if override else Path(user_config_dir("chembook3d", appauthor=False))
 
 
+TIDY_ARROW_ROOM = 220
+TIDY_ARROW_ROOM_RANGE = (40, 1000)
+
+
 @dataclass
 class Settings:
     energy_unit: str = "kcal/mol"
@@ -140,6 +144,8 @@ class Settings:
     crest_count: int = CREST_COUNT
     hydrogens: str = "all"
     steric_colours: str = "blue"
+    # D209: room between two boxes an arrow joins when Tidy uses springs (px, D207/D208)
+    tidy_arrow_room: int = TIDY_ARROW_ROOM
     theme: str = "system"
     batch_suffixes: list[str] = field(default_factory=lambda: list(BATCH_SUFFIXES))
     profile_style: dict = field(default_factory=lambda: dict(PROFILE_PRESETS["screen"]))
@@ -228,6 +234,10 @@ def load() -> Settings:
         settings.standard_state = data["standard_state"]
     if data.get("steric_colours") in STERIC_COLOURS:
         settings.steric_colours = data["steric_colours"]
+    room = data.get("tidy_arrow_room")
+    if isinstance(room, int | float) and not isinstance(room, bool) and room == room:
+        low, high = TIDY_ARROW_ROOM_RANGE
+        settings.tidy_arrow_room = round(min(high, max(low, room)))
     if data.get("theme") in THEMES:
         settings.theme = data["theme"]
     suffixes = data.get("batch_suffixes")

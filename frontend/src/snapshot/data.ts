@@ -107,6 +107,7 @@ export function sharedSettings(data: SnapshotData): Settings {
     crest_count: 0,
     hydrogen_modes: ['all', 'polar', 'none'],
     steric_colours: 'blue',
+    tidy_arrow_room: 220,
     // D185: the copy is always light
     theme: 'light',
     themes: ['light'],

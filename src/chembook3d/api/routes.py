@@ -433,6 +433,8 @@ class SettingsOut(BaseModel):
     hydrogens: str
     hydrogen_modes: list[str]
     steric_colours: str
+    # D209: room between joined boxes for Tidy with springs (px)
+    tidy_arrow_room: int
     # D185: light, dark or follow the system
     theme: str
     themes: list[str]
@@ -458,6 +460,7 @@ class SettingsIn(BaseModel):
     crest_count: int | None = None
     hydrogens: str | None = None
     steric_colours: str | None = None
+    tidy_arrow_room: int | None = None
     theme: str | None = None
     # D106: the keys given replace the current style's; unknown keys and values are dropped
     profile_style: dict[str, Any] | None = None
@@ -1021,6 +1024,7 @@ def get_settings(request: Request):
         hydrogens=s.hydrogens,
         hydrogen_modes=list(app_settings.HYDROGEN_MODES),
         steric_colours=s.steric_colours,
+        tidy_arrow_room=s.tidy_arrow_room,
         theme=s.theme,
         themes=list(app_settings.THEMES),
         profile_style=s.profile_style,
@@ -1075,6 +1079,11 @@ def put_settings(body: SettingsIn, request: Request):
         if body.steric_colours not in app_settings.STERIC_COLOURS:
             raise HTTPException(422, f"Unknown steric map colours '{body.steric_colours}'")
         s.steric_colours = body.steric_colours
+    if body.tidy_arrow_room is not None:
+        low, high = app_settings.TIDY_ARROW_ROOM_RANGE
+        if not low <= body.tidy_arrow_room <= high:
+            raise HTTPException(422, f"The arrow room must be from {low} to {high} px")
+        s.tidy_arrow_room = body.tidy_arrow_room
     if body.theme is not None:
         if body.theme not in app_settings.THEMES:
             raise HTTPException(422, f"Unknown theme '{body.theme}'")

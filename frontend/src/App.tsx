@@ -66,7 +66,7 @@ import { HPC, hpcLabel } from './hpc'
 import { LaunchNotices, ShutDownDialog } from './components/ShutDown'
 import { StartPage } from './components/StartPage'
 import { Menu, type MenuItem } from './components/MoreMenu'
-import { TIDY_MODES, type Positions } from './tidy'
+import { TIDY_MODES, type Positions, type TidyBox, type TidyLink } from './tidy'
 import { ContextMenu, type MenuHeading } from './components/ContextMenu'
 import { CommandPalette, KeyListener, ShortcutsDialog } from './components/CommandPalette'
 import {
@@ -751,10 +751,13 @@ function App() {
     saveSides(Object.fromEntries(Object.entries(tidyUndo.sides).filter(([id]) => edges.has(id))))
     setTidied(null)
   }
-  // D207: the springs layout (ELK), loaded when first used.
+  // D207: the springs layout (ELK), loaded when first used, with the arrow room from the
+  // settings (D209).
+  const arrowRoom = settings?.tidy_arrow_room
   const springLayout = useCallback(
-    async (...args: Parameters<typeof import('./elkTidy').springTidy>) => (await import('./elkTidy')).springTidy(...args),
-    [],
+    async (boxes: TidyBox[], links: TidyLink[], inPlace: boolean) =>
+      (await import('./elkTidy')).springTidy(boxes, links, inPlace, arrowRoom),
+    [arrowRoom],
   )
   // Moving a card by hand ends what Undo tidy would put back.
   const dragged = (positions: Record<string, { x: number; y: number }>) => {
@@ -787,6 +790,32 @@ function App() {
       return next
     })
   }, [])
+
+  // D210: every group drawn on the open canvas (in it, or in a sub-investigation expanded on it)
+  // expanded or collapsed at once, from the toolbar (it expands them while any is collapsed) or
+  // the palette.
+  const shownGroups = canvas.groups.filter((g) => visibleCanvases(subs, openCanvas, expanded).has(g.canvas_id ?? null))
+  const groupsToOpen = shownGroups.some((g) => !expanded.has(g.id))
+  const setGroupsOpen = (open: boolean) =>
+    setExpanded((current) => {
+      const next = new Set(current)
+      for (const g of shownGroups) {
+        if (open) next.add(g.id)
+        else next.delete(g.id)
+      }
+      return next
+    })
+  const groupsItems: MenuItem[] = shownGroups.length
+    ? [
+        { label: 'Expand all groups', icon: 'group', disabled: !groupsToOpen, onSelect: () => setGroupsOpen(true) },
+        {
+          label: 'Collapse all groups',
+          icon: 'group',
+          disabled: shownGroups.every((g) => !expanded.has(g.id)),
+          onSelect: () => setGroupsOpen(false),
+        },
+      ]
+    : []
 
   const chooseMode = (next: ViewMode) => {
     setMode(next)
@@ -1736,6 +1765,11 @@ function App() {
         keywords: 'layout arrange overlap columns springs force cycle',
       })
     if (tidyUndo) command('undo-tidy', 'Undo tidy', 'undo', onCanvas(undoTidy), { keywords: 'layout positions' })
+    for (const item of groupsItems)
+      if (!item.disabled)
+        command(item.label.toLowerCase().replaceAll(' ', '-'), item.label, 'group', onCanvas(item.onSelect), {
+          keywords: 'open close fold unfold members',
+        })
     const drawer = drawerOpen ? 'Hide profile and table' : 'Show profile and table'
     command('drawer', drawer, 'bottompanel', onCanvas(() => setDrawerOpen(!drawerOpen)), {
       shortcut: 'P',
@@ -2377,6 +2411,8 @@ function App() {
                   onTidy={tidy}
                   springLayout={springLayout}
                   onUndoTidy={tidyUndo ? undoTidy : undefined}
+                  groupsToOpen={shownGroups.length ? groupsToOpen : undefined}
+                  onGroupsOpen={setGroupsOpen}
                   onError={setError}
                   onOpenNote={openNote}
                   onLayoutNote={layoutNote}

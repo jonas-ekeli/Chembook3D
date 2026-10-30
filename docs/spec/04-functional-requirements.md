@@ -207,6 +207,8 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-CAN-11 | A right-click on a node, a group, an arrow, the empty canvas or a multi-selection opens a menu of the actions that fit it; a command palette (Ctrl K) finds nodes, branches, steps and commands; single keys work while the canvas has the focus. Each runs an action the app already has, by pointer or keyboard; the read-only copy has none. | D184 | 5 |
 | FR-CAN-12 | Tidy lays out the selection, or the whole open canvas, in reaction-step columns for all branches, ordered to cut down crossing arrows and with no boxes overlapping; boxes not tidied stay put and are kept clear of; groups and sub-investigation boxes move whole; one-step Undo tidy. | D199 | 4 |
 | FR-CAN-13 | Tidy offers a second layout, with springs (ELK stress), for big canvases and cycles: a catalytic cycle comes out as a loop with arrows of about one length and no boxes overlapping; each arrow between two tidied boxes gets the sides facing each other; Undo tidy puts back positions and sides. | D207 | 4 |
+| FR-CAN-14 | Tidy offers "With springs, in place": the springs layout started from where the boxes are, so they settle near their places in the same arrangement; arrow lengths for springs follow the boxes' sizes so arrow labels stay on their arrows, with the room between boxes set in Settings. | D208, D209 | 4 |
+| FR-CAN-15 | The canvas toolbar and palette expand or collapse every group shown on the open canvas at once. | D210 | 4 |
 
 ## FR-SUB · Sub-investigations (D193)
 
