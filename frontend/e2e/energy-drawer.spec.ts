@@ -340,7 +340,13 @@ test('energy drawer: saved profiles with pathways shown on the figure', async ({
     await picker.selectOption({ label: 'Only B' })
     await expect(drawer.getByRole('group', { name: /^Pathway / })).toHaveCount(1)
 
-    // After a reload the drawer opens on the profile it had open.
+    // After a reload the drawer opens on the profile it had open, once the view is saved (a
+    // reload cancels a save still on its way, which a slow runner showed).
+    const profiles = (await (await page.request.get('/api/energy-profiles')).json()) as { id: string; name: string }[]
+    const onlyB = profiles.find((profile) => profile.name === 'Only B')!.id
+    await expect
+      .poll(async () => (await (await page.request.get('/api/view-state')).json()).drawer?.profile_id)
+      .toBe(onlyB)
     await page.reload()
     await expect(picker.locator('option:checked')).toHaveText('Only B')
 
