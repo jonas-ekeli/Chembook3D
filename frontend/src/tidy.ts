@@ -12,8 +12,15 @@
  * step order (null: none), and whether this tidy moves it. */
 export type TidyBox = { id: string; x: number; y: number; w: number; h: number; step: number | null; moves: boolean }
 /** An arrow between two cards. */
-export type TidyLink = { source: string; target: string }
+export type TidyLink = { source: string; target: string; sourceSide?: Side; targetSide?: Side }
+export type Side = 'top' | 'right' | 'bottom' | 'left'
 export type Positions = Record<string, { x: number; y: number }>
+/** D199 step columns (this module), or D207 springs (ELK's stress layout, `elkTidy.ts`). */
+export type TidyMode = 'columns' | 'springs'
+export const TIDY_MODES: { mode: TidyMode; label: string; title: string }[] = [
+  { mode: 'columns', label: 'In step columns', title: 'One column per reaction step, fewer crossings, no overlaps (D199)' },
+  { mode: 'springs', label: 'With springs', title: 'Arrows as springs of one length, for big canvases: a cycle comes out as a loop (D207)' },
+]
 
 /** Room between columns, for the arrows and their labels (D98), and between cards in a column. */
 export const COLUMN_GAP = 96
@@ -59,15 +66,14 @@ export function tidy(boxes: TidyBox[], links: TidyLink[]): Positions {
   return result
 }
 
-type Rect = { x: number; y: number; w: number; h: number }
+export type Rect = { x: number; y: number; w: number; h: number }
 
 /**
- * The step columns. A box with a step is in that step's column; one without follows the box
- * with a step it is reached from, a column of its own after that step's (two boxes on from it,
- * two columns), else comes before the box with a step it leads to; the rest follow the last
- * step. Columns no box is in are left out.
+ * Where each box goes in step order, as [step, hops]: a box with a step is [step, 0]; one without
+ * follows the box with a step it is reached from ([step, 1] one box on, [step, 2] two), else comes
+ * before the box with a step it leads to ([step, -1]); the rest follow the last step.
  */
-function columnsOf(boxes: TidyBox[], links: TidyLink[]): TidyBox[][] {
+function stepKeys(boxes: TidyBox[], links: TidyLink[]): Map<string, [number, number]> {
   const key = new Map<string, [number, number]>()
   for (const b of boxes) if (b.step !== null) key.set(b.id, [b.step, 0])
   // From a box with a step, forward along the arrows from it and back along those into it.
@@ -93,6 +99,12 @@ function columnsOf(boxes: TidyBox[], links: TidyLink[]): TidyBox[][] {
     key.set(b.id, [LAST, 0])
     spread(true, [b.id], true)
   }
+  return key
+}
+
+/** The step columns, one per step key; columns no box is in are left out. */
+function columnsOf(boxes: TidyBox[], links: TidyLink[]): TidyBox[][] {
+  const key = stepKeys(boxes, links)
   const name = ([step, hops]: [number, number]) => `${step}:${hops}`
   const order = [...new Map([...key.values()].map((k) => [name(k), k])).values()]
     .sort((p, q) => p[0] - q[0] || p[1] - q[1])
@@ -268,4 +280,59 @@ function clearOf(columns: TidyBox[][], placed: Map<string, Rect>, staying: Rect[
       below = r.y + r.h + ROW_GAP
     }
   }
+}
+
+/**
+ * D207: leaves no two boxes on each other, for a layout that does not see the boxes that stay
+ * or may let boxes touch: tidied boxes that overlap are pushed apart along the shorter way out,
+ * then, top to bottom, each is moved down past any box that stays or is already settled.
+ */
+export function settle(placed: Map<string, Rect>, staying: Rect[]) {
+  const moving = [...placed.values()]
+  for (let round = 0, moved = true; moved && round < 200; round++) {
+    moved = false
+    for (let i = 0; i < moving.length; i++)
+      for (let j = i + 1; j < moving.length; j++) {
+        const [a, b] = [moving[i], moving[j]]
+        if (!overlaps(a, b, CLEAR)) continue
+        const dx = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) + CLEAR
+        const dy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) + CLEAR
+        const sign = (p: number, q: number) => (p < q ? -1 : 1)
+        if (dx < dy) {
+          const s = sign(a.x + a.w / 2, b.x + b.w / 2) * (dx / 2)
+          a.x += s
+          b.x -= s
+        } else {
+          const s = sign(a.y + a.h / 2, b.y + b.h / 2) * (dy / 2)
+          a.y += s
+          b.y -= s
+        }
+        moved = true
+      }
+  }
+  const settled: Rect[] = [...staying]
+  for (const r of moving.sort((p, q) => p.y - q.y || p.x - q.x)) {
+    for (let moved = true, rounds = 0; moved && rounds < 1000; rounds++) {
+      moved = false
+      for (const s of settled)
+        if (overlaps(r, s, CLEAR)) {
+          r.y = s.y + s.h + CLEAR
+          moved = true
+        }
+    }
+    settled.push(r)
+  }
+}
+
+/**
+ * D207: the sides of two boxes that face each other, for an arrow from `a` to `b`: left and right
+ * when the gap between them across is wider than the gap up and down, else top and bottom.
+ */
+export function facingSides(a: Rect, b: Rect): { source_side: Side; target_side: Side } {
+  const dx = b.x + b.w / 2 - (a.x + a.w / 2)
+  const dy = b.y + b.h / 2 - (a.y + a.h / 2)
+  const across = Math.abs(dx) - (a.w + b.w) / 2
+  const upDown = Math.abs(dy) - (a.h + b.h) / 2
+  if (across >= upDown) return dx >= 0 ? { source_side: 'right', target_side: 'left' } : { source_side: 'left', target_side: 'right' }
+  return dy >= 0 ? { source_side: 'bottom', target_side: 'top' } : { source_side: 'top', target_side: 'bottom' }
 }

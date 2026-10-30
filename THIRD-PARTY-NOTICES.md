@@ -26,7 +26,8 @@ copyright 2017 Robert Paton, University of Oxford; its text is in `tests/fixture
 ## Web interface
 
 The built interface bundles npm packages under the MIT, ISC and BSD-3-Clause licences, among them
-3Dmol.js, React, React Flow and xterm.js. The build writes their licence texts to
+3Dmol.js, React, React Flow and xterm.js, and the Eclipse Layout Kernel (elkjs, under EPL-2.0 or
+GPL-3.0-or-later; used here under GPL-3.0-or-later) for Tidy with springs. The build writes their licence texts to
 `frontend/dist/third-party-licenses.md`, and the read-only HTML copy carries the same texts in a
 comment at its top.
 

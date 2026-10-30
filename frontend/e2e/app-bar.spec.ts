@@ -37,7 +37,7 @@ test('the app bar, the investigation menu and the canvas toolbar', async ({ page
     await expect(bar.getByRole('button', { name, exact: true })).toBeVisible()
 
   // The canvas toolbar holds the canvas's controls, Fit, Tidy and Export among them.
-  for (const name of ['Compact', 'Energy', 'Structure', 'Filters', 'Fit to selection', 'Tidy', 'Export image ▾', 'Profile and table'])
+  for (const name of ['Compact', 'Energy', 'Structure', 'Filters', 'Fit to selection', 'Tidy ▾', 'Export image ▾', 'Profile and table'])
     await expect(toolbar.getByRole('button', { name, exact: true })).toBeVisible()
   await expect(toolbar.getByRole('group', { name: 'Energy view' }).getByLabel('Show on arrows')).toBeChecked()
 

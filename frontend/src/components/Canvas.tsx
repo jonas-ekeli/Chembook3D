@@ -77,7 +77,7 @@ import { memberShare, populationSummary } from '../populations'
 import { curveOf, LabelPlacer, leaderEnd, pointAt, type Curve, type Rect } from '../labelLayout'
 import { useRequest, type Request } from '../commands'
 import { chainOf, contentsText, isWithin, openInside, placeOf, subName, subsOf, visibleCanvases, canvasName } from '../subCanvas'
-import { tidy, type Positions, type TidyBox } from '../tidy'
+import { facingSides, tidy, TIDY_MODES, type Positions, type TidyBox, type TidyLink, type TidyMode } from '../tidy'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import type { Rotation } from '../chem'
@@ -237,6 +237,8 @@ export type CanvasTarget =
   | { kind: 'node' | 'group' | 'edge' | 'sub'; id: string }
   | { kind: 'selection' }
   | { kind: 'pane'; at: { x: number; y: number } }
+/** D207: the arrow sides a springs Tidy turned, by transition id, before and after. */
+export type TidySides = { before: Record<string, TransitionSides>; after: Record<string, TransitionSides> }
 /** D184: a right-click at a point of the window on something of the canvas. */
 export type CanvasContextMenu = (target: CanvasTarget, point: { x: number; y: number }) => void
 
@@ -753,6 +755,7 @@ function CanvasView({
   onOpenRecord,
   onTidy,
   onUndoTidy,
+  springLayout,
 }: {
   data: CanvasData
   mode: ViewMode
@@ -798,9 +801,12 @@ function CanvasView({
   /** D193: a rim stub's record, outside the open canvas: go out to it. */
   onOpenRecord?: (id: string) => void
   /** D199: Tidy moved these records (their places before and after); none in the read-only copy. */
-  onTidy?: (before: Positions, after: Positions) => void
+  onTidy?: (before: Positions, after: Positions, sides?: TidySides) => void
   /** D199: puts the last Tidy's cards back; only while there is one to undo. */
   onUndoTidy?: () => void
+  /** D207: the springs layout (ELK), handed in by the app so the read-only copy, which has no
+   * Tidy, does not carry it. */
+  springLayout?: (boxes: TidyBox[], links: TidyLink[]) => Promise<Positions>
 }) {
   const flow = useReactFlow()
   const theme = useTheme() // D185: React Flow's own colours follow the theme
@@ -1363,8 +1369,9 @@ function CanvasView({
    * boxes are the cards drawn at the top of the open canvas at their measured size: a group or an
    * expanded sub-investigation moves whole, so its inside keeps its own layout; rim stubs are
    * not records of this canvas and stay out. The cards not tidied stay put and are kept clear of.
+   * D207: the same boxes and rules for the springs layout, loaded when first used.
    */
-  const tidyUp = (all: boolean) => {
+  const tidyUp = async (all: boolean, layout: TidyMode = 'columns') => {
     if (!onTidy) return
     const drawn = flow.getNodes()
     const byId = new Map(drawn.map((n) => [n.id, n]))
@@ -1409,9 +1416,20 @@ function CanvasView({
     const links = plainEdges.flatMap((e) => {
       const source = topOf(e.source)?.id
       const target = topOf(e.target)?.id
-      return source && target ? [{ source, target }] : []
+      if (!source || !target) return []
+      const link: TidyLink = { source, target }
+      if (isSide(e.sourceHandle)) link.sourceSide = e.sourceHandle
+      if (isSide(e.targetHandle)) link.targetSide = e.targetHandle
+      return [link]
     })
-    const placed = tidy(boxes, links)
+    let placed: Positions
+    try {
+      if (layout === 'springs' && !springLayout) return
+      placed = layout === 'springs' ? await springLayout!(boxes, links) : tidy(boxes, links)
+    } catch (err) {
+      onError(`Could not tidy the canvas: ${String(err)}`)
+      return
+    }
     // Saved under the record each box stands for: a node drawn in place of its group moves the group (A23).
     const record = (id: string) => (byId.get(id)?.data as { standsFor?: string } | undefined)?.standsFor ?? id
     const before: Positions = {}
@@ -1422,13 +1440,34 @@ function CanvasView({
       before[record(b.id)] = { x: b.x, y: b.y }
       after[record(b.id)] = to
     }
-    onTidy(before, after)
+    // D207: with springs the boxes sit at every angle, so each arrow between two tidied boxes is
+    // turned to leave and arrive on the sides that face each other.
+    let sides: TidySides | undefined
+    if (layout === 'springs') {
+      sides = { before: {}, after: {} }
+      const moved = new Set(boxes.filter((b) => b.moves).map((b) => b.id))
+      const rect = new Map(boxes.map((b) => [b.id, { ...b, ...(placed[b.id] ?? {}) }]))
+      const transitions = new Map(data.transitions.map((t) => [t.id, t]))
+      for (const e of plainEdges) {
+        const source = topOf(e.source)?.id
+        const target = topOf(e.target)?.id
+        if (!source || !target || source === target || !moved.has(source) || !moved.has(target)) continue
+        const facing = facingSides(rect.get(source)!, rect.get(target)!)
+        for (const id of e.data?.ids ?? [e.id]) {
+          const t = transitions.get(id)
+          if (!t || (t.source_side === facing.source_side && t.target_side === facing.target_side)) continue
+          sides.before[id] = { source_side: t.source_side, target_side: t.target_side }
+          sides.after[id] = facing
+        }
+      }
+    }
+    onTidy(before, after, sides)
   }
-  const tidySelection = () => tidyUp(false)
 
   useRequest(asked, 'canvas', (action) => {
-    if (action === 'tidy') tidyUp(false)
-    else if (action === 'tidy-all') tidyUp(true)
+    // "tidy" (the selection, else everything) or "tidy-all", with ":mode" (step columns without).
+    const [what, layout] = action.split(':') as [string, TidyMode | undefined]
+    if (what === 'tidy' || what === 'tidy-all') void tidyUp(what === 'tidy-all', layout ?? 'columns')
     else if (action.startsWith('fit:'))
       void flow.fitView({ nodes: action.slice(4).split(',').map((id) => ({ id })), duration: 300, maxZoom: 1.5 })
     else if (action === 'fit-all' || (action === 'fit' && !flow.getNodes().some((n) => n.selected))) void fitAll()
@@ -1486,15 +1525,17 @@ function CanvasView({
         <span className="tb-label">Fit</span>
       </button>
       {onTidy && !readOnly && (
-        <button
-          className={toolClass}
-          title="Tidy: lay out the selection, or the whole canvas, in step columns with fewer crossing arrows and no overlaps"
-          aria-label="Tidy"
-          onClick={tidySelection}
+        <Menu
+          label="Tidy"
+          buttonClass={toolClass}
+          buttonLabel="Tidy ▾"
+          title="Tidy: lay out the selection, or the whole canvas, with no overlaps"
+          items={TIDY_MODES.map(({ mode: layout, label, title }) => ({ label, title, onSelect: () => void tidyUp(false, layout) }))}
         >
           <Icon name="tidy" />
           <span className="tb-label">Tidy</span>
-        </button>
+          <Icon name="chevron" />
+        </Menu>
       )}
       {onUndoTidy && !readOnly && (
         <button className={toolClass} title="Undo tidy: put the cards back where they were" aria-label="Undo tidy" onClick={onUndoTidy}>
