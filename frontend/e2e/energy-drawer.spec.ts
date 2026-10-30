@@ -199,7 +199,7 @@ test('energy drawer: a long node label wraps instead of hiding the pathway butto
   }
 })
 
-// T-UI-77, A138: a pathway that closes a cycle shows Turnover beside Undo step, Sterics and the
+// T-UI-78, A138: a pathway that closes a cycle shows Turnover beside Undo step, Sterics and the
 // remove button; its name keeps its width and the buttons wrap to the next line instead.
 test('energy drawer: a pathway name is not squeezed by its buttons', async ({ page }) => {
   let closing = ''
