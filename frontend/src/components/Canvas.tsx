@@ -1220,11 +1220,33 @@ function CanvasView({
       const representative = groupsById.get(id)?.representative_id
       return !!representative && byId.get(representative)?.role === 'transition_state'
     }
+    // D212: where a drawn card or box is on the canvas (a member is placed in its group, a group
+    // in an expanded box), for the arrows to rim stubs.
+    const drawnById = new Map(result.map((n) => [n.id, n]))
+    const drawnAt = (id: string): { x: number; y: number } => {
+      const n = drawnById.get(id)
+      if (!n) return { x: 0, y: 0 }
+      const parent = n.parentId ? drawnAt(n.parentId) : { x: 0, y: 0 }
+      return { x: parent.x + n.position.x, y: parent.y + n.position.y }
+    }
+    const rectOf = (id: string) => {
+      const n = drawnById.get(id)
+      const size = (v: unknown, fallback: number) => (typeof v === 'number' ? v : fallback)
+      return {
+        ...drawnAt(id),
+        w: size(n?.style?.width, NODE_WIDTH),
+        h: size(n?.style?.height, n?.type === 'stub' ? STUB_HEIGHT : cardHeight),
+      }
+    }
     for (const t of data.transitions) {
       if (hidden.statuses.has(t.status)) continue
       const source = drawnAs.get(t.source_id)
       const target = drawnAs.get(t.target_id)
       if (!source || !target || source === target) continue
+      // D212: an arrow to or from a rim stub leaves and arrives on the sides that face each other,
+      // whatever sides the transition keeps for the canvas it is drawn on in full (D76).
+      const facing =
+        source.startsWith('stub:') || target.startsWith('stub:') ? facingSides(rectOf(source), rectOf(target)) : null
       // An edge takes its source's branch colour; from a group, its outgoing branch.
       const sourceNode = byId.get(t.source_id)
       const colour = sourceNode
@@ -1253,8 +1275,8 @@ function CanvasView({
         source,
         target,
         // D76, A24: a line standing for several transitions uses the first one's sides.
-        sourceHandle: t.source_side,
-        targetHandle: t.target_side,
+        sourceHandle: facing?.source_side ?? t.source_side,
+        targetHandle: facing?.target_side ?? t.target_side,
         type: 'transition',
         ariaLabel: `Transition${t.direct ? ' (no TS)' : ''}`,
         selected,

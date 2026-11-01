@@ -178,8 +178,9 @@ test('the overview, outline and Ctrl K find things inside a sub-investigation', 
   }
 })
 
-// T-UI-82 (D211): in an opened sub-investigation each outside end's stub sits level with the card
-// it joins (coming in on the left, going out on the right), not stacked at the top.
+// T-UI-82 (D211, D212): in an opened sub-investigation each outside end's stub sits level with the
+// card it joins (coming in on the left, going out on the right), not stacked at the top, and its
+// arrow meets the card on the side facing the stub, whatever sides the transition keeps.
 test('stubs of an opened sub-investigation sit level with the cards they join', async ({ page }) => {
   const folder = join(E2E_DIR, `stubs-${Date.now()}`)
   await page.request.post('/api/investigations', { data: { folder, name: 'Stubs' } })
@@ -190,7 +191,10 @@ test('stubs of an opened sub-investigation sit level with the cards they join', 
   const outOf = await node('out of middle', 600, 500)
   await page.request.post('/api/transitions', { data: { source_id: inner[0], target_id: inner[1] } })
   await page.request.post('/api/transitions', { data: { source_id: inner[1], target_id: inner[2] } })
-  await page.request.post('/api/transitions', { data: { source_id: into, target_id: inner[2] } })
+  const coming = ((await (await page.request.post('/api/transitions', { data: { source_id: into, target_id: inner[2] } })).json()) as { id: string }).id
+  // Sides kept for the main canvas: bottom to top.
+  const kept = await page.request.patch(`/api/transitions/${coming}`, { data: { source_side: 'bottom', target_side: 'top' } })
+  expect(kept.ok()).toBe(true)
   await page.request.post('/api/transitions', { data: { source_id: inner[1], target_id: outOf } })
   const made = await page.request.post('/api/sub-investigations', { data: { label: 'Detour', ids: inner } })
   expect(made.ok()).toBe(true)
@@ -224,4 +228,19 @@ test('stubs of an opened sub-investigation sit level with the cards they join', 
   expect(Math.abs(stubOut.y - middle.y)).toBeLessThan(middle.height / 3)
   expect(stubIn.x).toBeLessThan(bottom.x)
   expect(stubOut.x).toBeGreaterThan(middle.x)
+
+  // The arrow from the stub ends on the bottom card's left side, not its top.
+  const end = await page.locator(`[data-testid="rf__edge-${coming}"] .react-flow__edge-path`).evaluate((p) => {
+    const path = p as SVGPathElement
+    const point = path.getPointAtLength(path.getTotalLength())
+    const m = path.getScreenCTM()!
+    return { x: m.a * point.x + m.c * point.y + m.e, y: m.b * point.x + m.d * point.y + m.f }
+  })
+  const target = await page.evaluate(() => {
+    const r = document.querySelector('[aria-label="Node bottom"]')!.getBoundingClientRect()
+    return { left: r.left, top: r.top, bottom: r.bottom }
+  })
+  expect(Math.abs(end.x - target.left)).toBeLessThan(12)
+  expect(end.y).toBeGreaterThan(target.top + 4)
+  expect(end.y).toBeLessThan(target.bottom - 4)
 })
