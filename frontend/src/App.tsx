@@ -16,6 +16,7 @@ import {
   type HistoryEntry,
   type Investigation,
   type Node,
+  type Note,
   type NoteLayout,
   type InspectTarget,
   type ScanEditorTarget,
@@ -398,6 +399,24 @@ function App() {
     saving.current = saving.current.then(() => api.saveViewState(state)).catch(() => undefined)
   }, [shown, energyLevel, energyType, referenceId, edgeEnergies, filters, expanded, canvasId, drawerOpen, drawerView])
 
+  // The energy view's choice as last rendered (set by the effect that fetches it, below).
+  const viewChoice = useRef<{
+    levelKey: string | null
+    shownType: EnergyType
+    referenceId: string | null
+    bsse: boolean
+  }>({ levelKey: null, shownType: 'G', referenceId: null, bsse: false })
+  const viewFetched = useRef(0)
+  const loadView = useCallback(() => {
+    const { levelKey, shownType, referenceId, bsse } = viewChoice.current
+    const n = ++viewFetched.current // an answer still coming for another choice is dropped
+    if (!levelKey) return
+    api.energyView(levelKey, shownType, referenceId, bsse).then(
+      (found) => n === viewFetched.current && setEnergyView(found),
+      (err: unknown) => n === viewFetched.current && setError(errorText(err)),
+    )
+  }, [])
+
   // Answers to earlier fetches can arrive after later ones (slow runners, a large import); only
   // the latest is shown, or a stale canvas without a just-created node would drop its inspector.
   const fetched = useRef(0)
@@ -411,16 +430,29 @@ function App() {
       }
     const failed = (err: unknown) => n === fetched.current && setError(errorText(err))
     api.canvas().then(latest(setCanvas), failed)
-    api.history().then(latest(setHistory), failed)
     api.energyOptions().then(latest(setEnergyOptions), failed)
-  }, [investigation])
-
-  useEffect(fetchRecords, [fetchRecords])
+    // The energy view is fetched beside them, not after the options arrive: with the level
+    // unchanged, fetching it again then would only repeat this (the first answer was dropped).
+    loadView()
+  }, [investigation, loadView])
 
   const reload = () => {
     fetchRecords()
     setRefreshKey((k) => k + 1)
   }
+
+  // The history is only fetched while it is shown, again whenever the canvas was fetched anew.
+  useEffect(() => {
+    if (!investigation || view !== 'history') return
+    let current = true
+    api.history().then(
+      (found) => current && setHistory(found),
+      (err: unknown) => current && setError(errorText(err)),
+    )
+    return () => {
+      current = false
+    }
+  }, [investigation, view, canvas])
 
   // D91: changes Claude (or another tab) makes show at once; Claude's deletes wait for an answer.
   // D159: the investigation's thermochemistry is in the settings, so they are read again too.
@@ -468,17 +500,15 @@ function App() {
       ? energyView
       : null
 
+  // Fetched when the choice changes, and by `fetchRecords` after every change to the records.
+  // Only the answer to the latest request is shown.
   useEffect(() => {
-    if (!levelKey) return
-    let current = true
-    api.energyView(levelKey, shownType, referenceId, bsse).then(
-      (found) => current && setEnergyView(found),
-      (err: unknown) => current && setError(errorText(err)),
-    )
-    return () => {
-      current = false
-    }
-  }, [levelKey, shownType, referenceId, bsse, energyOptions, refreshKey])
+    viewChoice.current = { levelKey, shownType, referenceId, bsse }
+    loadView()
+  }, [levelKey, shownType, referenceId, bsse, loadView])
+
+  // After the effect above, so a newly opened investigation never asks for the last one's level.
+  useEffect(fetchRecords, [fetchRecords])
 
   // D91: what this tab shows, for Claude's get_selection ("this node"). The tab used last wins.
   const groupIds = useMemo(() => new Set(canvas.groups.map((g) => g.id)), [canvas.groups])
@@ -776,9 +806,20 @@ function App() {
   const orderGroup = useCallback((id: string) => setOrdering(id), [])
 
   const openNote = useCallback((noteId: string) => setNoteEditing({ noteId }), [])
+  // Shown at once and saved in the background; nothing else on the canvas changes with it.
   const layoutNote = useCallback(
-    (noteId: string, layout: Partial<NoteLayout>) =>
-      void api.updateNote(noteId, layout).then(fetchRecords, (err: unknown) => setError(errorText(err))),
+    (noteId: string, layout: Partial<NoteLayout>) => {
+      const placeNote = (note: Partial<Note>) =>
+        setCanvas((current) => ({
+          ...current,
+          notes: current.notes.map((n) => (n.id === noteId ? { ...n, ...note } : n)),
+        }))
+      placeNote(layout)
+      api.updateNote(noteId, layout).then(placeNote, (err: unknown) => {
+        setError(errorText(err))
+        fetchRecords()
+      })
+    },
     [fetchRecords],
   )
 
