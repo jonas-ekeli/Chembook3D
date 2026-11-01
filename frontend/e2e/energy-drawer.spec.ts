@@ -327,7 +327,17 @@ test('energy drawer: saved profiles with pathways shown on the figure', async ({
     await drawer.getByRole('button', { name: 'New', exact: true }).click()
     await expect(picker.locator('option:checked')).toHaveText('Profile 2')
     await expect(drawer.getByRole('group', { name: /^Pathway / })).toHaveCount(0)
+    // Its pathway's save is held until after the switching below, as on a slow runner: the
+    // profile must still open again as it was left.
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    const saves = '**/api/energy-profiles/*'
+    await page.route(saves, async (route) => {
+      if (route.request().method() === 'PATCH' && 'paths' in (route.request().postDataJSON() ?? {})) await held
+      await route.continue()
+    })
     await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+    await expect(drawer.getByRole('group', { name: 'Pathway B' })).toBeVisible()
     await drawer.getByRole('button', { name: 'Profile actions' }).click()
     await page.getByRole('menuitem', { name: 'Rename' }).click()
     await drawer.getByLabel('Profile name').fill('Only B')
@@ -339,6 +349,14 @@ test('energy drawer: saved profiles with pathways shown on the figure', async ({
     await expect(drawer.getByRole('group', { name: /^Pathway / })).toHaveCount(2)
     await picker.selectOption({ label: 'Only B' })
     await expect(drawer.getByRole('group', { name: /^Pathway / })).toHaveCount(1)
+    release()
+    await expect
+      .poll(async () => {
+        const all = (await (await page.request.get('/api/energy-profiles')).json()) as { name: string; paths: unknown[] }[]
+        return all.find((profile) => profile.name === 'Only B')?.paths.length
+      })
+      .toBe(1)
+    await page.unroute(saves)
 
     // After a reload the drawer opens on the profile it had open, once the view is saved (a
     // reload cancels a save still on its way, which a slow runner showed).
