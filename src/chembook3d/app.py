@@ -24,7 +24,7 @@ from chembook3d.api.inspect import inspections
 from chembook3d.api.inspect import router as inspect_router
 from chembook3d.api.irc import router as irc_router
 from chembook3d.api.jobs import router as job_router
-from chembook3d.api.lifetime import SHUTDOWN_PUSH_TIMEOUT, Lifetime, watch
+from chembook3d.api.lifetime import SHUTDOWN_PUSH_TIMEOUT, Lifetime, TabRequests, watch
 from chembook3d.api.lifetime import router as lifetime_router
 from chembook3d.api.live import ChangeTracker, LiveState
 from chembook3d.api.live import router as live_router
@@ -117,6 +117,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.state.live = LiveState()  # D91: changes, selection and confirmations
     app.state.builds = Builds()  # D148: build_structure's results by id
     app.add_middleware(ChangeTracker, live=app.state.live)
+    app.add_middleware(TabRequests, lifetime=app.state.lifetime)  # D107
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

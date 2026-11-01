@@ -41,6 +41,35 @@ def test_a_launched_server_stops_when_every_tab_has_gone_silent():
     assert life.due(now=301)  # a crashed browser, or a tab put to sleep
 
 
+def test_a_tab_with_a_request_still_running_is_open():
+    """A tab whose long poll waits behind slow requests (a browser opens six connections to
+    the app) is still open: the server stopped under such a tab while it was being used."""
+    life = Lifetime(launched=True, grace=10, silence=300, started=0)
+    life.seen("a", now=1)
+    assert life.asking("a", now=10)
+    assert life.asking("a", now=20)
+    assert not life.due(now=1000)  # its presence has not come through, but it is busy
+    life.answered("a", now=1000)
+    assert not life.due(now=1200)
+    life.answered("a", now=1200)
+    assert life.busy == {} and life.tabs == {"a": 1200}
+    assert not life.due(now=1499)  # heard from when its last request was answered
+    assert life.due(now=1500)
+    # Requests from a client that is not a tab here change nothing
+    assert not life.asking("claude", now=5)
+    assert life.busy == {}
+
+
+def test_every_request_of_a_tab_is_a_word_from_it(client):
+    client.get("/api/presence", params={"tab": "t1"})
+    life = client.app.state.lifetime
+    life.tabs["t1"] = 0.0
+    client.get("/api/health", headers={"X-Chembook-Client": "t1"})
+    assert life.tabs["t1"] > 0 and life.busy == {}
+    client.get("/api/health", headers={"X-Chembook-Client": "someone"})
+    assert "someone" not in life.tabs
+
+
 def test_a_goodbye_from_an_unknown_tab_changes_nothing():
     life = Lifetime(launched=True, grace=10, silence=300, started=0)
     life.seen("a", now=1)

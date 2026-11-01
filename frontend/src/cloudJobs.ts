@@ -47,7 +47,13 @@ export function useScanPathImports(
   useEffect(() => {
     if (!folder || !linked) return
     let stopped = false
+    // A check still going when the next is due is left to finish: checks that piled up held
+    // the browser's few connections to the app, so nothing else got through (not even the
+    // tab's presence, and a launched app stopped).
+    let checking = false
     const check = async () => {
+      if (checking) return
+      checking = true
       try {
         if (!(await api.jobs(false)).some(awaitingImport)) return
         for (const job of await api.jobs(true)) {
@@ -64,6 +70,8 @@ export function useScanPathImports(
         }
       } catch {
         // Offline or the backend restarting: the next check tries again.
+      } finally {
+        checking = false
       }
     }
     void check()

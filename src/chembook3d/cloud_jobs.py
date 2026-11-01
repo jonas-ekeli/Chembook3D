@@ -681,40 +681,94 @@ def _wait_for_launch(run: Launch, wait: float, until_answered: bool = False) -> 
 # ---------- results ----------
 
 
-def _result_refs(folder: Path, job_id: str) -> list[tuple[str, str]]:
-    """(ref, commit time) of every branch that carries the job's result, newest first."""
-    path = f"{JOBS_DIR}/{job_id}/{RESULT}"
-    refs = sync._git(
+def _results_on_branches(folder: Path, job_ids: list[str]) -> dict[str, list[tuple[str, str]]]:
+    """(ref, commit time) of every branch that carries each job's result, newest first. One
+    `for-each-ref` and one `cat-file --batch-check` for all the jobs: a git call for each job
+    and branch took minutes on Windows (50 jobs and 55 branches are 2,750 calls), and the
+    app's checks piled up behind each other."""
+    found: dict[str, list[tuple[str, str]]] = {job_id: [] for job_id in job_ids}
+    if not job_ids:
+        return found
+    refs = []
+    for line in sync._git(
         folder,
         "for-each-ref",
         "--format=%(refname)%00%(committerdate:iso-strict)",
         "refs/remotes/origin",
         "refs/heads",
-    ).splitlines()
-    found = []
-    for line in refs:
+    ).splitlines():
         ref, _, when = line.partition("\0")
-        if ref.endswith("/HEAD"):
-            continue
-        if sync._ok(folder, "cat-file", "-e", f"{ref}:{path}"):
-            found.append((ref, when))
-    found.sort(key=lambda item: item[1], reverse=True)
+        if ref and not ref.endswith("/HEAD"):
+            refs.append((ref, when))
+    if not refs:
+        return found
+    asked = [(job_id, ref, when) for job_id in job_ids for ref, when in refs]
+    query = "".join(f"{ref}:{JOBS_DIR}/{job_id}/{RESULT}\n" for job_id, ref, _ in asked)
+    answers = sync._run(
+        folder, ("cat-file", "--batch-check"), sync.LOCAL_TIMEOUT, True, input=query
+    ).stdout.splitlines()
+    # One answer line per line asked: "<object id> blob <size>", or "<what was asked> missing".
+    for (job_id, ref, when), answer in zip(asked, answers, strict=False):
+        parts = answer.split(" ")
+        if len(parts) == 3 and parts[1] == "blob":
+            found[job_id].append((ref, when))
+    for listed in found.values():
+        listed.sort(key=lambda item: item[1], reverse=True)
     return found
 
 
-def _read_result(folder: Path, ref: str, job_id: str) -> dict[str, Any]:
-    raw = sync._run(
-        folder,
-        ("cat-file", "blob", f"{ref}:{JOBS_DIR}/{job_id}/{RESULT}"),
-        sync.LOCAL_TIMEOUT,
-        True,
-        binary=True,
-    ).stdout
+def _result_refs(folder: Path, job_id: str) -> list[tuple[str, str]]:
+    """(ref, commit time) of every branch that carries the job's result, newest first."""
+    return _results_on_branches(folder, [job_id])[job_id]
+
+
+def _parse_result(raw: bytes) -> dict[str, Any]:
     try:
         data = json.loads(raw.decode("utf-8"))
     except ValueError:
         return {"status": "unreadable", "summary": f"{RESULT} is not valid JSON", "outputs": []}
     return data if isinstance(data, dict) else {"status": "unreadable", "outputs": []}
+
+
+def _read_result(folder: Path, ref: str, job_id: str) -> dict[str, Any]:
+    return _read_results(folder, {job_id: ref})[job_id]
+
+
+def _read_results(folder: Path, wanted: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """Each job's result.json on the branch given, read with one `cat-file --batch`."""
+    if not wanted:
+        return {}
+    asked = list(wanted.items())
+    query = "".join(f"{ref}:{JOBS_DIR}/{job_id}/{RESULT}\n" for job_id, ref in asked)
+    raw = sync._run(
+        folder,
+        ("cat-file", "--batch"),
+        sync.LOCAL_TIMEOUT,
+        True,
+        binary=True,
+        input=query.encode("utf-8"),
+    ).stdout
+    # Each answer: "<object id> <type> <size>\n<content>\n", or "<what was asked> missing\n".
+    out: dict[str, dict[str, Any]] = {}
+    at = 0
+    for job_id, _ in asked:
+        end = raw.find(b"\n", at)
+        if end < 0:
+            break
+        header = raw[at:end].split(b" ")
+        at = end + 1
+        if len(header) != 3 or header[1] != b"blob" or not header[2].isdigit():
+            out[job_id] = {"status": "unreadable", "summary": f"{RESULT} is missing", "outputs": []}
+            continue
+        size = int(header[2])
+        out[job_id] = _parse_result(raw[at : at + size])
+        at += size + 1
+    for job_id, _ in asked:
+        out.setdefault(
+            job_id,
+            {"status": "unreadable", "summary": f"{RESULT} could not be read", "outputs": []},
+        )
+    return out
 
 
 def _short(ref: str) -> str:
@@ -733,15 +787,41 @@ def fetch_origin(folder: Path) -> str | None:
     return None
 
 
+@dataclass
+class Known:
+    """Every job's result branches and newest result, looked up at once."""
+
+    refs: dict[str, list[tuple[str, str]]]
+    results: dict[str, dict[str, Any]]
+
+
+def job_statuses(
+    folder: Path, jobs: list[dict[str, Any]], launcher: Launcher | None = None
+) -> list[dict[str, Any]]:
+    """`job_status` of each job listed, without fetching: two git calls for the branches and
+    two for the results, whatever the number of jobs and branches."""
+    folder = Path(folder)
+    started = [j["id"] for j in jobs if j.get("state") != "draft"]
+    refs: dict[str, list[tuple[str, str]]] = {}
+    results: dict[str, dict[str, Any]] = {}
+    if started and sync.git_available() and (folder / ".git").exists():
+        refs = _results_on_branches(folder, started)
+        results = _read_results(folder, {j: found[0][0] for j, found in refs.items() if found})
+    known = Known(refs, results)
+    return [job_status(folder, j["id"], launcher, fetch=False, known=known) for j in jobs]
+
+
 def job_status(
     folder: Path,
     job_id: str,
     launcher: Launcher | None = None,
     fetch: bool = True,
     wait: float = 0.0,
+    known: Known | None = None,
 ) -> dict[str, Any]:
     """The job as recorded, where its cloud session stands and whether its result is on GitHub.
-    With wait, fetch every POLL_EVERY seconds until a result appears or the time is up."""
+    With wait, fetch every POLL_EVERY seconds until a result appears or the time is up.
+    `known`: the branches and results `job_statuses` looked up for every job at once."""
     folder = Path(folder)
     record = read_job(folder, job_id)
     deadline = time.monotonic() + min(max(wait, 0.0), MAX_WAIT)
@@ -756,7 +836,9 @@ def job_status(
     while True:
         if fetch and record["state"] != "draft":
             fetch_error = fetch_origin(folder)
-        if record["state"] != "draft" and sync.git_available() and (folder / ".git").exists():
+        if known is not None:
+            refs = known.refs.get(job_id, [])
+        elif record["state"] != "draft" and sync.git_available() and (folder / ".git").exists():
             refs = _result_refs(folder, job_id)
         if refs or time.monotonic() + POLL_EVERY > deadline:
             break
@@ -775,7 +857,11 @@ def job_status(
     if refs:
         ref = refs[0][0]
         out["result_branch"] = _short(ref)
-        out["result"] = _read_result(folder, ref, job_id)
+        out["result"] = (
+            known.results[job_id]
+            if known is not None and job_id in known.results
+            else _read_result(folder, ref, job_id)
+        )
         out["other_result_branches"] = [_short(r) for r, _ in refs[1:]]
     if record.get("fetched"):
         status = "fetched"

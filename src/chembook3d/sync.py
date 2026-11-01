@@ -121,14 +121,19 @@ def _explain(args: tuple[str, ...], stderr: str) -> str:
 
 
 def _run(
-    folder: Path, args: tuple[str, ...], timeout: float, check: bool, binary: bool = False
+    folder: Path,
+    args: tuple[str, ...],
+    timeout: float,
+    check: bool,
+    binary: bool = False,
+    input: str | bytes | None = None,
 ) -> subprocess.CompletedProcess:
     try:
         result = subprocess.run(
             ["git", *args],
             cwd=folder,
             env=_env(),
-            stdin=subprocess.DEVNULL,
+            **({"input": input} if input is not None else {"stdin": subprocess.DEVNULL}),
             capture_output=True,
             timeout=timeout,
             **({} if binary else {"text": True, "encoding": "utf-8", "errors": "replace"}),
