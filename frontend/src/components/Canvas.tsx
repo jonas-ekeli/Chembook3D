@@ -78,6 +78,7 @@ import { curveOf, LabelPlacer, leaderEnd, pointAt, type Curve, type Rect } from 
 import { useRequest, type Request } from '../commands'
 import { chainOf, contentsText, isWithin, openInside, placeOf, subName, subsOf, visibleCanvases, canvasName } from '../subCanvas'
 import { facingSides, tidy, TIDY_MODES, type Positions, type TidyBox, type TidyLink, type TidyMode } from '../tidy'
+import { useStable, useStableOptional } from '../stable'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import type { Rotation } from '../chem'
@@ -703,6 +704,15 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
 
 const nodeTypes = { structure: StructureNode, cgroup: GroupBox, csub: SubBox, stub: StubNode }
 const edgeTypes = { transition: TransitionEdge }
+// Props of ReactFlow that never change, made once: React Flow copies some into its store, and
+// redraws parts, whenever one is a new object.
+const MULTI_SELECT_KEYS = ['Meta', 'Control', 'Shift']
+const FIT_VIEW = { maxZoom: 1.2, padding: 0.15 }
+const PRO_OPTIONS = { hideAttribution: true }
+const MINIMAP_SIZE = { width: 150, height: 100 }
+const minimapColour = (n: FlowNode) => (n.data as { colour?: string }).colour ?? NO_BRANCH
+// A connection must join two different boxes.
+const isValidConnection = (connection: Connection | Edge) => connection.source !== connection.target
 
 /** The sides a new or moved connection uses (D76); a handle without one is left to the default. */
 function sides(connection: Connection): TransitionSides {
@@ -715,6 +725,13 @@ function sides(connection: Connection): TransitionSides {
 /** What a click or right-click on a drawn box selects. */
 function kindOf(node: FlowNode): 'node' | 'group' | 'sub' {
   return node.type === 'cgroup' ? 'group' : node.type === 'csub' ? 'sub' : 'node'
+}
+
+/** Whether the drawn copy `drawn` of a node is `node` with only its measured size added. */
+function sameButMeasured(drawn: FlowNode, node: FlowNode): boolean {
+  const keys = Object.keys(node) as (keyof FlowNode)[]
+  const drawnKeys = Object.keys(drawn).filter((k) => k !== 'measured')
+  return drawnKeys.length === keys.length && keys.every((k) => k === 'measured' || drawn[k] === node[k])
 }
 
 function download(url: string, name: string) {
@@ -822,18 +839,29 @@ function CanvasView({
   const updateNodeInternals = useUpdateNodeInternals()
   const store = useStoreApi()
   const placer = useLabelPlacer()
-  // Cards that move, appear or are measured can free or block a label's spot.
+  // Cards that move, appear or are measured can free or block a label's spot. A pan or zoom
+  // (only the view's transform), the canvas resized or an arrow being drawn moves none of them,
+  // so is skipped instead of measuring every card on each frame.
   useEffect(() => {
-    const unsubscribe = store.subscribe(() => placer.cardsChanged())
+    const unsubscribe = store.subscribe((state, prev) => {
+      const moved = state.transform !== prev.transform || state.width !== prev.width || state.height !== prev.height
+      if (state.nodes === prev.nodes && (moved || state.connection !== prev.connection)) return
+      placer.cardsChanged()
+    })
     return () => {
       unsubscribe()
       placer.dispose()
     }
   }, [store, placer])
-  const pathChipClick = useCallback(
-    (id: string) => (onOpenPaths ? onOpenPaths(id) : onSelect({ kind: 'edge', id })),
-    [onOpenPaths, onSelect],
-  )
+  // Handlers handed to React Flow, to the cards' data and to contexts keep one identity, so a
+  // new function from the app redraws no card or arrow (and is not copied into React Flow's store).
+  const pathChipClick = useStable((id: string) => (onOpenPaths ? onOpenPaths(id) : onSelect({ kind: 'edge', id })))
+  const toggleGroup = useStable(onToggleGroup)
+  const groupLayout = useStable(onGroupLayout)
+  const groupOrder = useStableOptional(onGroupOrder)
+  const openSub = useStableOptional(onOpenSub)
+  const openNote = useStableOptional(onOpenNote)
+  const layoutNote = useStableOptional(onLayoutNote)
   const wrapper = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState(false)
   // D175: handles show only on a hovered or selected card, and on every card while an arrow is drawn.
@@ -847,8 +875,8 @@ function CanvasView({
     return found
   }, [data.notes])
   const noteActions: NoteActions = useMemo(
-    () => ({ onOpen: readOnly ? undefined : onOpenNote, onLayout: readOnly ? undefined : onLayoutNote }),
-    [readOnly, onOpenNote, onLayoutNote],
+    () => ({ onOpen: readOnly ? undefined : openNote, onLayout: readOnly ? undefined : layoutNote }),
+    [readOnly, openNote, layoutNote],
   )
   const stepNames = useMemo(() => new Map(data.steps.map((s) => [s.id, s.name || 'Unnamed step'])), [data.steps])
 
@@ -862,7 +890,8 @@ function CanvasView({
   // D197: only a group that shows its members' populations rebuilds the cards on a new view.
   const populations = data.groups.some((g) => g.show_populations) ? energy.view?.populations : undefined
 
-  const { flowNodes, flowEdges: plainEdges, origins } = useMemo(() => {
+  // The cards and arrows without the selection, which a second pass below adds.
+  const { flowNodes: plainNodes, flowEdges: plainEdges, origins } = useMemo(() => {
     // D43, D72: ΔX from the reference node (`cardEnergy`).
     const nodeEnergy = (id: string) => cardEnergy(nodeEnergySource, id)
     const populationOf = (groupId: string) => (populations ? populations[groupId] : undefined)
@@ -883,8 +912,6 @@ function CanvasView({
     const byId = new Map(data.nodes.map((n) => [n.id, n]))
     const notesOf = (id: string) => notesByNode.get(id) ?? NO_NOTES
     const cell = MEMBER_CELL[mode]
-    const chosen = new Set(multi)
-    const isSelected = (id: string) => chosen.has(id) || (selection?.kind === 'node' && selection.id === id)
 
     const result: FlowNode[] = []
     // Where each record is drawn: itself, its collapsed group, the closed box holding it
@@ -985,7 +1012,7 @@ function CanvasView({
         type: 'csub',
         ...at(sub.parent_id, sub.pos_x, sub.pos_y),
         ariaLabel: `Sub-investigation ${subName(sub)}`,
-        selected: chosen.has(sub.id) || (selection?.kind === 'sub' && selection.id === sub.id),
+        selected: false,
         style: open ? { width: sizes.get(sub.id)?.w, height: sizes.get(sub.id)?.h } : undefined,
         data: {
           sub,
@@ -993,8 +1020,8 @@ function CanvasView({
           mode,
           expanded: open,
           open: openInside(data, sub.id),
-          onToggle: onToggleGroup,
-          onOpen: onOpenSub,
+          onToggle: toggleGroup,
+          onOpen: openSub,
         } satisfies SubData,
       })
     }
@@ -1032,7 +1059,7 @@ function CanvasView({
           zIndex: notesOf(only.id).length ? 1 : undefined,
           ...at(group.canvas_id, group.pos_x, group.pos_y),
           ariaLabel: `Node ${only.label || 'Untitled node'}`,
-          selected: isSelected(only.id),
+          selected: false,
           data: {
             node: only,
             colour: branchColour(only.branch_id),
@@ -1067,7 +1094,7 @@ function CanvasView({
         type: 'cgroup',
         ...at(group.canvas_id, group.pos_x, group.pos_y),
         ariaLabel: `Group ${group.label || ''}`.trim(),
-        selected: chosen.has(group.id) || (selection?.kind === 'group' && selection.id === group.id),
+        selected: false,
         style: open ? { width: columns * cell.w + 16, height: GROUP_HEADER + rows * cell.h + 8 } : undefined,
         data: {
           group,
@@ -1081,9 +1108,9 @@ function CanvasView({
           // A25: a group of transition states is marked like one.
           ts: members.length > 0 && members.every((m) => m.role === 'transition_state'),
           expanded: open,
-          onToggle: onToggleGroup,
-          onLayout: onGroupLayout,
-          onOrder: onGroupOrder,
+          onToggle: toggleGroup,
+          onLayout: groupLayout,
+          onOrder: groupOrder,
           energy: nodeEnergy(group.id),
           memberNotes: members.flatMap((m) => notesOf(m.id)),
           memberWarnings: members.flatMap((m) =>
@@ -1110,7 +1137,7 @@ function CanvasView({
           draggable: false,
           position: { x: 8 + (index % columns) * cell.w, y: GROUP_HEADER + Math.floor(index / columns) * cell.h },
           ariaLabel: `Node ${member.label || 'Untitled node'}`,
-          selected: isSelected(member.id),
+          selected: false,
           data: {
             node: member,
             colour: branchColour(member.branch_id),
@@ -1141,7 +1168,7 @@ function CanvasView({
         zIndex: notesOf(node.id).length ? 1 : undefined,
         ...at(node.canvas_id, node.pos_x, node.pos_y),
         ariaLabel: `Node ${node.label || 'Untitled node'}`,
-        selected: isSelected(node.id),
+        selected: false,
         data: {
           node,
           colour: branchColour(node.branch_id),
@@ -1252,7 +1279,6 @@ function CanvasView({
       const colour = sourceNode
         ? branchColour(sourceNode.branch_id ?? byId.get(t.target_id)?.branch_id ?? null)
         : branchColour(groupsById.get(t.source_id)?.outgoing_branch_id ?? null)
-      const selected = selection?.kind === 'edge' && selection.id === t.id
       const same = between.get(`${source}>${target}`)
       if (same?.data) {
         const merged = same.data
@@ -1265,7 +1291,6 @@ function CanvasView({
         for (const s of speciesChips(t)) if (!merged.species.some((x) => x.text === s.text)) merged.species.push(s)
         merged.scanPaths.push(...(t.scan_paths ?? []))
         merged.warnings.push(...t.warnings.map((w) => `${w.code}: ${w.message}`))
-        same.selected ||= selected
         same.ariaLabel = `${merged.ids.length} transitions`
         same.markerEnd = { type: MarkerType.ArrowClosed, color: merged.colour, width: 16, height: 16 }
         continue
@@ -1279,7 +1304,7 @@ function CanvasView({
         targetHandle: facing?.target_side ?? t.target_side,
         type: 'transition',
         ariaLabel: `Transition${t.direct ? ' (no TS)' : ''}`,
-        selected,
+        selected: false,
         markerEnd: { type: MarkerType.ArrowClosed, color: colour, width: 16, height: 16 },
         data: {
           ids: [t.id],
@@ -1319,11 +1344,11 @@ function CanvasView({
         }) ?? null
     }
     return { flowNodes: result, flowEdges: edges, origins }
-  }, [data, mode, nodeEnergySource, populations, filters, expanded, selection, multi, colours, stepNames, onToggleGroup, onGroupLayout, onGroupOrder, notesByNode, noteActions, canvasId, onOpenSub])
+  }, [data, mode, nodeEnergySource, populations, filters, expanded, colours, stepNames, toggleGroup, groupLayout, groupOrder, notesByNode, noteActions, canvasId, openSub])
 
   // FR-EN-02: ΔX = X(target) − X(source) on each edge, or n/a (EN-3). D121: the scan path
   // chips, in the energy unit, are always shown (A68) and never feed ΔX.
-  const flowEdges = useMemo(() => {
+  const energyEdges = useMemo(() => {
     const view = energy.view
     const showEnergy = energy.showEdges && !!view
     if (!showEnergy && !plainEdges.some((e) => e.data?.scanPaths.length)) return plainEdges
@@ -1361,6 +1386,23 @@ function CanvasView({
     }))
   }, [plainEdges, energy])
 
+  // The selection: a click makes new objects only of the boxes and the arrow it selects; every
+  // other one, and every card's data, is kept as it was, so their memoised components and React
+  // Flow's own copies are not drawn again. A multi-selection holds nodes, groups and boxes.
+  const flowNodes = useMemo(() => {
+    const chosen = new Set(multi)
+    return plainNodes.map((n) => {
+      const kind = n.type === 'stub' ? null : kindOf(n)
+      const selected = kind !== null && (chosen.has(n.id) || (selection?.kind === kind && selection.id === n.id))
+      return selected ? { ...n, selected } : n
+    })
+  }, [plainNodes, selection, multi])
+  // A line standing for several transitions (A24) is selected with any of them.
+  const flowEdges = useMemo(() => {
+    if (selection?.kind !== 'edge') return energyEdges
+    return energyEdges.map((e) => (e.data?.ids.includes(selection.id) ? { ...e, selected: true } : e))
+  }, [energyEdges, selection])
+
   // Local copy so dragging is smooth; replaced whenever the records change.
   const [nodes, setNodes] = useState<FlowNode[]>(flowNodes)
   const [shown, setShown] = useState(flowNodes)
@@ -1369,8 +1411,14 @@ function CanvasView({
     // Keep each node's measured size: React Flow hides a node until it has one, and a node
     // whose size did not change is never measured again.
     setNodes((current) => {
-      const measured = new Map(current.map((n) => [n.id, n.measured]))
-      return flowNodes.map((n) => (measured.get(n.id) ? { ...n, measured: measured.get(n.id) } : n))
+      const before = new Map(current.map((n) => [n.id, n]))
+      return flowNodes.map((n) => {
+        const old = before.get(n.id)
+        if (!old?.measured) return n
+        // A card that changed in nothing else (another was clicked) stays the same object, so
+        // React Flow does not draw it again.
+        return sameButMeasured(old, n) ? old : { ...n, measured: old.measured }
+      })
     })
   }
   // React Flow draws an edge only once both of its nodes have measured handles. A node that
@@ -1639,6 +1687,70 @@ function CanvasView({
     return id && data.nodes.some((n) => n.id === id) ? id : null
   }
 
+  // React Flow's handlers, stable (see pathChipClick above).
+  const onNodeClick = useStable((event: MouseEvent, node: FlowNode) => {
+    // D193: a stub at the rim stands for a record outside the open sub-investigation.
+    if (node.type === 'stub') {
+      onOpenRecord?.(node.id.slice('stub:'.length))
+      return
+    }
+    // A click with Ctrl, Cmd or Shift adds to the selection instead of replacing it; a
+    // group can be part of it too, to add nodes to the group (A20).
+    if (event.ctrlKey || event.metaKey || event.shiftKey) {
+      onToggleNode(node.id)
+      return
+    }
+    onSelect({ kind: kindOf(node), id: node.id })
+  })
+  const onNodeDoubleClick = useStable((_: MouseEvent, node: FlowNode) => {
+    // A128: a double-click opens a box's canvas.
+    if (node.type === 'csub') onOpenSub?.(node.id)
+  })
+  const onEdgeClick = useStable((_: MouseEvent, edge: Edge) => onSelect({ kind: 'edge', id: edge.id }))
+  const onPaneClick = useStable(() => onSelect(null))
+  const onNodeContextMenu = useStable((event: MouseEvent, node: FlowNode) => {
+    if (node.type === 'stub') return event.preventDefault()
+    menuAt(event, { kind: kindOf(node), id: node.id })
+  })
+  const onEdgeContextMenu = useStable((event: MouseEvent, edge: Edge) => menuAt(event, { kind: 'edge', id: edge.id }))
+  const onSelectionContextMenu = useStable((event: MouseEvent) => menuAt(event, { kind: 'selection' }))
+  const onPaneContextMenu = useStable((event: MouseEvent | globalThis.MouseEvent) =>
+    menuAt(event, { kind: 'pane', at: position(event) }),
+  )
+  const onSelectionEnd = useStable(() => {
+    // Box selection (Shift-drag); single clicks are handled above, so the app owns the selection.
+    const ids = flow
+      .getNodes()
+      .filter((n) => n.selected)
+      .map((n) => n.id)
+    if (ids.length) onMultiSelect(ids)
+  })
+  const connect = useStable((connection: Connection) => {
+    if (connection.source && connection.target) onConnect(connection.source, connection.target, sides(connection))
+  })
+  const reconnect = useStable((old: Edge, connection: Connection) => {
+    // A29: dragging an arrow's end moves it to another side of the same box. Moving it to
+    // another box would make it a different transition, so that is refused.
+    if (connection.source !== old.source || connection.target !== old.target) {
+      onError("An arrow's end can only move to another side of the same box. To join other boxes, draw a new transition.")
+      return
+    }
+    const ids = (old.data as TransitionData | undefined)?.ids ?? [old.id]
+    onMoveEnds(ids, sides(connection))
+  })
+  const onNodeDragStop = useStable((_: unknown, __: FlowNode, dragged: FlowNode[]) => {
+    const moved: Record<string, { x: number; y: number }> = {}
+    for (const n of dragged) {
+      // D193: a card inside an expanded box moves in the box's own layout.
+      const origin = n.parentId ? origins.get(n.parentId) : { x: 0, y: 0 }
+      if (!origin) continue // a group's member, placed by its group
+      // A node drawn in place of its group moves the group (A23).
+      const id = (n.data as { standsFor?: string }).standsFor ?? n.id
+      moved[id] = { x: n.position.x + origin.x, y: n.position.y + origin.y }
+    }
+    if (Object.keys(moved).length) onPositions(moved)
+  })
+
   return (
     <div
       ref={wrapper}
@@ -1669,83 +1781,35 @@ function CanvasView({
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
-        onNodeClick={(event, node) => {
-          // D193: a stub at the rim stands for a record outside the open sub-investigation.
-          if (node.type === 'stub') {
-            onOpenRecord?.(node.id.slice('stub:'.length))
-            return
-          }
-          // A click with Ctrl, Cmd or Shift adds to the selection instead of replacing it; a
-          // group can be part of it too, to add nodes to the group (A20).
-          if (event.ctrlKey || event.metaKey || event.shiftKey) {
-            onToggleNode(node.id)
-            return
-          }
-          onSelect({ kind: kindOf(node), id: node.id })
-        }}
-        onNodeDoubleClick={(_, node) => {
-          // A128: a double-click opens a box's canvas.
-          if (node.type === 'csub') onOpenSub?.(node.id)
-        }}
-        onEdgeClick={(_, edge) => onSelect({ kind: 'edge', id: edge.id })}
-        onPaneClick={() => onSelect(null)}
-        onNodeContextMenu={(event, node) => {
-          if (node.type === 'stub') return event.preventDefault()
-          menuAt(event, { kind: kindOf(node), id: node.id })
-        }}
-        onEdgeContextMenu={(event, edge) => menuAt(event, { kind: 'edge', id: edge.id })}
-        onSelectionContextMenu={(event) => menuAt(event, { kind: 'selection' })}
-        onPaneContextMenu={(event) => menuAt(event, { kind: 'pane', at: position(event) })}
-        onSelectionEnd={() => {
-          // Box selection (Shift-drag); single clicks are handled above, so the app owns the selection.
-          const ids = flow
-            .getNodes()
-            .filter((n) => n.selected)
-            .map((n) => n.id)
-          if (ids.length) onMultiSelect(ids)
-        }}
+        onNodeClick={onNodeClick}
+        onNodeDoubleClick={onNodeDoubleClick}
+        onEdgeClick={onEdgeClick}
+        onPaneClick={onPaneClick}
+        onNodeContextMenu={onNodeContextMenu}
+        onEdgeContextMenu={onEdgeContextMenu}
+        onSelectionContextMenu={onSelectionContextMenu}
+        onPaneContextMenu={onPaneContextMenu}
+        onSelectionEnd={onSelectionEnd}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
         edgesReconnectable={!readOnly}
         connectionMode={ConnectionMode.Loose}
-        isValidConnection={(connection) => connection.source !== connection.target}
-        onConnect={(connection) => {
-          if (connection.source && connection.target) onConnect(connection.source, connection.target, sides(connection))
-        }}
-        onReconnect={(old, connection) => {
-          // A29: dragging an arrow's end moves it to another side of the same box. Moving it to
-          // another box would make it a different transition, so that is refused.
-          if (connection.source !== old.source || connection.target !== old.target) {
-            onError("An arrow's end can only move to another side of the same box. To join other boxes, draw a new transition.")
-            return
-          }
-          const ids = (old.data as TransitionData | undefined)?.ids ?? [old.id]
-          onMoveEnds(ids, sides(connection))
-        }}
-        onNodeDragStop={(_, __, dragged) => {
-          const moved: Record<string, { x: number; y: number }> = {}
-          for (const n of dragged) {
-            // D193: a card inside an expanded box moves in the box's own layout.
-            const origin = n.parentId ? origins.get(n.parentId) : { x: 0, y: 0 }
-            if (!origin) continue // a group's member, placed by its group
-            // A node drawn in place of its group moves the group (A23).
-            const id = (n.data as { standsFor?: string }).standsFor ?? n.id
-            moved[id] = { x: n.position.x + origin.x, y: n.position.y + origin.y }
-          }
-          if (Object.keys(moved).length) onPositions(moved)
-        }}
+        isValidConnection={isValidConnection}
+        onConnect={connect}
+        onReconnect={reconnect}
+        onNodeDragStop={onNodeDragStop}
         deleteKeyCode={null}
         zoomOnDoubleClick={false}
-        multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
+        multiSelectionKeyCode={MULTI_SELECT_KEYS}
         minZoom={0.05}
         fitView
-        fitViewOptions={{ maxZoom: 1.2, padding: 0.15 }}
-        proOptions={{ hideAttribution: true }}
+        fitViewOptions={FIT_VIEW}
+        proOptions={PRO_OPTIONS}
         colorMode={theme}
       >
         <Background gap={24} size={1} />
         <Controls showInteractive={false} />
-        <MiniMap pannable zoomable style={{ width: 150, height: 100 }} nodeColor={(n) => ((n.data as { colour?: string }).colour ?? NO_BRANCH)} />
+        <MiniMap pannable zoomable style={MINIMAP_SIZE} nodeColor={minimapColour} />
         {tools === undefined && (
           <Panel position="top-right" className="canvas-tools">
             {canvasTools}
@@ -1805,4 +1869,5 @@ function CanvasView({
   )
 }
 
-export const CanvasPane = CanvasView
+/** Memoised: the app hands it stable handlers, so its renders for other things skip the canvas. */
+export const CanvasPane = memo(CanvasView)

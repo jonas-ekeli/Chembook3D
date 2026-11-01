@@ -104,6 +104,7 @@ import {
   TransitionInspector,
 } from './components/PathwayInspectors'
 import { groupActions, selectionActions } from './panelActions'
+import { useStable } from './stable'
 
 type LockPrompt = { folder: string; host?: string; openedAt?: string }
 
@@ -1226,6 +1227,50 @@ function App() {
     </StericColourSetting>
   )
 
+  const toggleNode = (id: string) =>
+    setMulti((current) => {
+      const base = current.length
+        ? current
+        : selection?.kind === 'node' || selection?.kind === 'group' || selection?.kind === 'sub'
+          ? [selection.id]
+          : []
+      return base.includes(id) ? base.filter((x) => x !== id) : [...base, id]
+    })
+
+  // The canvas is memoised: what it is handed keeps its identity, so a render of the app for
+  // something else (a notice, the inspector's splitter dragged) does not draw every card and
+  // arrow again. Each calls the latest handler, with this render's records.
+  const canvasHandlers = {
+    select: useStable((next: Selection) => {
+      setNotice(null)
+      choose(next)
+    }),
+    openRecord: useStable(openRecord),
+    toggleNode: useStable(toggleNode),
+    connect: useStable((source: string, target: string, sides: TransitionSides) =>
+      // D193: an arrow to a closed box ends at a node inside it, picked in a dialog.
+      subs.some((b) => b.id === source || b.id === target)
+        ? setBoxEnd({ source, target, sides })
+        : api.createTransition(source, target, sides).then(reload, (err: unknown) => setError(errorText(err))),
+    ),
+    moveEnds: useStable((ids: string[], sides: TransitionSides) =>
+      Promise.all(ids.map((id) => api.updateTransition(id, sides))).then(reload, (err: unknown) =>
+        setError(errorText(err)),
+      ),
+    ),
+    addNode: useStable(addNode),
+    importFiles: useCallback(() => setImportRequest({ targetId: null, files: [], position: null }), []),
+    dropFiles: useCallback(
+      (files: File[], targetId: string | null, position: { x: number; y: number }) =>
+        setImportRequest({ targetId, files, position }),
+      [],
+    ),
+    dragged: useStable(dragged),
+    tidy: useStable(tidy),
+    undoTidy: useStable(undoTidy),
+    setGroupsOpen: useStable(setGroupsOpen),
+  }
+
   if (investigation === undefined) return <p className="loading">Connecting to backend…</p>
 
   if (investigation === null) {
@@ -1263,15 +1308,6 @@ function App() {
     reveal(id)
     focusOn(id)
   }
-  const toggleNode = (id: string) =>
-    setMulti((current) => {
-      const base = current.length
-        ? current
-        : selection?.kind === 'node' || selection?.kind === 'group' || selection?.kind === 'sub'
-          ? [selection.id]
-          : []
-      return base.includes(id) ? base.filter((x) => x !== id) : [...base, id]
-    })
   const selectBranch = (id: string) => choose({ kind: 'branch', id })
   const selectEdge = (id: string) => {
     choose({ kind: 'edge', id })
@@ -2385,36 +2421,24 @@ function App() {
                   expanded={expanded}
                   canvasId={openCanvas}
                   onOpenSub={setCanvasId}
-                  onOpenRecord={openRecord}
+                  onOpenRecord={canvasHandlers.openRecord}
                   onToggleGroup={toggleGroup}
                   onGroupLayout={setGroupLayout}
                   onGroupOrder={orderGroup}
-                  onSelect={(next) => {
-                    setNotice(null)
-                    choose(next)
-                  }}
+                  onSelect={canvasHandlers.select}
                   onMultiSelect={setMulti}
-                  onToggleNode={toggleNode}
-                  onConnect={(source, target, sides) =>
-                    // D193: an arrow to a closed box ends at a node inside it, picked in a dialog.
-                    subs.some((b) => b.id === source || b.id === target)
-                      ? setBoxEnd({ source, target, sides })
-                      : api.createTransition(source, target, sides).then(reload, (err: unknown) => setError(errorText(err)))
-                  }
-                  onMoveEnds={(ids, sides) =>
-                    Promise.all(ids.map((id) => api.updateTransition(id, sides))).then(reload, (err: unknown) =>
-                      setError(errorText(err)),
-                    )
-                  }
-                  onAddNode={addNode}
-                  onImport={() => setImportRequest({ targetId: null, files: [], position: null })}
-                  onDropFiles={(files, targetId, position) => setImportRequest({ targetId, files, position })}
-                  onPositions={dragged}
-                  onTidy={tidy}
+                  onToggleNode={canvasHandlers.toggleNode}
+                  onConnect={canvasHandlers.connect}
+                  onMoveEnds={canvasHandlers.moveEnds}
+                  onAddNode={canvasHandlers.addNode}
+                  onImport={canvasHandlers.importFiles}
+                  onDropFiles={canvasHandlers.dropFiles}
+                  onPositions={canvasHandlers.dragged}
+                  onTidy={canvasHandlers.tidy}
                   springLayout={springLayout}
-                  onUndoTidy={tidyUndo ? undoTidy : undefined}
+                  onUndoTidy={tidyUndo ? canvasHandlers.undoTidy : undefined}
                   groupsToOpen={shownGroups.length ? groupsToOpen : undefined}
-                  onGroupsOpen={setGroupsOpen}
+                  onGroupsOpen={canvasHandlers.setGroupsOpen}
                   onError={setError}
                   onOpenNote={openNote}
                   onLayoutNote={layoutNote}
