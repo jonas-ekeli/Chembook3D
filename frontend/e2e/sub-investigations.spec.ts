@@ -177,3 +177,51 @@ test('the overview, outline and Ctrl K find things inside a sub-investigation', 
       await page.request.post(`/api/sub-investigations/${left.id}/dissolve`)
   }
 })
+
+// T-UI-82 (D211): in an opened sub-investigation each outside end's stub sits level with the card
+// it joins (coming in on the left, going out on the right), not stacked at the top.
+test('stubs of an opened sub-investigation sit level with the cards they join', async ({ page }) => {
+  const folder = join(E2E_DIR, `stubs-${Date.now()}`)
+  await page.request.post('/api/investigations', { data: { folder, name: 'Stubs' } })
+  const node = async (label: string, x: number, y: number) =>
+    ((await (await page.request.post('/api/nodes', { data: { label, pos_x: x, pos_y: y } })).json()) as { id: string }).id
+  const inner = [await node('top', 0, 0), await node('middle', 0, 500), await node('bottom', 0, 1000)]
+  const into = await node('into bottom', -600, 1000)
+  const outOf = await node('out of middle', 600, 500)
+  await page.request.post('/api/transitions', { data: { source_id: inner[0], target_id: inner[1] } })
+  await page.request.post('/api/transitions', { data: { source_id: inner[1], target_id: inner[2] } })
+  await page.request.post('/api/transitions', { data: { source_id: into, target_id: inner[2] } })
+  await page.request.post('/api/transitions', { data: { source_id: inner[1], target_id: outOf } })
+  const made = await page.request.post('/api/sub-investigations', { data: { label: 'Detour', ids: inner } })
+  expect(made.ok()).toBe(true)
+  await page.goto('/')
+  await box(page, 'Detour').getByRole('button', { name: 'Open Detour' }).click()
+  await expect(card(page, 'bottom')).toBeVisible()
+
+  // All measured at once, as the view may still be moving after opening.
+  const middles = async () =>
+    page.evaluate(() =>
+      Object.fromEntries(
+        [...document.querySelectorAll('.react-flow__node')].map((n) => {
+          const r = n.getBoundingClientRect()
+          return [n.getAttribute('aria-label'), { x: r.x + r.width / 2, y: r.y + r.height / 2, height: r.height }]
+        }),
+      ),
+    )
+  let last = ''
+  await expect
+    .poll(async () => {
+      const now = JSON.stringify(await middles())
+      const still = now === last
+      last = now
+      return still
+    })
+    .toBe(true)
+  const at = JSON.parse(last) as Awaited<ReturnType<typeof middles>>
+  const [stubIn, stubOut] = [at['Outside: into bottom'], at['Outside: out of middle']]
+  const [bottom, middle] = [at['Node bottom'], at['Node middle']]
+  expect(Math.abs(stubIn.y - bottom.y)).toBeLessThan(bottom.height / 3)
+  expect(Math.abs(stubOut.y - middle.y)).toBeLessThan(middle.height / 3)
+  expect(stubIn.x).toBeLessThan(bottom.x)
+  expect(stubOut.x).toBeGreaterThan(middle.x)
+})

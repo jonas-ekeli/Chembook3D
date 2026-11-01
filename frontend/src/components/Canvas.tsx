@@ -143,7 +143,10 @@ const GROUP_HEADER = 48
 const SUB_HEADER = 44
 const SUB_PAD = 24
 const CARD_HEIGHT: Record<ViewMode, number> = { compact: 78, energy: 78, structure: 196 }
-const STUB_GAP = { x: 300, y: 84 }
+// D211: across, a card's width and room for the arrow's labels (as Tidy with springs leaves, D209).
+const STUB_GAP = { x: NODE_WIDTH + 240, y: 84 }
+/** About the height of a rim stub (`.cstub`), to centre it on the box it joins. */
+const STUB_HEIGHT = 48
 
 type StructureData = {
   node: Node
@@ -1154,29 +1157,43 @@ function CanvasView({
     }
 
     // D193: a neighbour outside the open sub-investigation that a crossing edge joins is a faded
-    // stub at the rim: left of everything for an edge coming in, right for one going out.
+    // stub at the rim: left of everything for an edge coming in, right for one going out. D211:
+    // each stub sits level with the box it joins, pushed down only as far as the stub above it
+    // needs, so its arrow runs across to its box instead of over the whole canvas.
     if (outside.size) {
       const top = result.filter((n) => !n.parentId)
       const width = (n: FlowNode) => (typeof n.style?.width === 'number' ? n.style.width : NODE_WIDTH)
       const x0 = top.length ? Math.min(...top.map((n) => n.position.x)) : 0
       const x1 = top.length ? Math.max(...top.map((n) => n.position.x + width(n))) : NODE_WIDTH
       const y0 = top.length ? Math.min(...top.map((n) => n.position.y)) : 0
-      const sides = new Map<string, 'left' | 'right'>()
+      const byId = new Map(result.map((n) => [n.id, n]))
+      // How far down the canvas a drawn card or box is (a member is placed in its group, a group
+      // in an expanded box), and its middle.
+      const down = (n: FlowNode | undefined): number =>
+        n ? n.position.y + (n.parentId ? down(byId.get(n.parentId)) : 0) : y0
+      const middle = (id: string) => {
+        const n = byId.get(id)
+        return down(n) + (typeof n?.style?.height === 'number' ? n.style.height : cardHeight) / 2
+      }
+      const sides = new Map<string, { side: 'left' | 'right'; at: number }>()
       for (const t of data.transitions) {
         if (hidden.statuses.has(t.status)) continue
-        if (outside.has(t.source_id) && drawnAs.has(t.target_id)) sides.set(t.source_id, 'left')
+        if (outside.has(t.source_id) && drawnAs.has(t.target_id))
+          sides.set(t.source_id, { side: 'left', at: middle(drawnAs.get(t.target_id)!) })
         else if (outside.has(t.target_id) && drawnAs.has(t.source_id) && !sides.has(t.target_id))
-          sides.set(t.target_id, 'right')
+          sides.set(t.target_id, { side: 'right', at: middle(drawnAs.get(t.source_id)!) })
       }
-      const rows = { left: 0, right: 0 }
-      for (const [id, side] of sides) {
+      const next = { left: -Infinity, right: -Infinity }
+      for (const [id, { side, at }] of [...sides].sort((a, b) => a[1].at - b[1].at)) {
         const record = outside.get(id)!
         const stub = `stub:${id}`
         drawnAs.set(id, stub)
+        const y = Math.max(Math.round(at - STUB_HEIGHT / 2), next[side])
+        next[side] = y + STUB_GAP.y
         result.push({
           id: stub,
           type: 'stub',
-          position: { x: side === 'left' ? x0 - STUB_GAP.x : x1 + STUB_GAP.x - NODE_WIDTH, y: y0 + rows[side]++ * STUB_GAP.y },
+          position: { x: side === 'left' ? x0 - STUB_GAP.x : x1 + STUB_GAP.x - NODE_WIDTH, y },
           draggable: false,
           connectable: false,
           ariaLabel: `Outside: ${record.label}`,
