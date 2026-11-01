@@ -42,10 +42,12 @@ from chembook3d.models import (
     Node,
     NodeKind,
     Role,
+    Transition,
 )
 from chembook3d.parsers import joined
 from chembook3d.parsers.common import BSSE, NOT_STATIONARY
 from chembook3d.services import concentrations, levels, spin, thermo_model, thermo_settings
+from chembook3d.services import transitions as transition_service
 from chembook3d.services.records import RecordError
 
 ENERGY_TYPES = ("E", "H", "G", "G_qh")
@@ -619,12 +621,24 @@ class Energies:
         query = select(Node).options(
             selectinload(Node.calculations).selectinload(Calculation.result)
         )
+        tolerance = settings.geometry_tolerance  # read once, not once per node
         self.nodes = {
-            n.id: NodeEnergies(n, self.temperature, self.cutoff, self.standard_state, bsse)
+            n.id: NodeEnergies(
+                n, self.temperature, self.cutoff, self.standard_state, bsse, tolerance
+            )
             for n in session.scalars(query)
         }
         self.groups = {g.id: g for g in session.scalars(select(GroupNode))}
         self._models: dict[LevelKey, dict[str, thermo_model.Thermo]] = {}  # D163
+        self._kinds: dict[tuple[LevelKey, str], tuple[set[float], list[thermo_model.Thermo]]] = {}
+        self._transitions: list[Transition] | None = None
+
+    def transitions(self) -> list[Transition]:
+        """Every transition with its species, listed once for the request (the energy view
+        reads them for its edges and again for its notes, the read-only copy per level)."""
+        if self._transitions is None:
+            self._transitions = transition_service.list_transitions(self.session)
+        return self._transitions
 
     def options(self) -> list[dict[str, Any]]:
         """FR-EN-01: composite levels with the energy types that have at least one value, and
@@ -710,21 +724,35 @@ class Energies:
         mine = models.get(node_id)
         if mine is None:
             return []
-        others = [m for other, m in models.items() if other != node_id]
+        # Compared with the few distinct scales and models at the level, not with every other
+        # node: that was each node against all the others, 90,000 comparisons for 300 nodes.
+        # The node's own scale and model are never "different", so it needs no leaving out.
+        scales_there, models_there = self._kinds_at(key, energy_type)
         issues = []
         own = mine.scale_for(energy_type)
-        scales = [
-            m.scale_for(energy_type)
-            for m in others
-            if not thermo_model.same_scale(m.scale_for(energy_type), own)
-        ]
+        scales = [s for s in scales_there if not thermo_model.same_scale(s, own)]
         if scales:
             issues.append(thermo_model.scale_issue(own, scales, energy_type))
         if energy_type == "G":
-            different = [m for m in others if m.model != mine.model]
+            different = [m for m in models_there if m.model != mine.model]
             if different:
                 issues.append(thermo_model.model_issue(mine, different))
         return issues
+
+    def _kinds_at(
+        self, key: LevelKey, energy_type: str
+    ) -> tuple[set[float], list[thermo_model.Thermo]]:
+        """The distinct scale factors behind `energy_type` at the level, and one model of each
+        distinct (model, label) there: all `mixing` needs to know of the other nodes."""
+        found = self._kinds.get((key, energy_type))
+        if found is None:
+            scales: set[float] = set()
+            kinds: dict[tuple[str | None, str], thermo_model.Thermo] = {}
+            for model in self.thermo_models(key).values():
+                scales.add(model.scale_for(energy_type))
+                kinds.setdefault((model.model, model.model_label), model)
+            found = self._kinds[(key, energy_type)] = (scales, list(kinds.values()))
+        return found
 
     def g_models(self, key: LevelKey) -> list[str]:
         """D163: the models of the printed G at this composite level, as "Gaussian's RRHO"."""
