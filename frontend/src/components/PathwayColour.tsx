@@ -29,8 +29,9 @@ export function PathwayColour({
   // above it where there is no room below.
   const [place, setPlace] = useState<{ left: number; top: number } | null>(null)
 
+  // Measured before the browser paints, so a place left from the last opening never shows.
   useLayoutEffect(() => {
-    if (!open) return setPlace(null)
+    if (!open) return
     const at = button.current?.getBoundingClientRect()
     const height = pop.current?.offsetHeight ?? 0
     if (!at) return

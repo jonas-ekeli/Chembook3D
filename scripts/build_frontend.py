@@ -29,7 +29,8 @@ def fail(message: str) -> NoReturn:
 
 
 def node_supported(version: str) -> bool:
-    """Vite 8 needs Node.js 20.19+ or 22.12+ (CI builds with 22)."""
+    """Vite 8 needs Node.js 20.19+ or 22.12+. CI builds with 24, which Ketcher asks for
+    (24.14.1+); older versions still build, but npm warns (EBADENGINE)."""
     match = re.match(r"v?(\d+)\.(\d+)", version.strip())
     if match is None:
         return True  # unknown format: let npm decide
@@ -41,7 +42,7 @@ def check_tools() -> str:
     npm = shutil.which("npm")
     node = shutil.which("node")
     if npm is None or node is None:
-        fail("Node.js was not found. Install Node.js 22 (see README.md, 'Install the tools').")
+        fail("Node.js was not found. Install Node.js 24 (see README.md, 'Install the tools').")
 
     if running_in_wsl():
         windows_tools = [p for p in (npm, node) if p.startswith("/mnt/")]
@@ -54,7 +55,7 @@ def check_tools() -> str:
 
     version = subprocess.run([node, "--version"], capture_output=True, text=True).stdout.strip()
     if not node_supported(version):
-        fail(f"Node.js {version} is too old. Install Node.js 22 (see README.md).")
+        fail(f"Node.js {version} is too old. Install Node.js 24 (see README.md).")
     return npm
 
 

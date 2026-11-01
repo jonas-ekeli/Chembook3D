@@ -218,6 +218,8 @@ function App() {
     setMulti([])
   }
   const [focus, setFocus] = useState<{ id: string; n: number } | null>(null)
+  // Centre the canvas on a card; the count makes a repeat on the same card a new request.
+  const focusOn = (id: string) => setFocus((f) => ({ id, n: (f?.n ?? 0) + 1 }))
   // D184: the right-click menu, the command palette, the shortcut list, and the action a menu
   // asked of the panel that holds it.
   const [menu, setMenu] = useState<{ x: number; y: number; target: CanvasTarget } | null>(null)
@@ -638,7 +640,7 @@ function App() {
     setCanvasId(on)
     const kind = canvas.groups.some((g) => g.id === id) ? 'group' : subs.some((b) => b.id === id) ? 'sub' : 'node'
     choose({ kind, id })
-    setFocus({ id, n: Date.now() })
+    focusOn(id)
   }
 
   const selectNode = (id: string, centre = false) => {
@@ -648,7 +650,7 @@ function App() {
     // A free species is not on the canvas, so there is nothing to centre (D69).
     const onCanvas = canvas.nodes.find((n) => n.id === id)
     if (onCanvas) reveal(onCanvas.group_id ?? id)
-    if (centre && onCanvas) setFocus({ id: onCanvas.group_id ?? id, n: Date.now() })
+    if (centre && onCanvas) focusOn(onCanvas.group_id ?? id)
   }
 
   const addSpecies = () =>
@@ -672,7 +674,7 @@ function App() {
         reload()
         choose({ kind: 'node', id: node.id })
         setView('canvas')
-        if (!position) setFocus({ id: node.id, n: Date.now() })
+        if (!position) focusOn(node.id)
       },
       (err: unknown) => setError(errorText(err)),
     )
@@ -1078,7 +1080,7 @@ function App() {
           onImported={(imported, message) => {
             setNotice(message)
             choose(imported)
-            if (imported.kind === 'group') setFocus({ id: imported.id, n: Date.now() })
+            if (imported.kind === 'group') focusOn(imported.id)
             setView('canvas')
             reload()
             nextImport()
@@ -1215,7 +1217,7 @@ function App() {
             const first = result.files.find((f) => f.how === 'new' || f.how === 'derived' || f.how === 'group')
             if (first?.group_id) choose({ kind: 'group', id: first.group_id })
             else if (first?.node_id) choose({ kind: 'node', id: first.node_id })
-            if (first) setFocus({ id: (first.group_id ?? first.node_id)!, n: Date.now() })
+            if (first) focusOn((first.group_id ?? first.node_id)!)
             setView('canvas')
             reload()
           }}
@@ -1254,12 +1256,12 @@ function App() {
   const selectGroup = (id: string) => {
     choose({ kind: 'group', id })
     reveal(id)
-    setFocus({ id, n: Date.now() })
+    focusOn(id)
   }
   const selectSub = (id: string) => {
     choose({ kind: 'sub', id })
     reveal(id)
-    setFocus({ id, n: Date.now() })
+    focusOn(id)
   }
   const toggleNode = (id: string) =>
     setMulti((current) => {
@@ -1903,7 +1905,7 @@ function App() {
           setView('canvas')
           selectBranch(branch.id)
           const first = canvas.nodes.find((n) => n.branch_id === branch.id && !n.on_edge)
-          if (first) setFocus({ id: first.group_id ?? first.id, n: Date.now() })
+          if (first) focusOn(first.group_id ?? first.id)
         },
       })
     }
@@ -2097,7 +2099,7 @@ function App() {
         onArranged={() => {
           reload()
           const first = canvas.nodes.find((n) => n.branch_id === selectedBranch.id)
-          if (first) setFocus({ id: first.id, n: Date.now() })
+          if (first) focusOn(first.id)
         }}
       />
     )
@@ -2114,7 +2116,7 @@ function App() {
           selectEdge(id)
           const edge = canvas.transitions.find((t) => t.id === id)
           const source = edge && canvas.nodes.find((n) => n.id === edge.source_id)
-          if (edge) setFocus({ id: source?.group_id ?? edge.source_id, n: Date.now() })
+          if (edge) focusOn(source?.group_id ?? edge.source_id)
         }}
         onSelectBranch={selectBranch}
       />
