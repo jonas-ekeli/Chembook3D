@@ -16,6 +16,7 @@ import uvicorn
 from chembook3d.app import create_app, static_dir
 
 HOST = "127.0.0.1"  # loopback only (NFR-SEC-01)
+KEEP_ALIVE = 60  # seconds an idle connection stays open
 
 
 def running_in_wsl() -> bool:
@@ -76,9 +77,17 @@ def main(argv: list[str] | None = None) -> None:
     if not (args.no_browser or args.launched):
         threading.Timer(1.0, open_browser, args=(url,)).start()
     app = create_app(launched=args.launched, notices=args.notice)
-    # Open long polls and terminals would otherwise hold up a shut-down.
+    # Open long polls and terminals would otherwise hold up a shut-down. An idle connection is
+    # kept for a minute, not uvicorn's 5 s: a client that reuses one just as the server drops it
+    # gets a reset (Playwright's request context on the Windows runners, "socket hang up").
     server = uvicorn.Server(
-        uvicorn.Config(app, host=HOST, port=args.port, timeout_graceful_shutdown=5)
+        uvicorn.Config(
+            app,
+            host=HOST,
+            port=args.port,
+            timeout_graceful_shutdown=5,
+            timeout_keep_alive=KEEP_ALIVE,
+        )
     )
     # Shut down in the app (D107) stops the server as Ctrl+C does.
     app.state.lifetime.exit = lambda: setattr(server, "should_exit", True)
