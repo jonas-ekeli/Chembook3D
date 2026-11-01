@@ -303,6 +303,28 @@ export function Viewer3D({
     return () => observer.disconnect()
   }, [])
 
+  // A viewer that goes (a node inspector per selected node, an Inspect window per file) gives
+  // back its models and stops watching its element; 3Dmol has no call for that. Its WebGL
+  // context is shared by every viewer of the page, so it is not lost here.
+  useEffect(
+    () => () => {
+      const v = viewer.current
+      viewer.current = null
+      if (!v) return
+      try {
+        v.stopAnimate()
+        v.clear()
+      } catch {
+        // Already torn down
+      }
+      // Private in 3Dmol's types: the observers it starts on its element.
+      const watchers = v as unknown as { divwatcher?: ResizeObserver; intwatcher?: IntersectionObserver }
+      watchers.divwatcher?.disconnect()
+      watchers.intwatcher?.disconnect()
+    },
+    [],
+  )
+
   const result = describe(measure(picks.map((i) => atoms[i]).filter(Boolean)))
 
   const applyTyped = () => {
