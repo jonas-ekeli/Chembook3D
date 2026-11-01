@@ -3,6 +3,7 @@ stands in for GitHub, `tests/fake_claude_cloud.py` for `claude --cloud`, and a s
 pushing a branch for the cloud session."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -523,3 +524,60 @@ def test_an_uploaded_folder_is_flagged_and_the_session_can_be_asked_to_push(
     monkeypatch.setenv("FAKE_CLAUDE_CLOUD", "fail")
     response = client.post(f"/api/jobs/{job['id']}/message", json={"text": "Push again"})
     assert response.status_code == 422 and "Session not found" in response.text
+
+
+def test_job_list_looks_up_results_in_a_fixed_number_of_git_calls(tmp_path, monkeypatch):
+    """Listing jobs used a git call per job and branch: with 52 jobs and 55 branches that took
+    minutes on Windows, the app's checks piled up, and the tab lost its connections."""
+    from chembook3d import sync
+
+    folder = tmp_path / "inv"
+    folder.mkdir()
+    git(folder, "init", "-q", "-b", "main")
+    git(folder, "config", "user.email", "t@example.org")
+    git(folder, "config", "user.name", "T")
+    ids = [f"2026-10-0{n}-job-{n}" for n in range(1, 6)]
+    (folder / "README").write_text("x", encoding="utf-8")
+    git(folder, "add", "-A")
+    git(folder, "commit", "-q", "-m", "base")
+
+    def branch(name: str, files: dict[str, str], when: str) -> None:
+        git(folder, "checkout", "-q", "-b", name, "main")
+        for path, text in files.items():
+            target = folder / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        git(folder, "add", "-A")
+        env = {"GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when}
+        subprocess.run(
+            ["git", "commit", "-q", "-m", name],
+            cwd=folder,
+            check=True,
+            env={**os.environ, **env},
+        )
+        git(folder, "checkout", "-q", "main")
+
+    result = "jobs/{}/result.json"
+    branch("older", {result.format(ids[0]): '{"summary": "old"}'}, "2026-10-01T10:00:00+00:00")
+    branch("newer", {result.format(ids[0]): '{"summary": "new"}'}, "2026-10-02T10:00:00+00:00")
+    branch("broken", {result.format(ids[1]): "not json"}, "2026-10-03T10:00:00+00:00")
+    branch("folder", {f"jobs/{ids[2]}/result.json/x": "a folder"}, "2026-10-03T11:00:00+00:00")
+    for n in range(20):  # branches with no result at all
+        branch(f"other-{n}", {f"notes/{n}.txt": "x"}, "2026-10-04T10:00:00+00:00")
+
+    calls = []
+    run = sync._run
+    monkeypatch.setattr(sync, "_run", lambda *a, **k: calls.append(a[1][0]) or run(*a, **k))
+    refs = cloud_jobs._results_on_branches(folder, ids)
+    assert [r for r, _ in refs[ids[0]]] == ["refs/heads/newer", "refs/heads/older"]
+    assert [r for r, _ in refs[ids[1]]] == ["refs/heads/broken"]
+    assert refs[ids[2]] == [] and refs[ids[3]] == [] and refs[ids[4]] == []
+    results = cloud_jobs._read_results(
+        folder, {j: found[0][0] for j, found in refs.items() if found}
+    )
+    assert results[ids[0]]["summary"] == "new"
+    assert results[ids[1]]["status"] == "unreadable"
+    assert len(calls) == 3  # for-each-ref, cat-file --batch-check, cat-file --batch
+    # One job alone gives the same as before
+    assert cloud_jobs._result_refs(folder, ids[0]) == refs[ids[0]]
+    assert cloud_jobs._read_result(folder, "refs/heads/older", ids[0])["summary"] == "old"

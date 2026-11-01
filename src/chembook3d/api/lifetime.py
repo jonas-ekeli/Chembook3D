@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from chembook3d import sync
 from chembook3d.api.routes import close_and_push
@@ -50,6 +51,7 @@ class Lifetime:
     silence: float = field(default_factory=lambda: _seconds("CHEMBOOK3D_LAUNCH_SILENCE", SILENCE))
     started: float = field(default_factory=time.monotonic)
     tabs: dict[str, float] = field(default_factory=dict)  # tab id: when last heard from
+    busy: dict[str, int] = field(default_factory=dict)  # tab id: its requests still running
     goodbye: float | None = None  # when the last tab left said goodbye
     dropped: bool = False  # the last tabs left went silent instead
     stopping: bool = False
@@ -64,6 +66,29 @@ class Lifetime:
             self.goodbye = None
             self.dropped = False
 
+    def asking(self, tab: str, now: float | None = None) -> bool:
+        """A request of the tab began. Any request of a known tab is a word from it, and a tab
+        with a request still being answered is open: its long poll may be waiting behind that
+        request, as a browser opens only six connections to the app. False for a tab not known
+        here (Claude's requests, a page still loading)."""
+        with self.lock:
+            if tab not in self.tabs:
+                return False
+            self.tabs[tab] = time.monotonic() if now is None else now
+            self.busy[tab] = self.busy.get(tab, 0) + 1
+            return True
+
+    def answered(self, tab: str, now: float | None = None) -> None:
+        """A request `asking` counted has been answered."""
+        with self.lock:
+            count = self.busy.get(tab, 0) - 1
+            if count > 0:
+                self.busy[tab] = count
+            else:
+                self.busy.pop(tab, None)
+            if tab in self.tabs:
+                self.tabs[tab] = time.monotonic() if now is None else now
+
     def closed(self, tab: str, now: float | None = None) -> None:
         with self.lock:
             if self.tabs.pop(tab, None) is not None and not self.tabs:
@@ -76,7 +101,7 @@ class Lifetime:
             if not self.launched or self.stopping:
                 return False
             for tab, heard in list(self.tabs.items()):
-                if now - heard >= self.silence:
+                if now - heard >= self.silence and not self.busy.get(tab):
                     del self.tabs[tab]
                     self.dropped = True
             if self.tabs:
@@ -96,6 +121,31 @@ class Lifetime:
         print(f"Chembook3D is shutting down: {reason}", flush=True)
         if self.exit is not None:
             threading.Timer(EXIT_DELAY, self.exit).start()
+
+
+class TabRequests:
+    """Tells the lifetime about every request a tab sends (its `X-Chembook-Client` header)."""
+
+    def __init__(self, app: ASGIApp, lifetime: Lifetime) -> None:
+        self.app = app
+        self.lifetime = lifetime
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        tab = ""
+        if scope["type"] == "http":
+            for name, value in scope.get("headers", []):
+                if name == b"x-chembook-client":
+                    tab = value.decode("latin-1")[:100]
+        if not tab:
+            await self.app(scope, receive, send)
+            return
+        if not self.lifetime.asking(tab):
+            await self.app(scope, receive, send)
+            return
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            self.lifetime.answered(tab)
 
 
 def lifetime(request: Request) -> Lifetime:

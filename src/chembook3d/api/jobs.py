@@ -99,7 +99,7 @@ def list_jobs(
     error = None
     if refresh and any(j.get("state") != "draft" for j in jobs):
         error = cloud_jobs.fetch_origin(folder)
-    out = [cloud_jobs.job_status(folder, j["id"], launcher(request), fetch=False) for j in jobs]
+    out = cloud_jobs.job_statuses(folder, jobs, launcher(request))
     for job in out:
         job["fetch_error"] = error
         if job.get("imported"):
