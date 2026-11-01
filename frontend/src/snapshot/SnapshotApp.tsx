@@ -158,6 +158,8 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
   const [canvas, setCanvas] = useState(data.canvas)
   const [selection, setSelection] = useState<PanelSelection>(null)
   const [focus, setFocus] = useState<{ id: string; n: number } | null>(null)
+  // Centre the canvas on a card; the count makes a repeat on the same card a new request.
+  const focusOn = (id: string) => setFocus((f) => ({ id, n: (f?.n ?? 0) + 1 }))
   const [opening] = useState(() => openingView(data))
   const [mode, setMode] = useState<ViewMode>(opening.mode)
   const [filters, setFilters] = useState<Filters>(opening.filters)
@@ -241,26 +243,26 @@ export function SnapshotApp({ data }: { data: SnapshotData }) {
     setSelection({ kind: 'node', id })
     const onCanvas = canvas.nodes.find((n) => n.id === id)
     if (onCanvas) reveal(canvasOf(canvas, id))
-    if (onCanvas) setFocus({ id: onCanvas.group_id ?? id, n: Date.now() })
+    if (onCanvas) focusOn(onCanvas.group_id ?? id)
   }
   const selectGroup = (id: string) => {
     setSelection({ kind: 'group', id })
     reveal(canvasOf(canvas, id))
-    setFocus({ id, n: Date.now() })
+    focusOn(id)
   }
   const openRecord = (id: string) => {
     const on = canvasOf(canvas, id)
     if (on === undefined) return
     setCanvasId(on)
     setSelection({ kind: canvas.groups.some((g) => g.id === id) ? 'group' : 'node', id })
-    setFocus({ id, n: Date.now() })
+    focusOn(id)
   }
   const selectTransition = (id: string) => {
     if (canvas.transitions.some((t) => t.id === id)) reveal(transitionCanvas(canvas, id))
     setSelection({ kind: 'edge', id })
     const edge = canvas.transitions.find((t) => t.id === id)
     const source = edge && canvas.nodes.find((n) => n.id === edge.source_id)
-    if (edge) setFocus({ id: source?.group_id ?? edge.source_id, n: Date.now() })
+    if (edge) focusOn(source?.group_id ?? edge.source_id)
   }
   const select = {
     onSelectNode: selectNode,

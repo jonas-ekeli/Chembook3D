@@ -6,7 +6,7 @@ A local-first notebook for computational chemistry mechanism investigations. It 
 
 ## Install the tools
 
-You need [Git](https://git-scm.com/), [uv](https://docs.astral.sh/uv/) (it installs Python for you) and [Node.js](https://nodejs.org/) 22 or newer. Node.js is only used to build the interface.
+You need [Git](https://git-scm.com/), [uv](https://docs.astral.sh/uv/) (it installs Python for you) and [Node.js](https://nodejs.org/) 24 or newer. Node.js is only used to build the interface.
 
 Pick one of the three setups below. On a Windows PC, native Windows is the simplest; WSL works too, but everything, Node.js included, must then be installed inside WSL.
 
@@ -27,7 +27,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 ```
 
-Open a new terminal, then `nvm install 22`. Git usually comes with the distribution (`sudo apt install git` on Ubuntu).
+Open a new terminal, then `nvm install 24`. Git usually comes with the distribution (`sudo apt install git` on Ubuntu).
 
 ### WSL
 

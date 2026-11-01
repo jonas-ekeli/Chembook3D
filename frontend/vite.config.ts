@@ -13,8 +13,9 @@ export default defineConfig({
   build: {
     // The licences of the bundled packages, served beside the app (THIRD-PARTY-NOTICES.md).
     license: { fileName: 'third-party-licenses.md' },
-    // 3Dmol.js is one large library, loaded on demand; the app is served locally.
-    chunkSizeWarningLimit: 1000,
+    // The chunks over 1 MB are Ketcher (7.6 MB with its parts), ELK and the app itself; the
+    // libraries load on demand and the app is served locally, so their size costs little.
+    chunkSizeWarningLimit: 8000,
     rolldownOptions: {
       onLog(level, log, handler) {
         // 3Dmol.js uses eval internally; that is its own code, not ours.
