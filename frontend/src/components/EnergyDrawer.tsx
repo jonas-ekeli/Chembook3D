@@ -444,10 +444,13 @@ export function EnergyDrawer({
     if (!openId || lastSaved.current === null || lastSaved.current === storedKey) return
     lastSaved.current = storedKey
     const body = JSON.parse(storedKey) as { paths: ProfilePath[]; reference_id: string | null }
+    // The kept copy takes the change at once, not when the save comes back: a profile opened
+    // again before then must open as it was left, not as it was last saved.
+    setStored((current) => current?.map((p) => (p.id === openId ? { ...p, ...body } : p)) ?? null)
     saving.current = saving.current
       .then(() => api.updateEnergyProfile(openId, body))
       .then(
-        (updated) => setStored((current) => current?.map((p) => (p.id === updated.id ? { ...p, ...body } : p)) ?? null),
+        () => undefined,
         (err: unknown) => setError(errorText(err)),
       )
   }, [openId, storedKey])
