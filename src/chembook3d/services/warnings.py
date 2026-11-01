@@ -72,14 +72,19 @@ def calculation_warnings(
     return found
 
 
-def _frequency_jobs(node: Node) -> list[tuple[str, Calculation]]:
+def _frequency_jobs(
+    node: Node, settings: app_settings.Settings | None = None
+) -> list[tuple[str, Calculation]]:
     """D158: the latest frequency job at each composite level of the node, with the level's
     label, as `energies.NodeEnergies` uses them (another state's are left out, D155)."""
     if not any(c.type in FREQUENCY_TYPES for c in node.calculations):
         return []
     session = object_session(node)
-    settings = thermo_settings.settings(session)  # D159: the investigation's
-    found = energies.NodeEnergies(node, settings.qh_temperature, settings.qh_cutoff)
+    if settings is None:
+        settings = thermo_settings.settings(session)  # D159: the investigation's
+    found = energies.NodeEnergies(
+        node, settings.qh_temperature, settings.qh_cutoff, tolerance=settings.geometry_tolerance
+    )
     jobs = []
     for key, calculation in found.frequency_jobs():
         if calculation.result is None:
@@ -92,7 +97,9 @@ def _frequency_jobs(node: Node) -> list[tuple[str, Calculation]]:
     return jobs
 
 
-def node_warnings(node: Node) -> list[Finding]:
+def node_warnings(node: Node, settings: app_settings.Settings | None = None) -> list[Finding]:
+    """`settings`: `thermo_settings.settings(session)`, read once by a caller that asks for
+    many nodes; without it they are read here."""
     found: list[Finding] = []
     calculations = list(node.calculations)
     if OPTIMIZATION_INCOMPLETE in node.tags:
@@ -101,7 +108,7 @@ def node_warnings(node: Node) -> list[Finding]:
     # D158: every frequency job the energies use (the latest per composite level) is judged
     # against the node's role, naming its level, so a good job at one level never hides a
     # wrong one at another. A job not at a stationary point is each calculation's own warning.
-    frequencies = _frequency_jobs(node)
+    frequencies = _frequency_jobs(node, settings)
     for label, frequency in frequencies:
         for issue in energies.frequency_issues(node.role, frequency, f"at {label}"):
             if issue["code"] == "W-FREQ-NONSTAT":
@@ -134,7 +141,9 @@ def node_warnings(node: Node) -> list[Finding]:
         listed = ", ".join(f"charge {c} mult {m}" for c, m in sorted(states, key=str))
         found.append(Finding("W-CHG", f"charge or multiplicity disagree ({listed})"))
 
-    tolerance = app_settings.load().geometry_tolerance if calculations else None
+    tolerance = None
+    if calculations:
+        tolerance = (settings or app_settings.load()).geometry_tolerance
     for calculation in calculations:
         found += calculation_warnings(calculation, node, tolerance, on_node=True)
     return found

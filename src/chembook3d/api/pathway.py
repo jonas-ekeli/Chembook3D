@@ -36,7 +36,7 @@ from chembook3d.models import (
     Transition,
 )
 from chembook3d.services import alignment as alignment_service
-from chembook3d.services import atom_matching, layout, scan_edges, trajectory
+from chembook3d.services import atom_matching, layout, scan_edges, thermo_settings, trajectory
 from chembook3d.services import branches as branch_service
 from chembook3d.services import groups as group_service
 from chembook3d.services import nodes as node_service
@@ -509,12 +509,19 @@ def _folder(request: Request) -> Path | None:
 def canvas(request: Request, session: DbSession):
     """Everything the canvas draws, in one request."""
     paths = scan_edges.on_edges(session, _folder(request))
-    everything = node_service.list_nodes(session)
+    everything = node_service.list_nodes(session, with_calculations=True)
     nodes = [n for n in everything if not species_service.is_species(n)]
     counts = _step_counts(nodes)
+    # Read once for every node: per node they cost queries and a read of the settings file.
+    settings = thermo_settings.settings(session)
+    calculations = node_service.calculation_counts(session)
+
+    def out(node: Node) -> NodeOut:
+        return _node_out(session, node, settings, calculations)
+
     return CanvasOut(
-        nodes=[_node_out(session, n) for n in nodes],
-        species=[_node_out(session, n) for n in everything if species_service.is_species(n)],
+        nodes=[out(n) for n in nodes],
+        species=[out(n) for n in everything if species_service.is_species(n)],
         steps=[_step_out(session, s, counts) for s in step_service.list_steps(session)],
         branches=[_branch_out(session, b, nodes) for b in branch_service.list_branches(session)],
         transitions=[

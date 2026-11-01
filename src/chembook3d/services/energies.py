@@ -276,6 +276,7 @@ class NodeEnergies:
         cutoff: float,
         standard_state: str = "1 atm",
         bsse: bool = False,
+        tolerance: float | None = None,
     ):
         self.node = node
         self.bsse = bsse  # D161: add a counterpoise job's BSSE at the level
@@ -284,7 +285,8 @@ class NodeEnergies:
         self.standard_state = standard_state
         # D160: a free species' own concentration, whatever the standard state.
         self.concentration = node.concentration if node.kind == NodeKind.SPECIES else None
-        tolerance = app_settings.load().geometry_tolerance
+        if tolerance is None:
+            tolerance = app_settings.load().geometry_tolerance
         geometry = levels.node_geometry_level(node, tolerance)
         self.by_key: dict[LevelKey, list[Calculation]] = {}
         # D155: calculations for another charge or multiplicity than the node's are another

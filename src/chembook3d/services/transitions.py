@@ -13,7 +13,7 @@
 from typing import Any
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session, object_session
+from sqlalchemy.orm import Session, object_session, selectinload
 
 from chembook3d.models import GroupNode, Node, NodeKind, Role, Status, Transition
 from chembook3d.services import history
@@ -52,7 +52,9 @@ def endpoint(session: Session, record_id: str) -> Endpoint:
 
 
 def list_transitions(session: Session) -> list[Transition]:
-    return list(session.scalars(select(Transition).order_by(Transition.seq)))
+    # Their species are read for every edge (the canvas, mass balance, the energy view).
+    query = select(Transition).order_by(Transition.seq).options(selectinload(Transition.species))
+    return list(session.scalars(query))
 
 
 def touching(session: Session, record_ids: list[str]) -> list[Transition]:

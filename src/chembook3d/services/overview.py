@@ -16,7 +16,9 @@ from sqlalchemy.orm import Session
 from chembook3d.models import GroupNode, HistoryEntry, Node, NodeKind, Status
 from chembook3d.services import branches as branch_service
 from chembook3d.services import groups as group_service
+from chembook3d.services import nodes as node_service
 from chembook3d.services import steps as step_service
+from chembook3d.services import thermo_settings
 from chembook3d.services import transitions as transition_service
 from chembook3d.services import warnings as warning_service
 
@@ -86,7 +88,8 @@ def _end_label(end: Node | GroupNode) -> str:
 
 
 def overview(session: Session, since: datetime | None = None) -> Overview:
-    nodes = list(session.scalars(select(Node).order_by(Node.seq)))
+    nodes = node_service.list_nodes(session, with_calculations=True)
+    settings = thermo_settings.settings(session)  # read once for every node's warnings
     branch_list = branch_service.list_branches(session)
     branches = []
     for branch in branch_list:
@@ -108,7 +111,7 @@ def overview(session: Session, since: datetime | None = None) -> Overview:
         branch_ids = [node.branch_id] if node.branch_id else []
         if node.status in OPEN_STATUSES:
             items.append(OpenItem("node", node.id, _node_label(node), node.status, "", branch_ids))
-        found = warning_service.node_warnings(node)
+        found = warning_service.node_warnings(node, settings)
         if found:
             codes = sorted({w.code for w in found})
             items.append(

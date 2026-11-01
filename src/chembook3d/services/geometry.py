@@ -36,6 +36,8 @@ def aligned_rmsd(a: Rows, b: Rows) -> float | None:
 def matches(a: Rows | None, b: Rows | None, tolerance: float) -> bool:
     if not a or not b:
         return False
+    if a == b:
+        return True  # the usual case (a job's geometry is the node's), with no fit to make
     rmsd = aligned_rmsd(a, b)
     return rmsd is not None and rmsd <= tolerance
 
