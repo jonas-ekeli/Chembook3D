@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from chembook3d import xyz
 from chembook3d.models import (
@@ -55,6 +55,17 @@ def _geometry_from_atoms(atoms: list[xyz.Atom]) -> list[list[Any]]:
 
 def atoms_of(node: Node) -> list[xyz.Atom]:
     return [xyz.Atom(e, x, y, z) for e, x, y, z in (node.geometry or [])]
+
+
+def calculation_counts(session: Session) -> dict[str, int]:
+    """Each node's own calculations (IRC parts left out, as `calculation_count(own=True)`), for
+    every node in one query; a node with none is missing."""
+    query = (
+        select(Calculation.node_id, func.count())
+        .where(Calculation.irc_part.is_(None))
+        .group_by(Calculation.node_id)
+    )
+    return {node_id: count for node_id, count in session.execute(query).all()}
 
 
 def calculation_count(session: Session, node_id: str, own: bool = False) -> int:
@@ -183,8 +194,14 @@ def get(session: Session, node_id: str) -> Node:
     return node
 
 
-def list_nodes(session: Session) -> list[Node]:
-    return list(session.scalars(select(Node).order_by(Node.seq)))
+def list_nodes(session: Session, with_calculations: bool = False) -> list[Node]:
+    """Every node in canvas order. `with_calculations` loads their calculations and results
+    in two more queries, for callers that read them for every node (warnings, the canvas):
+    loaded one node at a time they cost two queries per node."""
+    query = select(Node).order_by(Node.seq)
+    if with_calculations:
+        query = query.options(selectinload(Node.calculations).selectinload(Calculation.result))
+    return list(session.scalars(query))
 
 
 def create(session: Session, fields: dict[str, Any], xyz_text: str | None = None) -> Node:
