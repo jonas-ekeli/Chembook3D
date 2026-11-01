@@ -28,6 +28,38 @@ function describe(result: ReturnType<typeof measure>): string | null {
   return `Dihedral ${result.value.toFixed(1)}°`
 }
 
+/** 3Dmol's viewer adds listeners to the window and the page's body that it never removes, so
+ * every viewer made stayed in memory with its models. This makes one and keeps them, so
+ * `release` can take them off again when the viewer goes. */
+function createViewer($3Dmol: typeof import('3dmol'), element: HTMLElement, options: object) {
+  const added: [EventTarget, string, EventListenerOrEventListenerObject][] = []
+  const targets: EventTarget[] = [window, document.body]
+  const originals = targets.map((target) => target.addEventListener)
+  const own = targets.map((target) => Object.prototype.hasOwnProperty.call(target, 'addEventListener'))
+  targets.forEach((target, i) => {
+    target.addEventListener = function (
+      this: EventTarget,
+      type: string,
+      listener: EventListenerOrEventListenerObject | null,
+      ...rest: [(boolean | AddEventListenerOptions)?]
+    ) {
+      if (listener) added.push([target, type, listener])
+      return originals[i].call(this, type, listener, ...rest)
+    } as EventTarget['addEventListener']
+  })
+  try {
+    const viewer = $3Dmol.createViewer(element, options)
+    const release = () => added.forEach(([target, type, listener]) => target.removeEventListener(type, listener))
+    return { viewer, release }
+  } finally {
+    targets.forEach((target, i) => {
+      // Back to the inherited method, or to the target's own if it had one.
+      if (own[i]) target.addEventListener = originals[i]
+      else delete (target as { addEventListener?: unknown }).addEventListener
+    })
+  }
+}
+
 function hideHydrogens(model: import('3dmol').GLModel, xyz: string, mode: HydrogenMode) {
   const hidden = hiddenAtoms(parseXyz(xyz), mode)
   if (hidden.size > 0) model.setStyle({ index: [...hidden] }, {})
@@ -83,6 +115,7 @@ export function Viewer3D({
   const hydrogens = useContext(HydrogenDisplay)
   const host = useRef<HTMLDivElement>(null)
   const viewer = useRef<Viewer | null>(null)
+  const releaseListeners = useRef<(() => void) | null>(null)
   const [ready, setReady] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [picks, setPicks] = useState<number[]>([])
@@ -114,7 +147,11 @@ export function Viewer3D({
     import('3dmol')
       .then(($3Dmol) => {
         if (cancelled || !host.current) return
-        if (!viewer.current) viewer.current = $3Dmol.createViewer(host.current, { backgroundColor: colourToken('--viewer-bg') })
+        if (!viewer.current) {
+          const made = createViewer($3Dmol, host.current, { backgroundColor: colourToken('--viewer-bg') })
+          viewer.current = made.viewer
+          releaseListeners.current = made.release
+        }
         const v = viewer.current
         // Showing or hiding a structure, or starting or stopping a movie of it (D101), keeps
         // the user's view; new structures are zoomed to.
@@ -231,11 +268,25 @@ export function Viewer3D({
   }, [imageRef])
 
   // Picked atoms: highlighted, joined by dashed lines and numbered. Alignment atoms being
-  // picked (D80) are numbered in their order, without lines.
-  const aligning = picking?.atoms
+  // picked (D80) are numbered in their order, without lines. Callers build `marks` and the
+  // picked list anew on every render (each keystroke in the structure editor), so they are
+  // compared by content: otherwise every label was drawn again on each.
+  const marksKey = marks ? JSON.stringify(marks) : ''
+  const shownMarks = useMemo(() => (marksKey ? (JSON.parse(marksKey) as AtomMarks) : undefined), [marksKey])
+  const aligningKey = picking ? picking.atoms.join(',') : null
+  const aligning = useMemo(
+    () => (aligningKey === null ? undefined : aligningKey ? aligningKey.split(',').map(Number) : []),
+    [aligningKey],
+  )
+  const drawn = useRef(false)
   useEffect(() => {
     const v = viewer.current
     if (!v || !ready) return
+    const marks = shownMarks
+    const nothing = !marks?.lines?.length && !marks?.labels.length && !aligning?.length && !picks.length
+    // A movie's frames change `atoms`; with nothing drawn on them, there is nothing to redo.
+    if (nothing && !drawn.current) return
+    drawn.current = !nothing
     v.removeAllShapes()
     v.removeAllLabels()
     const at = (index: number) => {
@@ -293,7 +344,7 @@ export function Viewer3D({
       }
     })
     v.render()
-  }, [picks, aligning, atoms, ready, marks])
+  }, [picks, aligning, atoms, ready, shownMarks])
 
   useEffect(() => {
     const element = host.current
@@ -321,6 +372,8 @@ export function Viewer3D({
       const watchers = v as unknown as { divwatcher?: ResizeObserver; intwatcher?: IntersectionObserver }
       watchers.divwatcher?.disconnect()
       watchers.intwatcher?.disconnect()
+      releaseListeners.current?.()
+      releaseListeners.current = null
     },
     [],
   )
