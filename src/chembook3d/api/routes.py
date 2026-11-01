@@ -505,7 +505,14 @@ def session_dep(request: Request) -> Iterator[Session]:
 DbSession = Annotated[Session, Depends(session_dep, scope="function")]
 
 
-def _node_out(session: Session, node: Node) -> NodeOut:
+def _node_out(
+    session: Session,
+    node: Node,
+    settings: app_settings.Settings | None = None,
+    counts: dict[str, int] | None = None,
+) -> NodeOut:
+    """`settings` (the investigation's, `thermo_settings.settings`) and `counts`
+    (`calculation_counts`): read once by a caller that lists many nodes."""
     atoms = node_service.atoms_of(node)
     return NodeOut(
         id=node.id,
@@ -521,8 +528,12 @@ def _node_out(session: Session, node: Node) -> NodeOut:
         atom_count=len(atoms),
         xyz=node_service.to_xyz(node) if atoms else None,
         derived_from_id=node.derived_from_id,
-        calculation_count=node_service.calculation_count(session, node.id, own=True),
-        warnings=[WarningOut(**w.as_dict()) for w in warning_service.node_warnings(node)],
+        calculation_count=(
+            counts.get(node.id, 0)
+            if counts is not None
+            else node_service.calculation_count(session, node.id, own=True)
+        ),
+        warnings=[WarningOut(**w.as_dict()) for w in warning_service.node_warnings(node, settings)],
         step_id=node.step_id,
         branch_id=node.branch_id,
         group_id=node.group_id,
@@ -834,7 +845,10 @@ class NodeBrief(BaseModel):
 def list_nodes(session: DbSession, include_xyz: bool = True, brief: bool = False):
     """include_xyz false (D148): every node without its coordinates, a short list; brief (D149)
     also leaves out the fields a list does not need."""
-    found = [_node_out(session, n) for n in node_service.list_nodes(session)]
+    settings = thermo_settings.settings(session)
+    counts = node_service.calculation_counts(session)
+    listed = node_service.list_nodes(session, with_calculations=True)
+    found = [_node_out(session, n, settings, counts) for n in listed]
     if not include_xyz:
         for node in found:
             node.xyz = None
