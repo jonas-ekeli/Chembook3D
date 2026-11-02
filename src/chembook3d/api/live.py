@@ -25,8 +25,10 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from chembook3d.api.identity import check_investigation_identity
 from chembook3d.api.routes import DbSession
 from chembook3d.models import (
     AlignmentSet,
@@ -77,6 +79,13 @@ QUIET = re.compile(
     r"|jobs|jobs/(?![^/]+/import-path$).*"  # importing a scan path changes the notebook
     r"|local/(?!jobs/[^/]+/import$).*"  # D213: only importing a local result changes it
     r")$"
+)
+
+# Identity discovery, explicit opening and computer-wide folder browsing must work from a
+# stale tab. Close/sync/settings stay guarded: their target depends on the active notebook.
+IDENTITY_DISCOVERY = re.compile(
+    r"^/api/(live|presence|investigation|health|folders|remote|investigations"
+    r"|investigations/open|investigations/clone|sync/resolve)$"
 )
 
 
@@ -171,6 +180,14 @@ class ChangeTracker:
             if name == CLIENT_HEADER.encode():
                 client = value.decode("latin-1")[:100]
         path: str = scope["path"]
+        if path.startswith("/api/") and not IDENTITY_DISCOVERY.fullmatch(path):
+            try:
+                check_investigation_identity(Request(scope))
+            except HTTPException as exc:
+                await JSONResponse({"detail": exc.detail}, status_code=exc.status_code)(
+                    scope, receive, send
+                )
+                return
         counts = (
             scope["method"] not in ("GET", "HEAD", "OPTIONS")
             and path.startswith("/api/")
@@ -276,7 +293,9 @@ class SelectionIn(BaseModel):
 @router.put("/selection", status_code=204)
 def report_selection(body: SelectionIn, request: Request):
     """The tab reports what is selected; the tab used last is the one Claude reads (A38)."""
-    folder = _folder(request)
+    investigation = getattr(request.app.state, "investigation", None)
+    check_investigation_identity(request, investigation)
+    folder = None if investigation is None else str(investigation.folder)
     with live_state(request).lock:
         live_state(request).selection = {"folder": folder, **body.model_dump()}
 

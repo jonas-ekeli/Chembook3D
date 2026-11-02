@@ -4,11 +4,11 @@
 // in a note can run in the page.
 
 import { createContext, useContext } from 'react'
-import type { Note } from './api'
+import { investigationUrl, type Note } from './api'
 
 /** Where a note's picture comes from: the API in the app, a data URL in the read-only copy. */
 export const NoteImageSource = createContext<(id: string) => string | undefined>(
-  (id) => `/api/note-images/${id}`,
+  (id) => investigationUrl(`/api/note-images/${id}`),
 )
 
 export const useNoteImage = () => useContext(NoteImageSource)

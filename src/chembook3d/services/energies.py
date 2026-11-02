@@ -16,6 +16,9 @@
   standard state (D160, `concentrations`).
 - W-TEMP (D160): H and G read at a frequency job temperature other than the G_qh temperature
   (or the analysis's) are noted in the value's check; G_qh is recomputed at it, so it never is.
+- Printed G at an explicit source pressure other than 1 atm is unavailable (W-PRESSURE):
+  D57/D95/D160's standard-state handling assumes a 1 atm source. G_qh recomputes translation
+  at 1 atm independently, so it needs no source-pressure correction.
 - A group node's value is its representative's; with none, it has no value (EN-7).
 - D161: a counterpoise job's stored energy is its corrected total; here it counts as the
   complex's uncorrected energy (that total minus its BSSE), like every other calculation at its
@@ -268,6 +271,20 @@ def check_of(issues: list[dict[str, str]]) -> dict[str, Any] | None:
     }
 
 
+def printed_g_pressure_issue(pressure: float | None) -> dict[str, str] | None:
+    """D57/D95/D160 assume 1 atm input; guard explicit other pressures without choosing a
+    new normalization convention. Missing pressure keeps the existing input convention."""
+    if pressure is None or pressure == 1.0:
+        return None
+    return {
+        "code": "W-PRESSURE",
+        "message": f"printed G is unavailable: the frequency job used {pressure:g} atm, while "
+        "standard-state or concentration handling assumes 1 atm input; source-pressure "
+        "conversion is not supported. G_qh is unaffected, as it is recomputed independently "
+        "at 1 atm",
+    }
+
+
 class NodeEnergies:
     """Every energy one node has, by composite level."""
 
@@ -455,6 +472,10 @@ class NodeEnergies:
                     f"{self.temperature:g} K like G_qh",
                 }
             )
+        if energy_type == "G" and frequency is not None:
+            issue = printed_g_pressure_issue(frequency.result.pressure)
+            if issue is not None:
+                issues.append(issue)
         return check_of(issues)
 
     def thermo_of(self, key: LevelKey) -> thermo_model.Thermo | None:
@@ -545,6 +566,14 @@ class NodeEnergies:
                     thermo.id,
                 )
             if energy_type == "G":
+                issue = printed_g_pressure_issue(result.pressure)
+                if issue is not None:
+                    # Keep the source correction and pressure accessible, but never label or
+                    # shift this value as though it were the 1 atm input D57/D95 require.
+                    details["printed_correction"] = correction
+                    return Value(
+                        None, issue["code"], issue["message"], source.id, thermo.id, details
+                    )
                 # D160: the file's G is at its job temperature, and so is its 1 M shift.
                 correction += self._standard_state(details, result.temperature or self.temperature)
             return Value(energy + correction, None, None, source.id, thermo.id, details)

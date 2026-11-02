@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTheme } from '../theme'
 import {
   api,
+  investigationUrl,
   balanceText,
   energyTypeName,
   formatDelta,
@@ -660,7 +661,7 @@ function TurnoverResultView({
             <h3>Degree of TOF control</h3>
             <button
               className="small"
-              onClick={() => download(`/api/turnovers/${turnover.id}/table.csv`, 'turnover.csv')}
+              onClick={() => download(investigationUrl(`/api/turnovers/${turnover.id}/table.csv`), 'turnover.csv')}
             >
               Export CSV
             </button>

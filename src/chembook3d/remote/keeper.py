@@ -34,6 +34,27 @@ from pathlib import Path
 
 import asyncssh
 
+
+def _download_destination(folder: Path, name: str) -> Path:
+    """Keep a remote POSIX basename safe when the local filesystem is Windows too."""
+    reserved = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} | {
+        f"{prefix}{number}" for prefix in ("COM", "LPT") for number in "123456789¹²³"
+    }
+    if (
+        not name
+        or name in (".", "..")
+        or any(ord(char) < 32 or char in '<>:"/\\|?*' for char in name)
+        or name.endswith((".", " "))
+        or name.split(".", 1)[0].rstrip(" .").upper() in reserved
+    ):
+        raise OSError("This remote file name cannot be copied safely on this computer.")
+    destination = folder.resolve()
+    local = destination / name
+    if local.resolve().parent != destination:
+        raise OSError("The local destination is outside the download folder.")
+    return local
+
+
 # 2: X11 forwarding (D123a); 3: the `inspect` command (D123c); 4: `read`, and `within` on `list`
 # and `download`, for Claude reading files (D124); 5: `write` and `writes`, Claude writing new
 # files once the user allows it (D126); 6: the files one `inspect` names go to the app as one
@@ -884,7 +905,9 @@ class Keeper:
                 if total > MAX_DOWNLOAD:
                     failed.append({"path": path, "reason": "more than 2 GB in one import"})
                     continue
-                local = Path(folder) / name
+                # A POSIX basename may still be a Windows path, device or alternate
+                # data stream. Keep ordinary names (including ORCA companions) intact.
+                local = _download_destination(Path(folder), name)
                 await sftp.get(path, str(local))
             except Outside as exc:
                 failed.append({"path": path, "reason": str(exc)})

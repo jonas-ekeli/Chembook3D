@@ -2053,8 +2053,8 @@ export class ApiError extends Error {
     return detail && Array.isArray(detail.blockers) ? detail.blockers : null
   }
 
-  get lock(): { host?: string; opened_at?: string } | null {
-    const detail = this.detail as { locked?: { host?: string; opened_at?: string } } | null
+  get lock(): { host?: string; opened_at?: string; can_force?: boolean } | null {
+    const detail = this.detail as { locked?: { host?: string; opened_at?: string; can_force?: boolean } } | null
     return this.status === 409 && detail && detail.locked ? detail.locked : null
   }
 
@@ -2085,9 +2085,49 @@ export type ClaudeStatus = {
  * elsewhere (by Claude, or in another tab). */
 export const CLIENT_ID = `tab-${Math.random().toString(36).slice(2, 10)}`
 
+let investigationIdentity: string | null = null
+let investigationGeneration = 0
+
+/** Bind requests to the notebook this tab displays, including while another tab switches it. */
+export function setInvestigationIdentity(folder: string | null): void {
+  investigationIdentity = folder
+  investigationGeneration += 1
+}
+
+/** A queued notebook operation retains its initiating investigation even after its UI closes. */
+export function captureInvestigation() {
+  const generation = investigationGeneration
+  return <T,>(operation: () => Promise<T>): Promise<T> => {
+    if (generation !== investigationGeneration) {
+      return Promise.reject(new ApiError(409, 'The investigation changed before this operation ran'))
+    }
+    return operation()
+  }
+}
+
+const unscoped = /^\/(live|presence|investigation|health|folders|remote)(\?|$)|^\/investigations(?:\/open|\/clone)?$|^\/sync\/resolve$/
+
+/** Browser links and image loads cannot send our header; retain the rendered target in the URL. */
+export function investigationUrl(path: string): string {
+  return `${path}${path.includes('?') ? '&' : '?'}expected_investigation=${encodeURIComponent(investigationIdentity ?? '')}`
+}
+
+function notebookHeaders(path: string): Record<string, string> {
+  return unscoped.test(path) ? {} : { 'X-Chembook-Investigation': encodeURIComponent(investigationIdentity ?? '') }
+}
+
+function checkResponseIdentity(path: string, generation: number): void {
+  // Close captures its target in the header, but live can report its completion before a
+  // slow push returns. Its sync outcome still belongs to that close operation.
+  if (!unscoped.test(path) && path !== '/investigations/close' && generation !== investigationGeneration) {
+    throw new ApiError(409, 'The investigation changed while this request was running')
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const generation = investigationGeneration
   const raw = body instanceof Blob
-  const headers: Record<string, string> = { 'X-Chembook-Client': CLIENT_ID }
+  const headers: Record<string, string> = { 'X-Chembook-Client': CLIENT_ID, ...notebookHeaders(path) }
   if (body !== undefined) headers['Content-Type'] = raw ? 'application/octet-stream' : 'application/json'
   const response = await fetch(`/api${path}`, {
     method,
@@ -2095,9 +2135,12 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
     body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
     signal,
   })
+  checkResponseIdentity(path, generation)
   if (!response.ok) throw await apiError(response)
   if (response.status === 204) return undefined as T
-  return (await response.json()) as T
+  const result = (await response.json()) as T
+  checkResponseIdentity(path, generation)
+  return result
 }
 
 /** The backend's error as an ApiError, with its JSON `detail` when it sent one. */
@@ -2114,13 +2157,17 @@ async function apiError(response: Response): Promise<ApiError> {
 /** POST `body` as JSON for a file read as a blob. A refusal throws an ApiError, carrying the
  * backend's `detail` only with `withDetail` (the CSV exports show the bare HTTP status). */
 async function requestBlob(path: string, body: unknown, withDetail = false): Promise<{ blob: Blob; headers: Headers }> {
+  const generation = investigationGeneration
   const response = await fetch(`/api${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Chembook-Client': CLIENT_ID, ...notebookHeaders(path) },
     body: JSON.stringify(body),
   })
+  checkResponseIdentity(path, generation)
   if (!response.ok) throw withDetail ? await apiError(response) : new ApiError(response.status, null)
-  return { blob: await response.blob(), headers: response.headers }
+  const blob = await response.blob()
+  checkResponseIdentity(path, generation)
+  return { blob, headers: response.headers }
 }
 
 /** D91: a delete Claude asks for; the app does it only on the user's Confirm. */
@@ -2430,7 +2477,7 @@ export const api = {
     request<BuilderEdited>('POST', '/builder/edit', { ...structure, picks, tool, ...options }),
   deletePreview: (id: string) => request<NodeDeletePreview>('GET', `/nodes/${id}/delete-preview`),
   deleteNode: (id: string) => request<unknown>('DELETE', `/nodes/${id}`),
-  xyzDownloadUrl: (id: string) => `/api/nodes/${id}/xyz`,
+  xyzDownloadUrl: (id: string) => investigationUrl(`/api/nodes/${id}/xyz`),
 
   history: (recordId?: string) =>
     request<HistoryEntry[]>(
@@ -2498,14 +2545,14 @@ export const api = {
   customBases: () => request<CustomBasisSummary[]>('GET', '/custom-bases'),
   customBasis: (id: string) => request<CustomBasisDetail>('GET', `/custom-bases/${id}`),
   customBasisFileUrl: (id: string, elements?: string[]) =>
-    `/api/custom-bases/${id}/file${elements ? `?elements=${encodeURIComponent(elements.join(','))}` : ''}`,
+    investigationUrl(`/api/custom-bases/${id}/file${elements ? `?elements=${encodeURIComponent(elements.join(','))}` : ''}`),
   updateSourceFile: (
     id: string,
     fields: Partial<Pick<SourceFile, 'original_name' | 'origin_device' | 'origin_path'>>,
   ) => request<SourceFile>('PATCH', `/source-files/${id}`, fields),
   openSourceFile: (id: string, reveal = false) =>
     request<void>('POST', `/source-files/${id}/open${reveal ? '?reveal=true' : ''}`),
-  sourceFileUrl: (id: string) => `/api/source-files/${id}/download`,
+  sourceFileUrl: (id: string) => investigationUrl(`/api/source-files/${id}/download`),
 
   canvas: () => request<Canvas>('GET', '/canvas'),
 

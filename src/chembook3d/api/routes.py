@@ -3,6 +3,7 @@
 import os
 import string
 from collections.abc import Callable, Iterator
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -18,13 +19,14 @@ from sqlalchemy.orm import Session, object_session
 from chembook3d import settings as app_settings
 from chembook3d import sync, thermochem, units, xyz
 from chembook3d.api import builds, downloads
+from chembook3d.api.identity import check_investigation_identity
 from chembook3d.investigation import (
     DB_NAME,
     Investigation,
     InvestigationError,
     InvestigationLocked,
     NeedsUpgrade,
-    check_lock,
+    acquire_ownership,
     create_investigation,
     open_investigation,
 )
@@ -487,6 +489,7 @@ class FolderListing(BaseModel):
 
 def _investigation(request: Request) -> Investigation:
     investigation = getattr(request.app.state, "investigation", None)
+    check_investigation_identity(request, investigation)
     if investigation is None:
         raise HTTPException(409, "No investigation is open")
     return investigation
@@ -604,12 +607,23 @@ def close_and_push(
     investigation: Investigation, timeout: float = sync.NETWORK_TIMEOUT
 ) -> sync.SyncStatus | None:
     """Close an investigation, then commit and push it if it is linked (FR-SYNC-05)."""
-    _remember(investigation, opened=False)
-    investigation.close()
-    if not sync.is_linked(investigation.folder):
-        return None
     try:
-        return sync.push(investigation.folder, open_db=False, timeout=timeout)
+        with investigation.ownership.operation(investigation.folder):
+            _remember(investigation, opened=False)
+            investigation.close(release_ownership=False)
+            try:
+                if not sync.is_linked(investigation.folder):
+                    return None
+                return sync.push(
+                    investigation.folder,
+                    open_db=False,
+                    timeout=timeout,
+                    ownership=investigation.ownership,
+                )
+            finally:
+                investigation.ownership.release()
+    except InvestigationError as exc:
+        return sync.SyncStatus("error", str(exc))
     except sync.SyncError as exc:
         return sync.SyncStatus("error", str(exc))
 
@@ -654,24 +668,24 @@ def _open_folder(request: Request, folder: Path, force: bool, upgrade: bool) -> 
     current = getattr(request.app.state, "investigation", None)
     if current is not None and folder.resolve() == current.folder.resolve():
         return _investigation_out(current)
-    try:
-        check_lock(folder, force)
-    except InvestigationLocked as exc:
-        raise HTTPException(409, {"locked": exc.lock, "message": str(exc)}) from exc
-    except InvestigationError as exc:
-        raise HTTPException(422, str(exc)) from exc
     status = None
-    if sync.is_linked(folder):
-        # FR-SYNC-04: pull first. Without a connection the investigation opens anyway.
-        try:
-            status = sync.pull(folder)
-        except sync.SyncError as exc:
-            status = sync.SyncStatus("error", str(exc))
-        if status.state == "diverged":
-            raise _conflict(folder, status)
+    ownership = None
+    investigation = None
     try:
+        ownership = acquire_ownership(folder, force)
+        if sync.is_linked(folder):
+            # FR-SYNC-04: the same lease covers pull, migration and the live database.
+            try:
+                status = sync.pull(folder, ownership=ownership)
+            except sync.SyncError as exc:
+                status = sync.SyncStatus("error", str(exc))
+            if status.state == "diverged":
+                raise _conflict(folder, status)
         investigation = open_investigation(
-            folder, force=force, allow_upgrade=upgrade or status is None
+            folder,
+            force=force,
+            allow_upgrade=upgrade or status is None,
+            ownership=ownership,
         )
     except InvestigationLocked as exc:
         raise HTTPException(409, {"locked": exc.lock, "message": str(exc)}) from exc
@@ -682,6 +696,9 @@ def _open_folder(request: Request, folder: Path, force: bool, upgrade: bool) -> 
         ) from exc
     except InvestigationError as exc:
         raise HTTPException(422, str(exc)) from exc
+    finally:
+        if ownership is not None and investigation is None:
+            ownership.release()
     return _set_open(request, investigation, status)
 
 
@@ -704,6 +721,7 @@ def clone(body: CloneInvestigationIn, request: Request):
 @router.post("/investigations/close", response_model=SyncOut | None)
 def close(request: Request):
     investigation = getattr(request.app.state, "investigation", None)
+    check_investigation_identity(request, investigation)
     status = None
     if investigation is not None:
         request.app.state.investigation = None
@@ -727,18 +745,36 @@ def sync_status(request: Request, fetch: bool = True):
 def sync_now(request: Request):
     """The Sync button: commit and push while the investigation stays open."""
     try:
-        return _sync_out(sync.push(_investigation(request).folder, open_db=True))
+        investigation = _investigation(request)
+        return _sync_out(
+            sync.push(
+                investigation.folder,
+                open_db=True,
+                ownership=investigation.ownership,
+            )
+        )
     except sync.SyncError as exc:
         return SyncOut(state="error", message=str(exc))
+    except InvestigationError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/sync/link", response_model=SyncOut)
 def sync_link(body: LinkIn, request: Request):
     investigation = _investigation(request)
     try:
-        return _sync_out(sync.link(investigation.folder, body.url, investigation.name))
+        return _sync_out(
+            sync.link(
+                investigation.folder,
+                body.url,
+                investigation.name,
+                ownership=investigation.ownership,
+            )
+        )
     except sync.SyncError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except InvestigationError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/sync/resolve", response_model=SyncOut)
@@ -747,12 +783,25 @@ def sync_resolve(body: ResolveIn, request: Request):
     interface opens it again afterwards."""
     folder = Path(body.folder)
     current = getattr(request.app.state, "investigation", None)
+    check_investigation_identity(request, current)
+    ownership = None
     if current is not None and folder.resolve() == current.folder.resolve():
-        request.app.state.investigation = None
-        current.close()
-        _staging(request).clear()
+        ownership = current.ownership
     try:
-        return _sync_out(sync.resolve(folder, body.keep))
+        with ownership.operation(folder) if ownership is not None else nullcontext():
+            try:
+                if ownership is not None:
+                    request.app.state.investigation = None
+                    current.close(release_ownership=False)
+                    _staging(request).clear()
+                return _sync_out(sync.resolve(folder, body.keep, ownership=ownership))
+            finally:
+                if ownership is not None:
+                    ownership.release()
+    except InvestigationLocked as exc:
+        raise HTTPException(409, {"locked": exc.lock, "message": str(exc)}) from exc
+    except InvestigationError as exc:
+        raise HTTPException(422, str(exc)) from exc
     except sync.SyncError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -1007,6 +1056,7 @@ def _with_investigation(request: Request, change: Callable[[Session | None], Any
     """`change` run in a transaction of the open investigation, or with None when none is
     open (the settings routes work either way)."""
     investigation = getattr(request.app.state, "investigation", None)
+    check_investigation_identity(request, investigation)
     if investigation is None:
         return change(None)
     with investigation.sessions.begin() as session:

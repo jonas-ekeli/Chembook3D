@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from '../theme'
 import {
   api,
+  captureInvestigation,
   energyTypeName,
   type Canvas,
   type EnergyTable,
@@ -162,8 +163,13 @@ export function EnergyDrawer({
   // The open profile for callbacks that finish after a render, such as a pathway being found.
   const openRef = useRef<string | null>(null)
   const saving = useRef<Promise<unknown>>(Promise.resolve())
-  const [profiles, setProfiles] = useState<Profiles | null>(null)
-  const [table, setTable] = useState<EnergyTable | null>(null)
+  const inInvestigation = useRef(captureInvestigation()).current
+  const [result, setResult] = useState<{
+    key: string
+    profiles?: Profiles
+    table?: EnergyTable
+    error?: string
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [sterics, setSterics] = useState<string[] | null>(null)
   // D106: drawer height, pathways list, zoom (null fits the profile to the drawer), style dialog.
@@ -317,6 +323,10 @@ export function EnergyDrawer({
         }
       : null
   const requestKey = JSON.stringify(request)
+  // INV-5: the refresh belongs to the result too: changed records invalidate old numbers.
+  const resultKey = JSON.stringify([requestKey, refreshKey])
+  const currentResultKey = useRef(resultKey)
+  currentResultKey.current = resultKey
 
   useEffect(() => {
     const request = JSON.parse(requestKey) as ProfileRequest | null
@@ -325,16 +335,14 @@ export function EnergyDrawer({
     Promise.all([api.profiles(request), api.energyTable(request)]).then(
       ([p, t]) => {
         if (!current) return
-        setProfiles(p)
-        setTable(t)
-        setError(null)
+        setResult({ key: resultKey, profiles: p, table: t })
       },
-      (err: unknown) => current && setError(errorText(err)),
+      (err: unknown) => current && setResult({ key: resultKey, error: errorText(err) }),
     )
     return () => {
       current = false
     }
-  }, [requestKey, refreshKey])
+  }, [requestKey, resultKey])
 
   // D189: the ways on from each pathway's end are asked for again whenever its nodes or the
   // canvas change, so a step undone or an edge drawn later never leaves a pathway at a dead end.
@@ -427,7 +435,7 @@ export function EnergyDrawer({
     // again before then must open as it was left, not as it was last saved.
     setStored((current) => current?.map((p) => (p.id === openId ? { ...p, ...body } : p)) ?? null)
     saving.current = saving.current
-      .then(() => api.updateEnergyProfile(openId, body))
+      .then(() => inInvestigation(() => api.updateEnergyProfile(openId, body)))
       .then(
         () => undefined,
         (err: unknown) => setError(errorText(err)),
@@ -437,7 +445,7 @@ export function EnergyDrawer({
   /** D190: a new, empty profile, opened; made after any save still on its way. */
   const newProfile = (): Promise<EnergyProfile> => {
     const made = saving.current
-      .then(() => api.createEnergyProfile({}))
+      .then(() => inInvestigation(() => api.createEnergyProfile({})))
       .then((created) => {
         setStored((current) => [...(current ?? []), created])
         show(created)
@@ -498,7 +506,7 @@ export function EnergyDrawer({
     if (!openProfile) return
     // The copy is made from what was saved last, after any save still on its way.
     saving.current = saving.current.then(() =>
-      api.duplicateEnergyProfile(openProfile.id).then(
+      inInvestigation(() => api.duplicateEnergyProfile(openProfile.id)).then(
         (copy) => {
           setStored((current) => [...(current ?? []), copy])
           show(copy)
@@ -511,7 +519,7 @@ export function EnergyDrawer({
     if (!openProfile) return
     const gone = openProfile.id
     saving.current = saving.current.then(() =>
-      api.deleteEnergyProfile(gone).then(
+      inInvestigation(() => api.deleteEnergyProfile(gone)).then(
         () => {
           const rest = (stored ?? []).filter((p) => p.id !== gone)
           setStored(rest)
@@ -527,8 +535,9 @@ export function EnergyDrawer({
   }
 
   // Shown only while there is something to show; a stale result is never drawn.
-  const shownProfiles = request ? profiles : null
-  const shownTable = request ? table : null
+  const shownResult = request && result?.key === resultKey ? result : null
+  const shownProfiles = shownResult?.profiles ?? null
+  const shownTable = shownResult?.table ?? null
 
   // D190: which saved profile the drawer shows, and its New, Rename, Duplicate and Delete.
   const profilePicker = (
@@ -599,18 +608,23 @@ export function EnergyDrawer({
   }
 
   const exportCsv = () => {
-    if (!request) return
+    if (!request || !shownTable) return
+    const key = resultKey
     api.energyTableCsv(request).then(
       (blob) => {
-        downloadBlob(blob, 'energy-table.csv')
+        if (currentResultKey.current === key) downloadBlob(blob, 'energy-table.csv')
       },
-      (err: unknown) => setError(errorText(err)),
+      (err: unknown) => {
+        if (currentResultKey.current !== key) return
+        setResult((previous) => previous?.key === key ? { ...previous, error: errorText(err) } : previous)
+      },
     )
   }
 
-  const errorLine = error && (
+  const shownError = shownResult?.error ?? error
+  const errorLine = shownError && (
     <p role="alert" className="error small">
-      {error}
+      {shownError}
     </p>
   )
 
@@ -951,6 +965,7 @@ export function EnergyDrawer({
           onPointerUp={() => (panning.current = null)}
         >
           {!layout.pathways && errorLine}
+          {request && !shownResult && <p role="status">Loading energy results…</p>}
           {livePaths.length > 0 && <EnergyNotes notes={shownProfiles?.notes} />}
           {!livePaths.length && listed.length ? (
             <EmptyState compact icon="chart" title="No pathway shown">

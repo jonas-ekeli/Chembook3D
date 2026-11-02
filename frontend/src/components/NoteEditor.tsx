@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
 import {
   api,
+  investigationUrl,
   NOTE_COLOURS,
   NOTE_CORNER_LABEL,
   NOTE_CORNERS,
@@ -94,7 +95,7 @@ export function NoteEditor({
     // The stored text is already clean; cleaning it again keeps only the allowed tags.
     element.innerHTML = cleanNoteHtml(initial.current)
     for (const img of element.querySelectorAll<HTMLImageElement>('img[data-note-image]')) {
-      img.src = `/api/note-images/${img.dataset.noteImage}`
+      img.src = investigationUrl(`/api/note-images/${img.dataset.noteImage}`)
     }
     element.focus()
   }, [])
@@ -124,7 +125,7 @@ export function NoteEditor({
     const img = document.createElement('img')
     img.dataset.noteImage = id
     img.alt = ''
-    img.src = `/api/note-images/${id}`
+    img.src = investigationUrl(`/api/note-images/${id}`)
     range.deleteContents()
     range.insertNode(img)
     range.setStartAfter(img)
