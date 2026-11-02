@@ -1,7 +1,9 @@
 """P22: ownership protects filesystem lifecycle work, as well as SQLite writes."""
 
+import errno
 import gc
 import json
+import os
 import subprocess
 import sys
 import time
@@ -495,3 +497,46 @@ def test_real_resolution_foreign_lock_cannot_reset_or_stage(tmp_path, monkeypatc
     assert sync._git(folder, "rev-parse", "HEAD") == head
     assert not (folder / inv.BACKUP_DIR).exists()
     assert (folder / inv.LOCK_NAME).read_text() == marker
+
+
+def _lock_raises(monkeypatch, code):
+    """Make the OS lock call fail with `code`, as an unsupporting filesystem or a holder would."""
+
+    def refuse(*_args):
+        raise OSError(code, os.strerror(code))
+
+    if os.name == "nt":
+        import msvcrt
+
+        monkeypatch.setattr(msvcrt, "locking", refuse)
+    else:
+        import fcntl
+
+        monkeypatch.setattr(fcntl, "flock", refuse)
+
+
+def test_folder_without_file_locking_still_opens(tmp_path, monkeypatch):
+    """P22: where the filesystem cannot lock (ENOLCK, EOPNOTSUPP), the lock file alone decides,
+    and "Open anyway" can override it; the investigation is never refused for good."""
+    folder = tmp_path / "inv"
+    inv.create_investigation(folder, "No locks").close()
+    for code in (errno.ENOLCK, errno.EOPNOTSUPP, errno.EINVAL):
+        _lock_raises(monkeypatch, code)
+        inv.open_investigation(folder).close()
+    (folder / inv.LOCK_NAME).write_text(json.dumps({"host": "other-computer", "pid": 42}))
+    with pytest.raises(inv.InvestigationLocked) as error:
+        inv.open_investigation(folder)
+    assert error.value.lock["can_force"] is True
+    inv.open_investigation(folder, force=True).close()
+
+
+def test_held_lock_without_marker_names_the_other_app(tmp_path, monkeypatch):
+    folder = tmp_path / "inv"
+    inv.create_investigation(folder, "Held").close()
+    (folder / inv.LOCK_NAME).unlink(missing_ok=True)
+    _lock_raises(monkeypatch, errno.EACCES if os.name == "nt" else errno.EWOULDBLOCK)
+    with pytest.raises(inv.InvestigationLocked) as error:
+        inv.open_investigation(folder, force=True)
+    assert error.value.lock["can_force"] is False
+    assert "?" not in str(error.value)
+    assert "another Chembook3D app on this computer" in str(error.value)
