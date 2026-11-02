@@ -1,7 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
   api,
-  ApiError,
   geometryToXyz,
   type BuilderDescription,
   type BuilderHold,
@@ -16,6 +15,8 @@ import { parseXyz } from '../chem'
 import { HydrogenDisplay } from '../display'
 import { Modal } from './Modal'
 import { Viewer3D, type AtomMarks } from './Viewer3D'
+import { errorText } from '../util'
+import { nodeName } from '../names'
 
 // D142: Ketcher is large, so it is loaded only when Draw… is first opened.
 const KetcherDrawer = lazy(() => import('./KetcherDrawer'))
@@ -26,11 +27,6 @@ const FROZEN = '#1971c2'
 
 function rowsOf(text: string | null): GeometryRows {
   return text ? parseXyz(text).map((a) => [a.element, a.x, a.y, a.z]) : []
-}
-
-function errorText(err: unknown): string {
-  if (err instanceof ApiError && typeof err.detail === 'string') return err.detail
-  return err instanceof Error ? err.message : String(err)
 }
 
 /** Atom numbers typed from 1, as picks from 0; null when they cannot be read. */
@@ -208,7 +204,7 @@ export function StructureEditor({
   const addMolecule = () => {
     if (molecule.startsWith('node:')) {
       const other = nodes.find((n) => n.id === molecule.slice(5))
-      if (other) void run('molecule', { atoms: rowsOf(other.xyz), what: `“${other.label || 'Untitled node'}”` })
+      if (other) void run('molecule', { atoms: rowsOf(other.xyz), what: `“${nodeName(other)}”` })
     } else if (molecule) {
       void run('molecule', { name: molecule })
     }
@@ -235,7 +231,7 @@ export function StructureEditor({
 
   return (
     <Modal
-      title={`Edit structure: “${node.label || 'Untitled node'}”`}
+      title={`Edit structure: “${nodeName(node)}”`}
       onClose={drawing ? () => undefined : close}
       wide
       actions={
@@ -520,7 +516,7 @@ export function StructureEditor({
                     <optgroup label="Nodes">
                       {others.map((n) => (
                         <option key={n.id} value={`node:${n.id}`}>
-                          {n.label || 'Untitled node'}
+                          {nodeName(n)}
                         </option>
                       ))}
                     </optgroup>

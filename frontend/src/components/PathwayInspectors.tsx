@@ -28,10 +28,7 @@ import { CompareStericsDialog } from './Sterics'
 import { useRequest, type Request } from '../commands'
 import { groupActions, scanPathEnds, selectionActions } from '../panelActions'
 import { memberShare, populationSummary } from '../populations'
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
+import { errorText } from '../util'
 
 const nodeName = (n: Node | undefined) => (n ? n.label || 'Untitled node' : 'a deleted node')
 const branchName = (b: Branch | undefined) => (b ? b.name || 'Unnamed branch' : '—')

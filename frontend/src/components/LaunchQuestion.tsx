@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import { api, type LaunchQuestion as Question } from '../api'
-import { colourToken } from '../util'
+import { colourToken, errorText } from '../util'
 
 // D93, A40: a `claude --cloud` launch of a calculation job that stops at a question (whether
 // Claude Code may trust the investigation folder, for one). The app answers none itself; this
@@ -72,7 +72,7 @@ export function LaunchQuestion({ question, onDone }: { question: Question; onDon
         }
         term.onData((data) => send({ type: 'input', data }))
       } catch (err) {
-        finish({ kind: 'ended', message: err instanceof Error ? err.message : String(err) })
+        finish({ kind: 'ended', message: errorText(err) })
       }
     })()
     return () => {

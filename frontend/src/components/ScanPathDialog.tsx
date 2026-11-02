@@ -5,10 +5,7 @@ import { measure, parseXyz } from '../chem'
 import { AtomMatchReview } from './AtomMatchDialog'
 import { SpeciesSection } from './ScanPathSpecies'
 import { Modal } from './Modal'
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
+import { errorText } from '../util'
 
 type Held = { end: 'start' | 'end'; atoms: number[]; ticked: boolean; why: string; start_value: number; end_value: number; kind: string }
 

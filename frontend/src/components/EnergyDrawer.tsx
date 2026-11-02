@@ -18,8 +18,8 @@ import {
 } from '../api'
 import { Icon } from '../icons'
 import { figureOf } from '../profileFigure'
-import { pathwayColours, saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
-import { closesCycle, csvTitle, download } from '../util'
+import { pathwayColours, pathwayLabels, pathwayLegend, saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
+import { closesCycle, csvTitle, downloadBlob, errorText } from '../util'
 import { EmptyState } from './EmptyState'
 import { EnergyNotes } from './EnergyNotes'
 import { EnergyTableView } from './EnergyTableView'
@@ -33,8 +33,6 @@ import { CompareStericsDialog } from './Sterics'
 import { useRequest, type Request } from '../commands'
 import { placeText } from '../subCanvas'
 
-const NO_BRANCH = '#98a2b3'
-const FALLBACK = ['#2459c6', '#c4320a', '#079455', '#6938ef', '#b54708']
 
 type Path = {
   ids: string[]
@@ -77,10 +75,6 @@ function shifted(shifts: PathShift[], at: number, delta: number): PathShift[] {
 
 /** D105: the drawer as the investigation remembers it. */
 export type DrawerView = Omit<ViewState['drawer'], 'open'>
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
 
 // D106: the drawer's height and whether its pathways list shows, remembered by the browser.
 const LAYOUT = 'chembook3d.drawer'
@@ -250,15 +244,8 @@ export function EnergyDrawer({
     return () => el.removeEventListener('wheel', onWheel)
   }, [tab])
 
-  const labels = useMemo(() => {
-    const found = new Map<string, string>()
-    for (const n of canvas.nodes) found.set(n.id, n.label || 'Untitled node')
-    for (const g of canvas.groups) found.set(g.id, g.label || 'Group')
-    return found
-  }, [canvas])
+  const labels = useMemo(() => pathwayLabels(canvas), [canvas])
   const branches = useMemo(() => new Map(canvas.branches.map((b) => [b.id, b])), [canvas.branches])
-  const branchOf = (id: string) =>
-    canvas.nodes.find((n) => n.id === id)?.branch_id ?? canvas.groups.find((g) => g.id === id)?.outgoing_branch_id ?? null
 
   // D81: a pathway's structures in order, each once; a group counts through its representative.
   const pathwayNodes = (ids: string[]) => {
@@ -275,15 +262,7 @@ export function EnergyDrawer({
   // Each pathway with its place in `paths`, its colour and its name; D190: only the ticked
   // ones are drawn, valued and exported, and a pathway keeps its colour whether shown or not.
   const listed = paths
-    .map((path, at) => {
-      const branchId = path.branchId ?? [...path.ids].reverse().map(branchOf).find((b) => b)
-      const colour = branchId ? (branches.get(branchId)?.colour ?? NO_BRANCH) : FALLBACK[at % FALLBACK.length]
-      const branch = path.branchId ? branches.get(path.branchId) : undefined
-      const name = branch
-        ? `${branch.name || 'Unnamed branch'}`
-        : `${labels.get(path.ids[0])} → ${labels.get(path.ids.at(-1)!)}`
-      return { path, at, colour, name, branched: Boolean(branchId) }
-    })
+    .map((path, at) => ({ path, at, ...pathwayLegend(canvas, branches, labels, path.ids, path.branchId, at) }))
     .filter(({ path }) => path.ids.every((id) => labels.has(id)))
   const drawn = listed.filter(({ path }) => path.shown)
   const livePaths = drawn.map(({ path }) => path)
@@ -623,9 +602,7 @@ export function EnergyDrawer({
     if (!request) return
     api.energyTableCsv(request).then(
       (blob) => {
-        const url = URL.createObjectURL(blob)
-        download(url, 'energy-table.csv')
-        setTimeout(() => URL.revokeObjectURL(url), 1000)
+        downloadBlob(blob, 'energy-table.csv')
       },
       (err: unknown) => setError(errorText(err)),
     )

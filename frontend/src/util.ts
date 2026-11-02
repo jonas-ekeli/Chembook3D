@@ -1,5 +1,7 @@
 // Small helpers shared by the app and its read-only copy (D79).
 
+import { ApiError } from './api'
+
 // A13: a pathway may end at a node it visited earlier, closing a catalytic cycle once.
 export function closesCycle(ids: string[]): boolean {
   return ids.slice(0, -1).includes(ids[ids.length - 1])
@@ -25,6 +27,13 @@ export function download(url: string, name: string) {
   link.href = url
   link.download = name
   link.click()
+}
+
+/** Save `blob` as the file `name`, freeing its object URL `revokeAfter` ms later. */
+export function downloadBlob(blob: Blob, name: string, revokeAfter = 1000) {
+  const url = URL.createObjectURL(blob)
+  download(url, name)
+  setTimeout(() => URL.revokeObjectURL(url), revokeAfter)
 }
 
 /** Build xyz text with a displacement vector per atom, which 3Dmol animates (FR-3D-03). */
@@ -81,8 +90,11 @@ export function csvTitle(type: string): string {
   )
 }
 
-// D83, D86, D171: shared by the analyses in the Analyses view.
-export function errorText(err: unknown): string {
+/** A caught error as the text shown to the user (D83, D86, D171). An ApiError's message is
+ * already the backend's `detail` when that is text. With `blockers`, the reasons the backend
+ * gave for refusing a change are shown instead, joined by "; ", when it sent some. */
+export function errorText(err: unknown, options: { blockers?: boolean } = {}): string {
+  if (options.blockers && err instanceof ApiError && err.blockers) return err.blockers.join('; ')
   return err instanceof Error ? err.message : String(err)
 }
 

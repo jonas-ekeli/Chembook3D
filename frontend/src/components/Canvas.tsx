@@ -66,7 +66,7 @@ import {
 } from '../api'
 import { MoleculeSketch } from './MoleculeSketch'
 import { useTheme } from '../theme'
-import { colourToken } from '../util'
+import { colourToken, download } from '../util'
 import { CardNotes, type NoteActions } from './CanvasNotes'
 import { noteTitle } from '../notes'
 import { Icon } from '../icons'
@@ -82,6 +82,7 @@ import { useStable, useStableOptional } from '../stable'
 
 import type { Filters, Selection, ViewMode } from '../canvasView'
 import type { Rotation } from '../chem'
+import { nodeName } from '../names'
 
 const NO_BRANCH = '#98a2b3'
 
@@ -458,7 +459,7 @@ const SubBox = memo(function SubBox({ data, selected }: NodeProps<FlowNode<SubDa
       )}
       {!expanded && face && mode !== 'structure' && (
         <div className="csub-face small muted" title="The structure this box shows (its face)">
-          {face.label || 'Untitled node'}
+          {nodeName(face)}
         </div>
       )}
     </div>
@@ -732,13 +733,6 @@ function sameButMeasured(drawn: FlowNode, node: FlowNode): boolean {
   const keys = Object.keys(node) as (keyof FlowNode)[]
   const drawnKeys = Object.keys(drawn).filter((k) => k !== 'measured')
   return drawnKeys.length === keys.length && keys.every((k) => k === 'measured' || drawn[k] === node[k])
-}
-
-function download(url: string, name: string) {
-  const link = document.createElement('a')
-  link.href = url
-  link.download = name
-  link.click()
 }
 
 function CanvasView({
@@ -1038,7 +1032,7 @@ function CanvasView({
         { id: group.id, label: group.label || 'Group', ts: false, colour: groupColour },
         ...shown.map((m) => ({
           id: m.id,
-          label: m.label || 'Untitled node',
+          label: nodeName(m),
           ts: m.role === 'transition_state',
           colour: branchColour(m.branch_id),
         })),
@@ -1058,7 +1052,7 @@ function CanvasView({
           // D87: its notes, floating ones too, are drawn over the cards around it.
           zIndex: notesOf(only.id).length ? 1 : undefined,
           ...at(group.canvas_id, group.pos_x, group.pos_y),
-          ariaLabel: `Node ${only.label || 'Untitled node'}`,
+          ariaLabel: `Node ${nodeName(only)}`,
           selected: false,
           data: {
             node: only,
@@ -1101,7 +1095,7 @@ function CanvasView({
           colour,
           stepName: group.step_id ? (stepNames.get(group.step_id) ?? null) : null,
           memberCount: members.length,
-          representativeLabel: representative ? representative.label || 'Untitled node' : null,
+          representativeLabel: representative ? nodeName(representative) : null,
           representativeXyz: representative?.xyz ?? null,
           representativeRotation: representative?.view_rotation ?? null,
           mode,
@@ -1114,7 +1108,7 @@ function CanvasView({
           energy: nodeEnergy(group.id),
           memberNotes: members.flatMap((m) => notesOf(m.id)),
           memberWarnings: members.flatMap((m) =>
-            m.warnings.map((w) => `${m.label || 'Untitled node'}: ${w.code}: ${w.message}`),
+            m.warnings.map((w) => `${nodeName(m)}: ${w.code}: ${w.message}`),
           ),
           population: group.show_populations && populationOf(group.id) ? populationSummary(populationOf(group.id)!) : null,
         } satisfies GroupData,
@@ -1136,7 +1130,7 @@ function CanvasView({
           extent: 'parent',
           draggable: false,
           position: { x: 8 + (index % columns) * cell.w, y: GROUP_HEADER + Math.floor(index / columns) * cell.h },
-          ariaLabel: `Node ${member.label || 'Untitled node'}`,
+          ariaLabel: `Node ${nodeName(member)}`,
           selected: false,
           data: {
             node: member,
@@ -1157,7 +1151,7 @@ function CanvasView({
     for (const node of data.nodes) {
       // D121: a scan path shown on its edge only is drawn as the edge's chip.
       if (node.group_id || !nodeShown(node) || node.on_edge) continue
-      const self = { id: node.id, label: node.label || 'Untitled node', ts: node.role === 'transition_state' }
+      const self = { id: node.id, label: nodeName(node), ts: node.role === 'transition_state' }
       if (!own(node.canvas_id, [{ ...self, colour: branchColour(node.branch_id) }])) continue
       drawnAs.set(node.id, node.id)
       result.push({
@@ -1167,7 +1161,7 @@ function CanvasView({
         // D87: its notes, floating ones too, are drawn over the cards around it.
         zIndex: notesOf(node.id).length ? 1 : undefined,
         ...at(node.canvas_id, node.pos_x, node.pos_y),
-        ariaLabel: `Node ${node.label || 'Untitled node'}`,
+        ariaLabel: `Node ${nodeName(node)}`,
         selected: false,
         data: {
           node,

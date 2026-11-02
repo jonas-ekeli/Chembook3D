@@ -39,7 +39,7 @@ import { CloudJobsDialog } from './components/CloudJobsDialog'
 import { useScanPathImports } from './cloudJobs'
 import { CanvasPane, type CanvasEnergy, type CanvasContextMenu, type CanvasTarget, type TidySides } from './components/Canvas'
 import { EnergyDrawer, type DrawerPath, type DrawerView } from './components/EnergyDrawer'
-import { download } from './util'
+import { downloadBlob, errorText } from './util'
 import { FilterMenu } from './components/FilterMenu'
 import { FolderPicker } from './components/FolderPicker'
 import { GModelBadge } from './components/GModelBadge'
@@ -85,7 +85,7 @@ import { cardEnergy, minus } from './cardEnergy'
 import { Icon, type IconName } from './icons'
 import { useLive } from './live'
 import type { HydrogenMode } from './chem'
-import { recordNames } from './names'
+import { nodeName, recordNames } from './names'
 import { HydrogenDisplay, StericColourSetting, type StericColours } from './display'
 import { setTheme } from './theme'
 import { EnergyNotes } from './components/EnergyNotes'
@@ -127,7 +127,7 @@ type ImportRequest = {
 /** An edge's end as the scan editor lists it: the node's label, or the group's. */
 function endLabel(canvas: Canvas, id: string): string {
   const node = canvas.nodes.find((n) => n.id === id)
-  if (node) return node.label || 'Untitled node'
+  if (node) return nodeName(node)
   const group = canvas.groups.find((g) => g.id === id)
   return group ? group.label || 'Group' : '?'
 }
@@ -143,10 +143,6 @@ function readMode(): ViewMode {
   } catch {
     return 'compact'
   }
-}
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }
 
 /** The display settings every 3D view, card and steric map reads, and what opens the scan
@@ -886,9 +882,7 @@ function App() {
     }
     api.exportSnapshot(drawerPaths, referenceId, view, drawerReference).then(
       ({ blob, name }) => {
-        const url = URL.createObjectURL(blob)
-        download(url, name)
-        setTimeout(() => URL.revokeObjectURL(url), 1000)
+        downloadBlob(blob, name)
         setSharing(null)
         setNotice(`Saved “${name}”. It opens in a browser, offline, and cannot be edited.`)
       },
@@ -923,7 +917,7 @@ function App() {
         <NoteEditor
           note={editedNote ?? null}
           nodeId={notedNode.id}
-          nodeLabel={notedNode.label || 'Untitled node'}
+          nodeLabel={nodeName(notedNode)}
           onClose={() => setNoteEditing(null)}
           onSaved={() => {
             setNoteEditing(null)
@@ -1198,7 +1192,7 @@ function App() {
             setEditingNode(null)
             changed(
               saved,
-              derived ? `Saved as a new node derived from “${original?.label || 'Untitled node'}”.` : 'Structure saved.',
+              derived ? `Saved as a new node derived from “${nodeName(original)}”.` : 'Structure saved.',
             )
           }}
         />
@@ -1365,7 +1359,7 @@ function App() {
   const newSelectivity = (nodes: Node[], groups: Group[]) => {
     const used = new Set<string>()
     const outcomes = [...groups, ...nodes].map((item) => {
-      const base = ('kind' in item ? item.label || 'Untitled node' : item.label || 'Group').trim()
+      const base = ('kind' in item ? nodeName(item) : item.label || 'Group').trim()
       let name = base
       for (let n = 2; used.has(name); n++) name = `${base} (${n})`
       used.add(name)
@@ -1479,7 +1473,7 @@ function App() {
   // D184: the right-click menus and the palette. Every entry runs what a panel, the outline or a
   // bar already does: directly when App holds it, else asked of the panel (`ask`), which runs its
   // own code with its own checks and dialogs.
-  const nodeName = (n: Node) => n.label || (n.kind === 'species' ? 'Untitled species' : 'Untitled node')
+  const nodeOrSpeciesName = (n: Node) => n.label || (n.kind === 'species' ? 'Untitled species' : 'Untitled node')
   const startPathway = () => {
     setView('canvas')
     setDrawerOpen(true)
@@ -1490,7 +1484,7 @@ function App() {
   const copyXyz = (node: Node) => {
     if (!node.xyz) return
     navigator.clipboard.writeText(node.xyz).then(
-      () => setNotice(`Copied the xyz of “${nodeName(node)}” to the clipboard.`),
+      () => setNotice(`Copied the xyz of “${nodeOrSpeciesName(node)}” to the clipboard.`),
       () => setError('The browser did not allow copying; use Copy under Coordinates in the node’s panel.'),
     )
   }
@@ -1720,7 +1714,7 @@ function App() {
       const detail = [node.role === 'transition_state' ? 'TS' : null, stepName(node.step_id)].filter(Boolean).join(' · ')
       return {
         label: 'Node actions',
-        heading: { title: nodeName(node), detail: detail || undefined },
+        heading: { title: nodeOrSpeciesName(node), detail: detail || undefined },
         items: nodeItems(node),
       }
     }
@@ -1795,7 +1789,7 @@ function App() {
       }
     }
     if (multiNodes.length + multiGroups.length + multiSubs.length >= 2) fromMenu('Selection', selectionItems())
-    else if (selectedNode) fromMenu(nodeName(selectedNode), nodeItems(selectedNode))
+    else if (selectedNode) fromMenu(nodeOrSpeciesName(selectedNode), nodeItems(selectedNode))
     else if (selectedGroup) fromMenu(selectedGroup.label || 'Group', groupItems(selectedGroup))
     else if (selectedSub) fromMenu(subName(selectedSub), subItems(selectedSub))
     else if (selectedEdge)
@@ -1935,7 +1929,7 @@ function App() {
       entries.push({
         id: `node:${node.id}`,
         group: 'Nodes',
-        label: nodeName(node),
+        label: nodeOrSpeciesName(node),
         icon: 'cube',
         ts: node.role === 'transition_state' && node.kind !== 'species',
         detail: detail.join(' · ') || undefined,

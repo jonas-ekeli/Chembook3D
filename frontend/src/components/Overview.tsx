@@ -8,10 +8,7 @@ import {
 } from "../api";
 import { HistoryList, type Names } from "./HistoryList";
 import { placeText } from "../subCanvas";
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+import { errorText } from "../util";
 
 const REASONS: { reason: OpenItem["reason"]; title: string }[] = [
   { reason: "failed", title: "Failed" },

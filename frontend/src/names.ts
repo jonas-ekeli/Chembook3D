@@ -1,9 +1,14 @@
 import type { Canvas } from './api'
 
+/** A node's display name: its label, or "Untitled node" when it has none (or is missing). */
+export function nodeName(node: { label?: string | null } | null | undefined): string {
+  return node?.label || 'Untitled node'
+}
+
 /** Display names for every record on the canvas, for history entries that hold ids. */
 export function recordNames(canvas: Canvas): Map<string, string> {
   const names = new Map<string, string>([
-    ...canvas.nodes.map((n) => [n.id, n.label || 'Untitled node'] as [string, string]),
+    ...canvas.nodes.map((n) => [n.id, nodeName(n)] as [string, string]),
     ...canvas.species.map((n) => [n.id, n.label || 'Untitled species'] as [string, string]),
     ...canvas.steps.map((s) => [s.id, s.name || 'Unnamed step'] as [string, string]),
     ...canvas.branches.map((b) => [b.id, b.name || 'Unnamed branch'] as [string, string]),

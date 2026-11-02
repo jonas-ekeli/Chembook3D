@@ -37,7 +37,7 @@ import { PathEdgeSection } from './ScanPathsOnEdge'
 import { MoreMenu, type MenuItem } from './MoreMenu'
 import { Icon } from '../icons'
 import { cardEnergy, minus, type CanvasEnergy } from '../cardEnergy'
-import { hartree } from '../util'
+import { errorText, hartree } from '../util'
 import { useRequest, type Request } from '../commands'
 
 const SYSTEM_TAGS = new Set(['optimization-incomplete'])
@@ -272,7 +272,7 @@ export function NodeInspector({
         setError(null)
         onChanged(updated)
       },
-      (err: unknown) => setError(err instanceof Error ? err.message : String(err)),
+      (err: unknown) => setError(errorText(err)),
     )
   }
 
@@ -282,7 +282,7 @@ export function NodeInspector({
         setError(null)
         onChanged(updated, kind === 'species' ? 'Now a free species, listed under Free species.' : 'Now a node on the canvas.')
       },
-      (err: unknown) => setError(err instanceof Error ? err.message : String(err)),
+      (err: unknown) => setError(errorText(err)),
     )
 
   const restore = (entry: HistoryEntry) => {
@@ -297,7 +297,7 @@ export function NodeInspector({
             result.node,
             result.derived ? 'The old coordinates were saved as a new derived node.' : undefined,
           ),
-        (err: unknown) => setError(err instanceof Error ? err.message : String(err)),
+        (err: unknown) => setError(errorText(err)),
       )
     } else if (entry.field) {
       update({ [entry.field]: entry.old_value } as NodeFields)

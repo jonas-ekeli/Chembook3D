@@ -4,10 +4,7 @@ import { Icon } from '../icons'
 import { Modal } from './Modal'
 import { NodeRow } from './NodeRow'
 import { contentsText, placeText, subName, subsOf } from '../subCanvas'
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
+import { errorText } from '../util'
 
 // D178: which outline sections are collapsed, remembered by the browser.
 const COLLAPSED = 'chembook3d.outline.collapsed'

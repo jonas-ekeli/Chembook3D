@@ -10,12 +10,8 @@ import {
   type SourceFile,
   type ThermoModel,
 } from '../api'
-import { hartree } from '../util'
+import { errorText, hartree } from '../util'
 import { BasisSetsDialog } from './BasisSets'
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
 
 const LEVEL_FIELDS: { key: keyof LevelFields; label: string }[] = [
   { key: 'method', label: 'Method' },

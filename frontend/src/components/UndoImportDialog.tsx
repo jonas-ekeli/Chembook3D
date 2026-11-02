@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { HistoryEntry, UndoFile, UndoPreview } from '../api'
 import { api, ApiError, CALCULATION_TYPES } from '../api'
 import { Modal } from './Modal'
+import { errorText } from '../util'
 
 const FIELD_NAMES: Record<string, string> = {
   geometry: 'coordinates',
@@ -84,7 +85,7 @@ export function UndoImportDialog({
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    api.undoPreview(entry.id).then(setPreview, (err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+    api.undoPreview(entry.id).then(setPreview, (err: unknown) => setError(errorText(err)))
   }, [entry.id])
 
   const batch = entry.undo === 'batch'
@@ -96,7 +97,7 @@ export function UndoImportDialog({
       (err: unknown) => {
         setBusy(false)
         if (err instanceof ApiError && err.blockers && preview) setPreview({ ...preview, blockers: err.blockers })
-        else setError(err instanceof Error ? err.message : String(err))
+        else setError(errorText(err))
       },
     )
   }

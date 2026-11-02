@@ -15,12 +15,9 @@ import {
   type NameRequest,
 } from '../api'
 import { Modal } from './Modal'
-import { nameFilter } from '../util'
+import { errorText, nameFilter } from '../util'
 import { Viewer3D } from './Viewer3D'
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
+import { nodeName } from '../names'
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -476,15 +473,15 @@ export function ImportDialog({
   const ircWhat =
     irc?.part === 'end' ? `a job on the ${irc.direction} end point` : 'an IRC path'
   const title = irc
-    ? `Add ${ircWhat} to the IRC of “${target?.label || 'Untitled node'}”`
+    ? `Add ${ircWhat} to the IRC of “${nodeName(target)}”`
     : target
-    ? `Import onto “${target.label || 'Untitled node'}”`
+    ? `Import onto “${nodeName(target)}”`
     : asSpecies
       ? 'Import a free species'
       : 'Import calculation output'
   const chosen = plan?.steps.find((s) => s.index === plan.chosen_step) ?? null
   const writesNode = plan && (plan.mode !== 'onto' || plan.derived_offered)
-  const nodeLabel = (id: string) => nodes.find((n) => n.id === id)?.label || 'Untitled node'
+  const nodeLabel = (id: string) => nodeName(nodes.find((n) => n.id === id))
 
   return (
     <Modal
@@ -608,7 +605,7 @@ export function ImportDialog({
               </p>
               {plan.irc_targets.map((t) => (
                 <button key={t.node_id} className="primary" onClick={() => change({ irc_part: 'path', target_node_id: t.node_id })}>
-                  Add to the IRC of “{t.label || 'Untitled node'}” ({t.rmsd.toFixed(3)} Å)
+                  Add to the IRC of “{nodeName(t)}” ({t.rmsd.toFixed(3)} Å)
                 </button>
               ))}
             </section>

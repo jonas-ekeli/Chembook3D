@@ -6,6 +6,7 @@ import { api, type ShutdownInfo } from '../api'
 import { shutDown, useLifecycle, type Stopped } from '../lifecycle'
 import { Icon } from '../icons'
 import { Modal } from './Modal'
+import { errorText } from '../util'
 
 /** The start page's button (D180: with an investigation open, the investigation menu's last item). */
 export function ShutDownButton() {
@@ -34,7 +35,7 @@ export function ShutDownDialog({ onClose }: { onClose: () => void }) {
     setBusy(true)
     shutDown().catch((err: unknown) => {
       setBusy(false)
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorText(err))
     })
   }
 

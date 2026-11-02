@@ -8,7 +8,7 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 
 ## Frontend package
 
-`frontend/`: TypeScript + React UI built with Vite. The backend serves `frontend/dist` when it exists.
+`frontend/`: TypeScript + React UI built with Vite. The backend serves `frontend/dist` when it exists. Shared helpers, used instead of local copies: `src/util.ts` `errorText` (a caught error as shown text; `{ blockers: true }` shows an ApiError's `blockers` instead), `download` (a URL) and `downloadBlob` (a Blob); `src/names.ts` `nodeName` (a label, else "Untitled node"); `src/api.ts` `request` for JSON and `requestBlob` for a file fetched as a blob.
 
 ## Look of the interface (D174)
 
@@ -144,7 +144,7 @@ Git sync (D71): `sync.py` runs the installed `git` (link, pull on open, push on 
 
 ## Read-only copy to share (D79)
 
-Read-only copy to share (D79, A30): `api/snapshot.py` (`POST /api/snapshot`) computes everything the reader can choose (energies per level and type, profiles and tables per reference on the exported pathways) with the API's own functions, drops local paths, copied files and history, and writes it as gzip+base64 JSON into the viewer page `frontend/dist-snapshot/snapshot.html`. That page is a second Vite build (`vite.snapshot.config.ts`, entry `snapshot.html` → `src/snapshot/`) with every script and style inlined, so it opens from disk; it reuses the canvas (`readOnly`), `ProfileChart`, `Viewer3D` and `OverviewSections`, with its own read-only panels. Helpers both builds share are in `src/util.ts`. It opens on the view the app showed (D128, A73): the export sends `view` (D105's view state plus the node `mode`), `snapshot._view` cleans it with `view_state.clean`/`current` (none sent: `view_state.load`), and the copy carries it with a random `copy_id`; `snapshot/data.ts` `openingView` starts from it, then from the reader's own choices kept in localStorage per `copy_id` (`rememberView`).
+Read-only copy to share (D79, A30): `api/snapshot.py` (`POST /api/snapshot`) computes everything the reader can choose (energies per level and type, profiles and tables per reference on the exported pathways) with the API's own functions, drops local paths, copied files and history, and writes it as gzip+base64 JSON into the viewer page `frontend/dist-snapshot/snapshot.html`. That page is a second Vite build (`vite.snapshot.config.ts`, entry `snapshot.html` → `src/snapshot/`) with every script and style inlined, so it opens from disk; it reuses the canvas (`readOnly`), `ProfileChart`, `Viewer3D` and `OverviewSections`, with its own read-only panels. Helpers both builds share are in `src/util.ts`; both drawers take a pathway's colour and legend name from `profileStyle.ts` (`pathwayLabels`, `pathwayLegend`). It opens on the view the app showed (D128, A73): the export sends `view` (D105's view state plus the node `mode`), `snapshot._view` cleans it with `view_state.clean`/`current` (none sent: `view_state.load`), and the copy carries it with a random `copy_id`; `snapshot/data.ts` `openingView` starts from it, then from the reader's own choices kept in localStorage per `copy_id` (`rememberView`).
 
 ## Claude in the notebook (D91)
 

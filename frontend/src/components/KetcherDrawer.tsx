@@ -5,6 +5,7 @@ import { Editor } from 'ketcher-react'
 import type { Ketcher } from 'ketcher-core'
 import { StandaloneStructServiceProvider } from 'ketcher-standalone/dist/binaryWasm'
 import 'ketcher-react/dist/index.css'
+import { errorText } from '../util'
 
 declare global {
   interface Window {
@@ -71,7 +72,7 @@ export default function KetcherDrawer({
       const drawing = await current()
       if (drawing) onConvert(drawing)
     } catch (err) {
-      setProblem(err instanceof Error ? err.message : String(err))
+      setProblem(errorText(err))
     }
   }
 

@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
   api,
-  ApiError,
   CALCULATION_TYPES,
   LARGE_FILE,
   type BatchImported,
@@ -13,11 +12,8 @@ import {
 } from '../api'
 import { NameField } from './ImportDialog'
 import { Modal } from './Modal'
-
-function errorText(err: unknown): string {
-  if (err instanceof ApiError && err.blockers) return err.blockers.join('; ')
-  return err instanceof Error ? err.message : String(err)
-}
+import { errorText } from '../util'
+import { nodeName } from '../names'
 
 /** How a file's target was found (D97). */
 const MATCHES: Record<BatchRow['match'], string> = {
@@ -35,7 +31,7 @@ const MATCHES: Record<BatchRow['match'], string> = {
 function where(row: BatchRow): string {
   const target = row.target
   if (!target) return '—'
-  const name = target.kind === 'file' ? `the node from ${target.file}` : `“${target.label || 'Untitled node'}”`
+  const name = target.kind === 'file' ? `the node from ${target.file}` : `“${nodeName(target)}”`
   if (target.kind === 'group') return `New group “${target.label}”`
   if (target.kind === 'new') return `New node “${target.label}”`
   if (row.kind === 'irc') return `Into the IRC of ${name}` // D134
@@ -138,7 +134,7 @@ export function BatchImportDialog({
     setError(null)
   }
   const failed = (request: number) => (err: unknown) => {
-    if (request === latest.current) setError(errorText(err))
+    if (request === latest.current) setError(errorText(err, { blockers: true }))
   }
 
   const scan = useCallback(
@@ -213,7 +209,7 @@ export function BatchImportDialog({
       },
       (err: unknown) => {
         setBusy(false)
-        setError(errorText(err))
+        setError(errorText(err, { blockers: true }))
       },
     )
   }
@@ -401,7 +397,7 @@ export function BatchImportDialog({
                                       .filter((n) => n.role === 'transition_state')
                                       .map((n) => (
                                         <option key={n.id} value={`node:${n.id}`}>
-                                          {n.label || 'Untitled node'}
+                                          {nodeName(n)}
                                         </option>
                                       ))}
                                   </select>
@@ -424,7 +420,7 @@ export function BatchImportDialog({
                                     <optgroup label="Nodes">
                                       {byLabel.map((n) => (
                                         <option key={n.id} value={`node:${n.id}`}>
-                                          {n.label || 'Untitled node'}
+                                          {nodeName(n)}
                                           {n.kind === 'species' ? ' (free species)' : ''}
                                         </option>
                                       ))}

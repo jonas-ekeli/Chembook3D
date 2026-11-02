@@ -13,7 +13,7 @@ import {
   type Trim,
 } from '../api'
 import { OpenScanEditor } from '../scanEditor'
-import { hartree, ranges } from '../util'
+import { errorText, hartree, ranges } from '../util'
 
 export type Movie = { frames: string[]; index: number }
 
@@ -116,7 +116,7 @@ export function StepMovie({
         setConvergedOnly(loaded.scan !== null)
         setPlaying(true)
       },
-      (err: unknown) => !cancelled && setError(err instanceof Error ? err.message : String(err)),
+      (err: unknown) => !cancelled && setError(errorText(err)),
     )
     return () => {
       cancelled = true
@@ -150,7 +150,7 @@ export function StepMovie({
     let cancelled = false
     api.previewTrim(calcId, { remove: selected.remove }).then(
       (result) => !cancelled && setPreview(result),
-      (err: unknown) => !cancelled && setPreview(err instanceof Error ? err.message : String(err)),
+      (err: unknown) => !cancelled && setPreview(errorText(err)),
     )
     return () => {
       cancelled = true
@@ -185,7 +185,7 @@ export function StepMovie({
   }
   const failed = (err: unknown) => {
     setUsing(false)
-    setError(err instanceof Error ? err.message : String(err))
+    setError(errorText(err))
   }
   const use = (n: number | undefined = shown[at]?.n) => {
     if (n === undefined) return

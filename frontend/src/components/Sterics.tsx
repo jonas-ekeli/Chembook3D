@@ -12,9 +12,10 @@ import {
 } from '../api'
 import { formatAtomList, fragment, parseAtomList, parseXyz } from '../chem'
 import { STERIC_PALETTES, StericColourSetting, type StericColours } from '../display'
-import { download, fileName } from '../util'
+import { download, downloadBlob, errorText, fileName } from '../util'
 import { Modal } from './Modal'
 import { Viewer3D } from './Viewer3D'
+import { nodeName } from '../names'
 
 // Buried volume and steric maps (D81, A32). The backend computes everything; these
 // components choose a profile, edit its atoms and draw what comes back.
@@ -26,11 +27,6 @@ export const MAX_MAPS = 12
 
 const RADII_NAMES: Record<StericRadii, string> = { bondi: 'Bondi', crc: 'CRC' }
 
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
-const nodeName = (n: Node) => n.label || 'Untitled node'
 const percent = (value: number | null | undefined) => (value === null || value === undefined ? '—' : value.toFixed(1))
 
 /** "3.5 Å sphere, Bondi ×1.17, hydrogens left out, 0.1 Å mesh": every value is shown with
@@ -950,9 +946,7 @@ export function CompareStericsDialog({
     if (!chosen) return
     api.stericTableCsv(chosen, ids).then(
       (blob) => {
-        const url = URL.createObjectURL(blob)
-        download(url, 'buried-volume.csv')
-        setTimeout(() => URL.revokeObjectURL(url), 1000)
+        downloadBlob(blob, 'buried-volume.csv')
       },
       (err: unknown) => setError(errorText(err)),
     )

@@ -1,13 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api, type BasisVariant, type CustomBasisDetail, type CustomBasisSummary } from '../api'
-import { download, fileName } from '../util'
+import { download, errorText, fileName } from '../util'
 import { Modal } from './Modal'
 
 const ANGULAR = 'SPDFGHIK'
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
 
 /** D94: the saved custom basis sets (FR-CALC-03), each with its shells, exponents,
  * coefficients and ECP, and as a Gaussian basis file to download or copy. */

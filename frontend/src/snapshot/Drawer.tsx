@@ -7,12 +7,9 @@ import { Menu } from '../components/MoreMenu'
 import { ProfileChart, SCREEN_TEXT } from '../components/ProfileChart'
 import { Icon } from '../icons'
 import { figureOf } from '../profileFigure'
-import { pathwayColours, saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
-import { closesCycle, csvTitle, download } from '../util'
+import { pathwayColours, pathwayLabels, pathwayLegend, saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
+import { closesCycle, csvTitle, downloadBlob } from '../util'
 import { tableCsv, type SnapshotData } from './data'
-
-const NO_BRANCH = '#98a2b3'
-const FALLBACK = ['#2459c6', '#c4320a', '#079455', '#6938ef', '#b54708']
 
 /** The profile and table of the exported pathways (A30), for the chosen level, type and
  * reference; the reader cannot add pathways, since the app computed each one when exporting. */
@@ -45,25 +42,13 @@ export function SnapshotDrawer({
   const canvas = data.canvas
   const paths = data.paths
 
-  const labels = useMemo(() => {
-    const found = new Map<string, string>()
-    for (const n of canvas.nodes) found.set(n.id, n.label || 'Untitled node')
-    for (const g of canvas.groups) found.set(g.id, g.label || 'Group')
-    return found
-  }, [canvas])
+  const labels = useMemo(() => pathwayLabels(canvas), [canvas])
   const branches = new Map(canvas.branches.map((b) => [b.id, b]))
-  const branchOf = (id: string) =>
-    canvas.nodes.find((n) => n.id === id)?.branch_id ?? canvas.groups.find((g) => g.id === id)?.outgoing_branch_id ?? null
   const onPaths = [...new Set(paths.flatMap((p) => p.ids))]
   const reference = referenceId && onPaths.includes(referenceId) ? referenceId : (paths[0]?.ids[0] ?? null)
-  const colours = paths.map((p, i) => {
-    const branchId = p.branch_id ?? [...p.ids].reverse().map(branchOf).find((b) => b)
-    return branchId ? (branches.get(branchId)?.colour ?? NO_BRANCH) : FALLBACK[i % FALLBACK.length]
-  })
-  const names = paths.map((p) => {
-    const branch = p.branch_id ? branches.get(p.branch_id) : undefined
-    return branch ? branch.name || 'Unnamed branch' : `${labels.get(p.ids[0])} → ${labels.get(p.ids.at(-1)!)}`
-  })
+  const legend = paths.map((p, i) => pathwayLegend(canvas, branches, labels, p.ids, p.branch_id, i))
+  const colours = legend.map(({ colour }) => colour)
+  const names = legend.map(({ name }) => name)
   const shown = level && reference ? data.profiles[`${level}|${type}|${reference}`] : undefined
   const shifts = paths.map((p) => p.shifts ?? []) // D194
   const chosen = paths.map((p) => p.colour) // D195
@@ -84,9 +69,7 @@ export function SnapshotDrawer({
 
   const exportCsv = () => {
     if (!shown) return
-    const url = URL.createObjectURL(new Blob([tableCsv(shown.table)], { type: 'text/csv;charset=utf-8' }))
-    download(url, 'energy-table.csv')
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    downloadBlob(new Blob([tableCsv(shown.table)], { type: 'text/csv;charset=utf-8' }), 'energy-table.csv')
   }
 
   return (
