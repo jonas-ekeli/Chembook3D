@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type LocalJob, type LocalTools, type Node } from '../api'
-import { measure, parseAtomList, parseXyz } from '../chem'
+import { formatAtomList, measure, parseAtomList, parseXyz } from '../chem'
 import { heldBefore, readConstraints, type Held } from '../localJobs'
 import { Modal } from './Modal'
 import { RefineCore, type CoreChoice } from './RefineCore'
@@ -52,18 +52,24 @@ export function RefineDialog({
   const [busy, setBusy] = useState(false)
   const [core, setCore] = useState<CoreChoice | null>(null)
   const chooseCore = useCallback((choice: CoreChoice) => setCore(choice), [])
+  const [transition, setTransition] = useState(false)
+  const [reacting, setReacting] = useState('')
+  const [fromMode, setFromMode] = useState(false)
   const atoms = useMemo(() => (node.xyz ? parseXyz(node.xyz) : []), [node.xyz])
 
   useEffect(() => {
-    api.localTools(node.atom_count).then(
-      (found) => {
+    Promise.all([api.localTools(node.atom_count), api.localCore({ node_id: node.id }).catch(() => null)]).then(
+      ([found, core]) => {
         setTools(found)
         // A143: a structure with a metal starts on Quick DFT (ONIOM), the rest on GFN2-xTB.
-        if (found.methods.some((m) => m.value === 'oniom'))
-          api.localCore({ node_id: node.id }).then(
-            (core) => core.core.length && setMethod((m) => (m === 'gfn2' ? 'oniom' : m)),
-            () => undefined,
-          )
+        if (core?.core.length && found.methods.some((m) => m.value === 'oniom'))
+          setMethod((m) => (m === 'gfn2' ? 'oniom' : m))
+        // A145: a node with an imaginary mode starts as a TS search on the atoms it moves.
+        if (core?.mode_atoms.length) {
+          setTransition(true)
+          setFromMode(true)
+          setReacting((current) => current || formatAtomList(core.mode_atoms.map((a) => a + 1)))
+        }
       },
       (err: unknown) => setError(errorText(err)),
     )
@@ -87,10 +93,21 @@ export function RefineDialog({
     Number.isInteger(chargeValue) && charge.trim() !== '' && Number.isInteger(multiplicityValue) && multiplicityValue >= 1
 
   const constraints = readConstraints(frozen, held, atoms.length)
+  const reactingRead = useMemo((): { atoms: number[] | null } | { error: string } => {
+    if (!transition || !reacting.trim()) return { atoms: null }
+    const found = parseAtomList(reacting)
+    if ('error' in found) return { error: `Reacting atoms: ${found.error}` }
+    if (!found.numbers.every((n) => n >= 1 && n <= atoms.length)) return { error: `Reacting atoms are numbered 1 to ${atoms.length}` }
+    return { atoms: found.numbers.map((n) => n - 1) }
+  }, [transition, reacting, atoms.length])
 
   const chosen = tools?.methods.find((m) => m.value === method)
   const layered = Boolean(chosen?.layered)
-  const ready = Boolean(tools?.installed) && node.atom_count > 0 && (!layered || Boolean(core?.usable))
+  const ready =
+    Boolean(tools?.installed) && node.atom_count > 0 && (!layered || Boolean(core?.usable)) && !('error' in reactingRead)
+  // D215: a TS search computes two GFN2-xTB Hessians, 6 gradients per atom each.
+  const gfn2Step = tools?.methods.find((m) => m.value === 'gfn2')?.estimate?.seconds_per_step
+  const hessians = gfn2Step ? 12 * node.atom_count * gfn2Step : null
   // D214: a layered method's time depends on its core.
   const estimateOf = (m: LocalTools['methods'][number]) => (m.layered && core?.check ? core.check.estimate : m.estimate)
   const chosenEstimate = chosen ? estimateOf(chosen) : null
@@ -107,6 +124,8 @@ export function RefineDialog({
         multiplicity: multiplicityValue,
         constraints: constraints.value,
         core: layered ? core?.atoms : null,
+        transition,
+        reacting: 'atoms' in reactingRead ? reactingRead.atoms : null,
       })
       .then(
         (job) => {
@@ -189,6 +208,44 @@ export function RefineDialog({
               onChange={(event) => setMultiplicity(event.target.value)}
             />
           </label>
+        </div>
+        <div className="refine-ts">
+          <label className="check">
+            <input
+              type="checkbox"
+              aria-label="Search for a transition state"
+              checked={transition}
+              onChange={(event) => setTransition(event.target.checked)}
+            />
+            Search for a transition state
+          </label>
+          {transition && (
+            <>
+              <p className="muted small">
+                The search climbs to a saddle point, starting from a GFN2-xTB Hessian of the whole molecule; a second one at
+                the result checks its imaginary frequency{hessians ? ` (both about ${duration(hessians)})` : ''}.
+              </p>
+              <label className="field">
+                <span>Reacting atoms (optional)</span>
+                <input
+                  aria-label="Reacting atoms"
+                  placeholder="e.g. 1 5 9"
+                  value={reacting}
+                  onChange={(event) => setReacting(event.target.value)}
+                />
+                <small className="muted">
+                  {fromMode
+                    ? 'The atoms the node’s imaginary mode moves most. The check says whether the final mode stays on them.'
+                    : 'The check says whether the final imaginary mode stays on them.'}
+                </small>
+              </label>
+              {'error' in reactingRead && (
+                <p className="small cloud-job-problem" role="alert">
+                  {reactingRead.error}
+                </p>
+              )}
+            </>
+          )}
         </div>
         {layered && node.xyz && (
           <RefineCore

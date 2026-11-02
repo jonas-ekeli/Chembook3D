@@ -40,7 +40,7 @@ import { CloudJobsDialog } from './components/CloudJobsDialog'
 import { useScanPathImports } from './cloudJobs'
 import { LocalJobsDialog } from './components/LocalJobsDialog'
 import { RefineDialog } from './components/RefineDialog'
-import { useLocalJobs } from './localJobs'
+import { tsCheckText, useLocalJobs } from './localJobs'
 import { CanvasPane, type CanvasEnergy, type CanvasContextMenu, type CanvasTarget, type TidySides } from './components/Canvas'
 import { EnergyDrawer, type DrawerPath, type DrawerView } from './components/EnergyDrawer'
 import { downloadBlob, errorText } from './util'
@@ -484,7 +484,8 @@ function App() {
     reload()
     const where = job.imported?.derived ? 'a node derived from' : ''
     setNotice(
-      `The ${job.level} refine of “${job.node_label}” is done and imported onto ${where ? `${where} ` : ''}it (it can be undone in History).`,
+      `The ${job.level} ${job.transition ? 'TS search' : 'refine'} of “${job.node_label}” is done and imported onto ${where ? `${where} ` : ''}it (it can be undone in History).` +
+        (tsCheckText(job) ? ` ${tsCheckText(job)}` : ''),
     )
   }
   const localJobs = useLocalJobs(investigation?.folder ?? null, localImported, (job, message) =>

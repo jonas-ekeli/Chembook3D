@@ -50,6 +50,7 @@ METHOD_LABELS = {
     "oniom": ("Psi4", "ONIOM(r2SCAN-3c:GFN2-xTB)"),
     "stub": ("stub", "stub"),
     "oniom-stub": ("stub", "ONIOM(stub:stub-low)"),
+    "stub-saddle": ("stub", "stub-saddle"),
 }
 
 
@@ -191,6 +192,37 @@ def _stub(start, shrink: float, weight: float, delay: float):
     return stub
 
 
+def _saddle(start, delay: float):
+    """Test engine with a saddle point: harmonic bonds at the starting distances, except
+    between atoms 1 and 2, which sit in a double well whose barrier top is 5 % longer than
+    their starting distance (a TS search climbs to it; its imaginary mode is that bond)."""
+    import numpy as np
+
+    rest = _stub(start, 1.0, 0.1, 0.0)
+    top, width, height = 1.05 * float(np.linalg.norm(start[0] - start[1])), 0.3, 0.5
+
+    def saddle(x):
+        if delay:
+            time.sleep(delay)
+        e, g = rest(x)
+        d = x[0] - x[1]
+        r = float(np.linalg.norm(d))
+        # the harmonic term rest() put on this pair is taken off again
+        r0 = top / 1.05
+        w = 0.1 / r0**2
+        e -= w * (r - r0) ** 2
+        f = -2 * w * (r - r0) * d / r
+        u = (r - top) ** 2 - width**2
+        e += height * u**2
+        f += height * 4 * u * (r - top) * d / r
+        g = g.copy()
+        g[0] += f
+        g[1] -= f
+        return e, g
+
+    return saddle
+
+
 def _gfn2(numbers, charge: int, unpaired: int):
     import numpy as np
     from tblite.interface import Calculator
@@ -248,12 +280,16 @@ def _psi4(method: str, numbers, charge: int, unpaired: int, job: dict, folder: P
     return dft
 
 
-def _engine(method: str, numbers, start, job: dict, folder: Path):
-    """One method on one system (atomic numbers, starting coordinates in Bohr)."""
+def _engine(method: str, numbers, start, job: dict, folder: Path, delay: bool = True):
+    """One method on one system (atomic numbers, starting coordinates in Bohr); `delay` lets a
+    test engine wait as the job asks (not while it computes a Hessian)."""
+    wait = float(job.get("stub_delay_s", 0)) if delay else 0.0
     charge = int(job.get("charge", 0))
     unpaired = int(job.get("multiplicity", 1)) - 1
     if method == "stub":
-        return _stub(start, 0.98, 0.1, float(job.get("stub_delay_s", 0)))
+        return _stub(start, 0.98, 0.1, wait)
+    if method == "stub-saddle":
+        return _saddle(start, wait)
     if method == "stub-low":  # a second, different test engine for ONIOM's low level
         return _stub(start, 0.95, 0.05, 0.0)
     if method == "gfn2":
@@ -296,6 +332,59 @@ def oniom(real, high, low_model, core, links):
         return energy, grad
 
     return calculate
+
+
+HESSIAN_STEP = 0.005  # Bohr, central differences of the gradient
+MODE_SHARE = 0.5  # the reacting atoms carry at least this share of the mode: it stays on them
+
+
+def numerical_hessian(calculate, x, progress=None, what="Hessian"):
+    """Hartree/Bohr^2 from central differences of the gradient, symmetrised."""
+    import numpy as np
+
+    n = x.size
+    hessian = np.zeros((n, n))
+    flat = x.reshape(-1)
+    for k in range(n):
+        plus, minus = flat.copy(), flat.copy()
+        plus[k] += HESSIAN_STEP
+        minus[k] -= HESSIAN_STEP
+        g_plus = np.asarray(calculate(plus.reshape(-1, 3))[1], float).reshape(-1)
+        g_minus = np.asarray(calculate(minus.reshape(-1, 3))[1], float).reshape(-1)
+        hessian[k] = (g_plus - g_minus) / (2 * HESSIAN_STEP)
+        if progress is not None and (k % 6 == 5 or k == n - 1):
+            progress.update(phase=f"{what} {k + 1}/{n}")
+    return (hessian + hessian.T) / 2
+
+
+def moving_atoms(mode, share: float = 0.3, limit: int = 8) -> list[int]:
+    """The atoms (from 0) a normal mode moves most: at least `share` of the largest, at most
+    `limit`, largest first."""
+    import numpy as np
+
+    size = np.linalg.norm(np.asarray(mode, float).reshape(-1, 3), axis=1)
+    order = [int(i) for i in np.argsort(-size)]
+    return [i for i in order[:limit] if size[i] >= share * size[order[0]]]
+
+
+def mode_check(symbols, x, hessian, reacting=None) -> dict:
+    """D215: the harmonic frequencies of a Hessian (cm-1), its imaginary ones, the atoms the
+    first imaginary mode moves, and its share on the reacting atoms."""
+    import numpy as np
+    from geometric.normal_modes import frequency_analysis
+
+    freqs, modes, _ = frequency_analysis(np.asarray(x).reshape(-1), hessian, elem=list(symbols))
+    imaginary = [round(float(f), 1) for f in freqs if f < 0]
+    out: dict = {"imaginary": imaginary, "lowest": [round(float(f), 1) for f in freqs[:3]]}
+    if imaginary:
+        mode = np.asarray(modes[0], float).reshape(-1, 3)
+        out["atoms"] = moving_atoms(mode)
+        if reacting:
+            weight = (mode**2).sum(axis=1)
+            share = float(weight[list(reacting)].sum() / weight.sum())
+            out["share_on_reacting"] = round(share, 3)
+            out["on_reacting"] = share >= MODE_SHARE
+    return out
 
 
 def make_calculator(job: dict, numbers, folder: Path):
@@ -435,6 +524,30 @@ def run(folder: Path, lock: Path | None) -> int:
             options["constraints"] = str(folder / "constraints.txt")
         if job.get("hessian"):
             options["hessian"] = job["hessian"]
+        hessian_engine = None
+        if job.get("transition"):
+            # D215: geomeTRIC starts the TS search from a Hessian; a cheap one (GFN2-xTB on the
+            # whole molecule, by finite differences) instead of one at the job's own level.
+            raw = _engine(
+                job.get("ts_hessian", "gfn2"),
+                numbers,
+                start / BOHR_TO_ANGSTROM,
+                job,
+                folder,
+                delay=False,
+            )
+
+            def hessian_engine(x, raw=raw):
+                if cancel_file.exists():
+                    raise Cancelled()
+                return raw(x)
+
+            x0 = start / BOHR_TO_ANGSTROM
+            first = numerical_hessian(hessian_engine, x0, progress, "Starting Hessian")
+            np.savetxt(folder / "hessian.txt", first)
+            options["hessian"] = "file:" + str(folder / "hessian.txt")
+            result["ts_check"] = {"start": mode_check(symbols, x0, first, job.get("reacting"))}
+            progress.update(phase=None)
         converged = True
         try:
             _redirect_geometric_log(log)
@@ -442,6 +555,12 @@ def run(folder: Path, lock: Path | None) -> int:
         except geometric.errors.GeomOptNotConvergedError:
             converged = False
         result["state"] = "converged" if converged else "not_converged"
+        if hessian_engine is not None and frames:
+            x1 = np.asarray(last["coords"]) / BOHR_TO_ANGSTROM
+            final = numerical_hessian(hessian_engine, x1, progress, "Final Hessian")
+            result["ts_check"]["end"] = mode_check(symbols, x1, final, job.get("reacting"))
+            name = job.get("ts_hessian", "gfn2")
+            result["ts_check"]["level"] = METHOD_LABELS.get(name, (name, name))[1]
     except Cancelled:
         result["state"] = "cancelled"
     except Exception as exc:  # noqa: BLE001 - every failure goes into result.json

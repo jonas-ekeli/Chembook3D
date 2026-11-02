@@ -15,6 +15,7 @@ export function localStatusText(job: LocalJob): string {
     case 'queued':
       return 'Waiting for another local job'
     case 'running':
+      if (job.progress.phase) return `Running, ${job.progress.phase.toLowerCase()}`
       return job.progress.cycle ? `Running, step ${job.progress.cycle}` : 'Running'
     case 'cancelling':
       return 'Stopping'
@@ -147,4 +148,22 @@ export function readConstraints(
   }
   const any = out.frozen.length + out.distances.length + out.angles.length + out.dihedrals.length
   return { value: any ? out : null }
+}
+
+/** D215: what the check of a TS search's final structure found, in a sentence; null when the
+ * job is no TS search or has no final check. */
+export function tsCheckText(job: LocalJob): string | null {
+  const check = job.result?.ts_check
+  const end = check?.end
+  if (!check || !end) return null
+  const level = check.level ?? 'GFN2-xTB'
+  const n = end.imaginary.length
+  if (n === 0) return `${level} check: no imaginary frequency at the result, so it is not a transition state there.`
+  const frequencies = end.imaginary.map((f) => `${Math.round(f)} cm⁻¹`).join(', ')
+  const head = `${level} check: ${n === 1 ? 'one imaginary frequency' : `${n} imaginary frequencies`} (${frequencies})`
+  if (end.on_reacting === undefined) {
+    const atoms = (end.atoms ?? []).map((a) => a + 1).join(', ')
+    return `${head}, moving atoms ${atoms}.`
+  }
+  return end.on_reacting ? `${head}, on the reacting atoms.` : `${head}, but its mode is mostly away from the reacting atoms.`
 }

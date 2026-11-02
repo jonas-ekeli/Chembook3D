@@ -5470,6 +5470,10 @@ table.scan-path-held input.drive-value {
 .refine-constraints > .small:not(p) {
   justify-self: start;
 }
+.refine-ts {
+  display: grid;
+  gap: 0.4rem;
+}
 .refine-core {
   display: grid;
   gap: 0.5rem;
