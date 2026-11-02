@@ -209,10 +209,7 @@ class Resources:
 
 
 def resources() -> Resources:
-    try:
-        data = json.loads((tools_dir() / SETTINGS).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        data = {}
+    data = _local_settings()
     cores, memory = data.get("cores"), data.get("memory_mb")
     return Resources(
         cores=cores if isinstance(cores, int) and cores >= 1 else default_cores(),
@@ -220,16 +217,44 @@ def resources() -> Resources:
     )
 
 
+def _local_settings() -> dict[str, Any]:
+    try:
+        data = json.loads((tools_dir() / SETTINGS).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_local_settings(data: dict[str, Any]) -> None:
+    tools_dir().mkdir(parents=True, exist_ok=True)
+    (tools_dir() / SETTINGS).write_text(json.dumps(data), encoding="utf-8")
+
+
 def save_resources(cores: int | None, memory_mb: int | None) -> Resources:
     """None puts the default back."""
-    data: dict[str, int] = {}
+    data = {k: v for k, v in _local_settings().items() if k not in ("cores", "memory_mb")}
     if cores is not None:
         data["cores"] = max(1, min(int(cores), os.cpu_count() or 1))
     if memory_mb is not None:
         data["memory_mb"] = max(500, int(memory_mb))
-    tools_dir().mkdir(parents=True, exist_ok=True)
-    (tools_dir() / SETTINGS).write_text(json.dumps(data), encoding="utf-8")
+    _save_local_settings(data)
     return resources()
+
+
+def calibration() -> dict[str, float]:
+    """Seconds per step this computer took, by method, scaled to 70 atoms on 4 cores."""
+    found = _local_settings().get("calibration")
+    if not isinstance(found, dict):
+        return {}
+    return {k: float(v) for k, v in found.items() if isinstance(v, int | float) and v > 0}
+
+
+def save_calibration(method: str, seconds: float) -> None:
+    data = _local_settings()
+    found = data.get("calibration") if isinstance(data.get("calibration"), dict) else {}
+    found[method] = round(seconds, 3)
+    data["calibration"] = found
+    _save_local_settings(data)
 
 
 # ---------- installing ----------

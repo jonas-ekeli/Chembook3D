@@ -5457,3 +5457,18 @@ table.scan-path-held input.drive-value {
   background: var(--hover);
   color: var(--muted);
 }
+
+/* D213: Refine geometry's constraints */
+.refine-constraints {
+  display: grid;
+  gap: 0.5rem;
+}
+.refine-constraints > .small:not(p) {
+  justify-self: start;
+}
+.refine-held {
+  display: grid;
+  grid-template-columns: 1fr 8rem auto;
+  gap: 0.5rem;
+  align-items: end;
+}

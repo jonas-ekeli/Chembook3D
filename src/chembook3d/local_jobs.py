@@ -54,7 +54,20 @@ STARTING_S = 60.0  # a job without a heartbeat yet is starting for this long
 _JOB_ID = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9-]{1,60}$")
 
 # The methods offered and what the result is called (the worker's METHOD_LABELS).
-METHODS = {"gfn2": "GFN2-xTB"}
+METHODS = {"gfn2": "GFN2-xTB", "b97-3c": "B97-3c", "r2scan-3c": "r2SCAN-3c"}
+
+# A143: what a time estimate starts from, per method: seconds per gradient for a 70-atom Ru
+# complex on 4 cores (measured 2026-11-02 on the MCB structure: Psi4 1.11 r2SCAN-3c 862 s and
+# B97-3c 601 s from a fresh guess, about 60 % of that from the last step's orbitals; GFN2-xTB
+# about 0.5 s), how it grows with the number of atoms, and the steps an optimization takes.
+# Each finished job on this computer replaces the first number with its own (`calibrate`).
+TIMING = {
+    "gfn2": {"seconds": 0.5, "power": 2.0},
+    "b97-3c": {"seconds": 400.0, "power": 2.7},
+    "r2scan-3c": {"seconds": 550.0, "power": 2.7},
+    "stub": {"seconds": 1.0, "power": 0.0},
+}
+TIMING_ATOMS, TIMING_CORES = 70, 4
 TEST_METHODS = {"stub": "stub"}  # CHEMBOOK3D_LOCAL_STUB=1 only (tests)
 
 _records = threading.Lock()
@@ -76,6 +89,42 @@ def methods() -> dict[str, str]:
     if os.environ.get("CHEMBOOK3D_LOCAL_STUB") == "1":
         return {**METHODS, **TEST_METHODS}
     return dict(METHODS)
+
+
+def steps(atoms: int) -> int:
+    """About how many steps an optimization of so many atoms takes."""
+    return 15 + atoms // 2
+
+
+def _scale(method: str, atoms: int, cores: int) -> float:
+    timing = TIMING.get(method, TIMING["stub"])
+    return (max(atoms, 1) / TIMING_ATOMS) ** timing["power"] * (
+        TIMING_CORES / max(cores, 1)
+    ) ** 0.85
+
+
+def estimate(method: str, atoms: int, cores: int) -> dict[str, Any]:
+    """Seconds for one step and for the optimization, and whether this computer measured it."""
+    measured = local_tools.calibration().get(method)
+    base = measured if measured else TIMING.get(method, TIMING["stub"])["seconds"]
+    per_step = base * _scale(method, atoms, cores)
+    return {
+        "seconds_per_step": round(per_step, 2),
+        "steps": steps(atoms),
+        "seconds": round(per_step * steps(atoms)),
+        "measured": bool(measured),
+    }
+
+
+def calibrate(result: dict[str, Any], job: dict[str, Any]) -> None:
+    """Keep what a finished job took per step, scaled back to 70 atoms on 4 cores."""
+    cycles, elapsed = result.get("cycles"), result.get("elapsed_s")
+    method = job.get("method")
+    if not cycles or not elapsed or method not in METHODS or cycles < 3:
+        return
+    atoms = len(job.get("elements") or [])
+    per_step = float(elapsed) / int(cycles)
+    local_tools.save_calibration(method, per_step / _scale(method, atoms, int(job.get("cores", 1))))
 
 
 def slug(text: str, limit: int = 40) -> str:
@@ -426,4 +475,9 @@ def _import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any
         "at": _now(),
     }
     update_job(folder, job_id, imported=imported, import_error=None)
+    try:
+        result = json.loads(path.read_text(encoding="utf-8"))
+        calibrate(result, read_job(folder, job_id))
+    except (OSError, ValueError):
+        pass
     return {**job_status(folder, job_id), "imported": imported}

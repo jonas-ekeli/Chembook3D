@@ -876,7 +876,12 @@ export type LocalTools = {
   logical_cores: number
   total_memory_mb: number | null
   /** the methods a refine offers: value for the request, label to show */
-  methods: { value: string; label: string }[]
+  methods: {
+    value: string
+    label: string
+    /** for the `atoms` asked about: seconds per step and in all, measured on this computer or not */
+    estimate: { seconds_per_step: number; steps: number; seconds: number; measured: boolean } | null
+  }[]
 }
 
 /** D213: what a local refine holds: atoms counted from 0; a null value holds the current one. */
@@ -1230,6 +1235,8 @@ export type Calculation = {
   /** D117: scan points left out of a scan path. */
   removed_points: number[]
   created_at: string
+  /** D157: what held the structure while it was optimized ("constrained B(1,2)", "2 frozen atoms") */
+  constraints?: string[]
 }
 
 /** D162: the spin expectation value a calculation printed (Gaussian's before annihilation,
@@ -2594,7 +2601,7 @@ export const api = {
       'POST',
       `/jobs/${encodeURIComponent(id)}/import-path${again ? '?again=true' : ''}`,
     ),
-  localTools: () => request<LocalTools>('GET', '/local/tools'),
+  localTools: (atoms?: number) => request<LocalTools>('GET', `/local/tools${atoms ? `?atoms=${atoms}` : ''}`),
   installLocalTools: () => request<LocalTools>('POST', '/local/tools/install'),
   saveLocalResources: (body: { cores: number | null; memory_mb: number | null }) =>
     request<LocalTools>('PUT', '/local/tools', body),

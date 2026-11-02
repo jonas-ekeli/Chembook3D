@@ -994,7 +994,9 @@ TOOLS: list[ToolSpec] = [
         "/api/local/jobs",
         "Refine a node's geometry on this computer (D213): a geometry optimization run by the "
         "tools the user installed in Settings (Local calculations), in a process of its own "
-        "that goes on when the app is closed. Method gfn2: GFN2-xTB with tblite. Charge and "
+        "that goes on when the app is closed. Methods: gfn2 (GFN2-xTB with tblite, minutes), "
+        "b97-3c and r2scan-3c (the whole molecule with Psi4, hours for a 70-atom complex: "
+        "say so and ask before starting one). Charge and "
         "multiplicity default to the node's. Optional constraints (atoms from 0) hold atoms "
         "frozen, or distances, angles and dihedrals at their current value or at a target. "
         "The app imports the result onto the node when it finishes. It uses the computer's "

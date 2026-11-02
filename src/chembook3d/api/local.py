@@ -38,17 +38,25 @@ def _refused(exc: local_jobs.LocalJobError) -> HTTPException:
     return HTTPException(422, str(exc))
 
 
-def _status(request: Request) -> dict[str, Any]:
+def _status(request: Request, atoms: int | None = None) -> dict[str, Any]:
     out = local_tools.status(installer(request))
-    out["methods"] = [{"value": k, "label": v} for k, v in local_jobs.methods().items()]
+    out["methods"] = [
+        {
+            "value": key,
+            "label": label,
+            "estimate": local_jobs.estimate(key, atoms, out["cores"]) if atoms else None,
+        }
+        for key, label in local_jobs.methods().items()
+    ]
     return out
 
 
 @router.get("/tools")
-def tools_status(request: Request) -> dict[str, Any]:
+def tools_status(request: Request, atoms: int | None = None) -> dict[str, Any]:
     """Whether the tools are installed, their versions, an install under way, the cores and
-    memory a job may use, and the methods a refine offers."""
-    return _status(request)
+    memory a job may use, and the methods a refine offers, each with a time estimate for a
+    structure of `atoms` atoms."""
+    return _status(request, atoms)
 
 
 @router.post("/tools/install")
@@ -88,7 +96,12 @@ class ConstraintsIn(BaseModel):
 
 class RefineIn(BaseModel):
     node_id: str
-    method: str = Field("gfn2", description="gfn2: a GFN2-xTB (tblite) geometry optimization")
+    method: str = Field(
+        "gfn2",
+        description="gfn2: GFN2-xTB (tblite), seconds to minutes; b97-3c: B97-3c (Psi4), the "
+        "whole molecule at DFT quality, hours for 70 atoms; r2scan-3c: r2SCAN-3c (Psi4), "
+        "a little better than B97-3c at about 1.4 times its cost",
+    )
     charge: int | None = Field(None, description="Default: the node's charge, else 0")
     multiplicity: int | None = Field(None, ge=1, description="Default: the node's, else 1")
     constraints: ConstraintsIn | None = None

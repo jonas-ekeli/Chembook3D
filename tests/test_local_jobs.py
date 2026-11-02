@@ -285,6 +285,45 @@ def test_the_package_lists_are_pinned():
             assert wanted in names, (conda, wanted)
 
 
+def test_methods_come_with_time_estimates_that_learn(open_client, water, stub_tools, no_tools):
+    """T-LOC-06: an estimate per method for the node's atoms, replaced by this computer's own
+    time once a job has run."""
+    open_client.put("/api/local/tools", json={"cores": 4, "memory_mb": 2000})
+    methods = open_client.get("/api/local/tools?atoms=70").json()["methods"]
+    by = {m["value"]: m for m in methods}
+    assert {"gfn2", "b97-3c", "r2scan-3c"} <= set(by)
+    assert by["r2scan-3c"]["estimate"]["seconds"] > by["b97-3c"]["estimate"]["seconds"]
+    assert by["b97-3c"]["estimate"]["seconds"] > by["gfn2"]["estimate"]["seconds"] * 100
+    assert not by["gfn2"]["estimate"]["measured"]
+    assert open_client.get("/api/local/tools").json()["methods"][0]["estimate"] is None
+    local_jobs.calibrate(
+        {"cycles": 10, "elapsed_s": 50.0}, {"method": "gfn2", "elements": ["C"] * 70, "cores": 4}
+    )
+    gfn2 = open_client.get("/api/local/tools?atoms=70").json()["methods"][0]
+    assert gfn2["estimate"]["measured"] and gfn2["estimate"]["seconds_per_step"] == 5.0
+
+
+@pytest.mark.skipif(not REAL, reason="needs the installed local tools (CHEMBOOK3D_REAL_TOOLS=1)")
+def test_real_tools_refine_water_with_dft(open_client, water, monkeypatch):
+    """T-LOC-05: a B97-3c refine with Psi4, holding the O-H distance."""
+    monkeypatch.delenv("CHEMBOOK3D_LOCAL_PYTHON", raising=False)
+    monkeypatch.setenv("CHEMBOOK3D_LOCAL_STUB", "1")
+    job = open_client.post(
+        "/api/local/jobs",
+        json={
+            "node_id": water,
+            "method": "b97-3c",
+            "constraints": {"distances": [{"atoms": [0, 1], "value": 0.95}]},
+        },
+    ).json()
+    done = wait_for(open_client, job["id"], finished, timeout=600)
+    assert done["status"] == "converged", done["result"]["error"]
+    assert -76.5 < done["result"]["energy"] < -76.3  # B97-3c water, hartree
+    assert open_client.post(f"/api/local/jobs/{job['id']}/import").status_code == 200
+    calcs = open_client.get(f"/api/nodes/{water}/calculations").json()
+    assert calcs[0]["program"] == "Psi4" and calcs[0]["constraints"] == ["constrained B(1,2)"]
+
+
 @pytest.mark.skipif(not REAL, reason="needs the installed local tools (CHEMBOOK3D_REAL_TOOLS=1)")
 def test_real_tools_refine_water(open_client, water, monkeypatch):
     """T-LOC-05: a GFN2-xTB refine with the real tools."""
