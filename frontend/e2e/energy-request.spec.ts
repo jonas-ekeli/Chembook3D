@@ -117,11 +117,14 @@ test('a late profile/table and CSV response cannot replace or export a newer sci
     await drawer.getByRole('button', { name: 'Table', exact: true }).click()
     const table = drawer.getByRole('table', { name: 'Energy table' })
     await expect(table.locator('thead tr').last().locator('th').nth(3)).toHaveText('ΔH')
-    const current = await table.innerText()
+    // Compare the same DOM representation on both sides: innerText inserts layout tabs and
+    // line breaks between table cells, whereas Playwright's text assertion uses textContent.
+    const cells = table.locator('th, td')
+    const current = await cells.allTextContents()
     gate.resolve()
     csvGate.resolve()
     await expect.poll(() => finished).toBe(2)
-    await expect(table).toHaveText(current)
+    await expect(cells).toHaveText(current)
     expect(downloads).toEqual([])
   } finally {
     gate.resolve()

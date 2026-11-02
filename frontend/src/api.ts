@@ -2409,6 +2409,8 @@ export const api = {
   /** A long poll: answers when something changed elsewhere, the requests changed, or after `wait` s. */
   live: (since: number | null, confirmVersion: number | null, wait: number, signal?: AbortSignal) => {
     const query = new URLSearchParams({ client: CLIENT_ID, wait: String(wait) })
+    // Identity changes must wake this tab even when its own close is excluded from `changed`.
+    query.set('expected_investigation', investigationIdentity ?? '')
     if (since !== null) query.set('since', String(since))
     if (confirmVersion !== null) query.set('confirmations', String(confirmVersion))
     return request<Live>('GET', `/live?${query.toString()}`, undefined, signal)

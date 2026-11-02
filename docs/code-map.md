@@ -176,6 +176,8 @@ Notebook request identity (F02): `frontend/src/api.ts`'s `setInvestigationIdenti
 
 `app.py` maps an investigation/session lease refusal during close to a controlled HTTP 409; `tests/test_live.py` exercises the registered exception handler through ASGI without a socket pair.
 
+`GET /api/live` also accepts the displayed folder as `expected_investigation` (empty for the start page). Identity differences wake the poll independently of the change counter, including a same-tab close whose push is still pending. Legacy polls detect identity changes during their wait too.
+
 For browser downloads, custom-basis copy and note images, `api.ts`'s `investigationUrl` puts the rendered folder in `expected_investigation`; the backend accepts this query fallback when the header is absent (headers take precedence, each value is decoded once). Legacy clients with neither remain supported. The computer-wide `/remote` status read is also unscoped so it can load before the notebook identity is established.
 
 `frontend/e2e/`: Playwright UI tests against the real backend.

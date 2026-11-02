@@ -27,6 +27,7 @@ test('notebook reads and mutations send the displayed Unicode identity, discover
   assert.equal(calls[0].options.headers['X-Chembook-Investigation'], 'C%3A%2F%CE%B2%20notebook')
   assert.equal(calls[1].options.headers['X-Chembook-Investigation'], calls[0].options.headers['X-Chembook-Investigation'])
   for (const call of calls.slice(2)) assert.equal(call.options.headers['X-Chembook-Investigation'], undefined)
+  assert.equal(new URL(calls[2].path, 'http://127.0.0.1').searchParams.get('expected_investigation'), 'C:/β notebook')
 })
 
 test('a start-page mutation explicitly expects no open investigation', async () => {
@@ -36,6 +37,16 @@ test('a start-page mutation explicitly expects no open investigation', async () 
   }
   setInvestigationIdentity(null)
   await api.saveSettings({ energy_unit: 'kcal/mol' })
+})
+
+test('the start-page live poll explicitly expects no investigation without sending a scoped header', async () => {
+  globalThis.fetch = async (path, options) => {
+    assert.equal(new URL(path, 'http://127.0.0.1').searchParams.get('expected_investigation'), '')
+    assert.equal(options.headers['X-Chembook-Investigation'], undefined)
+    return Response.json({ investigation: null })
+  }
+  setInvestigationIdentity(null)
+  await api.live(2, 0, 25)
 })
 
 test('a delayed old-notebook response is rejected after switching, even after switching back', async () => {

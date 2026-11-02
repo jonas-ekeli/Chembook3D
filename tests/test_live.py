@@ -11,6 +11,7 @@ from starlette.middleware.exceptions import ExceptionMiddleware
 
 from chembook3d.api.identity import check_investigation_identity
 from chembook3d.api.live import ChangeTracker, LiveState, SelectionIn, report_selection
+from chembook3d.api.live import live as poll_live
 from chembook3d.api.routes import _with_investigation
 from chembook3d.app import create_app
 from chembook3d.investigation import InvestigationError
@@ -18,6 +19,43 @@ from tests.conftest import WATER
 
 ORIGIN = {"Origin": "http://127.0.0.1:8765"}
 CLAUDE = {"X-Chembook-Client": "claude"}
+
+
+@pytest.mark.parametrize("actual,expected", [(None, "A"), ("B", "A"), ("B", "")])
+def test_live_returns_immediately_for_displayed_identity_mismatch(actual, expected):
+    request = identity_request("/api/live", None, actual, method="GET")
+    request.app.state.live = LiveState()
+    coroutine = poll_live(
+        request,
+        since=0,
+        confirmations=0,
+        client="tab",
+        wait=25,
+        expected_investigation=expected,
+    )
+    with pytest.raises(StopIteration) as done:
+        coroutine.send(None)
+    assert done.value.value.investigation == actual
+    assert done.value.value.changed is False
+
+
+def test_live_notices_identity_change_while_waiting_without_an_external_change(monkeypatch):
+    request = identity_request("/api/live", None, "A", method="GET")
+    request.app.state.live = LiveState()
+
+    async def disconnected():
+        return False
+
+    async def close_during_wait(seconds):
+        request.app.state.investigation = None
+
+    monkeypatch.setattr(request, "is_disconnected", disconnected)
+    monkeypatch.setattr("chembook3d.api.live.asyncio.sleep", close_during_wait)
+    coroutine = poll_live(request, since=0, confirmations=0, client="tab", wait=25)
+    with pytest.raises(StopIteration) as done:
+        coroutine.send(None)
+    assert done.value.value.investigation is None
+    assert done.value.value.version == 0
 
 
 def identity_request(path, expected, actual, method="POST"):

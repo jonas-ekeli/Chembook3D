@@ -32,7 +32,9 @@ test('two tabs reconcile open, switch, stale records/view writes and close, incl
   const second = await context.newPage()
   const records = deferred()
   const save = deferred()
+  const saveFinished = deferred()
   let heldRecords = false
+  let fetchingRecords = false
   let heldSave = false
   let savedStatus = 0
   let oldRecordsFinished = false
@@ -48,9 +50,10 @@ test('two tabs reconcile open, switch, stale records/view writes and close, incl
 
     // Hold an actual A canvas response while live discovers B; release it after B is shown.
     await second.route('**/api/canvas', async (route) => {
-      if (heldRecords) return route.continue()
-      heldRecords = true
+      if (fetchingRecords) return route.continue()
+      fetchingRecords = true
       const response = await route.fetch()
+      heldRecords = true
       await records.promise
       await route.fulfill({ response })
       oldRecordsFinished = true
@@ -67,6 +70,7 @@ test('two tabs reconcile open, switch, stale records/view writes and close, incl
       const response = await route.fetch()
       savedStatus = response.status()
       await route.fulfill({ response })
+      saveFinished.resolve()
     })
     await second.getByRole('button', { name: 'Profile and table' }).click()
     await expect.poll(() => heldSave).toBe(true)
@@ -80,6 +84,8 @@ test('two tabs reconcile open, switch, stale records/view writes and close, incl
     save.resolve()
     await expect.poll(() => oldRecordsFinished).toBe(true)
     await expect.poll(() => savedStatus).toBe(409)
+    // Status is known before fulfill finishes. Reloading then cancels the still-owned route.
+    await saveFinished.promise
     await expect(second.getByRole('group', { name: 'Node Only in B', exact: true })).toBeVisible()
     expect((await (await page.request.get('/api/view-state')).json()).drawer.open).toBe(false)
 

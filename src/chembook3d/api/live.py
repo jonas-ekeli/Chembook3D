@@ -251,16 +251,25 @@ async def live(
     confirmations: int | None = None,
     client: str = "",
     wait: float = 0,
+    expected_investigation: str | None = None,
 ):
     """A long poll: answers as soon as another client changed something after `since`, or the
     list of confirmations differs from `confirmations`, or after `wait` seconds."""
     state = live_state(request)
+    initial_folder = _folder(request)
     deadline = time.monotonic() + max(0.0, min(wait, LONGEST_WAIT))
     while True:
         state.settle(_folder(request))
         changed = since is not None and state.changed_by_others(since, client)
         if (
             changed
+            # D91: identity must update even for this client's own close, before a slow
+            # push finishes. Explicit identity also catches a switch before this poll began.
+            or _folder(request) != initial_folder
+            or (
+                expected_investigation is not None
+                and (_folder(request) or "") != expected_investigation
+            )
             or (confirmations is not None and confirmations != state.confirm_version)
             or time.monotonic() >= deadline
             or await request.is_disconnected()
