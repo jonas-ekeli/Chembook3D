@@ -38,6 +38,7 @@ test('two tabs reconcile open, switch, stale records/view writes and close, incl
   let heldSave = false
   let savedStatus = 0
   let oldRecordsFinished = false
+  let completed = false
   try {
     await page.goto('/')
     await second.goto('/')
@@ -75,6 +76,10 @@ test('two tabs reconcile open, switch, stale records/view writes and close, incl
     await second.getByRole('button', { name: 'Profile and table' }).click()
     await expect.poll(() => heldSave).toBe(true)
     await openFolder(page, b)
+    // Two tabs' live/presence polls plus our two deliberately held requests exhaust the
+    // HTTP/1 six-connection budget. Release the switching tab's polls so identity discovery
+    // can proceed while both stale A requests remain held on the observing tab.
+    await page.goto('about:blank')
     await expect(second.locator('header .investigation')).toHaveText('Identity B')
     await expect(second.getByRole('group', { name: 'Node Only in B', exact: true })).toBeVisible()
     await expect(second.getByRole('group', { name: 'Node Only in A', exact: true })).toHaveCount(0)
@@ -93,15 +98,22 @@ test('two tabs reconcile open, switch, stale records/view writes and close, incl
     await second.reload()
     await expect(second.locator('header .investigation')).toHaveText('Identity B')
     await expect(second.getByRole('group', { name: 'Node Only in B', exact: true })).toBeVisible()
+    await page.goto('/')
+    await expect(page.locator('header .investigation')).toHaveText('Identity B')
     await investigationCommand(page, 'Close investigation')
     await expect(second.getByRole('button', { name: 'Open investigation…', exact: true })).toBeVisible()
     await expect(second.locator('header .investigation')).toHaveCount(0)
+    completed = true
   } finally {
     records.resolve()
     save.resolve()
-    await second.unrouteAll({ behavior: 'wait' })
-    await second.close()
-    await page.request.post('/api/investigations/close')
+    const cleanup = async () => {
+      await second.unrouteAll({ behavior: completed ? 'wait' : 'ignoreErrors' })
+      await second.close()
+      await page.request.post('/api/investigations/close')
+    }
+    if (completed) await cleanup()
+    else await cleanup().catch(() => undefined) // Preserve the original assertion on failure.
   }
 })
 
