@@ -859,6 +859,82 @@ export type CloudJob = {
   import_error?: string | null
 }
 
+/** D213: the tools for calculations on this computer, as the settings section shows them. */
+export type LocalTools = {
+  supported: boolean
+  platform: string | null
+  folder: string
+  installed: boolean
+  up_to_date: boolean
+  versions: Record<string, string>
+  installed_at: string | null
+  install: { state: 'idle' | 'running' | 'done' | 'failed'; step: string; error: string | null; seconds: number | null }
+  cores: number
+  memory_mb: number
+  default_cores: number
+  default_memory_mb: number
+  logical_cores: number
+  total_memory_mb: number | null
+  /** the methods a refine offers: value for the request, label to show */
+  methods: { value: string; label: string }[]
+}
+
+/** D213: what a local refine holds: atoms counted from 0; a null value holds the current one. */
+export type LocalConstraints = {
+  frozen?: number[]
+  distances?: { atoms: number[]; value: number | null }[]
+  angles?: { atoms: number[]; value: number | null }[]
+  dihedrals?: { atoms: number[]; value: number | null }[]
+}
+
+/** D213: a calculation run on this computer, folder local-jobs/<id>/. */
+export type LocalJob = {
+  id: string
+  kind: 'refine'
+  node_id: string
+  node_label: string
+  method: string
+  level: string
+  charge: number
+  multiplicity: number
+  cores: number
+  memory_mb: number
+  atoms: number
+  created: string
+  constraints: LocalConstraints | null
+  status:
+    | 'starting'
+    | 'queued'
+    | 'running'
+    | 'cancelling'
+    | 'converged'
+    | 'not_converged'
+    | 'failed'
+    | 'cancelled'
+    | 'stopped'
+  active: boolean
+  importable: boolean
+  progress: {
+    cycle: number
+    energy: number | null
+    max_gradient: number | null
+    energies: number[]
+    started_at: string | null
+    heartbeat_at: string | null
+  }
+  result?: {
+    state: string
+    energy: number | null
+    cycles: number | null
+    elapsed_s: number | null
+    error: string | null
+    program: string | null
+    level: string | null
+  }
+  imported?: { node_id: string; derived: boolean; calculation_ids: string[]; at: string; present?: boolean } | null
+  import_error?: string | null
+}
+
 /** FR-3D-07: a named list of alignment atoms per node. */
 export type AlignmentSet = { id: string; name: string; atoms: Record<string, number[]> }
 
@@ -2518,6 +2594,20 @@ export const api = {
       'POST',
       `/jobs/${encodeURIComponent(id)}/import-path${again ? '?again=true' : ''}`,
     ),
+  localTools: () => request<LocalTools>('GET', '/local/tools'),
+  installLocalTools: () => request<LocalTools>('POST', '/local/tools/install'),
+  saveLocalResources: (body: { cores: number | null; memory_mb: number | null }) =>
+    request<LocalTools>('PUT', '/local/tools', body),
+  localJobs: () => request<LocalJob[]>('GET', '/local/jobs'),
+  startRefine: (body: {
+    node_id: string
+    method: string
+    charge: number | null
+    multiplicity: number | null
+    constraints?: LocalConstraints | null
+  }) => request<LocalJob>('POST', '/local/jobs', body),
+  cancelLocalJob: (id: string) => request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/cancel`),
+  importLocalJob: (id: string) => request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/import`),
   atomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>
     request<AtomMatch>('POST', '/atom-match', { start_id: startId, end_id: endId, pairs }),
   energyProfiles: () => request<EnergyProfile[]>('GET', '/energy-profiles'),

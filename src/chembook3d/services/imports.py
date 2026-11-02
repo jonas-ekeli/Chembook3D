@@ -49,7 +49,7 @@ from chembook3d.models import (
     SubInvestigation,
     new_id,
 )
-from chembook3d.parsers import cml, crest, gaussian, joined, orca, xtb
+from chembook3d.parsers import cml, crest, gaussian, joined, local_result, orca, xtb
 from chembook3d.parsers.common import NOT_STATIONARY, ParsedFile, ParsedStep
 from chembook3d.services import geometry, history, levels, spin
 from chembook3d.services import groups as group_service
@@ -80,7 +80,14 @@ def read_file(text: str, name: str = "", folder: Path | None = None) -> ParsedFi
     """Recognise the program from the content, not the file name. `folder` is where the file
     was chosen, for an xTB scan's output beside it (D112)."""
     parsed: ParsedFile | crest.Ensemble
-    if joined.looks_like_joined(text):
+    if local_result.looks_like_local_result(text):
+        try:
+            parsed = local_result.parse(text)  # D213: a calculation run on this computer
+        except local_result.NotLocalResult as exc:
+            raise ImportFailed(
+                f"{name or 'The file'} is not a readable local result: {exc}"
+            ) from exc
+    elif joined.looks_like_joined(text):
         try:
             parsed = joined.parse(text, name)
         except joined.NotJoinedScan as exc:

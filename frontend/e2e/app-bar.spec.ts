@@ -33,7 +33,7 @@ test('the app bar, the investigation menu and the canvas toolbar', async ({ page
   // The view tabs: the Overview is the side panel's page, not a tab.
   const tabs = page.getByRole('navigation', { name: 'Views' }).getByRole('button')
   await expect(tabs).toHaveText(['Canvas', 'History', 'Analyses'])
-  for (const name of ['Scan editor', 'Cloud jobs', 'Claude', 'Not synced', 'Settings'])
+  for (const name of ['Scan editor', 'Cloud jobs', 'Local jobs', 'Claude', 'Not synced', 'Settings'])
     await expect(bar.getByRole('button', { name, exact: true })).toBeVisible()
 
   // The canvas toolbar holds the canvas's controls, Fit, Tidy and Export among them.

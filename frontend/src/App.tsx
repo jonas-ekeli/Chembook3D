@@ -19,6 +19,7 @@ import {
   type Note,
   type NoteLayout,
   type InspectTarget,
+  type LocalJob,
   type ScanEditorTarget,
   type RemoteServer,
   type RemoteStatus,
@@ -37,6 +38,9 @@ import { BoxEndDialog, MoveToDialog, NewSubDialog, SubInspector } from './compon
 import { canvasOf, chainOf, contentsText, placeText, subName, subsOf, transitionCanvas, visibleCanvases } from './subCanvas'
 import { CloudJobsDialog } from './components/CloudJobsDialog'
 import { useScanPathImports } from './cloudJobs'
+import { LocalJobsDialog } from './components/LocalJobsDialog'
+import { RefineDialog } from './components/RefineDialog'
+import { useLocalJobs } from './localJobs'
 import { CanvasPane, type CanvasEnergy, type CanvasContextMenu, type CanvasTarget, type TidySides } from './components/Canvas'
 import { EnergyDrawer, type DrawerPath, type DrawerView } from './components/EnergyDrawer'
 import { downloadBlob, errorText } from './util'
@@ -192,6 +196,8 @@ function App() {
   const [settingsSection, setSettingsSection] = useState<string | undefined>(undefined)
   const [showBases, setShowBases] = useState(false) // D94
   const [showJobs, setShowJobs] = useState(false) // D115
+  const [showLocalJobs, setShowLocalJobs] = useState(false) // D213
+  const [refineNode, setRefineNode] = useState<string | null>(null) // D213: its Refine geometry dialog
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   // Git sync (D71)
@@ -472,6 +478,19 @@ function App() {
   useScanPathImports(investigation?.folder ?? null, investigation?.linked ?? false, pathImported, (job, message) =>
     setNotice(`The scan path “${job.name}” could not be imported: ${message} (Cloud jobs)`),
   )
+
+  // D213: a refine run on this computer is imported onto its node when it is done.
+  const localImported = (job: LocalJob) => {
+    reload()
+    const where = job.imported?.derived ? 'a node derived from' : ''
+    setNotice(
+      `The ${job.level} refine of “${job.node_label}” is done and imported onto ${where ? `${where} ` : ''}it (it can be undone in History).`,
+    )
+  }
+  const localJobs = useLocalJobs(investigation?.folder ?? null, localImported, (job, message) =>
+    setNotice(`The ${job.level} refine of “${job.node_label}” could not be imported: ${message} (Local jobs)`),
+  )
+  const runningLocal = localJobs.jobs.filter((job) => job.active).length
 
   // The chosen level, or else the first with G (D32: free energy preferred), or else the first.
   const levelOption =
@@ -1004,6 +1023,39 @@ function App() {
           onSelectNode={(id) => {
             setView('canvas')
             selectNode(id, true)
+          }}
+        />
+      )}
+      {showLocalJobs && investigation && (
+        <LocalJobsDialog
+          jobs={localJobs.jobs}
+          onChanged={localJobs.refresh}
+          onClose={() => setShowLocalJobs(false)}
+          onImported={localImported}
+          onSelectNode={(id) => {
+            setView('canvas')
+            selectNode(id, true)
+          }}
+          onSettings={() => {
+            setShowLocalJobs(false)
+            setSettingsSection('local')
+            setShowSettings(true)
+          }}
+        />
+      )}
+      {refineNode && investigation && canvas.nodes.some((n) => n.id === refineNode) && (
+        <RefineDialog
+          key={refineNode}
+          node={canvas.nodes.find((n) => n.id === refineNode)!}
+          onClose={() => setRefineNode(null)}
+          onStarted={(job) => {
+            localJobs.refresh()
+            setNotice(`Refining “${job.node_label}” with ${job.level} on this computer; Local jobs shows how it goes.`)
+          }}
+          onSettings={() => {
+            setRefineNode(null)
+            setSettingsSection('local')
+            setShowSettings(true)
           }}
         />
       )}
@@ -1541,6 +1593,7 @@ function App() {
         onSelect: () => importOnto(node.id),
       },
       { label: 'Edit structure in 3D…', icon: 'pencil', onSelect: () => setEditingNode(node.id) },
+      node.atom_count > 0 && { label: 'Refine geometry…', icon: 'flask', onSelect: () => setRefineNode(node.id) },
       !species &&
         node.role === 'transition_state' && { label: 'IRC…', icon: 'wave', onSelect: () => setIrcNode(node.id) },
       !species && { label: 'Start energy pathway here', icon: 'chart', separated: true, onSelect: startPathway },
@@ -1882,6 +1935,7 @@ function App() {
     for (const st of canvas.steps) filter('steps', st.id, `step ${st.name || 'Unnamed step'}`)
     command('scan-editor', 'Scan editor', 'wave', () => openScanEditor([]))
     command('cloud-jobs', 'Cloud jobs', 'cloud', () => setShowJobs(true))
+    command('local-jobs', 'Local jobs', 'flask', () => setShowLocalJobs(true))
     command('claude', sideTab === 'claude' ? 'Hide the Claude panel' : 'Claude panel', 'spark', () =>
       setSideTab(sideTab === 'claude' ? null : 'claude'),
     )
@@ -2102,6 +2156,7 @@ function App() {
         settings={settings}
         servers={remote?.enabled ? remote.servers.filter((s) => s.connected) : []}
         onIrc={() => setIrcNode(selectedNode.id)}
+        onRefine={() => setRefineNode(selectedNode.id)}
         onEditStructure={() => setEditingNode(selectedNode.id)}
         energy={canvasEnergy}
         levelLabel={levelLabel}
@@ -2260,6 +2315,14 @@ function App() {
           >
             <Icon name="cloud" />
             <span className="tb-label">Cloud jobs</span>
+          </button>
+          <button
+            className="quiet"
+            onClick={() => setShowLocalJobs(true)}
+            title="Calculations run on this computer, such as Refine geometry (D213)"
+          >
+            <Icon name="flask" />
+            <span className="tb-label">{runningLocal ? `Local jobs · ${runningLocal} running` : 'Local jobs'}</span>
           </button>
           <span className="vsep" />
           <button

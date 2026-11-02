@@ -157,6 +157,7 @@ export function NodeInspector({
   settings,
   servers = [],
   onIrc,
+  onRefine,
   onEditStructure,
   energy,
   levelLabel,
@@ -184,6 +185,8 @@ export function NodeInspector({
   servers?: RemoteServer[]
   /** D131: open the node's IRC window. */
   onIrc?: () => void
+  /** D213: Refine geometry… on this computer */
+  onRefine?: () => void
   /** D139: open the Edit structure window. */
   onEditStructure?: () => void
   /** D179: the energy view as the canvas has it (level, type, reference), for the stat strip. */
@@ -371,6 +374,14 @@ export function NodeInspector({
       detail: ircLine(irc),
       title: 'The IRC’s files, path and end points, in a window of their own',
       onSelect: onIrc,
+    })
+  }
+  if (onRefine && node.atom_count > 0) {
+    moreItems.push({
+      label: 'Refine geometry…',
+      icon: 'flask',
+      title: 'Optimize the structure on this computer (D213)',
+      onSelect: onRefine,
     })
   }
   if (!isSpecies) {

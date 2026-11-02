@@ -30,7 +30,8 @@ from chembook3d.investigation import BACKUP_DIR, DB_NAME, LOCK_NAME
 # The lock file and journal belong to one running app, and backups/ holds local copies
 # (NFR-DATA-03), so none of them is shared. Every file is stored byte for byte: Git for
 # Windows would otherwise change the line endings of copied output files (NFR-DATA-02).
-IGNORED = [LOCK_NAME, f"{DB_NAME}-journal", f"{BACKUP_DIR}/"]
+# D213: local jobs change every few seconds while they run; their results are imported
+IGNORED = [LOCK_NAME, f"{DB_NAME}-journal", f"{BACKUP_DIR}/", "local-jobs/"]
 ATTRIBUTES = ["* -text", f"{DB_NAME} binary"]
 
 NETWORK_TIMEOUT = 300  # seconds; the first sign-in may wait for the browser

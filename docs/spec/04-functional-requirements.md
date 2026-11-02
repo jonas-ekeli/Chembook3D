@@ -338,6 +338,17 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 
 **AC:** with the demo linked to an empty private repository and Claude Code signed in, ask Claude in the panel to optimise a node with GFN2-xTB in the cloud: it shows the job, starts it when you agree and gives a claude.ai link; when the session has pushed its result, Claude fetches and imports the output, and the node has an xTB calculation.
 
+## FR-LOC · Calculations on this computer (D213)
+
+| ID | Requirement | Trace | Phase |
+|---|---|---|---|
+| FR-LOC-01 | Settings, Local calculations installs (or updates) the tools: micromamba checked against its pinned SHA-256, then a private environment created from the app's pinned package list for the platform (Windows or Linux on x86-64) in the app's data folder, checked by importing the tools, and swapped in only when it works. It shows whether the tools are installed and current, their versions, an install's progress or error, and the cores and memory each job may use (default: physical cores minus one, half the memory up to 16 GB). Installing is refused while a local job runs and from a web page of another origin. | D213, A143 | after 5 |
+| FR-LOC-02 | Refine geometry… on a node with coordinates (its menu and its panel's ⋯ menu) offers the methods the app has (GFN2-xTB first), charge and multiplicity from the node, and starts a job: `local-jobs/<date>-<name>/` with `job.json` and a copy of the worker, run with the tools' Python as a detached process that outlives the app. Optional constraints hold atoms frozen, or distances, angles and dihedrals at their current value or a target. | D213 | after 5 |
+| FR-LOC-03 | Jobs on this computer run one after another. Each job's status is starting, queued, running, cancelling, converged, not converged, failed, cancelled or stopped (the process ended without a result), with the step, the energy change since the start, the largest gradient and the time. Local jobs lists them, newest first; Cancel ends a waiting or running job's process. The folder `local-jobs/` is left out of git sync. | D213 | after 5 |
+| FR-LOC-04 | While the investigation is open, each finished result (converged or not) is imported once onto the node it was started from as an optimization with every step, by the usual import rules (D23, D100, D165), at its own level (program and method); a failed import is shown in Local jobs, which can try again. Claude can list, start, cancel and import local jobs, but not install the tools. | D213, D157 | after 5 |
+
+**AC:** install the tools in Settings; on a node without calculations choose Refine geometry…, GFN2-xTB, Start; close the tab and open the app again later: the job ran on, its result is the node's optimization at "tblite GFN2-xTB" with a step movie, and the node's geometry is the result.
+
 ## FR-SHARE · Read-only copy to share (D79)
 
 | ID | Requirement | Trace | Phase |

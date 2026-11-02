@@ -58,6 +58,9 @@ class Lifetime:
     reason: str = ""  # why it is stopping
     sync: str | None = None  # how the push at the Shut down button went
     exit: Callable[[], None] | None = None  # set by `chembook3d`: stops the server
+    # Work that keeps a launched server running with no tab left, such as installing the local
+    # tools (D213): each answers whether it is still going.
+    holds: list[Callable[[], bool]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def seen(self, tab: str, now: float | None = None) -> None:
@@ -99,6 +102,8 @@ class Lifetime:
         now = time.monotonic() if now is None else now
         with self.lock:
             if not self.launched or self.stopping:
+                return False
+            if any(hold() for hold in self.holds):
                 return False
             for tab, heard in list(self.tabs.items()):
                 if now - heard >= self.silence and not self.busy.get(tab):

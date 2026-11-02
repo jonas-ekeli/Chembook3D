@@ -53,3 +53,22 @@ from Feather, MIT License):
 The backend's dependencies are installed by uv, not copied into this repository. They are under
 permissive licences (MIT, BSD, Apache-2.0, PSF); certifi is under MPL-2.0, and asyncssh (the SSH connection of D122) under EPL-2.0 with GPL-2.0-or-later as its secondary licence. `uv.lock` lists the
 exact versions.
+
+## Optional local tools (D213)
+
+Settings, Local calculations downloads these on the user's request into the app's own data
+folder; none of them is copied into this repository or into an investigation, and the app runs
+them as separate programs:
+
+- [micromamba](https://github.com/mamba-org/mamba) (BSD-3-Clause), pinned by SHA-256 in
+  `src/chembook3d/local_tools.py`, which installs the rest from [conda-forge](https://conda-forge.org);
+- [Psi4](https://psicode.org) (LGPL-3.0, with BSD and MIT parts) for the DFT methods;
+- [tblite](https://github.com/tblite/tblite) (LGPL-3.0-or-later) for GFN2-xTB;
+- [geomeTRIC](https://github.com/leeping/geomeTRIC) (BSD-3-Clause), the optimizer;
+- [dftd4](https://github.com/dftd4/dftd4), [s-dftd3](https://github.com/dftd3/simple-dftd3) and
+  [gCP](https://github.com/grimme-lab/gcp) (LGPL-3.0-or-later), the corrections of the 3c methods;
+- their dependencies, listed with exact versions in `src/chembook3d/assets/local-tools/`, among
+  them OpenBLAS (BSD-3-Clause) on Linux and Intel MKL (Intel Simplified Software License) on
+  Windows.
+
+geomeTRIC is also a development dependency, for the tests of the local jobs.
