@@ -84,7 +84,9 @@ test('two tabs reconcile open, switch, stale records/view writes and close, incl
     await expect(second.getByRole('group', { name: 'Node Only in B', exact: true })).toBeVisible()
     await expect(second.getByRole('group', { name: 'Node Only in A', exact: true })).toHaveCount(0)
     await expect(second.getByLabel('Node inspector')).toHaveCount(0)
-    await expect(second.getByLabel('Energy drawer')).toHaveCount(0)
+    // The drawer stays mounted while closed so its same-notebook saves can finish.
+    await expect(second.getByLabel('Energy drawer')).toBeHidden()
+    await expect(second.getByRole('button', { name: 'Profile and table' })).toHaveAttribute('aria-pressed', 'false')
     records.resolve()
     save.resolve()
     await expect.poll(() => oldRecordsFinished).toBe(true)
