@@ -10,6 +10,8 @@
   --field-bg: #ffffff;
   --viewer-bg: #ffffff; /* the 3D view (Viewer3D reads it) */
   --viewer-line: #495057; /* the dashed line between atoms picked in the 3D view */
+  --viewer-core: #1c7ed6; /* D214: atoms of a DFT core in the 3D view */
+  --viewer-link: #f59f00; /* D214: atoms a DFT core's link hydrogens stand in for */
   --card: #ffffff; /* a node card on the canvas */
   --border: #d9dde3;
   --divider: #eef0f3;
@@ -123,6 +125,8 @@
   --field-bg: #0d1117;
   --viewer-bg: #0e1116;
   --viewer-line: #adb5bd;
+  --viewer-core: #4dabf7;
+  --viewer-link: #ffc078;
   --card: #1a2029;
   --border: #2b323d;
   --divider: #222831;
@@ -5465,6 +5469,19 @@ table.scan-path-held input.drive-value {
 }
 .refine-constraints > .small:not(p) {
   justify-self: start;
+}
+.refine-core {
+  display: grid;
+  gap: 0.5rem;
+}
+.refine-core-view .viewer {
+  height: 280px;
+}
+.refine-core-seeds {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  align-items: end;
 }
 .refine-held {
   display: grid;

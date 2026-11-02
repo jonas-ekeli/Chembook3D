@@ -879,9 +879,25 @@ export type LocalTools = {
   methods: {
     value: string
     label: string
+    /** D214: r2SCAN-3c on a core of the molecule, GFN2-xTB on the rest */
+    layered: boolean
     /** for the `atoms` asked about: seconds per step and in all, measured on this computer or not */
-    estimate: { seconds_per_step: number; steps: number; seconds: number; measured: boolean } | null
+    estimate: Estimate | null
   }[]
+}
+
+type Estimate = { seconds_per_step: number; steps: number; seconds: number; measured: boolean }
+
+/** D214: the DFT core of an ONIOM refine, atoms counted from 0. */
+export type LocalCore = {
+  core: number[]
+  links: { inner: number; outer: number; g: number }[]
+  suggested: boolean
+  atoms: number
+  model_size: number
+  warnings: string[]
+  errors: string[]
+  estimate: Estimate
 }
 
 /** D213: what a local refine holds: atoms counted from 0; a null value holds the current one. */
@@ -2612,7 +2628,15 @@ export const api = {
     charge: number | null
     multiplicity: number | null
     constraints?: LocalConstraints | null
+    core?: number[] | null
   }) => request<LocalJob>('POST', '/local/jobs', body),
+  localCore: (body: {
+    node_id: string
+    core?: number[] | null
+    seeds?: number[] | null
+    charge?: number | null
+    multiplicity?: number | null
+  }) => request<LocalCore>('POST', '/local/core', body),
   cancelLocalJob: (id: string) => request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/cancel`),
   importLocalJob: (id: string) => request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/import`),
   atomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>

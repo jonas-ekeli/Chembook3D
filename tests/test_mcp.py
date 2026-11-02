@@ -35,6 +35,7 @@ READ_POSTS = {
     "/api/builder/run",
     "/api/builder/check",
     "/api/measurements",
+    "/api/local/core",
 }
 # Changes that delete nothing and are undone at once, so they do not ask (A38).
 UNASKED_DELETES = {

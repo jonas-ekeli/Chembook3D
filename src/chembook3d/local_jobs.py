@@ -34,11 +34,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from sqlalchemy.orm import Session
 
 from chembook3d import local_tools
 from chembook3d.models import Node
-from chembook3d.services import imports
+from chembook3d.services import imports, oniom
 from chembook3d.services import nodes as node_service
 from chembook3d.services.records import RecordError
 
@@ -54,7 +55,14 @@ STARTING_S = 60.0  # a job without a heartbeat yet is starting for this long
 _JOB_ID = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9-]{1,60}$")
 
 # The methods offered and what the result is called (the worker's METHOD_LABELS).
-METHODS = {"gfn2": "GFN2-xTB", "b97-3c": "B97-3c", "r2scan-3c": "r2SCAN-3c"}
+METHODS = {
+    "gfn2": "GFN2-xTB",
+    "b97-3c": "B97-3c",
+    "r2scan-3c": "r2SCAN-3c",
+    "oniom": "ONIOM(r2SCAN-3c:GFN2-xTB)",
+}
+# D214: the methods with a DFT core, its high and low level.
+LAYERED = {"oniom": ("r2scan-3c", "gfn2"), "oniom-stub": ("stub", "stub-low")}
 
 # A143: what a time estimate starts from, per method: seconds per gradient for a 70-atom Ru
 # complex on 4 cores (measured 2026-11-02 on the MCB structure: Psi4 1.11 r2SCAN-3c 862 s and
@@ -65,10 +73,13 @@ TIMING = {
     "gfn2": {"seconds": 0.5, "power": 2.0},
     "b97-3c": {"seconds": 400.0, "power": 2.7},
     "r2scan-3c": {"seconds": 550.0, "power": 2.7},
+    # ONIOM: r2SCAN-3c on the model system (core and link atoms), counted by its size; the
+    # GFN2-xTB parts add seconds.
+    "oniom": {"seconds": 550.0, "power": 2.7},
     "stub": {"seconds": 1.0, "power": 0.0},
 }
 TIMING_ATOMS, TIMING_CORES = 70, 4
-TEST_METHODS = {"stub": "stub"}  # CHEMBOOK3D_LOCAL_STUB=1 only (tests)
+TEST_METHODS = {"stub": "stub", "oniom-stub": "ONIOM(stub:stub-low)"}  # LOCAL_STUB=1 (tests)
 
 _records = threading.Lock()
 # The workers this app started: kept so Python never warns that one is still running, and
@@ -103,11 +114,13 @@ def _scale(method: str, atoms: int, cores: int) -> float:
     ) ** 0.85
 
 
-def estimate(method: str, atoms: int, cores: int) -> dict[str, Any]:
-    """Seconds for one step and for the optimization, and whether this computer measured it."""
+def estimate(method: str, atoms: int, cores: int, model: int | None = None) -> dict[str, Any]:
+    """Seconds for one step and for the optimization, and whether this computer measured it.
+    A layered method's step is counted from its `model` size (core and link atoms)."""
     measured = local_tools.calibration().get(method)
     base = measured if measured else TIMING.get(method, TIMING["stub"])["seconds"]
-    per_step = base * _scale(method, atoms, cores)
+    sized = model if method in LAYERED and model else atoms
+    per_step = base * _scale(method, sized, cores)
     return {
         "seconds_per_step": round(per_step, 2),
         "steps": steps(atoms),
@@ -123,6 +136,8 @@ def calibrate(result: dict[str, Any], job: dict[str, Any]) -> None:
     if not cycles or not elapsed or method not in METHODS or cycles < 3:
         return
     atoms = len(job.get("elements") or [])
+    if job.get("oniom"):
+        atoms = len(job["oniom"]["core"]) + len(job["oniom"]["links"])
     per_step = float(elapsed) / int(cycles)
     local_tools.save_calibration(method, per_step / _scale(method, atoms, int(job.get("cores", 1))))
 
@@ -210,6 +225,7 @@ def create_job(
     multiplicity: int,
     constraints: dict[str, Any] | None = None,
     name: str | None = None,
+    core: list[int] | None = None,
 ) -> dict[str, Any]:
     if method not in methods():
         raise LocalJobError(f"Unknown method {method!r}; offered: {', '.join(methods())}")
@@ -220,6 +236,18 @@ def create_job(
         raise LocalJobError("The multiplicity is at least 1")
     if local_tools.worker_python() is None:
         raise LocalJobError("Install the local tools first (Settings, Local calculations)")
+    level = methods()[method]
+    layers = None
+    if method in LAYERED:
+        found = check_core(
+            atoms, core if core is not None else suggest_core(atoms), charge, multiplicity
+        )
+        if found.errors:
+            raise LocalJobError(found.errors[0])
+        high, low = LAYERED[method]
+        layers = {"core": found.atoms, "links": found.links, "high": high, "low": low}
+        # D214: an ONIOM energy compares only with the same core, so its size is in the level.
+        level = f"{level}, {len(found.atoms)}-atom core"
     resources = local_tools.resources()
     with _records:
         job_id = _new_id(folder, name or f"{node.label} {METHODS.get(method, method)}")
@@ -231,7 +259,7 @@ def create_job(
             "node_id": node.id,
             "node_label": node.label,
             "method": method,
-            "level": methods()[method],
+            "level": level,
             "charge": charge,
             "multiplicity": multiplicity,
             "cores": resources.cores,
@@ -241,12 +269,32 @@ def create_job(
             "constraints": constraints or None,
             "created": _now(),
         }
-        if method == "stub" and os.environ.get("CHEMBOOK3D_LOCAL_STUB_DELAY"):
+        if layers:
+            job["oniom"] = layers
+        if method in ("stub", "oniom-stub") and os.environ.get("CHEMBOOK3D_LOCAL_STUB_DELAY"):
             job["stub_delay_s"] = float(os.environ["CHEMBOOK3D_LOCAL_STUB_DELAY"])
         _write(path / JOB_JSON, job)
         shutil.copyfile(WORKER_SOURCE, path / WORKER)
     _spawn(path)
     return job_status(folder, job_id)
+
+
+def suggest_core(atoms: list[Any], seeds: list[int] | None = None) -> list[int]:
+    """D214: the suggested DFT core of a structure (atoms from 0)."""
+    return oniom.suggest(
+        [a.element for a in atoms], np.array([[a.x, a.y, a.z] for a in atoms]), seeds
+    )
+
+
+def check_core(atoms: list[Any], core: list[int], charge: int, multiplicity: int) -> oniom.Core:
+    """D214: the core with its link atoms and what is wrong with it."""
+    return oniom.build(
+        [a.element for a in atoms],
+        np.array([[a.x, a.y, a.z] for a in atoms]),
+        core,
+        charge,
+        multiplicity,
+    )
 
 
 def _spawn(path: Path) -> None:

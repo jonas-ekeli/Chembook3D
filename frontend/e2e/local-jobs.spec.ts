@@ -87,3 +87,70 @@ test('a refine on this computer is followed under Local jobs and imported onto i
   await expect(running).toContainText('Cancelled')
   await expect(page.getByRole('button', { name: 'Local jobs', exact: true })).toBeVisible()
 })
+
+// T-UI-84, D214: an ONIOM refine suggests its DFT core from the metal, shows its size and link
+// hydrogens, refuses a core that cuts a bond to the metal, and runs with the core chosen.
+const BUTYL = [
+  '16',
+  'butyl',
+  'Pd 0 0 0',
+  'Cl 0 2.3 0',
+  'Cl 0 -2.3 0',
+  'C 2.05 0 0',
+  'C 3.30 0.88 0',
+  'C 4.55 0 0',
+  'C 5.80 0.88 0',
+  'H 2.05 -0.63 0.89',
+  'H 2.05 -0.63 -0.89',
+  'H 3.30 1.51 0.89',
+  'H 3.30 1.51 -0.89',
+  'H 4.55 -0.63 0.89',
+  'H 4.55 -0.63 -0.89',
+  'H 5.80 1.51 0.89',
+  'H 5.80 1.51 -0.89',
+  'H 6.83 0.52 0',
+  '',
+].join('\n')
+
+test('an ONIOM refine starts from a suggested DFT core that can be changed', async ({ page }) => {
+  test.slow()
+  await startPage(page)
+  await page.getByRole('button', { name: /^New/ }).first().click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
+  await dialog.getByLabel('Folder path').fill(E2E_DIR)
+  await dialog.getByRole('button', { name: 'Go' }).click()
+  await dialog.getByLabel('Investigation name').fill('Local ONIOM')
+  await dialog.getByRole('button', { name: 'Create' }).click()
+  await expect(page.locator('.investigation')).toHaveText('Local ONIOM')
+  const created = await page.request.post('/api/nodes', { data: { label: 'butyl', xyz: BUTYL, charge: -1 } })
+  expect(created.ok()).toBeTruthy()
+  const id = (await created.json()).id
+  await page.reload()
+
+  await page.locator('.react-flow__node').filter({ hasText: 'butyl' }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Refine geometry…' }).click()
+  const refine = page.getByRole('dialog', { name: 'Refine geometry of “butyl”' })
+  await expect(refine.getByLabel('Method', { exact: true }).locator('option', { hasText: /^ONIOM\(r2SCAN-3c:GFN2-xTB\) · about/ })).toHaveCount(1)
+  // A143: a structure with a metal starts on Quick DFT.
+  await expect(refine.getByLabel('Method', { exact: true })).toHaveValue('oniom')
+  await expect(refine.getByRole('group', { name: 'DFT core' })).toBeVisible()
+  await refine.getByLabel('Method', { exact: true }).selectOption('oniom-stub')
+  const core = refine.getByRole('group', { name: 'DFT core' })
+  await expect(core.getByLabel('Core atoms')).toHaveValue('1-6, 8-13')
+  await expect(core.getByLabel('Core size')).toHaveText('12 of 16 atoms and 1 link hydrogen in r2SCAN-3c; GFN2-xTB for the whole molecule.')
+  await expect(core.getByTestId('viewer3d')).toBeVisible()
+
+  // Leaving a chlorine out cuts its bond to the palladium: refused.
+  await core.getByLabel('Core atoms').fill('1, 2, 4-6, 8-13')
+  await expect(core.getByRole('alert').filter({ hasText: 'to a metal' })).toHaveCount(1)
+  await expect(refine.getByRole('button', { name: 'Start' })).toBeDisabled()
+  await core.getByLabel('Core atoms').fill('1-6, 8-13')
+  await expect(core.getByLabel('Core size')).toBeVisible()
+  await refine.getByRole('button', { name: 'Start' }).click()
+  await expect(refine).toHaveCount(0)
+  await expect(page.getByText(/The ONIOM\(stub:stub-low\), 12-atom core refine of “butyl” is done/)).toBeVisible({ timeout: 60_000 })
+  const calcs = await (await page.request.get(`/api/nodes/${id}/calculations`)).json()
+  expect(calcs).toHaveLength(1)
+  expect(JSON.stringify(calcs[0])).toContain('12-atom core')
+})

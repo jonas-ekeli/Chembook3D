@@ -47,7 +47,9 @@ METHOD_LABELS = {
     "gfn2": ("tblite", "GFN2-xTB"),
     "b97-3c": ("Psi4", "B97-3c"),
     "r2scan-3c": ("Psi4", "r2SCAN-3c"),
+    "oniom": ("Psi4", "ONIOM(r2SCAN-3c:GFN2-xTB)"),
     "stub": ("stub", "stub"),
+    "oniom-stub": ("stub", "ONIOM(stub:stub-low)"),
 }
 
 
@@ -163,93 +165,159 @@ def read_constraints(job: dict) -> str | None:
     return text
 
 
+def _stub(start, shrink: float, weight: float, delay: float):
+    """Test engine: harmonic bonds towards the starting distances (Bohr) times `shrink`, so the
+    optimizer has a few steps to take; it needs no tools environment."""
+    import numpy as np
+
+    n = len(start)
+    pairs = [(i, j) for i in range(n) for j in range(i + 1, n)]
+    target = {p: shrink * np.linalg.norm(start[p[0]] - start[p[1]]) for p in pairs}
+
+    def stub(x):
+        if delay:
+            time.sleep(delay)
+        e, g = 0.0, np.zeros_like(x)
+        for i, j in pairs:
+            d = x[i] - x[j]
+            r = np.linalg.norm(d)
+            w = weight / target[(i, j)] ** 2
+            e += w * (r - target[(i, j)]) ** 2
+            f = 2 * w * (r - target[(i, j)]) * d / r
+            g[i] += f
+            g[j] -= f
+        return e, g
+
+    return stub
+
+
+def _gfn2(numbers, charge: int, unpaired: int):
+    import numpy as np
+    from tblite.interface import Calculator
+
+    def gfn2(x):
+        calc = Calculator("GFN2-xTB", numbers, x, charge=charge, uhf=unpaired)
+        calc.set("verbosity", 0)
+        res = calc.singlepoint()
+        return float(res.get("energy")), np.array(res.get("gradient"))
+
+    return gfn2
+
+
+def _psi4(method: str, numbers, charge: int, unpaired: int, job: dict, folder: Path):
+    import numpy as np
+
+    scratch = folder / "scratch"  # PSI_SCRATCH: Psi4 wants it there when imported
+    scratch.mkdir(exist_ok=True)
+    import psi4
+
+    psi4.core.set_output_file(str(folder / "psi4.out"), False)
+    psi4.set_memory(int(job.get("memory_mb", 2000)) * 1_000_000)
+    psi4.set_num_threads(max(1, int(job.get("cores", 1))))
+    psi4.core.IOManager.shared_object().set_default_path(str(scratch))
+    psi4.set_options(
+        {
+            "reference": "uks" if unpaired else "rks",
+            "scf_type": "df",
+            "maxiter": 200,
+        }
+    )
+    symbols = [ELEMENTS[z - 1] for z in numbers]
+    started = {"done": False}
+
+    def dft(x):
+        lines = [f"{charge} {unpaired + 1}"]
+        lines += [
+            f"{s} {a:.10f} {b:.10f} {c:.10f}" for s, (a, b, c) in zip(symbols, x, strict=True)
+        ]
+        lines += ["units bohr", "symmetry c1", "no_reorient", "no_com"]
+        psi4.geometry("\n".join(lines))
+        # From the second step on, the SCF starts from the last step's orbitals: a few
+        # iterations instead of twenty. A start that fails falls back to a fresh guess.
+        psi4.set_options({"guess": "read" if started["done"] else "sad"})
+        try:
+            grad, wfn = psi4.gradient(method, return_wfn=True)
+        except psi4.SCFConvergenceError:
+            if not started["done"]:
+                raise
+            psi4.set_options({"guess": "sad"})
+            grad, wfn = psi4.gradient(method, return_wfn=True)
+        started["done"] = True
+        return float(wfn.energy()), np.array(grad)
+
+    return dft
+
+
+def _engine(method: str, numbers, start, job: dict, folder: Path):
+    """One method on one system (atomic numbers, starting coordinates in Bohr)."""
+    charge = int(job.get("charge", 0))
+    unpaired = int(job.get("multiplicity", 1)) - 1
+    if method == "stub":
+        return _stub(start, 0.98, 0.1, float(job.get("stub_delay_s", 0)))
+    if method == "stub-low":  # a second, different test engine for ONIOM's low level
+        return _stub(start, 0.95, 0.05, 0.0)
+    if method == "gfn2":
+        return _gfn2(numbers, charge, unpaired)
+    if method in ("b97-3c", "r2scan-3c"):
+        return _psi4(method, numbers, charge, unpaired, job, folder)
+    raise ValueError(f"unknown method {method!r}")
+
+
+def model_coordinates(x, core, links):
+    """The ONIOM model system: the core atoms, then one H per cut bond (inner, outer, g) at
+    inner + g (outer - inner)."""
+    import numpy as np
+
+    caps = [x[a] + g * (x[b] - x[a]) for a, b, g in links]
+    return np.vstack([x[core]] + ([np.array(caps)] if caps else []))
+
+
+def oniom(real, high, low_model, core, links):
+    """Two-layer subtractive ONIOM, E = E_low(real) + E_high(model) - E_low(model) (D214).
+    `real` and `low_model` are the low level on the whole molecule and on the model, `high`
+    the high level on the model. A link atom's gradient goes to the atoms of its cut bond:
+    1 - g to the inner one, g to the outer one (the chain rule of its position)."""
+    import numpy as np
+
+    core = list(core)
+
+    def calculate(x):
+        e_real, g_real = real(x)
+        m = model_coordinates(x, core, links)
+        e_high, g_high = high(m)
+        e_low, g_low = low_model(m)
+        energy = e_real + e_high - e_low
+        diff = np.asarray(g_high) - np.asarray(g_low)
+        grad = np.array(g_real, float).reshape(-1, 3).copy()
+        grad[core] += diff[: len(core)]
+        for (a, b, g), d in zip(links, diff[len(core) :], strict=True):
+            grad[a] += (1 - g) * d
+            grad[b] += g * d
+        return energy, grad
+
+    return calculate
+
+
 def make_calculator(job: dict, numbers, folder: Path):
     """A function from coordinates (Bohr, n x 3) to (energy in Hartree, gradient Hartree/Bohr)."""
     import numpy as np
 
     method = job["method"]
-    charge = int(job.get("charge", 0))
-    unpaired = int(job.get("multiplicity", 1)) - 1
-    cores = max(1, int(job.get("cores", 1)))
-
-    if method == "stub":
-        # Test engine: harmonic bonds towards the starting distances shortened by 2 %, so the
-        # optimizer has a few steps to take; it needs no tools environment.
-        start = np.array(job["coordinates"], float) / BOHR_TO_ANGSTROM
-        n = len(start)
-        pairs = [(i, j) for i in range(n) for j in range(i + 1, n)]
-        target = {p: 0.98 * np.linalg.norm(start[p[0]] - start[p[1]]) for p in pairs}
-        delay = float(job.get("stub_delay_s", 0))
-
-        def stub(x):
-            if delay:
-                time.sleep(delay)
-            e, g = 0.0, np.zeros_like(x)
-            for i, j in pairs:
-                d = x[i] - x[j]
-                r = np.linalg.norm(d)
-                w = 0.1 / target[(i, j)] ** 2
-                e += w * (r - target[(i, j)]) ** 2
-                f = 2 * w * (r - target[(i, j)]) * d / r
-                g[i] += f
-                g[j] -= f
-            return e, g
-
-        return stub
-
-    if method == "gfn2":
-        from tblite.interface import Calculator
-
-        def gfn2(x):
-            calc = Calculator("GFN2-xTB", numbers, x, charge=charge, uhf=unpaired)
-            calc.set("verbosity", 0)
-            res = calc.singlepoint()
-            return float(res.get("energy")), np.array(res.get("gradient"))
-
-        return gfn2
-
-    if method in ("b97-3c", "r2scan-3c"):
-        scratch = folder / "scratch"  # PSI_SCRATCH: Psi4 wants it there when imported
-        scratch.mkdir(exist_ok=True)
-        import psi4
-
-        psi4.core.set_output_file(str(folder / "psi4.out"), False)
-        psi4.set_memory(int(job.get("memory_mb", 2000)) * 1_000_000)
-        psi4.set_num_threads(cores)
-        psi4.core.IOManager.shared_object().set_default_path(str(scratch))
-        psi4.set_options(
-            {
-                "reference": "uks" if unpaired else "rks",
-                "scf_type": "df",
-                "maxiter": 200,
-            }
-        )
-        symbols = [ELEMENTS[z - 1] for z in numbers]
-        started = {"done": False}
-
-        def dft(x):
-            lines = [f"{charge} {unpaired + 1}"]
-            lines += [
-                f"{s} {a:.10f} {b:.10f} {c:.10f}" for s, (a, b, c) in zip(symbols, x, strict=True)
-            ]
-            lines += ["units bohr", "symmetry c1", "no_reorient", "no_com"]
-            psi4.geometry("\n".join(lines))
-            # From the second step on, the SCF starts from the last step's orbitals: a few
-            # iterations instead of twenty. A start that fails falls back to a fresh guess.
-            psi4.set_options({"guess": "read" if started["done"] else "sad"})
-            try:
-                grad, wfn = psi4.gradient(method, return_wfn=True)
-            except psi4.SCFConvergenceError:
-                if not started["done"]:
-                    raise
-                psi4.set_options({"guess": "sad"})
-                grad, wfn = psi4.gradient(method, return_wfn=True)
-            started["done"] = True
-            return float(wfn.energy()), np.array(grad)
-
-        return dft
-
-    raise ValueError(f"unknown method {method!r}")
+    start = np.array(job["coordinates"], float) / BOHR_TO_ANGSTROM
+    if method not in ("oniom", "oniom-stub"):
+        return _engine(method, numbers, start, job, folder)
+    layers = job["oniom"]
+    core = [int(i) for i in layers["core"]]
+    links = [(int(a), int(b), float(g)) for a, b, g in layers["links"]]
+    model_numbers = np.concatenate([np.asarray(numbers)[core], np.ones(len(links), int)])
+    model_start = model_coordinates(start, core, links)
+    return oniom(
+        _engine(layers["low"], numbers, start, job, folder),
+        _engine(layers["high"], model_numbers, model_start, job, folder),
+        _engine(layers["low"], model_numbers, model_start, job, folder),
+        core,
+        links,
+    )
 
 
 def versions(method: str) -> dict:
@@ -257,9 +325,9 @@ def versions(method: str) -> dict:
 
     found = {"python": sys.version.split()[0]}
     names = ["numpy", "geometric"]
-    if method == "gfn2":
+    if method in ("gfn2", "oniom"):
         names.append("tblite")
-    if method in ("b97-3c", "r2scan-3c"):
+    if method in ("b97-3c", "r2scan-3c", "oniom"):
         names += ["psi4", "dftd4", "dftd3"]
     for name in names:
         try:
@@ -301,12 +369,14 @@ def run(folder: Path, lock: Path | None) -> int:
         "worker_version": WORKER_VERSION,
         "method": method,
         "program": program,
-        "level": label,
+        "level": job.get("level") or label,
         "charge": int(job.get("charge", 0)),
         "multiplicity": int(job.get("multiplicity", 1)),
         "constraints": job.get("constraints") or None,
         "transition": bool(job.get("transition", False)),
     }
+    if job.get("oniom"):
+        result["oniom"] = job["oniom"]
     t0 = time.time()
     energies: list[float] = []
     frames: list[list[list[float]]] = []
