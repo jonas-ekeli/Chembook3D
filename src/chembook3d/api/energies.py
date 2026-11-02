@@ -197,7 +197,7 @@ def view_values(
         for record_id in [*energies.nodes, *energies.groups]
     }
     edges = {}
-    for transition in transition_service.list_transitions(session):
+    for transition in energies.transitions():
         source = values[transition.source_id].value
         target = values[transition.target_id].value
         # D69: the free species that join or leave on the edge keep the atoms equal.
@@ -222,10 +222,7 @@ def view_notes(
     temperatures = distinct_temperatures(
         v.details.get("job_temperature") for v in values.values() if v.value is not None
     )
-    changes = [
-        species_service.change(t, forward=True)
-        for t in transition_service.list_transitions(session)
-    ]
+    changes = [species_service.change(t, forward=True) for t in energies.transitions()]
     found = [
         energies.temperature_note(temperatures, type),
         species_service.standard_state_note(session, energies, changes, key, type),
