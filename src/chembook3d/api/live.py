@@ -75,6 +75,7 @@ QUIET = re.compile(
     r"|server-files(/.*)?"  # D124, D126: files on a server, not the notebook
     r"|energy-profiles(/.*)?"  # D190: the drawer saves its profile on every step
     r"|jobs|jobs/(?![^/]+/import-path$).*"  # importing a scan path changes the notebook
+    r"|local/(?!jobs/[^/]+/import$).*"  # D213: only importing a local result changes it
     r")$"
 )
 

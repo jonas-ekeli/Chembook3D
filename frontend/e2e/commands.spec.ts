@@ -76,6 +76,7 @@ test('right-click menus on a node, an arrow, the canvas and a selection', async 
       'Set as energy referenceR',
       'Import output onto node…I',
       'Edit structure in 3D…',
+      'Refine geometry…',
       'IRC…',
       'Start energy pathway here',
       'Add to group',

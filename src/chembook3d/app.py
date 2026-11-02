@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
 
-from chembook3d import __version__, cloud_jobs
+from chembook3d import __version__, cloud_jobs, local_tools
 from chembook3d.api.batch_imports import router as batch_router
 from chembook3d.api.builder import router as builder_router
 from chembook3d.api.builds import Builds
@@ -28,6 +28,7 @@ from chembook3d.api.lifetime import SHUTDOWN_PUSH_TIMEOUT, Lifetime, TabRequests
 from chembook3d.api.lifetime import router as lifetime_router
 from chembook3d.api.live import ChangeTracker, LiveState
 from chembook3d.api.live import router as live_router
+from chembook3d.api.local import router as local_router
 from chembook3d.api.measurements import router as measurement_router
 from chembook3d.api.notes import router as note_router
 from chembook3d.api.pathway import router as pathway_router
@@ -116,6 +117,9 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.state.cloud_jobs = cloud_jobs.Launcher()  # D93
     app.state.live = LiveState()  # D91: changes, selection and confirmations
     app.state.builds = Builds()  # D148: build_structure's results by id
+    app.state.local_tools = local_tools.Installer()  # D213
+    # D213: an install of the local tools finishes even when its tab is closed
+    app.state.lifetime.holds.append(lambda: app.state.local_tools.current.state == "running")
     app.add_middleware(ChangeTracker, live=app.state.live)
     app.add_middleware(TabRequests, lifetime=app.state.lifetime)  # D107
 
@@ -146,6 +150,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(equilibrium_router)
     app.include_router(measurement_router)  # D151
     app.include_router(claude_router)
+    app.include_router(local_router)  # D213
     app.include_router(remote_router)  # D122
     app.include_router(inspect_router)  # D123c
     app.include_router(scan_editor_router)  # D135

@@ -117,3 +117,24 @@ jobs:
         with:
           name: investigation-${{ matrix.from }}
       - run: uv run python -m tests.portability check investigation-${{ matrix.from }}.zip
+
+  # D213, T-LOC-05: the real local tools (Psi4, tblite, geomeTRIC from conda-forge), installed as
+  # the app installs them, and a GFN2-xTB refine. Not a required check until it has proved stable.
+  local-tools:
+    name: Local tools (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run python -m chembook3d.local_tools install
+        env:
+          CHEMBOOK3D_TOOLS_DIR: ${{ runner.temp }}/chembook3d-tools
+      - run: uv run pytest -W error tests/test_local_jobs.py
+        env:
+          CHEMBOOK3D_TOOLS_DIR: ${{ runner.temp }}/chembook3d-tools
+          CHEMBOOK3D_REAL_TOOLS: "1"

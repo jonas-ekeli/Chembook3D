@@ -33,6 +33,7 @@ test('settings are a two-pane page that says where each setting is kept', async 
       'Steric maps',
       'CREST import',
       'Canvas',
+      'Local calculations',
       'Thermochemistry',
     ])
     await expect(nav.getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'true')
@@ -86,7 +87,7 @@ test('settings are a two-pane page that says where each setting is kept', async 
     // Escape empties the search, then closes the dialog.
     await search.press('Escape')
     await expect(search).toHaveValue('')
-    await expect(nav.getByRole('button')).toHaveCount(7)
+    await expect(nav.getByRole('button')).toHaveCount(8)
 
     // A number still saves when its field loses focus.
     const conformers = dialog.getByLabel('Conformers kept on import')

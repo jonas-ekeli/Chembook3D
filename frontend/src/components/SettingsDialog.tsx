@@ -5,6 +5,7 @@ import { Modal } from './Modal'
 import { NumberSetting } from './NumberSetting'
 import { StericColourSelect } from './Sterics'
 import { thermoSection } from './ThermoSettings'
+import { useLocalToolsSection } from '../localToolsSection'
 import { SETTINGS_SECTIONS } from '../settingsSections'
 import type { ThemeChoice } from '../theme'
 
@@ -106,6 +107,7 @@ export function SettingsDialog({
     resetKey: `${settings.thermo_scope}:${investigation?.folder ?? ''}`,
     onSaved: onThermoSaved,
   })
+  const local = useLocalToolsSection() // D213
   const computer: SettingSection[] = [
     {
       id: 'general',
@@ -271,6 +273,7 @@ export function SettingsDialog({
       ],
     },
   ]
+  computer.push(local)
   // D159: with no investigation open, the thermochemistry is this computer's default for new ones.
   const own = thermo.scope === 'investigation'
   const groups: { name: string; sections: SettingSection[] }[] = own

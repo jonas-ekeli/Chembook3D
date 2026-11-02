@@ -12,10 +12,15 @@ const SAGA_PORT = 8767 // the fake Saga of the SSH server tests (D122)
 
 // D92: the Claude panel runs tests/fake_claude.py instead of Claude Code, through a `claude`
 // command as Windows (a .cmd file, as npm installs it) or a shell would find it.
+function venvPython(): string {
+  const root = resolve(import.meta.dirname, '..')
+  return process.platform === 'win32' ? join(root, '.venv', 'Scripts', 'python.exe') : join(root, '.venv', 'bin', 'python')
+}
+
 function fakeClaude(): string {
   const root = resolve(import.meta.dirname, '..')
   const windows = process.platform === 'win32'
-  const python = windows ? join(root, '.venv', 'Scripts', 'python.exe') : join(root, '.venv', 'bin', 'python')
+  const python = venvPython()
   const script = join(root, 'tests', 'fake_claude.py')
   const folder = join(process.env.E2E_DIR!, 'bin')
   mkdirSync(folder, { recursive: true })
@@ -56,6 +61,11 @@ export default defineConfig({
         // D93: a cloud job's launch first asks a question, as the folder trust question does.
         FAKE_CLAUDE_CLOUD: 'ask',
         FAKE_CLAUDE_LOG: join(process.env.E2E_DIR, 'fake-claude-cloud.log'),
+        // D213: local jobs run the worker's test method with the app's own Python
+        CHEMBOOK3D_LOCAL_PYTHON: venvPython(),
+        CHEMBOOK3D_LOCAL_STUB: '1',
+        CHEMBOOK3D_LOCAL_STUB_DELAY: '1',
+        CHEMBOOK3D_TOOLS_DIR: join(process.env.E2E_DIR, 'tools'),
       },
     },
     // D122: a stand-in for Saga (tests/fake_ssh_server.py): password, then a one-time code.

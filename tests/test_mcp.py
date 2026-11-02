@@ -60,6 +60,7 @@ NOT_OFFERED = re.compile(
     r"|scan-editor(/.*)?"  # D135: the scan editor window, the page's own as Inspect
     r"|builder/(parts|drawing|describe|edit)"  # D139: the Edit structure window's, D144
     r"|nodes/[^/]+/irc/(summary|files/[^/]+|[^/]+/node)"  # D131: the IRC window's own
+    r"|local/tools(/install)?"  # D213: installing the local tools is the settings' own
     r"|presence(/.*)?|shutdown)$"  # D107: tabs coming and going, and the Shut down button
 )
 

@@ -6,5 +6,6 @@ export const SETTINGS_SECTIONS = {
   sterics: 'Steric maps',
   crest: 'CREST import',
   canvas: 'Canvas',
+  local: 'Local calculations',
   thermochemistry: 'Thermochemistry',
 }

@@ -968,6 +968,53 @@ TOOLS: list[ToolSpec] = [
         "them with import_file and commit_import, or read a structure and set_coordinates on "
         "the node the user names. Report anything listed in changed_outside_job to the user.",
     ),
+    # ---------- calculations on this computer (D213) ----------
+    T(
+        "list_local_jobs",
+        "read",
+        "GET",
+        "/api/local/jobs",
+        "The calculations run on this computer for this investigation (folders in "
+        "local-jobs/), newest first: node, method, status (starting, queued behind another "
+        "local job, running, cancelling, converged, not_converged, failed, cancelled, or "
+        "stopped when the process ended without a result), the optimizer's progress and "
+        "whether the result was imported.",
+    ),
+    T(
+        "get_local_job",
+        "read",
+        "GET",
+        "/api/local/jobs/{job_id}",
+        "Where one local job stands, as in list_local_jobs.",
+    ),
+    T(
+        "start_local_refine",
+        "write",
+        "POST",
+        "/api/local/jobs",
+        "Refine a node's geometry on this computer (D213): a geometry optimization run by the "
+        "tools the user installed in Settings (Local calculations), in a process of its own "
+        "that goes on when the app is closed. Method gfn2: GFN2-xTB with tblite. Charge and "
+        "multiplicity default to the node's. Optional constraints (atoms from 0) hold atoms "
+        "frozen, or distances, angles and dihedrals at their current value or at a target. "
+        "The app imports the result onto the node when it finishes. It uses the computer's "
+        "cores for minutes to hours, so only start one the user asked for.",
+    ),
+    T(
+        "cancel_local_job",
+        "write",
+        "POST",
+        "/api/local/jobs/{job_id}/cancel",
+        "Stop a local job that is waiting or running; nothing is imported from it.",
+    ),
+    T(
+        "import_local_result",
+        "write",
+        "POST",
+        "/api/local/jobs/{job_id}/import",
+        "Import a finished local job's result onto the node it was started from. The app does "
+        "this by itself while it is open; use it when that failed and the user asks.",
+    ),
     T(
         "import_scan_path",
         "write",
