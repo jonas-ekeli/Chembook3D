@@ -159,6 +159,9 @@ class ParsedStep:
     resolved_basis_definition: dict[str, str] | None = None
     # D137: a joined scan's GEN basis set, known only by its fingerprints {element: hash}.
     basis_fingerprints: dict[str, str] = field(default_factory=dict)
+    # D219: a 2D grid scan's two coordinates ({name, unit, values}) and, per scan point (from
+    # 1, in the order run), its cell [i, j] in their values; None for any other step.
+    scan_grid: dict[str, Any] | None = None
     # D157: what held the structure while it was optimized, as short descriptions ("scan
     # D(3,4,9,10)", "frozen B(1,2)", "2 frozen atoms"): a Gaussian, ORCA or xTB scan, frozen
     # coordinates or frozen atoms, as the output file shows them. Such a step ends on no free

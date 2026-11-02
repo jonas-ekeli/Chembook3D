@@ -5482,6 +5482,47 @@ table.scan-path-held input.drive-value {
 .refine-core-view .viewer {
   height: 280px;
 }
+/* D219: a 2D grid scan's energy surface */
+.surface-map {
+  margin: 0.5rem 0;
+}
+.surface-map svg {
+  display: block;
+  max-width: 100%;
+}
+.surface-cell {
+  cursor: pointer;
+}
+.surface-cell rect {
+  stroke: var(--panel);
+  stroke-width: 0.5;
+}
+.surface-cell rect.surface-empty {
+  fill: var(--panel-alt);
+}
+.surface-unconverged {
+  fill: var(--warn);
+  font-size: 0.8rem;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+.surface-current {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 2;
+  pointer-events: none;
+}
+.surface-tick,
+.surface-axis {
+  fill: var(--muted);
+  font-size: 0.7rem;
+  text-anchor: middle;
+}
+.surface-tick-y {
+  text-anchor: end;
+  dominant-baseline: central;
+}
 .local-job-mode .viewer {
   height: 260px; /* D217: a TS check's imaginary mode */
 }
@@ -5502,6 +5543,9 @@ table.scan-path-held input.drive-value {
   grid-template-columns: 1fr 6rem 6rem auto; /* D218: atoms, from, to, remove */
   gap: 0.5rem;
   align-items: end;
+}
+.refine-scan-row.is-grid {
+  grid-template-columns: 1fr 5rem 5rem 4.5rem auto; /* D219: and the coordinate's points */
 }
 .refine-scan-points {
   display: flex;

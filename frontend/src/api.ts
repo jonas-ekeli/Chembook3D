@@ -442,12 +442,19 @@ export type Trim = {
   last_removed: boolean
 }
 /** `in_place`: "Use this structure" changes the node itself (a scan path node), not a derived one (D112). */
+/** D219: a 2D grid scan's two coordinates and, per scan point (index point - 1), its cell. */
+export type StepGrid = {
+  coordinates: { name: string; unit: string; values: number[] }[]
+  cells: [number, number][]
+}
+
 export type Steps = {
   scan: 'relaxed' | 'rigid' | null
   points: number
   frames: StepFrame[]
   in_place: boolean
   trim: Trim | null
+  grid?: StepGrid | null
 }
 
 /** D131: an IRC direction as the program labels it; "forward" follows the imaginary mode as
@@ -920,8 +927,18 @@ export type LocalConstraints = {
 
 /** D218: a relaxed scan; every coordinate goes from its start to its end over the same points. */
 export type LocalScan = {
-  coordinates: { kind: 'distance' | 'angle' | 'dihedral'; atoms: number[]; start: number; end: number }[]
+  coordinates: {
+    kind: 'distance' | 'angle' | 'dihedral'
+    atoms: number[]
+    start: number
+    end: number
+    /** D219: a grid coordinate's own points */
+    points?: number
+  }[]
+  /** a concerted scan's points; a grid's points in all */
   points: number
+  /** D219: every pair of two coordinates' values */
+  grid?: boolean
 }
 
 /** D213: a calculation run on this computer, folder local-jobs/<id>/. */

@@ -268,6 +268,8 @@ def create_job(
         if transition:
             raise LocalJobError("A scan cannot also be a transition state search")
         scan = check_scan(scan, len(atoms), constraints)
+        if scan.get("grid") and method not in GRID_METHODS and method not in TEST_METHODS:
+            raise LocalJobError("A grid scan runs with GFN2-xTB or g-xTB")
         frequencies = False
     level = methods()[method]
     layers = None
@@ -341,7 +343,7 @@ SCAN_OFFSET = 280.0  # px: a scan's node goes this far right of the node it star
 
 def scan_name(scan: dict[str, Any]) -> str:
     """D218: the scanned coordinates as the parsers name them, e.g. B(1,2) or B(1,2)+B(3,4)."""
-    return "+".join(
+    return (" × " if scan.get("grid") else "+").join(
         f"{SCAN_LETTERS[c['kind']]}({','.join(str(int(a) + 1) for a in c['atoms'])})"
         for c in scan["coordinates"]
     )
@@ -349,13 +351,20 @@ def scan_name(scan: dict[str, Any]) -> str:
 
 MAX_SCAN_POINTS = 100
 MAX_SCAN_COORDINATES = 4
+# D219: a 2D grid runs only with the cheap methods, at most this many points a side and in all
+GRID_METHODS = {"gfn2", "gxtb", "stub"}
+MAX_GRID_SIDE = 30
+MAX_GRID_POINTS = 400
 
 
 def check_scan(
     scan: dict[str, Any], count: int, constraints: dict[str, Any] | None
 ) -> dict[str, Any]:
     """D218: a relaxed scan's coordinates (atoms from 0) with their start and end values (Å or
-    degrees), driven together over its number of points, checked."""
+    degrees), driven together over its number of points, checked. D219: a grid has two
+    coordinates, each with its own number of points."""
+    if scan.get("grid"):
+        return _check_grid(scan, count, constraints)
     points = int(scan.get("points") or 0)
     if not 2 <= points <= MAX_SCAN_POINTS:
         raise LocalJobError(f"A scan has 2 to {MAX_SCAN_POINTS} points")
@@ -367,6 +376,32 @@ def check_scan(
     if len(set(keys)) != len(keys):
         raise LocalJobError("A coordinate is scanned twice")
     return {"coordinates": checked, "points": points}
+
+
+def _check_grid(
+    scan: dict[str, Any], count: int, constraints: dict[str, Any] | None
+) -> dict[str, Any]:
+    coordinates = scan.get("coordinates") or []
+    if len(coordinates) != 2:
+        raise LocalJobError("A grid scan has two coordinates")
+    checked = []
+    for c in coordinates:
+        side = int(c.get("points") or 0)
+        if not 2 <= side <= MAX_GRID_SIDE:
+            raise LocalJobError(f"Each coordinate of a grid has 2 to {MAX_GRID_SIDE} points")
+        checked.append({**_check_scanned(c, count, constraints), "points": side})
+    if checked[0]["points"] * checked[1]["points"] > MAX_GRID_POINTS:
+        raise LocalJobError(f"A grid has at most {MAX_GRID_POINTS} points in all")
+    if (checked[0]["kind"], sorted(checked[0]["atoms"])) == (
+        checked[1]["kind"],
+        sorted(checked[1]["atoms"]),
+    ):
+        raise LocalJobError("A coordinate is scanned twice")
+    return {
+        "coordinates": checked,
+        "grid": True,
+        "points": checked[0]["points"] * checked[1]["points"],
+    }
 
 
 def _check_scanned(
@@ -654,7 +689,8 @@ def _import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any
         options = imports.ImportOptions(
             origin_path=str(path),
             original_name=name,
-            label=f"{node.label} scan {scan_name(job['scan'])}",
+            label=f"{node.label} {'grid' if job['scan'].get('grid') else 'scan'} "
+            f"{scan_name(job['scan'])}",
             duplicate_action="new",
             pos_x=node.pos_x + SCAN_OFFSET,
             pos_y=node.pos_y,

@@ -507,12 +507,30 @@ def versions(method: str) -> dict:
 
 def scan_values(scan: dict) -> list[list[float]]:
     """D218: per point of a relaxed scan, the value of each of its coordinates (Å or degrees):
-    every coordinate goes from its start to its end in the same number of steps (concerted)."""
+    every coordinate goes from its start to its end in the same number of steps (concerted).
+    D219: a grid's points are every pair of its two coordinates' values, run row by row with
+    every other row backwards, so each point starts from a neighbour."""
     import numpy as np
 
+    if scan.get("grid"):
+        return [[a, b] for a, b, _ in grid_cells(scan)]
     n = int(scan["points"])
     columns = [np.linspace(c["start"], c["end"], n) for c in scan["coordinates"]]
     return [[float(column[k]) for column in columns] for k in range(n)]
+
+
+def grid_cells(scan: dict) -> list[tuple[float, float, list[int]]]:
+    """D219: a grid's points in the order run: both values and the cell [i, j]."""
+    import numpy as np
+
+    first, second = scan["coordinates"]
+    rows = np.linspace(first["start"], first["end"], int(first["points"]))
+    columns = np.linspace(second["start"], second["end"], int(second["points"]))
+    out = []
+    for i, a in enumerate(rows):
+        order = range(len(columns)) if i % 2 == 0 else range(len(columns) - 1, -1, -1)
+        out += [(float(a), float(columns[j]), [i, j]) for j in order]
+    return out
 
 
 def xyz_frame(symbols, coords_ang, comment: str) -> str:
@@ -663,6 +681,7 @@ def run(folder: Path, lock: Path | None) -> int:
             # D218: a relaxed scan, one constrained optimization per point, each started from
             # the one before; a point that does not converge is kept and the scan goes on.
             values = scan_values(scan)
+            cells = [cell for _, _, cell in grid_cells(scan)] if scan.get("grid") else None
             points = []
             for k, value in enumerate(values):
                 point["index"] = k + 1
@@ -691,6 +710,8 @@ def run(folder: Path, lock: Path | None) -> int:
                         "converged": done,
                     }
                 )
+                if cells is not None:
+                    points[-1]["cell"] = cells[k]
                 converged = converged and done
             result["scan"] = {**scan, "points": points}
             progress.update(phase=None)

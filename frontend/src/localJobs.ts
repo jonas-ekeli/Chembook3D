@@ -150,19 +150,30 @@ export function readConstraints(
   return { value: any ? out : null }
 }
 
-export type ScanRow = { atoms: string; start: string; end: string }
+export type ScanRow = { atoms: string; start: string; end: string; points?: string }
 export const MAX_SCAN_COORDINATES = 4
 export const MAX_SCAN_POINTS = 100
+export const MAX_GRID_SIDE = 30
+export const MAX_GRID_POINTS = 400
+/** D219: the methods a 2D grid runs with (cheap enough for hundreds of optimizations) */
+export const GRID_METHODS = new Set(['gfn2', 'gxtb', 'stub'])
 const SCAN_KINDS = { 2: 'distance', 3: 'angle', 4: 'dihedral' } as const
 
 /** D218: the scan of Refine geometry as the request wants it (atoms from 0), or what is wrong
  * with it. An empty start is the coordinate's current value in `atoms`; all coordinates step
  * together over the same points (a concerted scan). */
-export function readScan(rows: ScanRow[], points: string, atoms: Atom[]): { value: LocalScan } | { error: string } {
+export function readScan(
+  rows: ScanRow[],
+  points: string,
+  atoms: Atom[],
+  grid = false,
+): { value: LocalScan } | { error: string } {
   const count = atoms.length
   const n = Number(points)
-  if (!Number.isInteger(n) || n < 2 || n > MAX_SCAN_POINTS) return { error: `A scan has 2 to ${MAX_SCAN_POINTS} points` }
+  if (!grid && (!Number.isInteger(n) || n < 2 || n > MAX_SCAN_POINTS))
+    return { error: `A scan has 2 to ${MAX_SCAN_POINTS} points` }
   if (!rows.length) return { error: 'Add a coordinate to scan' }
+  if (grid && rows.length !== 2) return { error: 'A grid scan has two coordinates' }
   const coordinates: LocalScan['coordinates'] = []
   for (const row of rows) {
     const read = parseAtomList(row.atoms)
@@ -177,9 +188,21 @@ export function readScan(rows: ScanRow[], points: string, atoms: Atom[]): { valu
     if (!Number.isFinite(start)) return { error: `Scan from “${row.start}” is not a number` }
     if (row.end.trim() === '' || !Number.isFinite(end)) return { error: `Scan of ${row.atoms}: give the value to scan to` }
     if (Math.abs(end - start) < 1e-6) return { error: `Scan of ${row.atoms}: the start and end are the same` }
-    coordinates.push({ kind: SCAN_KINDS[k as 2 | 3 | 4], atoms: read.numbers.map((a) => a - 1), start, end })
+    const side = Number(row.points ?? '')
+    if (grid && (!Number.isInteger(side) || side < 2 || side > MAX_GRID_SIDE))
+      return { error: `Scan of ${row.atoms}: a grid coordinate has 2 to ${MAX_GRID_SIDE} points` }
+    coordinates.push({
+      kind: SCAN_KINDS[k as 2 | 3 | 4],
+      atoms: read.numbers.map((a) => a - 1),
+      start,
+      end,
+      ...(grid ? { points: side } : {}),
+    })
   }
-  return { value: { coordinates, points: n } }
+  if (!grid) return { value: { coordinates, points: n } }
+  const total = (coordinates[0].points ?? 0) * (coordinates[1].points ?? 0)
+  if (total > MAX_GRID_POINTS) return { error: `A grid has at most ${MAX_GRID_POINTS} points in all (${total} asked)` }
+  return { value: { coordinates, points: total, grid: true } }
 }
 
 /** D218: a finished scan's points in a sentence: how many converged and where the energy tops. */

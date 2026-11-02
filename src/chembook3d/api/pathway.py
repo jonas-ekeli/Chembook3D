@@ -285,6 +285,8 @@ class StepsOut(BaseModel):
     # making a derived node.
     in_place: bool = False
     trim: TrimOut | None = None  # D117: a scan path's kept points; None for other calculations
+    # D219: a 2D grid scan: {coordinates: [{name, unit, values}] x2, cells: [[i, j]] per point}
+    grid: dict[str, Any] | None = None
 
 
 class TrimIn(BaseModel):
@@ -802,6 +804,7 @@ def _steps_out(calculation: Calculation, steps: trajectory.Steps) -> StepsOut:
         ],
         in_place=trajectory.changes_in_place(calculation.node),
         trim=_trim_out(steps.trim) if steps.trim else None,
+        grid=steps.grid,
     )
 
 

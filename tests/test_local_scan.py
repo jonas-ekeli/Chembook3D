@@ -143,3 +143,76 @@ def test_a_concerted_scan_drives_both_bonds_together(open_client):
     assert node["label"] == "w scan B(1,2)+B(1,3)"
     calc = open_client.get(f"/api/nodes/{imported['node_id']}/calculations").json()[0]
     assert {"scan B(1,2)", "scan B(1,3)"} <= set(calc["constraints"])
+
+
+GRID = {
+    "coordinates": [
+        {**OH, "points": 3},
+        {**OH, "atoms": [0, 2], "start": 1.2, "end": 0.9, "points": 2},
+    ],
+    "grid": True,
+}
+
+
+def test_grid_points_run_row_by_row_back_and_forth():
+    """T-LOC-22, D219: every pair of values, every other row backwards."""
+    cells = [cell for _, _, cell in local_worker.grid_cells(GRID)]
+    assert cells == [[0, 0], [0, 1], [1, 1], [1, 0], [2, 0], [2, 1]]
+    assert local_worker.scan_values(GRID)[2] == pytest.approx([1.05, 0.9])
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_a_grid_scan_is_imported_with_its_cells(open_client):
+    """T-LOC-23, D219: a 3 x 2 grid of water's two O-H bonds; the node is the lowest point, the
+    steps carry the grid, and its constraint is not a scan's, so it is not a path on an edge."""
+    node_id = open_client.post("/api/nodes", json={"label": "w", "xyz": WATER}).json()["id"]
+    job = open_client.post(
+        "/api/local/jobs", json={"node_id": node_id, "method": "stub", "scan": GRID}
+    ).json()
+    assert job["scan"]["grid"] and job["scan"]["points"] == 6
+    done = wait_for(open_client, job["id"], finished, timeout=120)
+    assert done["status"] == "converged"
+    points = done["result"]["scan"]["points"]
+    assert [p["cell"] for p in points][:3] == [[0, 0], [0, 1], [1, 1]]
+    imported = open_client.post(f"/api/local/jobs/{job['id']}/import").json()["imported"]
+    node = open_client.get(f"/api/nodes/{imported['node_id']}").json()
+    assert node["label"] == "w grid B(1,2) × B(1,3)"
+    calc = open_client.get(f"/api/nodes/{imported['node_id']}/calculations").json()[0]
+    assert calc["constraints"] == ["grid scan B(1,2) × B(1,3)"]
+    steps = open_client.get(f"/api/calculations/{calc['id']}/steps").json()
+    grid = steps["grid"]
+    assert [c["name"] for c in grid["coordinates"]] == ["B(1,2)", "B(1,3)"]
+    assert grid["coordinates"][0]["values"] == pytest.approx([0.9, 1.05, 1.2])
+    assert len(grid["cells"]) == 6 and steps["points"] == 6
+    lowest = min((p for p in points if p["converged"]), key=lambda p: p["energy"])
+    assert calc["result"]["energy"] == pytest.approx(lowest["energy"])
+
+
+@pytest.mark.usefixtures("stub_tools")
+@pytest.mark.parametrize(
+    ("scan", "method", "words"),
+    [
+        ({**GRID, "coordinates": GRID["coordinates"][:1]}, "stub", "two coordinates"),
+        (
+            {**GRID, "coordinates": [{**OH, "points": 31}, GRID["coordinates"][1]]},
+            "stub",
+            "2 to 30 points",
+        ),
+        (
+            {
+                "coordinates": [{**OH, "points": 30}, {**GRID["coordinates"][1], "points": 30}],
+                "grid": True,
+            },
+            "stub",
+            "at most 400",
+        ),
+        (GRID, "b97-3c", "GFN2-xTB or g-xTB"),
+    ],
+)
+def test_a_grid_that_cannot_run_says_why(open_client, scan, method, words):
+    """T-LOC-24"""
+    node_id = open_client.post("/api/nodes", json={"label": "w", "xyz": WATER}).json()["id"]
+    refused = open_client.post(
+        "/api/local/jobs", json={"node_id": node_id, "method": method, "scan": scan}
+    )
+    assert refused.status_code == 422 and words in refused.json()["detail"], refused.json()

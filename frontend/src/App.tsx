@@ -506,7 +506,7 @@ function App() {
     if (job.scan) {
       // D218: a scan comes in as a node of its own.
       setNotice(
-        `The ${job.level} scan of “${job.node_label}” is done and imported as a node of its own beside it (it can be undone in History).` +
+        `The ${job.level} ${job.scan.grid ? 'grid scan' : 'scan'} of “${job.node_label}” is done and imported as a node of its own beside it (it can be undone in History).` +
           (scanText(job) ? ` ${scanText(job)}` : ''),
       )
       return
