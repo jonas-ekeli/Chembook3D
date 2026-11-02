@@ -9,6 +9,7 @@ import { errorText } from '../util'
 /** What each method is for (D213); the server says which are offered. */
 const HELP: Record<string, string> = {
   gfn2: 'A quick clean-up before a DFT optimization on the cluster.',
+  gxtb: 'g-xTB: closer to DFT than GFN2-xTB, at a few times its cost (a development version).',
   'b97-3c': 'The whole molecule at DFT quality, its steric pocket included.',
   'r2scan-3c': 'A little better than B97-3c, at about 1.4 times its cost.',
   oniom:

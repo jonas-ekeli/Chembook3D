@@ -29,6 +29,7 @@ import sys
 import threading
 import time
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,26 @@ MICROMAMBA_SHA256 = {
     "linux-64": "701f39c06f8e6a670a0e186c8479b9e5c0502a2f0cda6cef65d83bdd2875e8bd",
 }
 LOCKS = Path(__file__).parent / "assets" / "local-tools"
+
+# D216: g-xTB, optional, from the Grimme group's binaries (an xtb 6.7.1 build with `--gxtb`;
+# GPL-3.0), pinned to one commit of github.com/grimme-lab/g-xtb and checked by SHA-256. It is
+# not on conda-forge, so it has its own install beside the environment.
+GXTB_VERSION = "6.7.1-gxtb-140526"
+GXTB_COMMIT = "23f81c2db64fa4272c25b86f8776ce862aeb59e2"
+GXTB_URL = "https://raw.githubusercontent.com/grimme-lab/g-xtb/{commit}/binaries/{file}"
+GXTB = {
+    "linux-64": (
+        "xtb-6.7.1-gxtb-140526-linux-x86_64.tar.xz",
+        "cdfb81164f8d3300fc451dbbf2414528b533e71f7a30ec824b564cd30d6d9e5c",
+        "xtb-6.7.1/bin/xtb",
+    ),
+    "win-64": (
+        "xtb-6.7.1-gxtb-140526-windows-x86_64.zip",
+        "fa6d6491b38d895196e2312c6ce34b74e60cd974f9c01da6c3ee567b3ca41830",
+        "xtb-bleed-windows/bin/xtb.exe",
+    ),
+}
+GXTB_MARKER = "chembook3d-gxtb.json"
 MARKER = "chembook3d-tools.json"
 SETTINGS = "local.json"
 LOCK_FILE = "local-jobs.lock"
@@ -273,9 +294,11 @@ class Install:
 
 
 class Installer:
-    """Runs the install in a thread of the app; its state is kept in memory."""
+    """Runs the install in a thread of the app; its state is kept in memory. `what` is
+    "tools" (the environment) or "gxtb" (D216)."""
 
-    def __init__(self) -> None:
+    def __init__(self, what: str = "tools") -> None:
+        self.what = what
         self.lock = threading.Lock()
         self.current = Install()
         self.thread: threading.Thread | None = None
@@ -286,6 +309,8 @@ class Installer:
         packages = package_list(conda)
         if conda is None or packages is None:
             raise ToolsError("Local calculations are offered on Windows and Linux (x86-64) only")
+        if self.what == "gxtb" and conda not in GXTB:
+            raise ToolsError("g-xTB is offered on Windows and Linux (x86-64) only")
         if busy:
             raise ToolsError("Wait for the running local job to finish, or cancel it, first")
         with self.lock:
@@ -293,7 +318,7 @@ class Installer:
                 return self.current
             self.current = Install(state="running", step="Starting", started=time.time())
             self.thread = threading.Thread(
-                target=self._run, args=(conda, packages), name="local-tools", daemon=True
+                target=self._run, args=(conda, packages), name=f"local-{self.what}", daemon=True
             )
             self.thread.start()
             return self.current
@@ -305,7 +330,10 @@ class Installer:
 
     def _run(self, conda: str, packages: Path) -> None:
         try:
-            install(conda, packages, self._say)
+            if self.what == "gxtb":
+                install_gxtb(conda, self._say)
+            else:
+                install(conda, packages, self._say)
         except Exception as exc:  # noqa: BLE001 - shown in the settings section
             with self.lock:
                 self.current.state = "failed"
@@ -338,6 +366,84 @@ def _download(url: str, target: Path, sha256: str) -> None:
         part.unlink(missing_ok=True)
         raise ToolsError(f"The download of {url} does not match its pinned SHA-256")
     os.replace(part, target)
+
+
+def gxtb_dir() -> Path:
+    return tools_dir() / "gxtb"
+
+
+def gxtb_binary() -> Path | None:
+    """The installed g-xTB program (`CHEMBOOK3D_GXTB` in tests), or None."""
+    if os.environ.get("CHEMBOOK3D_GXTB"):
+        return Path(os.environ["CHEMBOOK3D_GXTB"])
+    try:
+        marker = json.loads((gxtb_dir() / GXTB_MARKER).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    path = gxtb_dir() / marker.get("binary", "")
+    return path if path.is_file() else None
+
+
+def gxtb_status() -> dict[str, Any]:
+    try:
+        marker = json.loads((gxtb_dir() / GXTB_MARKER).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        marker = {}
+    return {
+        "supported": conda_platform() in GXTB,
+        "installed": gxtb_binary() is not None,
+        "version": marker.get("version"),
+        "up_to_date": marker.get("version") == GXTB_VERSION,
+    }
+
+
+def _unpack(archive: Path, target: Path) -> None:
+    """A tar.xz or zip archive, refusing members that would land outside `target`."""
+    import tarfile
+    import zipfile
+
+    root = target.resolve()
+    if archive.name.endswith(".zip"):
+        with zipfile.ZipFile(archive) as z:
+            for name in z.namelist():
+                if not (target / name).resolve().is_relative_to(root):
+                    raise ToolsError(f"Unsafe path in {archive.name}: {name}")
+            z.extractall(target)
+        return
+    with tarfile.open(archive) as t:
+        t.extractall(target, filter="data")
+
+
+def install_gxtb(conda: str, say: Callable[[str], None]) -> dict[str, Any]:
+    """D216: download the pinned g-xTB archive, unpack it beside the old one, check that the
+    program is there, and swap it in."""
+    name, sha256, binary = GXTB[conda]
+    folder = gxtb_dir()
+    new = folder.with_name("gxtb-new")
+    shutil.rmtree(new, ignore_errors=True)
+    new.mkdir(parents=True)
+    archive = new / name
+    say("Downloading g-xTB")
+    _download(GXTB_URL.format(commit=GXTB_COMMIT, file=name), archive, sha256)
+    say("Unpacking g-xTB")
+    _unpack(archive, new)
+    archive.unlink()
+    program = new / binary
+    if not program.is_file():
+        raise ToolsError(f"g-xTB's program {binary} is not in the archive")
+    if sys.platform != "win32":
+        program.chmod(0o755)
+    marker = {
+        "version": GXTB_VERSION,
+        "commit": GXTB_COMMIT,
+        "binary": binary,
+        "installed": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    (new / GXTB_MARKER).write_text(json.dumps(marker, indent=1), encoding="utf-8")
+    shutil.rmtree(folder, ignore_errors=True)
+    os.replace(new, folder)
+    say("Installed")
+    return marker
 
 
 def micromamba_path() -> Path:
@@ -469,21 +575,26 @@ def status(installer: Installer | None = None) -> dict[str, Any]:
         "default_memory_mb": default_memory_mb(),
         "logical_cores": os.cpu_count() or 1,
         "total_memory_mb": total_memory_mb(),
+        "gxtb": gxtb_status(),
     }
 
 
 def main(argv: list[str] | None = None) -> int:
     """`python -m chembook3d.local_tools install`: install the tools without the app (CI)."""
     args = sys.argv[1:] if argv is None else argv
-    if args != ["install"]:
-        print("usage: python -m chembook3d.local_tools install")
+    if args not in (["install"], ["install-gxtb"]):
+        print("usage: python -m chembook3d.local_tools install | install-gxtb")
         return 2
     conda = conda_platform()
     packages = package_list(conda)
     if conda is None or packages is None:
         print("Local calculations are offered on Windows and Linux (x86-64) only")
         return 1
-    marker = install(conda, packages, lambda step: print(step, flush=True))
+    say = lambda step: print(step, flush=True)  # noqa: E731
+    if args == ["install-gxtb"]:
+        marker = install_gxtb(conda, say)
+    else:
+        marker = install(conda, packages, say)
     print(json.dumps(marker, indent=1))
     return 0
 

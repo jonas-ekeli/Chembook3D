@@ -34,6 +34,9 @@ test('a refine on this computer is followed under Local jobs and imported onto i
   await expect(settings.getByRole('heading', { name: 'Local calculations This computer' })).toBeVisible()
   await expect(settings.getByLabel('Local tools status')).toHaveText(/^Installed/)
   await expect(settings.getByLabel('Cores for local jobs')).toBeVisible()
+  // D216: g-xTB is an optional install of its own.
+  await expect(settings.getByLabel('g-xTB status')).toHaveText('Not installed')
+  await expect(settings.getByRole('button', { name: 'Install g-xTB' })).toBeEnabled()
   await page.keyboard.press('Escape')
 
   // Refine geometry… on the node's menu.

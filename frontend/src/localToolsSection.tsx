@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type LocalTools } from './api'
-import { InstallControl } from './components/LocalTools'
+import { GxtbControl, InstallControl } from './components/LocalTools'
 import { NumberSetting } from './components/NumberSetting'
 import type { SettingSection } from './components/SettingsDialog'
 import { SETTINGS_SECTIONS } from './settingsSections'
@@ -27,7 +27,7 @@ function useLocalTools(): [LocalTools | null, (next: LocalTools) => void, string
   useEffect(() => {
     void load()
   }, [load])
-  const running = tools?.install.state === 'running'
+  const running = tools?.install.state === 'running' || tools?.gxtb.install.state === 'running'
   useEffect(() => {
     if (!running) return
     const timer = window.setInterval(() => void load(), INSTALL_POLL)
@@ -72,6 +72,23 @@ export function useLocalToolsSection(): SettingSection {
           </>
         ),
         control: <InstallControl tools={tools} onTools={setTools} />,
+      },
+      {
+        name: 'g-xTB (optional)',
+        help: (
+          <>
+            A newer tight-binding method from the Grimme group, closer to DFT than GFN2-xTB at a few times its cost, for
+            Refine geometry. A development version, downloaded as their program (about 40 MB).
+          </>
+        ),
+        more: (
+          <>
+            It is not on conda-forge, so the app downloads the Grimme group’s build of xtb with g-xTB (GPL-3.0) from
+            github.com/grimme-lab/g-xtb, at a fixed version checked by its SHA-256, into the tools folder. Results may change
+            with later versions of g-xTB; each calculation keeps the version it ran with.
+          </>
+        ),
+        control: <GxtbControl tools={tools} onTools={setTools} />,
       },
       {
         name: 'Cores',

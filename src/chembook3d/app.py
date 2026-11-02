@@ -118,8 +118,10 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.state.live = LiveState()  # D91: changes, selection and confirmations
     app.state.builds = Builds()  # D148: build_structure's results by id
     app.state.local_tools = local_tools.Installer()  # D213
-    # D213: an install of the local tools finishes even when its tab is closed
+    app.state.gxtb_installer = local_tools.Installer("gxtb")  # D216
+    # D213: an install of the local tools (or of g-xTB) finishes even when its tab is closed
     app.state.lifetime.holds.append(lambda: app.state.local_tools.current.state == "running")
+    app.state.lifetime.holds.append(lambda: app.state.gxtb_installer.current.state == "running")
     app.add_middleware(ChangeTracker, live=app.state.live)
     app.add_middleware(TabRequests, lifetime=app.state.lifetime)  # D107
 
