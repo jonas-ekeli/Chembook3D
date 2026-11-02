@@ -86,6 +86,7 @@ for (const choice of ['type', 'level', 'reference', 'pathways', 'BSSE'] as const
 test('a late profile/table and CSV response cannot replace or export a newer scientific choice', async ({ page }) => {
   const gate = deferred()
   const csvGate = deferred()
+  const csvFinished = deferred()
   let pending = 0
   let finished = 0
   let csvPending = false
@@ -98,6 +99,7 @@ test('a late profile/table and CSV response cannot replace or export a newer sci
       csvPending = true
       await csvGate.promise
       await route.fulfill({ response })
+      csvFinished.resolve()
     })
     await drawer.getByRole('button', { name: 'Export ▾' }).click()
     await page.getByRole('menuitem', { name: 'Table as CSV' }).click()
@@ -121,9 +123,15 @@ test('a late profile/table and CSV response cannot replace or export a newer sci
     // line breaks between table cells, whereas Playwright's text assertion uses textContent.
     const cells = table.locator('th, td')
     const current = await cells.allTextContents()
+    const csvResponse = page.waitForResponse((response) => response.url().endsWith('/api/energies/table.csv'))
     gate.resolve()
     csvGate.resolve()
     await expect.poll(() => finished).toBe(2)
+    await csvFinished.promise
+    expect(await (await csvResponse).finished()).toBeNull()
+    // Observe the browser after body delivery and its promise continuations, rather than
+    // asserting before the CSV consumer has had a chance to attempt a download.
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
     await expect(cells).toHaveText(current)
     expect(downloads).toEqual([])
   } finally {
