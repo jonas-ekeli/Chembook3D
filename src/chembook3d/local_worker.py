@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -208,10 +209,10 @@ def make_calculator(job: dict, numbers, folder: Path):
         return gfn2
 
     if method in ("b97-3c", "r2scan-3c"):
+        scratch = folder / "scratch"  # PSI_SCRATCH: Psi4 wants it there when imported
+        scratch.mkdir(exist_ok=True)
         import psi4
 
-        scratch = folder / "scratch"
-        scratch.mkdir(exist_ok=True)
         psi4.core.set_output_file(str(folder / "psi4.out"), False)
         psi4.set_memory(int(job.get("memory_mb", 2000)) * 1_000_000)
         psi4.set_num_threads(cores)
@@ -224,6 +225,7 @@ def make_calculator(job: dict, numbers, folder: Path):
             }
         )
         symbols = [ELEMENTS[z - 1] for z in numbers]
+        started = {"done": False}
 
         def dft(x):
             lines = [f"{charge} {unpaired + 1}"]
@@ -232,10 +234,18 @@ def make_calculator(job: dict, numbers, folder: Path):
             ]
             lines += ["units bohr", "symmetry c1", "no_reorient", "no_com"]
             psi4.geometry("\n".join(lines))
-            grad, wfn = psi4.gradient(method, return_wfn=True)
-            energy = float(wfn.energy())
-            psi4.core.clean()
-            return energy, np.array(grad)
+            # From the second step on, the SCF starts from the last step's orbitals: a few
+            # iterations instead of twenty. A start that fails falls back to a fresh guess.
+            psi4.set_options({"guess": "read" if started["done"] else "sad"})
+            try:
+                grad, wfn = psi4.gradient(method, return_wfn=True)
+            except psi4.SCFConvergenceError:
+                if not started["done"]:
+                    raise
+                psi4.set_options({"guess": "sad"})
+                grad, wfn = psi4.gradient(method, return_wfn=True)
+            started["done"] = True
+            return float(wfn.energy()), np.array(grad)
 
         return dft
 
@@ -377,6 +387,7 @@ def run(folder: Path, lock: Path | None) -> int:
     result["elapsed_s"] = round(time.time() - t0, 1)
     result["finished_at"] = now()
     progress.stopped.set()
+    shutil.rmtree(folder / "scratch", ignore_errors=True)  # Psi4's integrals and orbitals
     write_json(folder / "result.json", result)
     progress.update(state="finished")
     log.close()
