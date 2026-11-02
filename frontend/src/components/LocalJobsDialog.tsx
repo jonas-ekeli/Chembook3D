@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type LocalJob } from '../api'
-import { localStatusText } from '../localJobs'
+import { localStatusText, tsCheckText } from '../localJobs'
 import { Modal } from './Modal'
 import { errorText } from '../util'
 
@@ -138,6 +138,7 @@ export function LocalJobsDialog({
               {jobs.map((job) => {
                 const progress = progressText(job)
                 const problem = job.result?.error || job.import_error
+                const check = tsCheckText(job)
                 return (
                   <tr key={job.id} aria-label={job.id}>
                     <td>
@@ -146,6 +147,7 @@ export function LocalJobsDialog({
                         {job.level} · charge {job.charge}, multiplicity {job.multiplicity} · {job.atoms} atoms ·{' '}
                         {job.cores} core{job.cores === 1 ? '' : 's'} · {created(job)}
                         {job.constraints && ' · with constraints'}
+                        {job.transition && ' · TS search'}
                       </div>
                     </td>
                     <td>
@@ -155,6 +157,11 @@ export function LocalJobsDialog({
                           : `${localStatusText(job)}, imported; node removed`
                         : localStatusText(job)}
                       {progress && <div className="small">{progress}</div>}
+                      {check && (
+                        <div className="small" aria-label="TS check">
+                          {check}
+                        </div>
+                      )}
                       {problem && <div className="small cloud-job-problem">{problem}</div>}
                     </td>
                     <td className="cloud-job-actions">{actions(job)}</td>

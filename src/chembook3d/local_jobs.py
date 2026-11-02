@@ -79,7 +79,8 @@ TIMING = {
     "stub": {"seconds": 1.0, "power": 0.0},
 }
 TIMING_ATOMS, TIMING_CORES = 70, 4
-TEST_METHODS = {"stub": "stub", "oniom-stub": "ONIOM(stub:stub-low)"}  # LOCAL_STUB=1 (tests)
+# CHEMBOOK3D_LOCAL_STUB=1 only (tests)
+TEST_METHODS = {"stub": "stub", "oniom-stub": "ONIOM(stub:stub-low)", "stub-saddle": "stub-saddle"}
 
 _records = threading.Lock()
 # The workers this app started: kept so Python never warns that one is still running, and
@@ -226,6 +227,8 @@ def create_job(
     constraints: dict[str, Any] | None = None,
     name: str | None = None,
     core: list[int] | None = None,
+    transition: bool = False,
+    reacting: list[int] | None = None,
 ) -> dict[str, Any]:
     if method not in methods():
         raise LocalJobError(f"Unknown method {method!r}; offered: {', '.join(methods())}")
@@ -250,7 +253,8 @@ def create_job(
         level = f"{level}, {len(found.atoms)}-atom core"
     resources = local_tools.resources()
     with _records:
-        job_id = _new_id(folder, name or f"{node.label} {METHODS.get(method, method)}")
+        default = f"{node.label} {METHODS.get(method, method)}" + (" TS" if transition else "")
+        job_id = _new_id(folder, name or default)
         path = jobs_dir(folder) / job_id
         path.mkdir(parents=True)
         job = {
@@ -271,7 +275,14 @@ def create_job(
         }
         if layers:
             job["oniom"] = layers
-        if method in ("stub", "oniom-stub") and os.environ.get("CHEMBOOK3D_LOCAL_STUB_DELAY"):
+        if transition:
+            # D215: a TS search, started from a GFN2-xTB Hessian (the tests' stand-in for it).
+            job["transition"] = True
+            job["ts_hessian"] = {"stub-saddle": "stub-saddle"}.get(
+                method, "stub-low" if method in TEST_METHODS else "gfn2"
+            )
+            job["reacting"] = sorted(set(reacting)) if reacting else None
+        if method in TEST_METHODS and os.environ.get("CHEMBOOK3D_LOCAL_STUB_DELAY"):
             job["stub_delay_s"] = float(os.environ["CHEMBOOK3D_LOCAL_STUB_DELAY"])
         _write(path / JOB_JSON, job)
         shutil.copyfile(WORKER_SOURCE, path / WORKER)
@@ -284,6 +295,16 @@ def suggest_core(atoms: list[Any], seeds: list[int] | None = None) -> list[int]:
     return oniom.suggest(
         [a.element for a in atoms], np.array([[a.x, a.y, a.z] for a in atoms]), seeds
     )
+
+
+def mode_atoms(node: Node) -> list[int]:
+    """D215: the atoms (from 0) the node's latest imaginary mode moves most, as the reacting
+    atoms of a TS search or the seeds of a core; empty without one."""
+    from chembook3d.local_worker import moving_atoms
+    from chembook3d.services.scan_path import imaginary_mode
+
+    found = imaginary_mode(node)
+    return moving_atoms(found[1]) if found else []
 
 
 def check_core(atoms: list[Any], core: list[int], charge: int, multiplicity: int) -> oniom.Core:
@@ -388,11 +409,21 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
         "energies": progress.get("energies") or [],
         "started_at": progress.get("started_at"),
         "heartbeat_at": progress.get("heartbeat_at"),
+        "phase": progress.get("phase"),  # D215: a Hessian being computed
     }
     if result is not None:
         out["result"] = {
             key: result.get(key)
-            for key in ("state", "energy", "cycles", "elapsed_s", "error", "program", "level")
+            for key in (
+                "state",
+                "energy",
+                "cycles",
+                "elapsed_s",
+                "error",
+                "program",
+                "level",
+                "ts_check",
+            )
         }
     out["importable"] = status in ("converged", "not_converged") and not job.get("imported")
     return out

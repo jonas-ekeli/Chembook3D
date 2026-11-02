@@ -113,6 +113,16 @@ class RefineIn(BaseModel):
         description="oniom only: the atoms (from 0) treated with r2SCAN-3c; default the "
         "suggested core (check_local_core)",
     )
+    transition: bool = Field(
+        False,
+        description="D215: search for a transition state (geomeTRIC's TS mode, started from a "
+        "GFN2-xTB Hessian) instead of a minimum",
+    )
+    reacting: list[int] | None = Field(
+        None,
+        description="TS search: the atoms (from 0) that react; the result says whether its "
+        "imaginary mode stays on them",
+    )
     name: str | None = None
 
 
@@ -135,9 +145,9 @@ def _check_atoms(constraints: ConstraintsIn | None, count: int) -> dict[str, Any
     return out
 
 
-def _check_core(core: list[int] | None, count: int) -> list[int] | None:
+def _check_core(core: list[int] | None, count: int, what: str = "Core") -> list[int] | None:
     if core is not None and any(a < 0 or a >= count for a in core):
-        raise HTTPException(422, f"Core atoms are counted from 0 to {count - 1}")
+        raise HTTPException(422, f"{what} atoms are counted from 0 to {count - 1}")
     return core
 
 
@@ -183,6 +193,7 @@ def check_core(body: CoreIn, request: Request, session: DbSession) -> dict[str, 
         "warnings": found.warnings,
         "errors": found.errors,
         "estimate": local_jobs.estimate("oniom", count, cores, found.model_size),
+        "mode_atoms": local_jobs.mode_atoms(node),
     }
 
 
@@ -204,6 +215,8 @@ def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[s
             _check_atoms(body.constraints, count),
             body.name,
             _check_core(body.core, count),
+            body.transition,
+            _check_core(body.reacting, count, "Reacting"),
         )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc

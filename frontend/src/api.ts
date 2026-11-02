@@ -898,6 +898,8 @@ export type LocalCore = {
   warnings: string[]
   errors: string[]
   estimate: Estimate
+  /** D215: the atoms the node's own imaginary mode moves most (from 0), if it has one */
+  mode_atoms: number[]
 }
 
 /** D213: what a local refine holds: atoms counted from 0; a null value holds the current one. */
@@ -909,6 +911,16 @@ export type LocalConstraints = {
 }
 
 /** D213: a calculation run on this computer, folder local-jobs/<id>/. */
+/** D215: the imaginary frequencies (cm⁻¹) of a Hessian, the atoms its first imaginary mode
+ * moves most (from 0), and whether that mode stays on the reacting atoms. */
+export type ModeCheck = {
+  imaginary: number[]
+  lowest: number[]
+  atoms?: number[]
+  share_on_reacting?: number
+  on_reacting?: boolean
+}
+
 export type LocalJob = {
   id: string
   kind: 'refine'
@@ -923,6 +935,9 @@ export type LocalJob = {
   atoms: number
   created: string
   constraints: LocalConstraints | null
+  /** D215: a transition state search, and the atoms that react */
+  transition?: boolean
+  reacting?: number[] | null
   status:
     | 'starting'
     | 'queued'
@@ -942,6 +957,8 @@ export type LocalJob = {
     energies: number[]
     started_at: string | null
     heartbeat_at: string | null
+    /** D215: a Hessian being computed, e.g. "Starting Hessian 12/27" */
+    phase?: string | null
   }
   result?: {
     state: string
@@ -951,6 +968,7 @@ export type LocalJob = {
     error: string | null
     program: string | null
     level: string | null
+    ts_check?: { start?: ModeCheck; end?: ModeCheck; level?: string } | null
   }
   imported?: { node_id: string; derived: boolean; calculation_ids: string[]; at: string; present?: boolean } | null
   import_error?: string | null
@@ -2629,6 +2647,8 @@ export const api = {
     multiplicity: number | null
     constraints?: LocalConstraints | null
     core?: number[] | null
+    transition?: boolean
+    reacting?: number[] | null
   }) => request<LocalJob>('POST', '/local/jobs', body),
   localCore: (body: {
     node_id: string

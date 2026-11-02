@@ -154,3 +154,41 @@ test('an ONIOM refine starts from a suggested DFT core that can be changed', asy
   expect(calcs).toHaveLength(1)
   expect(JSON.stringify(calcs[0])).toContain('12-atom core')
 })
+
+// T-UI-85, D215: a TS search from Refine geometry, with reacting atoms; the result's check of
+// its imaginary mode is told when it is imported and shown under Local jobs.
+test('a transition state search on this computer checks its imaginary mode', async ({ page }) => {
+  test.slow()
+  await startPage(page)
+  await page.getByRole('button', { name: /^New/ }).first().click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
+  await dialog.getByLabel('Folder path').fill(E2E_DIR)
+  await dialog.getByRole('button', { name: 'Go' }).click()
+  await dialog.getByLabel('Investigation name').fill('Local TS')
+  await dialog.getByRole('button', { name: 'Create' }).click()
+  await expect(page.locator('.investigation')).toHaveText('Local TS')
+  expect((await page.request.post('/api/nodes', { data: { label: 'saddle', xyz: WATER } })).ok()).toBeTruthy()
+  await page.reload()
+
+  await page.locator('.react-flow__node').filter({ hasText: 'saddle' }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Refine geometry…' }).click()
+  const refine = page.getByRole('dialog', { name: 'Refine geometry of “saddle”' })
+  await refine.getByLabel('Method', { exact: true }).selectOption('stub-saddle')
+  await expect(refine.getByLabel('Reacting atoms')).toHaveCount(0)
+  await refine.getByLabel('Search for a transition state').check()
+  await expect(refine.getByText(/starting from a GFN2-xTB Hessian/)).toBeVisible()
+  await refine.getByLabel('Reacting atoms').fill('1 7')
+  await expect(refine.getByRole('alert')).toHaveText('Reacting atoms are numbered 1 to 3')
+  await expect(refine.getByRole('button', { name: 'Start' })).toBeDisabled()
+  await refine.getByLabel('Reacting atoms').fill('1 2')
+  await refine.getByRole('button', { name: 'Start' }).click()
+  await expect(refine).toHaveCount(0)
+  await expect(page.getByText(/The stub-saddle TS search of “saddle” is done and imported .* stub-saddle check: one imaginary frequency \(-?\d+ cm⁻¹\), on the reacting atoms\./)).toBeVisible({
+    timeout: 60_000,
+  })
+  await page.getByRole('button', { name: /^Local jobs/ }).click()
+  const row = page.getByRole('dialog', { name: 'Local jobs' }).getByRole('table', { name: 'Local jobs' }).getByRole('row').nth(1)
+  await expect(row).toContainText('TS search')
+  await expect(row.getByLabel('TS check')).toContainText('on the reacting atoms')
+})
