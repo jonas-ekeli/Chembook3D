@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { api, type LocalJob } from '../api'
 import { localStatusText, tsCheckText } from '../localJobs'
 import { Modal } from './Modal'
-import { errorText } from '../util'
+import { errorText, withDisplacements } from '../util'
+import { Viewer3D } from './Viewer3D'
 
 const KCAL = 627.509474
 
@@ -52,6 +53,7 @@ export function LocalJobsDialog({
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showMode, setShowMode] = useState<string | null>(null) // D217: the job whose mode is shown
   // Read the jobs again on opening: one Claude started is not known yet.
   useEffect(() => onChanged(), [onChanged])
 
@@ -139,33 +141,67 @@ export function LocalJobsDialog({
                 const progress = progressText(job)
                 const problem = job.result?.error || job.import_error
                 const check = tsCheckText(job)
+                const mode = job.result?.ts_check?.end?.mode
+                const xyz = job.result?.final_xyz
+                const shown = showMode === job.id && mode && xyz ? withDisplacements(xyz, mode) : null
+                const found = job.result?.frequencies
                 return (
-                  <tr key={job.id} aria-label={job.id}>
-                    <td>
-                      <strong>{job.node_label}</strong>
-                      <div className="muted small">
-                        {job.level} · charge {job.charge}, multiplicity {job.multiplicity} · {job.atoms} atoms ·{' '}
-                        {job.cores} core{job.cores === 1 ? '' : 's'} · {created(job)}
-                        {job.constraints && ' · with constraints'}
-                        {job.transition && ' · TS search'}
-                      </div>
-                    </td>
-                    <td>
-                      {job.imported
-                        ? job.imported.present
-                          ? `${localStatusText(job)}, imported${job.imported.derived ? ' onto a derived node' : ''}`
-                          : `${localStatusText(job)}, imported; node removed`
-                        : localStatusText(job)}
-                      {progress && <div className="small">{progress}</div>}
-                      {check && (
-                        <div className="small" aria-label="TS check">
-                          {check}
+                  <Fragment key={job.id}>
+                    <tr aria-label={job.id}>
+                      <td>
+                        <strong>{job.node_label}</strong>
+                        <div className="muted small">
+                          {job.level} · charge {job.charge}, multiplicity {job.multiplicity} · {job.atoms} atoms ·{' '}
+                          {job.cores} core{job.cores === 1 ? '' : 's'} · {created(job)}
+                          {job.constraints && ' · with constraints'}
+                          {job.transition && ' · TS search'}
                         </div>
-                      )}
-                      {problem && <div className="small cloud-job-problem">{problem}</div>}
-                    </td>
-                    <td className="cloud-job-actions">{actions(job)}</td>
-                  </tr>
+                      </td>
+                      <td>
+                        {job.imported
+                          ? job.imported.present
+                            ? `${localStatusText(job)}, imported${job.imported.derived ? ' onto a derived node' : ''}`
+                            : `${localStatusText(job)}, imported; node removed`
+                          : localStatusText(job)}
+                        {progress && <div className="small">{progress}</div>}
+                        {check && (
+                          <div className="small" aria-label="TS check">
+                            {check}
+                            {mode && xyz && (
+                              <>
+                                {' '}
+                                <button
+                                  className="small"
+                                  aria-pressed={showMode === job.id}
+                                  onClick={() => setShowMode((current) => (current === job.id ? null : job.id))}
+                                >
+                                  {showMode === job.id ? 'Hide mode' : 'Show mode'}
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                        {found && (
+                          <div className="small muted" aria-label="Frequencies">
+                            {found.level} frequencies at the result (
+                            {found.imaginary.length ? `${found.imaginary.length} imaginary` : 'none imaginary'}), imported as a
+                            frequency calculation.
+                          </div>
+                        )}
+                        {problem && <div className="small cloud-job-problem">{problem}</div>}
+                      </td>
+                      <td className="cloud-job-actions">{actions(job)}</td>
+                    </tr>
+                    {shown && (
+                      <tr>
+                        <td colSpan={3}>
+                          <div className="local-job-mode" aria-label="Imaginary mode">
+                            <Viewer3D models={[{ xyz: xyz ?? '' }]} vibration={{ xyz: shown }} />
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 )
               })}
             </tbody>

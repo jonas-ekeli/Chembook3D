@@ -8,6 +8,12 @@ optimization output.
 
 Levels: `tblite GFN2-xTB`, `Psi4 B97-3c`, `Psi4 r2SCAN-3c`; the 3c methods and GFN2 carry
 their own basis (`levels.needs_basis`).
+
+D217: a job that computed frequencies at its result (a GFN2-xTB or g-xTB TS search) adds a second
+step, a frequency calculation at the same level on the final structure, as Gaussian's `opt freq`
+does. Nothing is printed for it, so the molecular mass and rotational temperatures are worked
+out here from the structure (most abundant isotopes); the symmetry number is taken as 1 (the
+worker finds no point group), and the app computes G_qh from the frequencies (D56).
 """
 
 import json
@@ -23,6 +29,9 @@ from chembook3d.xyz import Atom
 
 FORMAT = "chembook3d-local-result"
 _LETTERS = {"distances": "B", "angles": "A", "dihedrals": "D"}
+# h² / (8π² k) in K amu Å²: a rotational temperature from a moment of inertia
+ROTATIONAL = 24.254367090467216
+LINEAR_INERTIA = 1e-3  # amu Å²: a smallest moment below this is a linear molecule's zero
 
 
 class NotLocalResult(ValueError):
@@ -47,6 +56,59 @@ def constraints_of(held: object) -> list[str]:
             atoms = [str(int(i) + 1) for i in item.get("atoms", [])]
             found.append(f"constrained {coordinate_name(atoms, letter)}")
     return found
+
+
+def rotor(atoms: list[Atom]) -> tuple[float, list[float]]:
+    """The molecular mass (amu) and rotational temperatures (K) of a structure: three for a
+    non-linear molecule, one for a linear one (D164)."""
+    import numpy as np
+    from morfeus.data import atomic_masses
+
+    from chembook3d.local_worker import ELEMENTS
+
+    masses = np.array([atomic_masses[ELEMENTS.index(a.element) + 1] for a in atoms], float)
+    xyz = np.array([[a.x, a.y, a.z] for a in atoms], float)
+    xyz -= (masses[:, None] * xyz).sum(axis=0) / masses.sum()
+    tensor = -np.einsum("i,ij,ik->jk", masses, xyz, xyz)
+    tensor += np.eye(3) * (masses * (xyz**2).sum(axis=1)).sum()
+    moments = sorted(float(m) for m in np.linalg.eigvalsh(tensor))
+    if moments[0] < LINEAR_INERTIA:
+        moments = moments[1:2]
+    return float(masses.sum()), [round(ROTATIONAL / m, 5) for m in moments if m > 0]
+
+
+def frequency_step(data: dict, final: list[Atom], index: int) -> ParsedStep:
+    """D217: the frequencies the job computed at its final structure, as a frequency step."""
+    found = data["frequencies"]
+    route = Route(
+        text=f"local {data.get('method', '')} frequencies",
+        method=found.get("level") or data.get("level") or data.get("method"),
+        basis="",
+    )
+    route.job_type = "frequency"
+    step = ParsedStep(
+        index=index,
+        route=route,
+        charge=data.get("charge"),
+        multiplicity=data.get("multiplicity"),
+        geometries=[final],
+    )
+    energy = found.get("energy", data.get("energy"))
+    step.scf_energy = float(energy) if energy is not None else None
+    step.geometry_energies = [step.scf_energy]
+    step.frequencies = [float(f) for f in found.get("wavenumbers") or []]
+    step.normal_modes = [
+        [[float(v) for v in atom] for atom in mode] for mode in found.get("modes") or []
+    ]
+    mass, temperatures = rotor(final)
+    step.thermo = {
+        "molecular_mass": round(mass, 5),
+        "rotational_temperatures": temperatures,
+        "symmetry_number": 1,
+    }
+    step.termination = "normal"
+    step.missing = [] if step.scf_energy is not None else ["total energy"]
+    return step
 
 
 def parse(text: str) -> ParsedFile:
@@ -99,5 +161,8 @@ def parse(text: str) -> ParsedFile:
     if step.scf_energy is None:
         missing.append("total energy")
     step.missing = missing
+    steps = [step]
+    if data.get("frequencies") and geometries and converged:
+        steps.append(frequency_step(data, geometries[-1], 2))
     version = (data.get("versions") or {}).get(str(data.get("program", "")).lower())
-    return ParsedFile(program=str(data.get("program") or "local"), version=version, steps=[step])
+    return ParsedFile(program=str(data.get("program") or "local"), version=version, steps=steps)

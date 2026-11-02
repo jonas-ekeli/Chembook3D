@@ -145,6 +145,11 @@ class RefineIn(BaseModel):
         description="TS search: the atoms (from 0) that react; the result says whether its "
         "imaginary mode stays on them",
     )
+    frequencies: bool | None = Field(
+        None,
+        description="D217: frequencies at the result at the job's own level, imported as a "
+        "frequency calculation (gfn2 and gxtb only); default on for a TS search",
+    )
     name: str | None = None
 
 
@@ -239,6 +244,7 @@ def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[s
             _check_core(body.core, count),
             body.transition,
             _check_core(body.reacting, count, "Reacting"),
+            body.frequencies,
         )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc

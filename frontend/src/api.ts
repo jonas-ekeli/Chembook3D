@@ -927,6 +927,8 @@ export type ModeCheck = {
   atoms?: number[]
   share_on_reacting?: number
   on_reacting?: boolean
+  /** D217: the first imaginary mode at the result, [atom][xyz], to animate */
+  mode?: number[][]
 }
 
 export type LocalJob = {
@@ -977,6 +979,10 @@ export type LocalJob = {
     program: string | null
     level: string | null
     ts_check?: { start?: ModeCheck; end?: ModeCheck; level?: string } | null
+    /** D217: frequencies computed at the result, imported as a frequency calculation */
+    frequencies?: { level: string; imaginary: number[]; count: number } | null
+    /** D217: the final structure, sent when the result's TS check has a mode to animate */
+    final_xyz?: string | null
   }
   imported?: { node_id: string; derived: boolean; calculation_ids: string[]; at: string; present?: boolean } | null
   import_error?: string | null
@@ -2707,6 +2713,7 @@ export const api = {
     core?: number[] | null
     transition?: boolean
     reacting?: number[] | null
+    frequencies?: boolean | null
   }) => request<LocalJob>('POST', '/local/jobs', body),
   localCore: (body: {
     node_id: string

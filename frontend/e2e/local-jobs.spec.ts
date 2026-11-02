@@ -160,6 +160,8 @@ test('an ONIOM refine starts from a suggested DFT core that can be changed', asy
 
 // T-UI-85, D215: a TS search from Refine geometry, with reacting atoms; the result's check of
 // its imaginary mode is told when it is imported and shown under Local jobs.
+// T-UI-86, D217: a cheap method's search starts from its own Hessian and ends with frequencies
+// at that level (on by default), and the checked imaginary mode can be animated there.
 test('a transition state search on this computer checks its imaginary mode', async ({ page }) => {
   test.slow()
   await startPage(page)
@@ -180,7 +182,8 @@ test('a transition state search on this computer checks its imaginary mode', asy
   await refine.getByLabel('Method', { exact: true }).selectOption('stub-saddle')
   await expect(refine.getByLabel('Reacting atoms')).toHaveCount(0)
   await refine.getByLabel('Search for a transition state').check()
-  await expect(refine.getByText(/starting from a GFN2-xTB Hessian/)).toBeVisible()
+  await expect(refine.getByText(/starting from a stub-saddle Hessian/)).toBeVisible()
+  await expect(refine.getByLabel('Frequencies at the result')).toBeChecked()
   await refine.getByLabel('Reacting atoms').fill('1 7')
   await expect(refine.getByRole('alert')).toHaveText('Reacting atoms are numbered 1 to 3')
   await expect(refine.getByRole('button', { name: 'Start' })).toBeDisabled()
@@ -194,4 +197,13 @@ test('a transition state search on this computer checks its imaginary mode', asy
   const row = page.getByRole('dialog', { name: 'Local jobs' }).getByRole('table', { name: 'Local jobs' }).getByRole('row').nth(1)
   await expect(row).toContainText('TS search')
   await expect(row.getByLabel('TS check')).toContainText('on the reacting atoms')
+  await expect(row.getByLabel('Frequencies')).toContainText('stub-saddle frequencies at the result (1 imaginary)')
+  await row.getByRole('button', { name: 'Show mode' }).click()
+  await expect(page.getByLabel('Imaginary mode').locator('canvas').first()).toBeVisible()
+  await page.getByRole('button', { name: 'Hide mode' }).click()
+  await expect(page.getByLabel('Imaginary mode')).toHaveCount(0)
+  const nodes = await (await page.request.get('/api/nodes')).json()
+  const saddle = nodes.find((n: { label: string }) => n.label === 'saddle')
+  const calcs = await (await page.request.get(`/api/nodes/${saddle.id}/calculations`)).json()
+  expect(calcs.map((c: { type: string }) => c.type)).toContain('frequency')
 })

@@ -428,18 +428,30 @@ def moving_atoms(mode, share: float = 0.3, limit: int = 8) -> list[int]:
     return [i for i in order[:limit] if size[i] >= share * size[order[0]]]
 
 
-def mode_check(symbols, x, hessian, reacting=None) -> dict:
-    """D215: the harmonic frequencies of a Hessian (cm-1), its imaginary ones, the atoms the
-    first imaginary mode moves, and its share on the reacting atoms."""
+def harmonic(symbols, x, hessian):
+    """The harmonic frequencies (cm-1, imaginary ones negative, lowest first) of a Hessian at
+    `x` (Bohr) and its normal modes as normalised Cartesian displacements [mode][atom][xyz],
+    translations and rotations projected out."""
     import numpy as np
     from geometric.normal_modes import frequency_analysis
 
     freqs, modes, _ = frequency_analysis(np.asarray(x).reshape(-1), hessian, elem=list(symbols))
+    return np.asarray(freqs, float), np.asarray(modes, float).reshape(len(freqs), -1, 3)
+
+
+def mode_check(symbols, x, hessian, reacting=None) -> dict:
+    """D215: the harmonic frequencies of a Hessian (cm-1), its imaginary ones, the atoms the
+    first imaginary mode moves (and that mode, D217, to animate), and its share on the
+    reacting atoms."""
+    import numpy as np
+
+    freqs, modes = harmonic(symbols, x, hessian)
     imaginary = [round(float(f), 1) for f in freqs if f < 0]
     out: dict = {"imaginary": imaginary, "lowest": [round(float(f), 1) for f in freqs[:3]]}
     if imaginary:
         mode = np.asarray(modes[0], float).reshape(-1, 3)
         out["atoms"] = moving_atoms(mode)
+        out["mode"] = mode.round(5).tolist()
         if reacting:
             weight = (mode**2).sum(axis=1)
             share = float(weight[list(reacting)].sum() / weight.sum())
@@ -588,6 +600,17 @@ def run(folder: Path, lock: Path | None) -> int:
         if job.get("hessian"):
             options["hessian"] = job["hessian"]
         hessian_engine = None
+        frequency_engine = None
+        if job.get("frequencies"):
+            # D217: frequencies at the job's own level once it has converged (cheap methods
+            # only: GFN2-xTB, g-xTB), imported as a frequency calculation on the result.
+            own = _engine(method, numbers, start / BOHR_TO_ANGSTROM, job, folder, delay=False)
+
+            def frequency_engine(x, raw=own):
+                if cancel_file.exists():
+                    raise Cancelled()
+                return raw(x)
+
         if job.get("transition"):
             # D215: geomeTRIC starts the TS search from a Hessian; a cheap one (GFN2-xTB on the
             # whole molecule, by finite differences) instead of one at the job's own level.
@@ -610,6 +633,7 @@ def run(folder: Path, lock: Path | None) -> int:
             np.savetxt(folder / "hessian.txt", first)
             options["hessian"] = "file:" + str(folder / "hessian.txt")
             result["ts_check"] = {"start": mode_check(symbols, x0, first, job.get("reacting"))}
+            result["ts_check"]["start"].pop("mode", None)  # only the final mode is shown
             progress.update(phase=None)
         converged = True
         try:
@@ -618,12 +642,25 @@ def run(folder: Path, lock: Path | None) -> int:
         except geometric.errors.GeomOptNotConvergedError:
             converged = False
         result["state"] = "converged" if converged else "not_converged"
-        if hessian_engine is not None and frames:
-            x1 = np.asarray(last["coords"]) / BOHR_TO_ANGSTROM
+        x1 = np.asarray(last["coords"]) / BOHR_TO_ANGSTROM
+        if frequency_engine is not None and frames and converged:
+            final = numerical_hessian(frequency_engine, x1, progress, "Frequencies")
+            freqs, modes = harmonic(symbols, x1, final)
+            result["frequencies"] = {
+                "level": result["level"],
+                "energy": last["energy"],
+                "wavenumbers": freqs.round(2).tolist(),
+                "modes": modes.round(5).tolist(),
+            }
+            if hessian_engine is not None:  # the TS check is read from the same Hessian
+                result["ts_check"]["end"] = mode_check(symbols, x1, final, job.get("reacting"))
+                result["ts_check"]["level"] = label
+        elif hessian_engine is not None and frames:
             final = numerical_hessian(hessian_engine, x1, progress, "Final Hessian")
             result["ts_check"]["end"] = mode_check(symbols, x1, final, job.get("reacting"))
             name = job.get("ts_hessian", "gfn2")
             result["ts_check"]["level"] = METHOD_LABELS.get(name, (name, name))[1]
+        progress.update(phase=None)
     except Cancelled:
         result["state"] = "cancelled"
     except Exception as exc:  # noqa: BLE001 - every failure goes into result.json

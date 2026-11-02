@@ -31,6 +31,8 @@ function duration(seconds: number): string {
  * at their current value or a target). The result is imported onto the node when it finishes
  * (a node without calculations takes its geometry; on one with calculations it goes to a
  * derived node, D23). */
+const FREQUENCY_METHODS = new Set(['gfn2', 'gxtb', 'stub', 'stub-saddle'])
+
 export function RefineDialog({
   node,
   onClose,
@@ -56,6 +58,8 @@ export function RefineDialog({
   const [transition, setTransition] = useState(false)
   const [reacting, setReacting] = useState('')
   const [fromMode, setFromMode] = useState(false)
+  // D217: null follows the TS box (frequencies after a TS search, none after a minimum).
+  const [frequenciesChoice, setFrequenciesChoice] = useState<boolean | null>(null)
   const atoms = useMemo(() => (node.xyz ? parseXyz(node.xyz) : []), [node.xyz])
 
   useEffect(() => {
@@ -106,9 +110,16 @@ export function RefineDialog({
   const layered = Boolean(chosen?.layered)
   const ready =
     Boolean(tools?.installed) && node.atom_count > 0 && (!layered || Boolean(core?.usable)) && !('error' in reactingRead)
-  // D215: a TS search computes two GFN2-xTB Hessians, 6 gradients per atom each.
-  const gfn2Step = tools?.methods.find((m) => m.value === 'gfn2')?.estimate?.seconds_per_step
-  const hessians = gfn2Step ? 12 * node.atom_count * gfn2Step : null
+  // D217: GFN2-xTB and g-xTB are cheap enough for a Hessian at their own level: a TS search
+  // with one starts from it, and frequencies at the result are on for a TS search, offered
+  // for a minimum. DFT and ONIOM searches start from, and are checked with, GFN2-xTB ones.
+  const ownLevel = FREQUENCY_METHODS.has(method)
+  const frequencies = ownLevel && (frequenciesChoice ?? transition)
+  const hessianMethod = ownLevel ? method : 'gfn2'
+  const hessianLabel = tools?.methods.find((m) => m.value === hessianMethod)?.label ?? 'GFN2-xTB'
+  // D215: a Hessian is 6 gradients per atom.
+  const hessianStep = tools?.methods.find((m) => m.value === hessianMethod)?.estimate?.seconds_per_step
+  const hessian = hessianStep ? 6 * node.atom_count * hessianStep : null
   // D214: a layered method's time depends on its core.
   const estimateOf = (m: LocalTools['methods'][number]) => (m.layered && core?.check ? core.check.estimate : m.estimate)
   const chosenEstimate = chosen ? estimateOf(chosen) : null
@@ -127,6 +138,7 @@ export function RefineDialog({
         core: layered ? core?.atoms : null,
         transition,
         reacting: 'atoms' in reactingRead ? reactingRead.atoms : null,
+        frequencies: ownLevel ? frequencies : null,
       })
       .then(
         (job) => {
@@ -223,8 +235,8 @@ export function RefineDialog({
           {transition && (
             <>
               <p className="muted small">
-                The search climbs to a saddle point, starting from a GFN2-xTB Hessian of the whole molecule; a second one at
-                the result checks its imaginary frequency{hessians ? ` (both about ${duration(hessians)})` : ''}.
+                The search climbs to a saddle point, starting from a {hessianLabel} Hessian of the whole molecule; a second
+                one at the result checks its imaginary frequency{hessian ? ` (each about ${duration(hessian)})` : ''}.
               </p>
               <label className="field">
                 <span>Reacting atoms (optional)</span>
@@ -246,6 +258,24 @@ export function RefineDialog({
                 </p>
               )}
             </>
+          )}
+          {ownLevel && (
+            <label className="check">
+              <input
+                type="checkbox"
+                aria-label="Frequencies at the result"
+                checked={frequencies}
+                onChange={(event) => setFrequenciesChoice(event.target.checked)}
+              />
+              Frequencies at the result
+            </label>
+          )}
+          {frequencies && (
+            <p className="muted small">
+              {transition
+                ? `From the final ${hessianLabel} Hessian, imported as a frequency calculation: its imaginary mode can be animated and checked like any TS.`
+                : `A ${hessianLabel} Hessian at the minimum${hessian ? ` (about ${duration(hessian)})` : ''}, imported as a frequency calculation.`}
+            </p>
           )}
         </div>
         {layered && node.xyz && (
