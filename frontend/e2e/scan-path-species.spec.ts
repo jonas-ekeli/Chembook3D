@@ -50,6 +50,7 @@ test('a species that joins is shown apart and can be set farther out', async ({ 
   await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const created = page.getByRole('dialog')
+  await expect(created.getByRole('list', { name: 'Folders' })).toBeVisible()
   await created.getByLabel('Folder path').fill(E2E_DIR)
   await created.getByRole('button', { name: 'Go' }).click()
   await expect(created.getByLabel('Folder path')).toHaveValue(E2E_DIR)

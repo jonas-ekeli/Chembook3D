@@ -25,13 +25,21 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from chembook3d.investigation import BACKUP_DIR, DB_NAME, LOCK_NAME
+from chembook3d.investigation import (
+    BACKUP_DIR,
+    DB_NAME,
+    LOCK_NAME,
+    OWNER_NAME,
+    InvestigationOwnership,
+    acquire_ownership,
+    active_ownership,
+)
 
 # The lock file and journal belong to one running app, and backups/ holds local copies
 # (NFR-DATA-03), so none of them is shared. Every file is stored byte for byte: Git for
 # Windows would otherwise change the line endings of copied output files (NFR-DATA-02).
 # D213: local jobs change every few seconds while they run; their results are imported
-IGNORED = [LOCK_NAME, f"{DB_NAME}-journal", f"{BACKUP_DIR}/", "local-jobs/"]
+IGNORED = [LOCK_NAME, OWNER_NAME, f"{DB_NAME}-journal", f"{BACKUP_DIR}/", "local-jobs/"]
 ATTRIBUTES = ["* -text", f"{DB_NAME} binary"]
 
 NETWORK_TIMEOUT = 300  # seconds; the first sign-in may wait for the browser
@@ -324,7 +332,43 @@ def _push_now(folder: Path, timeout: float) -> SyncStatus:
     return status(folder, fetch=False)
 
 
-def pull(folder: Path, timeout: float = NETWORK_TIMEOUT) -> SyncStatus:
+@contextmanager
+def _owned(
+    folder: Path, ownership: InvestigationOwnership | None, *, open_db: bool = False
+) -> Iterator[InvestigationOwnership]:
+    # Only non-replacing operations may borrow the running app's live database lease.
+    owner = ownership or (active_ownership(folder) if open_db else None)
+    acquired = owner is None
+    owner = owner or acquire_ownership(folder)
+    try:
+        with owner.operation(folder, closed=not open_db):
+            if (Path(folder) / ".git").exists() and git_available():
+                # Older linked folders lack OWNER_NAME in .gitignore. A local exclusion
+                # avoids committing it, without creating a tracked edit before pulling.
+                excluded = Path(_git(folder, "rev-parse", "--git-path", "info/exclude").strip())
+                if not excluded.is_absolute():
+                    excluded = Path(folder) / excluded
+                text = excluded.read_text(encoding="utf-8") if excluded.exists() else ""
+                if OWNER_NAME not in {line.strip() for line in text.splitlines()}:
+                    excluded.parent.mkdir(parents=True, exist_ok=True)
+                    excluded.write_text(text.rstrip("\n") + f"\n{OWNER_NAME}\n", encoding="utf-8")
+            yield owner
+    finally:
+        if acquired:
+            owner.release()
+
+
+def pull(
+    folder: Path,
+    timeout: float = NETWORK_TIMEOUT,
+    *,
+    ownership: InvestigationOwnership | None = None,
+) -> SyncStatus:
+    with _owned(folder, ownership):
+        return _pull(folder, timeout)
+
+
+def _pull(folder: Path, timeout: float) -> SyncStatus:
     """Before opening (FR-SYNC-04): commit what an earlier session left, then fast-forward
     to the remote, or push what this computer has. The investigation must be closed."""
     folder = Path(folder)
@@ -342,7 +386,18 @@ def pull(folder: Path, timeout: float = NETWORK_TIMEOUT) -> SyncStatus:
     return current
 
 
-def push(folder: Path, open_db: bool, timeout: float = NETWORK_TIMEOUT) -> SyncStatus:
+def push(
+    folder: Path,
+    open_db: bool,
+    timeout: float = NETWORK_TIMEOUT,
+    *,
+    ownership: InvestigationOwnership | None = None,
+) -> SyncStatus:
+    with _owned(folder, ownership, open_db=open_db):
+        return _push(folder, open_db, timeout)
+
+
+def _push(folder: Path, open_db: bool, timeout: float) -> SyncStatus:
     """Commit everything and push (FR-SYNC-05). With the investigation closed, a newer
     remote is fast-forwarded to; while it is open, that waits for the next open."""
     folder = Path(folder)
@@ -363,7 +418,18 @@ def push(folder: Path, open_db: bool, timeout: float = NETWORK_TIMEOUT) -> SyncS
     return current
 
 
-def link(folder: Path, url: str, name: str) -> SyncStatus:
+def link(
+    folder: Path,
+    url: str,
+    name: str,
+    *,
+    ownership: InvestigationOwnership | None = None,
+) -> SyncStatus:
+    with _owned(folder, ownership, open_db=True):
+        return _link(folder, url, name)
+
+
+def _link(folder: Path, url: str, name: str) -> SyncStatus:
     """FR-SYNC-02: link an open investigation to an empty repository and push it."""
     folder = Path(folder)
     if not git_available():
@@ -433,7 +499,18 @@ def _safe(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-.") or "computer"
 
 
-def resolve(folder: Path, keep: str, timeout: float = NETWORK_TIMEOUT) -> SyncStatus:
+def resolve(
+    folder: Path,
+    keep: str,
+    timeout: float = NETWORK_TIMEOUT,
+    *,
+    ownership: InvestigationOwnership | None = None,
+) -> SyncStatus:
+    with _owned(folder, ownership):
+        return _resolve(folder, keep, timeout)
+
+
+def _resolve(folder: Path, keep: str, timeout: float) -> SyncStatus:
     """FR-SYNC-06: keep one copy when both sides changed. keep is "this" or "github". The
     investigation must be closed. The other copy is always saved."""
     folder = Path(folder)

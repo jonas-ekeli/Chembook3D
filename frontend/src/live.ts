@@ -6,9 +6,11 @@ import { api, type ClaudeRequest } from './api'
 
 const WAIT = 25 // seconds per long poll; the backend answers at once when something happens
 
-/** Calls `onChanged` after a change made elsewhere in the open investigation (`folder`), and
- * returns Claude's requests waiting for an answer, oldest first. */
-export function useLive(folder: string | null, onChanged: () => void): ClaudeRequest[] {
+/** Reconcile the global notebook before reloading its records, even from the start page. */
+export function useLive(
+  folder: string | null | undefined,
+  onChanged: (folder: string | null) => void | Promise<void>,
+): ClaudeRequest[] {
   const [requests, setRequests] = useState<ClaudeRequest[]>([])
   const changed = useRef(onChanged)
   useEffect(() => {
@@ -16,7 +18,7 @@ export function useLive(folder: string | null, onChanged: () => void): ClaudeReq
   }, [onChanged])
 
   useEffect(() => {
-    if (!folder) return
+    if (folder === undefined) return
     const abort = new AbortController()
     let since: number | null = null
     let confirmVersion: number | null = null
@@ -24,10 +26,13 @@ export function useLive(folder: string | null, onChanged: () => void): ClaudeReq
       while (!abort.signal.aborted) {
         try {
           const live = await api.live(since, confirmVersion, since === null ? 0 : WAIT, abort.signal)
-          if (live.changed) changed.current()
+          if (abort.signal.aborted) return
+          const identityChanged = live.investigation !== folder
+          if (identityChanged || live.changed) await changed.current(live.investigation)
+          if (abort.signal.aborted) return
           since = live.version
           confirmVersion = live.confirm_version
-          setRequests(live.confirmations)
+          setRequests(identityChanged ? [] : live.confirmations)
         } catch {
           if (abort.signal.aborted) return
           // The backend restarting or briefly busy: try again shortly.

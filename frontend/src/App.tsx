@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   api,
   ApiError,
+  setInvestigationIdentity,
   energyTypeName,
   STATUS_LABEL,
   STATUSES,
@@ -111,7 +112,7 @@ import {
 import { groupActions, selectionActions } from './panelActions'
 import { useStable } from './stable'
 
-type LockPrompt = { folder: string; host?: string; openedAt?: string }
+type LockPrompt = { folder: string; host?: string; openedAt?: string; canForce?: boolean }
 
 /** One import dialog at a time; dropped files wait in a queue (WF-04: one or more files). */
 type ImportRequest = {
@@ -173,6 +174,8 @@ function Displays({
 
 function App() {
   const [investigation, setInvestigation] = useState<Investigation | null | undefined>(undefined)
+  const identity = useRef<string | null | undefined>(undefined)
+  const identityVersion = useRef(0)
   const [settings, setSettings] = useState<Settings | null>(null)
   // D84: the steric maps' colours, changed from the settings or beside any map.
   const stericColours = useMemo(
@@ -339,15 +342,16 @@ function App() {
   useEffect(() => {
     api.currentInvestigation().then(
       (inv) => {
-        setInvestigation(inv)
-        setShown((n) => n + 1)
+        if (identity.current !== undefined) return
+        if (inv) opened(inv)
+        else closed()
       },
       (err: unknown) => {
-        setInvestigation(null)
+        if (identity.current !== undefined) return
+        closed()
         setError(`Backend not reachable: ${errorText(err)}`)
       },
     )
-    api.settings().then(setSettings, () => undefined)
   }, [])
 
   // D105: open on what the investigation showed when it was last used. Records deleted since
@@ -356,14 +360,15 @@ function App() {
   useEffect(() => {
     restored.current = null
     if (!shownFolder) return
+    const version = identityVersion.current
     let current = true
     const done = (seen: string | null) => {
-      if (!current) return
+      if (!current || version !== identityVersion.current) return
       restored.current = shown
       lastSaved.current = seen
     }
     api.viewState().then((saved) => {
-      if (!current) return
+      if (!current || version !== identityVersion.current) return
       setEnergyLevel(saved.level)
       setEnergyType(saved.energy_type ?? 'G')
       setReferenceId(saved.reference_id)
@@ -384,7 +389,7 @@ function App() {
   // D105: every change to these is remembered at once, one save after the other.
   const saving = useRef<Promise<unknown>>(Promise.resolve())
   useEffect(() => {
-    if (restored.current !== shown || !drawerView) return
+    if (!shownFolder || restored.current !== shown || !drawerView) return
     const state: ViewState = {
       level: energyLevel,
       energy_type: energyType,
@@ -401,8 +406,11 @@ function App() {
       return
     }
     lastSaved.current = text
-    saving.current = saving.current.then(() => api.saveViewState(state)).catch(() => undefined)
-  }, [shown, energyLevel, energyType, referenceId, edgeEnergies, filters, expanded, canvasId, drawerOpen, drawerView])
+    const version = identityVersion.current
+    saving.current = saving.current.then(() => {
+      if (version === identityVersion.current) return api.saveViewState(state)
+    }).catch(() => undefined)
+  }, [shownFolder, shown, energyLevel, energyType, referenceId, edgeEnergies, filters, expanded, canvasId, drawerOpen, drawerView])
 
   // The energy view's choice as last rendered (set by the effect that fetches it, below).
   const viewChoice = useRef<{
@@ -415,10 +423,11 @@ function App() {
   const loadView = useCallback(() => {
     const { levelKey, shownType, referenceId, bsse } = viewChoice.current
     const n = ++viewFetched.current // an answer still coming for another choice is dropped
+    const version = identityVersion.current
     if (!levelKey) return
     api.energyView(levelKey, shownType, referenceId, bsse).then(
-      (found) => n === viewFetched.current && setEnergyView(found),
-      (err: unknown) => n === viewFetched.current && setError(errorText(err)),
+      (found) => n === viewFetched.current && version === identityVersion.current && setEnergyView(found),
+      (err: unknown) => n === viewFetched.current && version === identityVersion.current && setError(errorText(err)),
     )
   }, [])
 
@@ -428,12 +437,13 @@ function App() {
   const fetchRecords = useCallback(() => {
     if (!investigation) return
     const n = ++fetched.current
+    const version = identityVersion.current
     const latest =
       <T,>(set: (value: T) => void) =>
       (value: T) => {
-        if (n === fetched.current) set(value)
+        if (n === fetched.current && version === identityVersion.current) set(value)
       }
-    const failed = (err: unknown) => n === fetched.current && setError(errorText(err))
+    const failed = (err: unknown) => n === fetched.current && version === identityVersion.current && setError(errorText(err))
     api.canvas().then(latest(setCanvas), failed)
     api.energyOptions().then(latest(setEnergyOptions), failed)
     // The energy view is fetched beside them, not after the options arrive: with the level
@@ -450,9 +460,10 @@ function App() {
   useEffect(() => {
     if (!investigation || view !== 'history') return
     let current = true
+    const version = identityVersion.current
     api.history().then(
-      (found) => current && setHistory(found),
-      (err: unknown) => current && setError(errorText(err)),
+      (found) => current && version === identityVersion.current && setHistory(found),
+      (err: unknown) => current && version === identityVersion.current && setError(errorText(err)),
     )
     return () => {
       current = false
@@ -461,9 +472,18 @@ function App() {
 
   // D91: changes Claude (or another tab) makes show at once; Claude's deletes wait for an answer.
   // D159: the investigation's thermochemistry is in the settings, so they are read again too.
-  const claudeRequests = useLive(investigation?.folder ?? null, () => {
-    reload()
-    api.settings().then(setSettings, () => undefined)
+  const claudeRequests = useLive(investigation === undefined ? undefined : investigation?.folder ?? null, async (folder) => {
+    if (identity.current !== folder) {
+      // Do not load records until their identity and remembered view have been reset together.
+      const version = identityVersion.current
+      const inv = await api.currentInvestigation()
+      if (version !== identityVersion.current) return
+      if (inv) opened(inv)
+      else closed()
+    } else {
+      reload()
+      api.settings().then(setSettings, () => undefined)
+    }
   })
 
   // D115: a scan path that came back from its cloud session becomes a node by itself.
@@ -561,19 +581,36 @@ function App() {
 
   /** fresh: the investigation was closed in between (to resolve a sync conflict), so it is
    * shown anew even if it is the one this render still has. */
-  const opened = (inv: Investigation, fresh = false) => {
-    if (inv.sync) setSync(inv.sync)
-    else if (!inv.linked) setSync(null)
-    // Opened, but the pull did not get through (FR-SYNC-04): say why.
-    const syncProblem = inv.sync && SYNC_PROBLEMS.includes(inv.sync.state) ? `Sync: ${inv.sync.message}` : null
-    // Opening the investigation already shown keeps the canvas and selection: resetting them when
-    // the answer arrives would drop whatever was clicked in the meantime.
-    if (!fresh && investigation && investigation.folder === inv.folder) {
-      setError(null)
-      setNotice(syncProblem)
-      setView('canvas')
-      return
-    }
+  const resetInvestigation = (inv: Investigation | null) => {
+    identity.current = inv?.folder ?? null
+    identityVersion.current += 1
+    setInvestigationIdentity(identity.current)
+    fetched.current += 1
+    viewFetched.current += 1
+    restored.current = null
+    lastSaved.current = null
+    setEnergyView(null)
+    setCanvasId(null)
+    setDrawerPaths([])
+    setDrawerReference(null)
+    setImportRequest(null)
+    setBatchFolder(null)
+    setRemoteFiles(null)
+    setRemoteBatch(null)
+    setEditingNode(null)
+    setIrcNode(null)
+    setRefineNode(null)
+    setSubDialog(null)
+    setBoxEnd(null)
+    setUndoing(null)
+    setOpenAnalysis(null)
+    setSharing(null)
+    setShowBases(false)
+    setShowSettings(false)
+    setShowJobs(false)
+    setShowLocalJobs(false)
+    setLinking(false)
+    setConflict(null)
     setCanvas(EMPTY_CANVAS)
     setHistory([])
     setEnergyOptions(null)
@@ -587,15 +624,38 @@ function App() {
     setDrawerKey((k) => k + 1)
     setInvestigation(inv)
     setShown((n) => n + 1)
-    setError(null)
-    setNotice(syncProblem)
     setView('canvas')
     api.settings().then(setSettings, () => undefined)
   }
 
+  const closed = () => {
+    resetInvestigation(null)
+    setSync(null)
+    setError(null)
+    setNotice(null)
+  }
+
+  const opened = (inv: Investigation, fresh = false) => {
+    if (inv.sync) setSync(inv.sync)
+    else if (!inv.linked) setSync(null)
+    // Opened, but the pull did not get through (FR-SYNC-04): say why.
+    const syncProblem = inv.sync && SYNC_PROBLEMS.includes(inv.sync.state) ? `Sync: ${inv.sync.message}` : null
+    // Opening the investigation already shown keeps the canvas and selection: resetting them when
+    // the answer arrives would drop whatever was clicked in the meantime.
+    if (!fresh && identity.current === inv.folder) {
+      setError(null)
+      setNotice(syncProblem)
+      setView('canvas')
+      return
+    }
+    resetInvestigation(inv)
+    setError(null)
+    setNotice(syncProblem)
+  }
+
   const openFailed = (folder: string) => (err: unknown) => {
     if (err instanceof ApiError && err.lock) {
-      setLockPrompt({ folder, host: err.lock.host, openedAt: err.lock.opened_at })
+      setLockPrompt({ folder, host: err.lock.host, openedAt: err.lock.opened_at, canForce: err.lock.can_force })
     } else if (err instanceof ApiError && err.syncConflict) {
       setConflict(err.syncConflict)
     } else if (err instanceof ApiError && err.needsUpgrade) {
@@ -609,14 +669,22 @@ function App() {
     setPicker(null)
     setLockPrompt(null)
     setUpgrade(null)
-    api.openInvestigation(folder, force, upgradeConfirmed).then(opened, openFailed(folder))
+    const version = identityVersion.current
+    api.openInvestigation(folder, force, upgradeConfirmed).then(
+      (inv) => version === identityVersion.current && opened(inv),
+      openFailed(folder),
+    )
   }
 
   const cloneInto = (url: string, folder: string) => {
     setCloning(null)
     setNotice(null)
     setError(null)
-    api.cloneInvestigation(url, folder).then(opened, openFailed(folder))
+    const version = identityVersion.current
+    api.cloneInvestigation(url, folder).then(
+      (inv) => version === identityVersion.current && opened(inv),
+      openFailed(folder),
+    )
   }
 
   const syncNow = () => {
@@ -641,7 +709,7 @@ function App() {
     if (!conflict) return
     const folder = conflict.folder
     // The backend closes the investigation to resolve; it is opened again afterwards.
-    if (investigation && investigation.folder === folder) setInvestigation(null)
+    if (investigation && investigation.folder === folder) closed()
     api.resolveSync(folder, keep).then(
       () => {
         setConflict(null)
@@ -656,19 +724,23 @@ function App() {
 
   const createAt = (folder: string, name: string) => {
     setPicker(null)
-    api.createInvestigation(folder, name).then(opened, (err: unknown) => setError(errorText(err)))
+    const version = identityVersion.current
+    api.createInvestigation(folder, name).then(
+      (inv) => version === identityVersion.current && opened(inv),
+      (err: unknown) => setError(errorText(err)),
+    )
   }
 
   const close = () => {
     const folder = investigation?.folder
+    const version = identityVersion.current
     api.closeInvestigation().then((status) => {
-      setInvestigation(null)
-      setSync(null)
+      if (version !== identityVersion.current && identity.current !== null) return
+      if (version === identityVersion.current) closed()
       // Closing pushes a linked investigation (FR-SYNC-05).
       if (status && folder && status.state === 'diverged') setConflict({ ...status, folder })
       else if (status && SYNC_PROBLEMS.includes(status.state)) setError(`Sync: ${status.message}`)
-      api.settings().then(setSettings, () => undefined)
-    })
+    }, (err: unknown) => setError(errorText(err)))
   }
 
   // D193: the open canvas, while its box exists; and showing a record means opening its canvas
@@ -999,9 +1071,11 @@ function App() {
           actions={
             <>
               <button onClick={() => setLockPrompt(null)}>Cancel</button>
-              <button className="danger" onClick={() => openFolder(lockPrompt.folder, true)}>
-                Open anyway
-              </button>
+              {lockPrompt.canForce !== false && (
+                <button className="danger" onClick={() => openFolder(lockPrompt.folder, true)}>
+                  Open anyway
+                </button>
+              )}
             </>
           }
         >
@@ -1010,10 +1084,14 @@ function App() {
             {lockPrompt.openedAt && <> at {new Date(lockPrompt.openedAt + 'Z').toLocaleString()}</>} and has
             not been closed.
           </p>
-          <p>
-            If it is really open there, changes from both places can damage the database, especially in a
-            synced folder. Open it anyway only if you are sure it is closed (for example after a crash).
-          </p>
+          {lockPrompt.canForce === false ? (
+            <p>Close the other Chembook3D instance before opening this investigation.</p>
+          ) : (
+            <p>
+              If it is really open there, changes from both places can damage the database, especially in a
+              synced folder. Open it anyway only if you are sure it is closed (for example after a crash).
+            </p>
+          )}
         </Modal>
       )}
       {showJobs && investigation && (

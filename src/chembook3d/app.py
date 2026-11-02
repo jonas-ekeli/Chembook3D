@@ -45,6 +45,7 @@ from chembook3d.api.sterics import router as steric_router
 from chembook3d.api.sub_investigations import router as sub_investigation_router
 from chembook3d.api.turnover import router as turnover_router
 from chembook3d.api.view_state import router as view_state_router
+from chembook3d.investigation import InvestigationError
 from chembook3d.services.imports import Staging
 from chembook3d.services.records import RecordError, RecordNotFound
 
@@ -136,6 +137,11 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     @app.exception_handler(RecordNotFound)
     def record_not_found(_request: Request, exc: RecordNotFound) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=404)
+
+    @app.exception_handler(InvestigationError)
+    async def investigation_error(_request: Request, exc: InvestigationError) -> JSONResponse:
+        # A captured notebook may begin closing before its request acquires a session lease.
+        return JSONResponse({"detail": str(exc)}, status_code=409)
 
     app.include_router(router)
     app.include_router(batch_router)

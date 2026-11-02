@@ -38,6 +38,12 @@ def calculation_warnings(
     if calculation.parse_warnings:
         missing = ", ".join(calculation.parse_warnings)
         found.append(Finding("W-PARSE", f"not read from the file: {missing}", calculation.id))
+    if calculation.type == CalculationType.FREQUENCY and calculation.result is not None:
+        # D57/D95/D160's printed-G convention requires 1 atm input. Keep the reason visible
+        # on the calculation and node even when no G value remains in the energy options.
+        issue = energies.printed_g_pressure_issue(calculation.result.pressure)
+        if issue is not None:
+            found.append(Finding(issue["code"], issue["message"], calculation.id))
     if calculation.constraints and not (on_node and continued):
         # D157: a scan or an optimization held by frozen coordinates or atoms.
         held = ", ".join(calculation.constraints)

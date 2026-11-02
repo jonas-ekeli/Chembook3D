@@ -1,10 +1,218 @@
 """D91: the change counter open tabs wait on, the reported selection, and the confirmations
 Claude needs from the user before anything is deleted (T-MCP-01…05)."""
 
+import json
+from types import SimpleNamespace
+from urllib.parse import quote
+
+import pytest
+from fastapi import HTTPException, Request
+from starlette.middleware.exceptions import ExceptionMiddleware
+
+from chembook3d.api.identity import check_investigation_identity
+from chembook3d.api.live import ChangeTracker, LiveState, SelectionIn, report_selection
+from chembook3d.api.live import live as poll_live
+from chembook3d.api.routes import _with_investigation
+from chembook3d.app import create_app
+from chembook3d.investigation import InvestigationError
 from tests.conftest import WATER
 
 ORIGIN = {"Origin": "http://127.0.0.1:8765"}
 CLAUDE = {"X-Chembook-Client": "claude"}
+
+
+@pytest.mark.parametrize("actual,expected", [(None, "A"), ("B", "A"), ("B", "")])
+def test_live_returns_immediately_for_displayed_identity_mismatch(actual, expected):
+    request = identity_request("/api/live", None, actual, method="GET")
+    request.app.state.live = LiveState()
+    coroutine = poll_live(
+        request,
+        since=0,
+        confirmations=0,
+        client="tab",
+        wait=25,
+        expected_investigation=expected,
+    )
+    with pytest.raises(StopIteration) as done:
+        coroutine.send(None)
+    assert done.value.value.investigation == actual
+    assert done.value.value.changed is False
+
+
+def test_live_notices_identity_change_while_waiting_without_an_external_change(monkeypatch):
+    request = identity_request("/api/live", None, "A", method="GET")
+    request.app.state.live = LiveState()
+
+    async def disconnected():
+        return False
+
+    async def close_during_wait(seconds):
+        request.app.state.investigation = None
+
+    monkeypatch.setattr(request, "is_disconnected", disconnected)
+    monkeypatch.setattr("chembook3d.api.live.asyncio.sleep", close_during_wait)
+    coroutine = poll_live(request, since=0, confirmations=0, client="tab", wait=25)
+    with pytest.raises(StopIteration) as done:
+        coroutine.send(None)
+    assert done.value.value.investigation is None
+    assert done.value.value.version == 0
+
+
+def identity_request(path, expected, actual, method="POST"):
+    headers = [] if expected is None else [(b"x-chembook-investigation", expected.encode())]
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            investigation=None if actual is None else SimpleNamespace(folder=actual)
+        )
+    )
+    return Request(
+        {
+            "type": "http",
+            "method": method,
+            "path": path,
+            "headers": headers,
+            "app": app,
+            "query_string": b"",
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "nodes",
+        "view-state",
+        "selection",
+        "settings",
+        "investigations/close",
+        "energies/table.csv",
+        "nodes/shared-id/xyz",
+        "source-files/shared-id/download",
+        "custom-bases/shared-id/file",
+        "turnovers/shared-id/table.csv",
+        "note-images/shared-id",
+    ],
+)
+@pytest.mark.parametrize("transport", ["header", "query"])
+def test_stale_tab_request_never_reaches_handler(path, transport):
+    """Exercise the real ASGI middleware without opening an OS event loop/socket pair."""
+    request = identity_request(f"/api/{path}", quote("A"), "B")
+    if transport == "query":
+        request.scope["headers"] = []
+        request.scope["query_string"] = b"expected_investigation=A"
+    sent = []
+
+    async def handler(scope, receive, send):
+        pytest.fail("A stale tab reached the handler for B")
+
+    async def send(message):
+        sent.append(message)
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    coroutine = ChangeTracker(handler, LiveState())(request.scope, receive, send)
+    with pytest.raises(StopIteration):
+        coroutine.send(None)
+    assert sent[0]["status"] == 409
+    assert "investigation changed" in json.loads(sent[1]["body"])["detail"]
+
+
+@pytest.mark.parametrize(
+    "expected,actual", [(None, "B"), ("", None), (quote("C:/β notebook"), "C:/β notebook")]
+)
+def test_identity_header_accepts_matching_and_legacy_clients(expected, actual):
+    check_investigation_identity(identity_request("/api/nodes", expected, actual))
+
+
+def test_identity_rechecked_after_waiting_for_a_worker():
+    request = identity_request("/api/nodes", "A", "A")
+    check_investigation_identity(request)
+    request.app.state.investigation = SimpleNamespace(folder="B")
+    with pytest.raises(HTTPException) as error:
+        check_investigation_identity(request)
+    assert error.value.status_code == 409
+
+
+def test_settings_recheck_the_captured_investigation_after_worker_dispatch():
+    request = identity_request("/api/settings", "A", "A", method="PUT")
+    check_investigation_identity(request)
+    request.app.state.investigation = SimpleNamespace(folder="B")
+    with pytest.raises(HTTPException) as error:
+        _with_investigation(request, lambda session: pytest.fail("Stale settings targeted B"))
+    assert error.value.status_code == 409
+
+
+def test_identity_can_validate_the_captured_object_including_none():
+    request = identity_request("/api/nodes", "A", "B")
+    check_investigation_identity(request, SimpleNamespace(folder="A"))
+    with pytest.raises(HTTPException):
+        check_investigation_identity(request, None)
+
+
+def test_selection_rechecks_the_captured_investigation_after_dispatch():
+    request = identity_request("/api/selection", "A", "A", method="PUT")
+    check_investigation_identity(request)
+    request.app.state.live = LiveState()
+    request.app.state.investigation = SimpleNamespace(folder="B")
+    with pytest.raises(HTTPException) as error:
+        report_selection(SelectionIn(nodes=["shared-id"]), request)
+    assert error.value.status_code == 409
+    assert request.app.state.live.selection is None
+
+
+def test_query_identity_decoded_once_and_header_takes_precedence():
+    request = identity_request("/api/nodes/shared/xyz", None, "C:/A%20B")
+    request.scope["query_string"] = b"expected_investigation=C%3A%2FA%2520B"
+    check_investigation_identity(request)
+    request.scope["headers"] = [(b"x-chembook-investigation", b"C%3A%2FA%2520B")]
+    request.scope["query_string"] = b"expected_investigation=wrong"
+    check_investigation_identity(Request(request.scope))
+
+
+def test_closing_session_admission_has_a_controlled_http_conflict():
+    app = create_app()
+    request = identity_request("/api/nodes", "A", "A")
+    sent = []
+
+    async def handler(scope, receive, send):
+        raise InvestigationError("the investigation is closing or closed; open it again")
+
+    async def send(message):
+        sent.append(message)
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    middleware = ExceptionMiddleware(handler, handlers=app.exception_handlers)
+    coroutine = middleware(request.scope, receive, send)
+    with pytest.raises(StopIteration):
+        coroutine.send(None)
+    assert sent[0]["status"] == 409
+    assert "closing or closed" in json.loads(sent[1]["body"])["detail"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["live", "presence", "investigation", "folders", "investigations/open", "investigations/clone"],
+)
+def test_stale_tab_can_discover_or_explicitly_open_identity(path):
+    request = identity_request(f"/api/{path}", "A", "B")
+    reached = []
+
+    async def handler(scope, receive, send):
+        reached.append(scope["path"])
+
+    async def send(message):
+        pass
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    coroutine = ChangeTracker(handler, LiveState())(request.scope, receive, send)
+    with pytest.raises(StopIteration):
+        coroutine.send(None)
+    assert reached == [f"/api/{path}"]
 
 
 def live(test_client, **params):
