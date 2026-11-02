@@ -166,6 +166,7 @@ export function EnergyDrawer({
   const inInvestigation = useRef(captureInvestigation()).current
   const [result, setResult] = useState<{
     key: string
+    request: string
     profiles?: Profiles
     table?: EnergyTable
     error?: string
@@ -335,9 +336,12 @@ export function EnergyDrawer({
     Promise.all([api.profiles(request), api.energyTable(request)]).then(
       ([p, t]) => {
         if (!current) return
-        setResult({ key: resultKey, profiles: p, table: t })
+        setResult({ key: resultKey, request: requestKey, profiles: p, table: t })
+        // As before #179: a fetch that succeeds clears an earlier drawer error (a failed
+        // save, export or "Continue with"), so it does not stay on screen for good.
+        setError(null)
       },
-      (err: unknown) => current && setResult({ key: resultKey, error: errorText(err) }),
+      (err: unknown) => current && setResult({ key: resultKey, request: requestKey, error: errorText(err) }),
     )
     return () => {
       current = false
@@ -534,10 +538,16 @@ export function EnergyDrawer({
     )
   }
 
-  // Shown only while there is something to show; a stale result is never drawn.
-  const shownResult = request && result?.key === resultKey ? result : null
+  // A result for another request (type, level, reference, pathways, BSSE) is never drawn.
+  // While the same request is only being fetched again after a record changed (refreshKey),
+  // the last result stays up rather than flashing "Loading…" on every edit; exports wait for
+  // the refreshed numbers (INV-5).
+  const shownResult = request && result?.request === requestKey ? result : null
+  const fresh = shownResult !== null && result?.key === resultKey
   const shownProfiles = shownResult?.profiles ?? null
   const shownTable = shownResult?.table ?? null
+  const exportProfiles = fresh ? shownProfiles : null
+  const exportTable = fresh ? shownTable : null
 
   // D190: which saved profile the drawer shows, and its New, Rename, Duplicate and Delete.
   const profilePicker = (
@@ -595,7 +605,7 @@ export function EnergyDrawer({
   const dark = useTheme() === 'dark' // D185: on screen only; the saved figure stays light
   // D181: the saved figure is drawn afresh in the style alone, without the screen's text scale,
   // zoom or pointer marks.
-  const figure = () => shownProfiles && figureOf({ data: shownProfiles, colours, names, settings, shifts, chosen })
+  const figure = () => exportProfiles && figureOf({ data: exportProfiles, colours, names, settings, shifts, chosen })
 
   const exportSvg = () => {
     const svg = figure()
@@ -608,7 +618,7 @@ export function EnergyDrawer({
   }
 
   const exportCsv = () => {
-    if (!request || !shownTable) return
+    if (!request || !exportTable) return
     const key = resultKey
     api.energyTableCsv(request).then(
       (blob) => {
@@ -726,11 +736,11 @@ export function EnergyDrawer({
             {
               label: 'Profile as PNG',
               onSelect: exportPng,
-              disabled: !shownProfiles,
+              disabled: !exportProfiles,
               title: 'At the size and resolution of the profile style (Style…)',
             },
-            { label: 'Profile as SVG', onSelect: exportSvg, disabled: !shownProfiles },
-            { label: 'Table as CSV', onSelect: exportCsv, disabled: !shownTable, title: csvTitle(type) },
+            { label: 'Profile as SVG', onSelect: exportSvg, disabled: !exportProfiles },
+            { label: 'Table as CSV', onSelect: exportCsv, disabled: !exportTable, title: csvTitle(type) },
           ]}
         >
           <Icon name="download" />

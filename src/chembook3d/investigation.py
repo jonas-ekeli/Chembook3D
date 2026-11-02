@@ -8,6 +8,7 @@ Nothing inside refers to the folder's absolute location, so it can be zipped, mo
 synced between Windows and Linux (FR-INV-03, NFR-PORT-01).
 """
 
+import errno
 import json
 import logging
 import os
@@ -52,9 +53,9 @@ class InvestigationLocked(InvestigationError):
 
     def __init__(self, lock: dict, *, can_force: bool = True):
         self.lock = {**lock, "can_force": can_force}
-        message = (
-            f"investigation is open on {lock.get('host', '?')} since {lock.get('opened_at', '?')}"
-        )
+        message = f"investigation is open on {lock.get('host', '?')}"
+        if lock.get("opened_at"):
+            message += f" since {lock['opened_at']}"
         if not can_force:
             message += ". Close the other app instance before opening it here."
         super().__init__(message)
@@ -258,6 +259,16 @@ def active_ownership(folder: Path) -> InvestigationOwnership | None:
     return owner if owner is not None and owner.database_open else None
 
 
+# What a non-blocking lock attempt raises when another process holds the lock: flock gives
+# EWOULDBLOCK/EAGAIN, Windows' msvcrt.locking EACCES (EDEADLOCK after retrying). Anything else
+# means the filesystem does not support locking.
+_HELD_ERRNOS = {errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES, getattr(errno, "EDEADLOCK", -1)}
+
+
+def _lock_is_held(exc: OSError) -> bool:
+    return exc.errno in _HELD_ERRNOS
+
+
 def acquire_ownership(
     folder: Path, force: bool = False, *, existing: bool = True
 ) -> InvestigationOwnership:
@@ -281,10 +292,16 @@ def acquire_ownership(
 
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
-            raise InvestigationLocked(
-                _read_lock(folder) or {"host": "another process"},
-                can_force=False,
-            ) from exc
+            if not _lock_is_held(exc):
+                # The folder's filesystem cannot lock files (some network, FUSE or VM shared
+                # folders). Fall back to the lock file alone (P22), which "Open anyway" can
+                # override, rather than refusing the investigation for good.
+                log.warning("cannot lock %s (%s); relying on the lock file only", folder, exc)
+            else:
+                raise InvestigationLocked(
+                    _read_lock(folder) or {"host": "another Chembook3D app on this computer"},
+                    can_force=False,
+                ) from exc
         lock = _read_lock(folder)
         if lock and not force and not _lock_is_stale(lock):
             raise InvestigationLocked(lock)

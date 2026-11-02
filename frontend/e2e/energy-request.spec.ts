@@ -160,3 +160,66 @@ test('a CSV failure keeps the matching scientific result and figure exports avai
     await forgetView(page.request, demo)
   }
 })
+
+async function changeElsewhere(page: Page) {
+  // A change made outside this tab (as Claude's are) refreshes the same energy request.
+  const canvas = await (await page.request.get('/api/canvas')).json()
+  const node = canvas.nodes.find((n: { label: string }) => n.label === 'T-S0')
+  const changed = await page.request.patch(`/api/nodes/${node.id}`, { data: { notes: `${node.notes} ` } })
+  expect(changed.ok()).toBe(true)
+  return () => page.request.patch(`/api/nodes/${node.id}`, { data: { notes: node.notes } })
+}
+
+test('a refresh of the same request keeps the result up and holds exports until it arrives', async ({ page }) => {
+  const gate = deferred()
+  let pending = 0
+  let undo: (() => Promise<unknown>) | undefined
+  try {
+    const { drawer } = await openProfile(page)
+    await page.route(/\/api\/energies\/(profile|table)$/, async (route) => {
+      const response = await route.fetch()
+      pending += 1
+      await gate.promise
+      await route.fulfill({ response })
+    })
+    undo = await changeElsewhere(page)
+    await expect.poll(() => pending).toBe(2)
+    // No "Loading…" flash on every edit: the last numbers for this request stay drawn.
+    await expect(drawer.getByRole('img', { name: 'Energy profile' })).toBeVisible()
+    await expect(drawer.getByRole('status')).toHaveCount(0)
+    await exportsUnavailable(page)
+    gate.resolve()
+    await drawer.getByRole('button', { name: 'Export ▾' }).click()
+    await expect(page.getByRole('menuitem', { name: 'Profile as SVG' })).toBeEnabled()
+    await expect(page.getByRole('menuitem', { name: 'Table as CSV' })).toBeEnabled()
+    await page.keyboard.press('Escape')
+  } finally {
+    gate.resolve()
+    await page.unrouteAll({ behavior: 'wait' })
+    await undo?.()
+    await forgetView(page.request, demo)
+  }
+})
+
+test('a drawer error clears once the energies are fetched again successfully', async ({ page }) => {
+  let undo: (() => Promise<unknown>) | undefined
+  try {
+    const { drawer } = await openProfile(page)
+    await page.route('**/api/energy-profiles', (route) =>
+      route.request().method() === 'POST'
+        ? route.fulfill({ status: 500, json: { detail: 'Profile not made' } })
+        : route.continue(),
+    )
+    await drawer.getByRole('button', { name: 'New', exact: true }).click()
+    await expect(drawer.getByRole('alert')).toContainText('Profile not made')
+    await page.unroute('**/api/energy-profiles')
+    const refetched = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/energies/table')
+    undo = await changeElsewhere(page)
+    await refetched
+    await expect(drawer.getByRole('alert')).toHaveCount(0)
+  } finally {
+    await page.unrouteAll({ behavior: 'wait' })
+    await undo?.()
+    await forgetView(page.request, demo)
+  }
+})
