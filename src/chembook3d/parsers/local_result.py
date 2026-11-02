@@ -19,6 +19,11 @@ D218: a relaxed scan's result is read as Gaussian's relaxed scan is: every struc
 point it belongs to, each point's last structure converged when its optimization was, the
 scanned coordinate (`scan B(1,2)`, D157), and the node's structure the highest top of the
 converged points (else the middle one), as an xTB scan's (D112).
+
+D219: a 2D grid scan is read the same way, with `scan_grid` (the two coordinates' names, units
+and values, and each point's cell), its constraint `grid scan B(1,2) × B(3,4)` (not a `scan`
+one, so it is never shown on an edge as a path, D200) and the node's structure the lowest
+converged point.
 """
 
 import json
@@ -116,6 +121,12 @@ def frequency_step(data: dict, final: list[Atom], index: int) -> ParsedStep:
     return step
 
 
+def _linspace(start: float, end: float, count: int) -> list[float]:
+    if count < 2:
+        return [float(start)]
+    return [start + (end - start) * k / (count - 1) for k in range(count)]
+
+
 def _scan(data: dict, geometries: list[list[Atom]], energies: list) -> ParsedFile:
     from chembook3d.parsers.xtb import representative
 
@@ -144,15 +155,41 @@ def _scan(data: dict, geometries: list[list[Atom]], energies: list) -> ParsedFil
         scan="relaxed",
         scan_coordinates=[atoms for atoms, _ in scanned],
     )
+    grid = bool(scan.get("grid"))
     if finals:
-        top = finals[representative([step.geometry_energies[i] for i in finals])]
-        step.node_geometry = top
-        step.scf_energy = step.geometry_energies[top]
+        energies_at = [step.geometry_energies[i] for i in finals]
+        if grid:
+            known = [n for n, e in enumerate(energies_at) if e is not None]
+            chosen = min(known, key=lambda n: energies_at[n]) if known else 0
+        else:
+            chosen = representative(energies_at)
+        step.node_geometry = finals[chosen]
+        step.scf_energy = step.geometry_energies[finals[chosen]]
+    names = [coordinate_name([str(a) for a in atoms], letter) for atoms, letter in scanned]
+    if grid:
+        units = {"distance": "Å", "angle": "°", "dihedral": "°"}
+        step.scan_grid = {
+            "coordinates": [
+                {
+                    "name": name,
+                    "unit": units[c["kind"]],
+                    "values": [
+                        round(float(v), 6)
+                        for v in _linspace(c["start"], c["end"], int(c["points"]))
+                    ],
+                }
+                for name, c in zip(names, scan["coordinates"], strict=True)
+            ],
+            "cells": [list(p.get("cell") or [0, 0]) for p in points],
+        }
     state = data.get("state")
     step.optimization_converged = state == "converged"
     step.termination = "normal" if state in ("converged", "not_converged") else "abnormal"
-    for atoms, letter in scanned:
-        add_constraint(step, f"scan {coordinate_name([str(a) for a in atoms], letter)}")
+    if grid:
+        add_constraint(step, f"grid scan {' × '.join(names)}")
+    else:
+        for name in names:
+            add_constraint(step, f"scan {name}")
     for description in constraints_of(data.get("constraints")):
         add_constraint(step, description)
     step.missing = [] if step.scf_energy is not None else ["total energy"]

@@ -400,7 +400,7 @@ def scans_of(parsed: ParsedFile, name: str, path: str, file_key: str) -> list[Sc
     """The scans in a parsed file: its steps that scan through at least two points."""
     found: list[Scan] = []
     for step in parsed.steps:
-        if not step.scan:
+        if not step.scan or step.scan_grid:  # D219: a 2D grid is not a path
             continue
         points, left_out, restarted = _points(step)
         if len(points) < 2:

@@ -351,6 +351,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-LOC-07 | Settings, Local calculations installs g-xTB on request (the Grimme group's build, pinned and checked by SHA-256); once installed, Refine geometry offers it as a method, imported at the level "xTB g-xTB" with the build's version. | D216 | after 5 |
 | FR-LOC-08 | A GFN2-xTB or g-xTB TS search starts from a Hessian at its own level and, once converged, ends with frequencies at that level, imported as a frequency calculation on the result (on by default, optional for a minimum); a DFT or ONIOM search's GFN2-xTB check shows its imaginary mode in Local jobs. | D217 | after 5 |
 | FR-LOC-09 | Refine geometry runs a relaxed scan with any local method: one to four coordinates driven together from their start to their end over the same points, each point optimized from the one before; it is imported as a scan node of its own beside the start node. | D218 | after 5 |
+| FR-LOC-10 | With GFN2-xTB or g-xTB, a relaxed scan can be a 2D grid of two coordinates; it is imported as a node whose step movie shows the energy surface, each cell showing its point. | D219 | after 5 |
 
 **AC:** install the tools in Settings; on a node without calculations choose Refine geometry…, GFN2-xTB, Start; close the tab and open the app again later: the job ran on, its result is the node's optimization at "tblite GFN2-xTB" with a step movie, and the node's geometry is the result.
 

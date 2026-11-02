@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type LocalJob, type LocalTools, type Node } from '../api'
 import { formatAtomList, measure, parseAtomList, parseXyz } from '../chem'
 import {
+  GRID_METHODS,
   MAX_SCAN_COORDINATES,
   heldBefore,
   readConstraints,
@@ -71,6 +72,7 @@ export function RefineDialog({
   const [scanning, setScanning] = useState(false)
   const [scanRows, setScanRows] = useState<ScanRow[]>([{ atoms: '', start: '', end: '' }])
   const [scanPoints, setScanPoints] = useState('10')
+  const [gridChoice, setGridChoice] = useState(false) // D219: a 2D grid of two coordinates
   const atoms = useMemo(() => (node.xyz ? parseXyz(node.xyz) : []), [node.xyz])
 
   useEffect(() => {
@@ -109,7 +111,9 @@ export function RefineDialog({
     Number.isInteger(chargeValue) && charge.trim() !== '' && Number.isInteger(multiplicityValue) && multiplicityValue >= 1
 
   const constraints = readConstraints(frozen, held, atoms.length)
-  const scanRead = scanning ? readScan(scanRows, scanPoints, atoms) : null
+  const gridOffered = GRID_METHODS.has(method)
+  const grid = scanning && gridOffered && gridChoice
+  const scanRead = scanning ? readScan(scanRows, scanPoints, atoms, grid) : null
   const reactingRead = useMemo((): { atoms: number[] | null } | { error: string } => {
     if (!transition || !reacting.trim()) return { atoms: null }
     const found = parseAtomList(reacting)
@@ -317,10 +321,34 @@ export function RefineDialog({
             />
             Relaxed scan instead of one optimization
           </label>
+          {scanning && gridOffered && (
+            <label className="check">
+              <input
+                type="checkbox"
+                aria-label="2D grid"
+                checked={gridChoice}
+                onChange={(event) => {
+                  setGridChoice(event.target.checked)
+                  if (event.target.checked)
+                    setScanRows((rows) =>
+                      [...rows, { atoms: '', start: '', end: '' }]
+                        .slice(0, 2)
+                        .map((r) => ({ ...r, points: r.points ?? '10' })),
+                    )
+                }}
+              />
+              2D grid: every pair of two coordinates’ values
+            </label>
+          )}
           {scanning && (
             <>
               {scanRows.map((row, n) => (
-                <div key={n} className="refine-scan-row" role="group" aria-label={`Scanned coordinate ${n + 1}`}>
+                <div
+                  key={n}
+                  className={grid ? 'refine-scan-row is-grid' : 'refine-scan-row'}
+                  role="group"
+                  aria-label={`Scanned coordinate ${n + 1}`}
+                >
                   <label className="field">
                     <span>Atoms (2 to 4)</span>
                     <input
@@ -353,10 +381,24 @@ export function RefineDialog({
                       }
                     />
                   </label>
+                  {grid && (
+                    <label className="field">
+                      <span>Points</span>
+                      <input
+                        aria-label="Grid points"
+                        type="number"
+                        min={2}
+                        value={row.points ?? ''}
+                        onChange={(event) =>
+                          setScanRows(scanRows.map((r, k) => (k === n ? { ...r, points: event.target.value } : r)))
+                        }
+                      />
+                    </label>
+                  )}
                   <button
                     className="small"
                     aria-label="Remove this scanned coordinate"
-                    disabled={scanRows.length === 1}
+                    disabled={scanRows.length === 1 || grid}
                     onClick={() => setScanRows(scanRows.filter((_, k) => k !== n))}
                   >
                     ✕
@@ -364,30 +406,36 @@ export function RefineDialog({
                 </div>
               ))}
               <div className="refine-scan-points">
-                <button
-                  className="small"
-                  disabled={scanRows.length >= MAX_SCAN_COORDINATES}
-                  onClick={() => setScanRows([...scanRows, { atoms: '', start: '', end: '' }])}
-                >
-                  Scan another coordinate with it
-                </button>
-                <label className="field">
-                  <span>Points</span>
-                  <input
-                    aria-label="Scan points"
-                    type="number"
-                    min={2}
-                    value={scanPoints}
-                    onChange={(event) => setScanPoints(event.target.value)}
-                  />
-                </label>
+                {!grid && (
+                  <button
+                    className="small"
+                    disabled={scanRows.length >= MAX_SCAN_COORDINATES}
+                    onClick={() => setScanRows([...scanRows, { atoms: '', start: '', end: '' }])}
+                  >
+                    Scan another coordinate with it
+                  </button>
+                )}
+                {!grid && (
+                  <label className="field">
+                    <span>Points</span>
+                    <input
+                      aria-label="Scan points"
+                      type="number"
+                      min={2}
+                      value={scanPoints}
+                      onChange={(event) => setScanPoints(event.target.value)}
+                    />
+                  </label>
+                )}
               </div>
               <p className="muted small">
-                Each point is an optimization with the scanned coordinates held, started from the point before. Several
-                coordinates step together (a concerted scan). Å for distances, degrees for angles and dihedrals; an empty
-                From starts at the current value.
-                {chosenEstimate && Number(scanPoints) > 1
-                  ? ` Up to about ${duration(chosenEstimate.seconds * Number(scanPoints))} in all.`
+                Each point is an optimization with the scanned coordinates held, started from the point before.{' '}
+                {grid
+                  ? 'The grid runs row by row, every other row backwards, so each point starts beside the last; it shows as an energy surface.'
+                  : 'Several coordinates step together (a concerted scan).'}{' '}
+                Å for distances, degrees for angles and dihedrals; an empty From starts at the current value.
+                {chosenEstimate && scanRead && 'value' in scanRead
+                  ? ` Up to about ${duration(chosenEstimate.seconds * scanRead.value.points)} in all.`
                   : ''}
               </p>
               {scanRead && 'error' in scanRead && (

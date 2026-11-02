@@ -13,6 +13,7 @@ import {
   type Trim,
 } from '../api'
 import { OpenScanEditor } from '../scanEditor'
+import { SurfaceMap } from './SurfaceMap'
 import { errorText, hartree, ranges } from '../util'
 
 export type Movie = { frames: string[]; index: number }
@@ -124,6 +125,18 @@ export function StepMovie({
   }, [calcId])
 
   const shown = useMemo(() => visible(steps, convergedOnly, showRemoved), [steps, convergedOnly, showRemoved])
+  // D219: a 2D grid scan's points: the frame that stands for each (its converged structure,
+  // else its last), whether it converged, and its energy.
+  const gridPoints = useMemo(() => {
+    const grid = steps?.grid
+    if (!steps || !grid) return null
+    return grid.cells.map((_, k) => {
+      const frames = steps.frames.map((frame, n) => ({ frame, n })).filter(({ frame }) => frame.point === k + 1)
+      const done = frames.filter(({ frame }) => frame.converged).at(-1)
+      const chosen = done ?? frames.at(-1)
+      return { n: chosen?.n ?? null, converged: Boolean(done), energy: done ? done.frame.energy : null }
+    })
+  }, [steps])
   // Every structure of an xTB scan is a converged point: nothing to filter (A58).
   const filterable = steps !== null && steps.scan !== null && steps.frames.some((frame) => !frame.converged)
   const stages = steps ? new Set(steps.frames.map((frame) => frame.stage).filter((s) => s !== null)).size : 0
@@ -175,6 +188,18 @@ export function StepMovie({
   const last = [...shown].reverse().find(({ frame }) => frame.energy !== null && !frame.removed)?.frame.energy ?? null
   const unit = settings?.energy_unit ?? 'kcal/mol'
   const pointOf = (n: number) => steps?.frames[n]?.point ?? n + 1
+  const pickPoint = (point: number) => {
+    const frame = gridPoints?.[point - 1]?.n
+    if (frame === null || frame === undefined || !steps) return
+    setPlaying(false)
+    const position = shown.findIndex(({ n }) => n === frame)
+    if (position >= 0) {
+      setIndex(position)
+      return
+    }
+    setConvergedOnly(false)
+    setIndex(Math.max(0, visible(steps, false, showRemoved).findIndex(({ n }) => n === frame)))
+  }
   const step = (by: number) => {
     setPlaying(false)
     setIndex((at + by + count) % count)
@@ -374,7 +399,7 @@ export function StepMovie({
               </>
             )}
             <span className="muted small">{steps.in_place ? 'changes this node' : 'makes a derived node'}</span>
-            {openScanEditor && steps.scan && (
+            {openScanEditor && steps.scan && !steps.grid && (
               <>
                 {' '}
                 <button
@@ -401,6 +426,16 @@ export function StepMovie({
               onChange={change}
               onUse={use}
               onClear={() => setSelection(null)}
+            />
+          )}
+          {steps.grid && gridPoints && (
+            <SurfaceMap
+              grid={steps.grid}
+              energies={gridPoints.map((p) => p.energy)}
+              converged={gridPoints.map((p) => p.converged)}
+              current={current?.point ?? null}
+              settings={settings}
+              onPick={pickPoint}
             />
           )}
           <EnergyChart

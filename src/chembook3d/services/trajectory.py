@@ -90,6 +90,7 @@ class Steps:
     points: int  # how many scan points the file reached; 0 outside a scan
     frames: list[Frame]
     trim: Trim | None = None  # D117: a scan path's kept points; None for any other calculation
+    grid: dict[str, Any] | None = None  # D219: a 2D grid scan's coordinates and cells
 
 
 @lru_cache(maxsize=32)  # the canvas reads every scan path shown on an edge (D121)
@@ -160,7 +161,7 @@ def read_steps(folder: Path, calculation: Calculation) -> Steps:
 
     frames = frames_of(step, calculation.geometry)
     points = {f.point for f in frames if f.point is not None}
-    steps = Steps(scan=step.scan, points=len(points), frames=frames)
+    steps = Steps(scan=step.scan, points=len(points), frames=frames, grid=step.scan_grid)
     if is_scan_path(calculation):
         steps.trim = trim_of(frames, calculation.removed_points or [], calculation.geometry)
     return steps

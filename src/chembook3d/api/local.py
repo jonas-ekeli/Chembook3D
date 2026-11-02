@@ -124,14 +124,20 @@ class ScanCoordinateIn(BaseModel):
     atoms: list[int] = Field(description="2, 3 or 4 atoms, counted from 0")
     start: float = Field(description="Å for a distance, degrees for an angle or dihedral")
     end: float
+    points: int | None = Field(None, description="grid only: this coordinate's points")
 
 
 class ScanIn(BaseModel):
     coordinates: list[ScanCoordinateIn] = Field(
         description="1 to 4 coordinates, driven together (concerted): at point k each is at "
-        "its k-th value from start to end"
+        "its k-th value from start to end; a grid has exactly two"
     )
-    points: int = Field(ge=2, le=local_jobs.MAX_SCAN_POINTS)
+    points: int | None = Field(None, ge=2, le=local_jobs.MAX_SCAN_POINTS)
+    grid: bool = Field(
+        False,
+        description="D219: every pair of the two coordinates' values (gfn2 and gxtb only), "
+        "each with its own points",
+    )
 
 
 class RefineIn(BaseModel):

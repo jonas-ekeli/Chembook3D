@@ -11,7 +11,7 @@ import {
   type StericValues,
 } from '../api'
 import { formatAtomList, fragment, parseAtomList, parseXyz } from '../chem'
-import { STERIC_PALETTES, StericColourSetting, type StericColours } from '../display'
+import { STERIC_PALETTES, StericColourSetting, ramp, type StericColours } from '../display'
 import { download, downloadBlob, errorText, fileName } from '../util'
 import { Modal } from './Modal'
 import { Viewer3D } from './Viewer3D'
@@ -65,18 +65,6 @@ export function StericColourSelect({ bare = false }: { bare?: boolean }) {
   )
 }
 
-function hex(colour: string): [number, number, number] {
-  return [1, 3, 5].map((i) => Number.parseInt(colour.slice(i, i + 2), 16)) as [number, number, number]
-}
-
-function ramp(stops: string[], t: number): [number, number, number] {
-  const clamped = Math.min(1, Math.max(0, t))
-  const position = clamped * (stops.length - 1)
-  const i = Math.min(stops.length - 2, Math.floor(position))
-  const f = position - i
-  const [a, b] = [hex(stops[i]), hex(stops[i + 1])]
-  return [0, 1, 2].map((k) => Math.round(a[k] + (b[k] - a[k]) * f)) as [number, number, number]
-}
 
 // ---------- the map ----------
 

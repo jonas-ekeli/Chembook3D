@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from chembook3d.models import Branch, InvestigationInfo, Node, NodeKind, utcnow
 
 log = logging.getLogger(__name__)
+_MIGRATIONS = RLock()  # one Alembic upgrade at a time in this process
 
 DB_NAME = "investigation.sqlite"
 FILES_DIR = "files"
@@ -431,7 +432,9 @@ def _migrate(engine: Engine, db_path: Path, allow_upgrade: bool = True) -> str |
         connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
         connection.commit()
         try:
-            with connection.begin():
+            # Alembic keeps its running context in module globals, so two migrations at once
+            # (two investigations opened by different requests) break each other; one at a time.
+            with _MIGRATIONS, connection.begin():
                 command.upgrade(_alembic_config(connection), "head")
                 broken = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
                 if broken:

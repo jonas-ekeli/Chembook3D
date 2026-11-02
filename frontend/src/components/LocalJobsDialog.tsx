@@ -156,7 +156,10 @@ export function LocalJobsDialog({
                           {job.cores} core{job.cores === 1 ? '' : 's'} · {created(job)}
                           {job.constraints && ' · with constraints'}
                           {job.transition && ' · TS search'}
-                          {job.scan && ` · scan of ${job.scan.coordinates.length} coordinate${job.scan.coordinates.length === 1 ? '' : 's'}, ${job.scan.points} points`}
+                          {job.scan &&
+                            (job.scan.grid
+                              ? ` · 2D grid scan, ${job.scan.points} points`
+                              : ` · scan of ${job.scan.coordinates.length} coordinate${job.scan.coordinates.length === 1 ? '' : 's'}, ${job.scan.points} points`)}
                         </div>
                       </td>
                       <td>
