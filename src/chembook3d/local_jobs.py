@@ -84,6 +84,11 @@ TIMING = {
 TIMING_ATOMS, TIMING_CORES = 70, 4
 # CHEMBOOK3D_LOCAL_STUB=1 only (tests)
 TEST_METHODS = {"stub": "stub", "oniom-stub": "ONIOM(stub:stub-low)", "stub-saddle": "stub-saddle"}
+# D217: methods cheap enough for a numerical Hessian at the job's own level, so a TS search with
+# one starts from its own Hessian and ends with frequencies at that level (on by default for a
+# TS search, offered for a minimum); DFT and ONIOM keep the GFN2-xTB check instead.
+FREQUENCY_METHODS = {"gfn2", "gxtb", "stub", "stub-saddle"}
+OWN_HESSIAN = {"gfn2", "gxtb", "stub-saddle"}
 
 _records = threading.Lock()
 # The workers this app started: kept so Python never warns that one is still running, and
@@ -203,6 +208,16 @@ def update_job(folder: Path, job_id: str, **fields: Any) -> dict[str, Any]:
         return data
 
 
+def _xyz(result: dict[str, Any]) -> str:
+    """The job's final structure as XYZ text (Å)."""
+    elements = result.get("elements") or []
+    rows = [
+        f"{e} {x:.6f} {y:.6f} {z:.6f}"
+        for e, (x, y, z) in zip(elements, result.get("coordinates") or [], strict=True)
+    ]
+    return "\n".join([str(len(rows)), "final structure", *rows]) + "\n"
+
+
 def _new_id(folder: Path, name: str) -> str:
     base = f"{datetime.now():%Y-%m-%d}-{slug(name)}"
     candidate, n = base, 2
@@ -235,6 +250,7 @@ def create_job(
     core: list[int] | None = None,
     transition: bool = False,
     reacting: list[int] | None = None,
+    frequencies: bool | None = None,
 ) -> dict[str, Any]:
     if method not in methods():
         raise LocalJobError(f"Unknown method {method!r}; offered: {', '.join(methods())}")
@@ -285,12 +301,19 @@ def create_job(
             job["gxtb"] = str(local_tools.gxtb_binary())
             job["gxtb_version"] = local_tools.gxtb_status().get("version")
         if transition:
-            # D215: a TS search, started from a GFN2-xTB Hessian (the tests' stand-in for it).
+            # D215: a TS search, started from a GFN2-xTB Hessian (the tests' stand-in for it);
+            # D217: a g-xTB one from a g-xTB Hessian.
             job["transition"] = True
-            job["ts_hessian"] = {"stub-saddle": "stub-saddle"}.get(
-                method, "stub-low" if method in TEST_METHODS else "gfn2"
+            job["ts_hessian"] = (
+                method
+                if method in OWN_HESSIAN
+                else ("stub-low" if method in TEST_METHODS else "gfn2")
             )
             job["reacting"] = sorted(set(reacting)) if reacting else None
+        if frequencies is None:
+            frequencies = transition
+        if frequencies and method in FREQUENCY_METHODS:
+            job["frequencies"] = True  # D217: same-level frequencies at the result
         if method in TEST_METHODS and os.environ.get("CHEMBOOK3D_LOCAL_STUB_DELAY"):
             job["stub_delay_s"] = float(os.environ["CHEMBOOK3D_LOCAL_STUB_DELAY"])
         _write(path / JOB_JSON, job)
@@ -434,6 +457,16 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
                 "ts_check",
             )
         }
+        found = result.get("frequencies")
+        if found:  # D217: what the frequency step will show, without its modes
+            wavenumbers = found.get("wavenumbers") or []
+            out["result"]["frequencies"] = {
+                "level": found.get("level"),
+                "imaginary": [f for f in wavenumbers if f < 0],
+                "count": len(wavenumbers),
+            }
+        if (result.get("ts_check") or {}).get("end", {}).get("mode"):
+            out["result"]["final_xyz"] = _xyz(result)  # D217: to animate the checked mode
     out["importable"] = status in ("converged", "not_converged") and not job.get("imported")
     return out
 

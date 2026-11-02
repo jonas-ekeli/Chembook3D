@@ -1,5 +1,6 @@
 """Transition state search on this computer (D215, FR-LOC-06, T-LOC-10..12): a starting
-Hessian, geomeTRIC's TS mode, and the check of the final imaginary mode.
+Hessian, geomeTRIC's TS mode, and the check of the final imaginary mode; frequencies at the
+result (D217, FR-LOC-08, T-LOC-16, T-LOC-17).
 
 The search runs with the stand-in engine `stub-saddle` (a bond in a double well, so there is a
 saddle point to find); the real GFN2-xTB one only with CHEMBOOK3D_REAL_TOOLS=1.
@@ -60,7 +61,8 @@ def test_moving_atoms_of_a_mode():
 @pytest.mark.usefixtures("stub_tools")
 def test_ts_search_finds_the_saddle_and_checks_its_mode(open_client):
     """T-LOC-11: a TS search climbs to the barrier top; the result has the starting and final
-    checks, and is imported as a TS optimization."""
+    checks, and is imported as a TS optimization. T-LOC-16, D217: with its frequencies at the
+    same level, imported as a frequency calculation that gives G_qh."""
     node_id = open_client.post("/api/nodes", json={"label": "w", "xyz": WATER}).json()["id"]
     job = open_client.post(
         "/api/local/jobs",
@@ -81,9 +83,51 @@ def test_ts_search_finds_the_saddle_and_checks_its_mode(open_client):
     r0 = np.linalg.norm(start[1] - start[0])
     assert np.linalg.norm(final[1] - final[0]) == pytest.approx(1.05 * r0, abs=2e-3)
 
+    # D217: frequencies at the search's own level, from the same final Hessian as the check
+    assert done["result"]["frequencies"]["level"] == "stub-saddle"
+    assert len(done["result"]["frequencies"]["imaginary"]) == 1
+    assert len(result["frequencies"]["wavenumbers"]) == 3 * 3 - 6
+    assert len(check["end"]["mode"]) == 3 and "mode" not in check["start"]
+    assert done["result"]["final_xyz"].startswith("3\n")
+
     assert open_client.post(f"/api/local/jobs/{job['id']}/import").status_code == 200
     calcs = open_client.get(f"/api/nodes/{node_id}/calculations").json()
-    assert "ts" in json.dumps(calcs[0]).lower()
+    assert "ts" in json.dumps(calcs).lower()
+    frequency = next(c for c in calcs if c["type"] == "frequency")
+    assert frequency["result"]["imaginary_count"] == 1, frequency
+    modes = open_client.get(f"/api/calculations/{frequency['id']}/modes").json()
+    assert len(modes["modes"]) == 3 and len(modes["modes"][0]) == 3
+    levels = open_client.get("/api/energies/options").json()["levels"]
+    key = next(o["key"] for o in levels if "stub-saddle" in o["label"])
+    g_qh = open_client.get(f"/api/energies/view?level={key}&type=G_qh").json()
+    value = g_qh["values"][node_id]  # computed from the stored frequencies (D56)
+    assert value["value"] is not None and value["details"]["imaginary_excluded"] == 1
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_frequencies_after_a_minimum_on_request(open_client):
+    """T-LOC-17: frequencies true adds them after a minimum; a TS search can turn them off;
+    DFT keeps its GFN2-xTB check and no frequencies."""
+    node_id = open_client.post("/api/nodes", json={"label": "w", "xyz": WATER}).json()["id"]
+    plain = open_client.post("/api/local/jobs", json={"node_id": node_id, "method": "stub"})
+    asked = open_client.post(
+        "/api/local/jobs", json={"node_id": node_id, "method": "stub", "frequencies": True}
+    )
+    off = open_client.post(
+        "/api/local/jobs",
+        json={
+            "node_id": node_id,
+            "method": "stub-saddle",
+            "transition": True,
+            "frequencies": False,
+        },
+    )
+    for job, expected in ((plain, False), (asked, True), (off, False)):
+        done = wait_for(open_client, job.json()["id"], finished, timeout=120)
+        assert done["status"] == "converged"
+        assert ("frequencies" in done["result"]) is expected
+    found = wait_for(open_client, asked.json()["id"], finished)["result"]["frequencies"]
+    assert found["imaginary"] == [] and found["count"] == 3
 
 
 @pytest.mark.usefixtures("stub_tools")

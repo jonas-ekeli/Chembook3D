@@ -5481,6 +5481,9 @@ table.scan-path-held input.drive-value {
 .refine-core-view .viewer {
   height: 280px;
 }
+.local-job-mode .viewer {
+  height: 260px; /* D217: a TS check's imaginary mode */
+}
 .refine-core-seeds {
   display: grid;
   grid-template-columns: 1fr auto;
