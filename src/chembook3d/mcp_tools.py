@@ -996,11 +996,25 @@ TOOLS: list[ToolSpec] = [
         "tools the user installed in Settings (Local calculations), in a process of its own "
         "that goes on when the app is closed. Methods: gfn2 (GFN2-xTB with tblite, minutes), "
         "b97-3c and r2scan-3c (the whole molecule with Psi4, hours for a 70-atom complex: "
-        "say so and ask before starting one). Charge and "
+        "say so and ask before starting one), oniom (D214: r2SCAN-3c on a core around the "
+        "metal or chosen atoms, GFN2-xTB on the rest, H link atoms on the cut bonds; "
+        "several times faster than r2scan-3c; check the core with check_local_core first and "
+        "pass it as core). Charge and "
         "multiplicity default to the node's. Optional constraints (atoms from 0) hold atoms "
         "frozen, or distances, angles and dihedrals at their current value or at a target. "
         "The app imports the result onto the node when it finishes. It uses the computer's "
         "cores for minutes to hours, so only start one the user asked for.",
+    ),
+    T(
+        "check_local_core",
+        "read",
+        "POST",
+        "/api/local/core",
+        "The DFT core of an oniom refine (D214) of a node: suggested from its metal atoms, or "
+        "from seed atoms (a reaction's atoms in a metal-free molecule), or checked as given; "
+        "with the H link atoms on the bonds it cuts, errors (a cut bond to a metal or a "
+        "hydrogen, an electron count that cannot have the multiplicity), warnings and the "
+        "time estimate. Atoms are counted from 0. Changes nothing.",
     ),
     T(
         "cancel_local_job",

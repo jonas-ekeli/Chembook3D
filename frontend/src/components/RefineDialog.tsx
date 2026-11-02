@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type LocalJob, type LocalTools, type Node } from '../api'
 import { measure, parseAtomList, parseXyz } from '../chem'
 import { heldBefore, readConstraints, type Held } from '../localJobs'
 import { Modal } from './Modal'
+import { RefineCore, type CoreChoice } from './RefineCore'
 import { errorText } from '../util'
 
 /** What each method is for (D213); the server says which are offered. */
@@ -10,6 +11,9 @@ const HELP: Record<string, string> = {
   gfn2: 'A quick clean-up before a DFT optimization on the cluster.',
   'b97-3c': 'The whole molecule at DFT quality, its steric pocket included.',
   'r2scan-3c': 'A little better than B97-3c, at about 1.4 times its cost.',
+  oniom:
+    'r2SCAN-3c on the metal and the atoms around it, GFN2-xTB on the rest: the core at DFT quality in a fraction of the time.',
+  'oniom-stub': 'A layered stand-in for tests.',
   stub: 'A stand-in for tests.',
 }
 
@@ -46,10 +50,23 @@ export function RefineDialog({
   const [prefilled, setPrefilled] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [core, setCore] = useState<CoreChoice | null>(null)
+  const chooseCore = useCallback((choice: CoreChoice) => setCore(choice), [])
   const atoms = useMemo(() => (node.xyz ? parseXyz(node.xyz) : []), [node.xyz])
 
   useEffect(() => {
-    api.localTools(node.atom_count).then(setTools, (err: unknown) => setError(errorText(err)))
+    api.localTools(node.atom_count).then(
+      (found) => {
+        setTools(found)
+        // A143: a structure with a metal starts on Quick DFT (ONIOM), the rest on GFN2-xTB.
+        if (found.methods.some((m) => m.value === 'oniom'))
+          api.localCore({ node_id: node.id }).then(
+            (core) => core.core.length && setMethod((m) => (m === 'gfn2' ? 'oniom' : m)),
+            () => undefined,
+          )
+      },
+      (err: unknown) => setError(errorText(err)),
+    )
     // D165: a node with a constrained optimization offers what it held.
     api.calculations(node.id).then(
       (calcs) => {
@@ -71,8 +88,12 @@ export function RefineDialog({
 
   const constraints = readConstraints(frozen, held, atoms.length)
 
-  const ready = Boolean(tools?.installed) && node.atom_count > 0
   const chosen = tools?.methods.find((m) => m.value === method)
+  const layered = Boolean(chosen?.layered)
+  const ready = Boolean(tools?.installed) && node.atom_count > 0 && (!layered || Boolean(core?.usable))
+  // D214: a layered method's time depends on its core.
+  const estimateOf = (m: LocalTools['methods'][number]) => (m.layered && core?.check ? core.check.estimate : m.estimate)
+  const chosenEstimate = chosen ? estimateOf(chosen) : null
 
   const start = () => {
     if ('error' in constraints) return
@@ -85,6 +106,7 @@ export function RefineDialog({
         charge: chargeValue,
         multiplicity: multiplicityValue,
         constraints: constraints.value,
+        core: layered ? core?.atoms : null,
       })
       .then(
         (job) => {
@@ -139,17 +161,17 @@ export function RefineDialog({
         <label className="field">
           <span>Method</span>
           <select aria-label="Method" value={method} onChange={(event) => setMethod(event.target.value)}>
-            {(tools?.methods ?? [{ value: 'gfn2', label: 'GFN2-xTB', estimate: null }]).map((m) => (
+            {(tools?.methods ?? [{ value: 'gfn2', label: 'GFN2-xTB', layered: false, estimate: null }]).map((m) => (
               <option key={m.value} value={m.value}>
-                {m.estimate ? `${m.label} · about ${duration(m.estimate.seconds)}` : m.label}
+                {estimateOf(m) ? `${m.label} · about ${duration(estimateOf(m)!.seconds)}` : m.label}
               </option>
             ))}
           </select>
           <small className="muted" aria-label="Method help">
             {HELP[method]}
-            {chosen?.estimate &&
-              ` About ${chosen.estimate.steps} steps of ${duration(chosen.estimate.seconds_per_step)} for ${node.atom_count} atoms` +
-                (chosen.estimate.measured ? ', as measured on this computer.' : ' (a first guess until a job has run here).')}
+            {chosenEstimate &&
+              ` About ${chosenEstimate.steps} steps of ${duration(chosenEstimate.seconds_per_step)} for ${node.atom_count} atoms` +
+                (chosenEstimate.measured ? ', as measured on this computer.' : ' (a first guess until a job has run here).')}
           </small>
         </label>
         <div className="field-pair">
@@ -168,6 +190,16 @@ export function RefineDialog({
             />
           </label>
         </div>
+        {layered && node.xyz && (
+          <RefineCore
+            nodeId={node.id}
+            xyz={node.xyz}
+            count={atoms.length}
+            charge={stateValid ? chargeValue : null}
+            multiplicity={stateValid ? multiplicityValue : null}
+            onChange={chooseCore}
+          />
+        )}
         <fieldset className="refine-constraints">
           <legend>Constraints</legend>
           {prefilled && <p className="muted small">An earlier optimization on this node held {prefilled}.</p>}

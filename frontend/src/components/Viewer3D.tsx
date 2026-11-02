@@ -301,7 +301,11 @@ export function Viewer3D({
     marks?.labels.forEach(({ index, text, colour, highlight }) => {
       const center = at(index)
       if (!center) return
-      if (highlight) v.addSphere({ center, radius: 0.5, color: colour ?? PICK_COLOURS[0], alpha: 0.6 })
+      // A halo a little larger than the atom's ball: a hydrogen's is small, a metal's or a
+      // halogen's as large as the old fixed halo.
+      const radius = atoms[index]?.element === 'H' ? 0.45 : 0.62
+      if (highlight) v.addSphere({ center, radius, color: colour ?? PICK_COLOURS[0], alpha: 0.6 })
+      if (!text) return // a highlight only
       v.addLabel(text, {
         position: center,
         fontSize: 10,

@@ -38,13 +38,14 @@ def _refused(exc: local_jobs.LocalJobError) -> HTTPException:
     return HTTPException(422, str(exc))
 
 
-def _status(request: Request, atoms: int | None = None) -> dict[str, Any]:
+def _status(request: Request, atoms: int | None = None, model: int | None = None) -> dict[str, Any]:
     out = local_tools.status(installer(request))
     out["methods"] = [
         {
             "value": key,
             "label": label,
-            "estimate": local_jobs.estimate(key, atoms, out["cores"]) if atoms else None,
+            "layered": key in local_jobs.LAYERED,
+            "estimate": local_jobs.estimate(key, atoms, out["cores"], model) if atoms else None,
         }
         for key, label in local_jobs.methods().items()
     ]
@@ -52,11 +53,13 @@ def _status(request: Request, atoms: int | None = None) -> dict[str, Any]:
 
 
 @router.get("/tools")
-def tools_status(request: Request, atoms: int | None = None) -> dict[str, Any]:
+def tools_status(
+    request: Request, atoms: int | None = None, model: int | None = None
+) -> dict[str, Any]:
     """Whether the tools are installed, their versions, an install under way, the cores and
     memory a job may use, and the methods a refine offers, each with a time estimate for a
-    structure of `atoms` atoms."""
-    return _status(request, atoms)
+    structure of `atoms` atoms (an ONIOM one for a DFT core and link atoms of `model`)."""
+    return _status(request, atoms, model)
 
 
 @router.post("/tools/install")
@@ -105,6 +108,11 @@ class RefineIn(BaseModel):
     charge: int | None = Field(None, description="Default: the node's charge, else 0")
     multiplicity: int | None = Field(None, ge=1, description="Default: the node's, else 1")
     constraints: ConstraintsIn | None = None
+    core: list[int] | None = Field(
+        None,
+        description="oniom only: the atoms (from 0) treated with r2SCAN-3c; default the "
+        "suggested core (check_local_core)",
+    )
     name: str | None = None
 
 
@@ -127,6 +135,57 @@ def _check_atoms(constraints: ConstraintsIn | None, count: int) -> dict[str, Any
     return out
 
 
+def _check_core(core: list[int] | None, count: int) -> list[int] | None:
+    if core is not None and any(a < 0 or a >= count for a in core):
+        raise HTTPException(422, f"Core atoms are counted from 0 to {count - 1}")
+    return core
+
+
+class CoreIn(BaseModel):
+    node_id: str
+    core: list[int] | None = Field(None, description="Atoms from 0; None: suggest one")
+    seeds: list[int] | None = Field(
+        None,
+        description="Atoms from 0 to grow a suggestion from (e.g. a reaction's atoms); "
+        "None: every metal atom",
+    )
+    charge: int | None = Field(None, description="Default: the node's charge, else 0")
+    multiplicity: int | None = Field(None, ge=1, description="Default: the node's, else 1")
+
+
+@router.post("/core")
+def check_core(body: CoreIn, request: Request, session: DbSession) -> dict[str, Any]:
+    """D214: the DFT core of an ONIOM refine, suggested (from the metals, or from seed atoms)
+    or as given, with the H link atoms on the bonds it cuts, its size, what is wrong with it,
+    and the time a refine with it would take. Changes nothing."""
+    _investigation(request)
+    node = get(session, Node, body.node_id, "Node")
+    atoms = node_service.atoms_of(node)
+    count = len(atoms)
+    for name, given in (("core", body.core), ("seeds", body.seeds)):
+        if given is not None and any(a < 0 or a >= count for a in given):
+            raise HTTPException(422, f"The {name} atoms are counted from 0 to {count - 1}")
+    suggested = body.core is None
+    core = local_jobs.suggest_core(atoms, body.seeds) if suggested else body.core
+    found = local_jobs.check_core(
+        atoms,
+        core or [],
+        body.charge if body.charge is not None else (node.charge or 0),
+        body.multiplicity if body.multiplicity is not None else (node.multiplicity or 1),
+    )
+    cores = local_tools.resources().cores
+    return {
+        "core": found.atoms,
+        "links": [{"inner": a, "outer": b, "g": g} for a, b, g in found.links],
+        "suggested": suggested,
+        "atoms": count,
+        "model_size": found.model_size,
+        "warnings": found.warnings,
+        "errors": found.errors,
+        "estimate": local_jobs.estimate("oniom", count, cores, found.model_size),
+    }
+
+
 @router.post("/jobs")
 def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[str, Any]:
     """Start a geometry refinement of a node on this computer; the result is imported onto the
@@ -144,6 +203,7 @@ def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[s
             body.multiplicity if body.multiplicity is not None else (node.multiplicity or 1),
             _check_atoms(body.constraints, count),
             body.name,
+            _check_core(body.core, count),
         )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc
