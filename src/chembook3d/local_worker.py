@@ -681,6 +681,8 @@ def run(folder: Path, lock: Path | None) -> int:
                     geometric.optimize.run_optimizer(**options)
                 except geometric.errors.GeomOptNotConvergedError:
                     done = False
+                finally:
+                    _close_geometric_logs()
                 points.append(
                     {
                         "values": [round(v, 6) for v in value],
@@ -753,6 +755,19 @@ def _redirect_geometric_log(log) -> None:
         lg.handlers = [handler]
         lg.setLevel(logging.INFO)
         lg.propagate = False
+
+
+def _close_geometric_logs() -> None:
+    """D218: close the log files geomeTRIC's run opened, so the next point's run can back its
+    log up (Windows cannot rename a file that is still open)."""
+    import logging
+
+    for name in ("", "geometric", "geometric.nifty"):
+        lg = logging.getLogger(name)
+        for handler in list(lg.handlers):
+            if isinstance(handler, logging.FileHandler):
+                handler.close()
+                lg.removeHandler(handler)
 
 
 def main(argv: list[str] | None = None) -> int:
