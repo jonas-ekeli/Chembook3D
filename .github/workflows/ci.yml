@@ -138,7 +138,7 @@ jobs:
       - run: uv run python -m chembook3d.local_tools install-gxtb
         env:
           CHEMBOOK3D_TOOLS_DIR: ${{ runner.temp }}/chembook3d-tools
-      - run: uv run pytest -W error tests/test_local_jobs.py tests/test_local_oniom.py tests/test_local_ts.py tests/test_local_gxtb.py
+      - run: uv run pytest -W error tests/test_local_jobs.py tests/test_local_oniom.py tests/test_local_ts.py tests/test_local_gxtb.py tests/test_local_scan.py
         env:
           CHEMBOOK3D_TOOLS_DIR: ${{ runner.temp }}/chembook3d-tools
           CHEMBOOK3D_REAL_TOOLS: "1"

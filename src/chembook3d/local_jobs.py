@@ -147,6 +147,8 @@ def calibrate(result: dict[str, Any], job: dict[str, Any]) -> None:
     method = job.get("method")
     if not cycles or not elapsed or method not in METHODS or cycles < 3:
         return
+    if job.get("transition") or job.get("frequencies"):
+        return  # its time includes Hessians (D215, D217), not only steps
     atoms = len(job.get("elements") or [])
     if job.get("oniom"):
         atoms = len(job["oniom"]["core"]) + len(job["oniom"]["links"])
@@ -251,6 +253,7 @@ def create_job(
     transition: bool = False,
     reacting: list[int] | None = None,
     frequencies: bool | None = None,
+    scan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if method not in methods():
         raise LocalJobError(f"Unknown method {method!r}; offered: {', '.join(methods())}")
@@ -261,6 +264,11 @@ def create_job(
         raise LocalJobError("The multiplicity is at least 1")
     if local_tools.worker_python() is None:
         raise LocalJobError("Install the local tools first (Settings, Local calculations)")
+    if scan is not None:
+        if transition:
+            raise LocalJobError("A scan cannot also be a transition state search")
+        scan = check_scan(scan, len(atoms), constraints)
+        frequencies = False
     level = methods()[method]
     layers = None
     if method in LAYERED:
@@ -275,7 +283,9 @@ def create_job(
         level = f"{level}, {len(found.atoms)}-atom core"
     resources = local_tools.resources()
     with _records:
-        default = f"{node.label} {METHODS.get(method, method)}" + (" TS" if transition else "")
+        default = f"{node.label} {METHODS.get(method, method)}" + (
+            " TS" if transition else " scan" if scan else ""
+        )
         job_id = _new_id(folder, name or default)
         path = jobs_dir(folder) / job_id
         path.mkdir(parents=True)
@@ -314,12 +324,75 @@ def create_job(
             frequencies = transition
         if frequencies and method in FREQUENCY_METHODS:
             job["frequencies"] = True  # D217: same-level frequencies at the result
+        if scan:
+            job["scan"] = scan  # D218: a relaxed scan, imported as a node of its own
         if method in TEST_METHODS and os.environ.get("CHEMBOOK3D_LOCAL_STUB_DELAY"):
             job["stub_delay_s"] = float(os.environ["CHEMBOOK3D_LOCAL_STUB_DELAY"])
         _write(path / JOB_JSON, job)
         shutil.copyfile(WORKER_SOURCE, path / WORKER)
     _spawn(path)
     return job_status(folder, job_id)
+
+
+SCAN_KINDS = {"distance": 2, "angle": 3, "dihedral": 4}
+SCAN_LETTERS = {"distance": "B", "angle": "A", "dihedral": "D"}
+SCAN_OFFSET = 280.0  # px: a scan's node goes this far right of the node it started from
+
+
+def scan_name(scan: dict[str, Any]) -> str:
+    """D218: the scanned coordinates as the parsers name them, e.g. B(1,2) or B(1,2)+B(3,4)."""
+    return "+".join(
+        f"{SCAN_LETTERS[c['kind']]}({','.join(str(int(a) + 1) for a in c['atoms'])})"
+        for c in scan["coordinates"]
+    )
+
+
+MAX_SCAN_POINTS = 100
+MAX_SCAN_COORDINATES = 4
+
+
+def check_scan(
+    scan: dict[str, Any], count: int, constraints: dict[str, Any] | None
+) -> dict[str, Any]:
+    """D218: a relaxed scan's coordinates (atoms from 0) with their start and end values (Å or
+    degrees), driven together over its number of points, checked."""
+    points = int(scan.get("points") or 0)
+    if not 2 <= points <= MAX_SCAN_POINTS:
+        raise LocalJobError(f"A scan has 2 to {MAX_SCAN_POINTS} points")
+    coordinates = scan.get("coordinates") or []
+    if not 1 <= len(coordinates) <= MAX_SCAN_COORDINATES:
+        raise LocalJobError(f"A scan drives 1 to {MAX_SCAN_COORDINATES} coordinates")
+    checked = [_check_scanned(c, count, constraints) for c in coordinates]
+    keys = [(c["kind"], tuple(sorted(c["atoms"]))) for c in checked]
+    if len(set(keys)) != len(keys):
+        raise LocalJobError("A coordinate is scanned twice")
+    return {"coordinates": checked, "points": points}
+
+
+def _check_scanned(
+    scan: dict[str, Any], count: int, constraints: dict[str, Any] | None
+) -> dict[str, Any]:
+    kind = scan.get("kind")
+    if kind not in SCAN_KINDS:
+        raise LocalJobError("A scan drives a distance, an angle or a dihedral")
+    atoms = [int(a) for a in scan.get("atoms") or []]
+    if len(atoms) != SCAN_KINDS[kind] or len(set(atoms)) != len(atoms):
+        raise LocalJobError(f"A scanned {kind} needs {SCAN_KINDS[kind]} different atoms")
+    if not all(0 <= a < count for a in atoms):
+        raise LocalJobError(f"Scan atoms are numbered 1 to {count}")
+    start, end = float(scan["start"]), float(scan["end"])
+    if start == end:
+        raise LocalJobError("A scan's start and end differ")
+    if kind == "distance" and min(start, end) <= 0.3:
+        raise LocalJobError("A scanned distance stays above 0.3 Å")
+    if kind == "angle" and not (0 < min(start, end) and max(start, end) <= 180):
+        raise LocalJobError("A scanned angle stays between 0° and 180°")
+    for item in (constraints or {}).get(kind + "s", []):
+        if sorted(item.get("atoms", [])) == sorted(atoms):
+            raise LocalJobError(f"The scanned {kind} is also held by a constraint")
+    if set(atoms) & set((constraints or {}).get("frozen") or []) == set(atoms):
+        raise LocalJobError(f"The scanned {kind}'s atoms are all frozen")
+    return {"kind": kind, "atoms": atoms, "start": start, "end": end}
 
 
 def suggest_core(atoms: list[Any], seeds: list[int] | None = None) -> list[int]:
@@ -455,6 +528,7 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
                 "program",
                 "level",
                 "ts_check",
+                "scan",
             )
         }
         found = result.get("frequencies")
@@ -572,12 +646,29 @@ def _import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any
         update_job(folder, job_id, import_error=message)
         raise LocalJobError(message)
     path = job_dir(folder, job_id) / RESULT
-    name = f"{slug(status['node_label'], 60)}-{status['method']}-refine.json"
-    options = imports.ImportOptions(
-        target_node_id=node.id,
-        origin_path=str(path),
-        original_name=name,
-    )
+    job = read_job(folder, job_id)
+    if job.get("scan"):
+        # D218: a scan is a node of its own beside the one it started from, in its step and
+        # branch, as an imported Gaussian scan is (D200); the start node keeps its structure.
+        name = f"{slug(status['node_label'], 60)}-{status['method']}-scan.json"
+        options = imports.ImportOptions(
+            origin_path=str(path),
+            original_name=name,
+            label=f"{node.label} scan {scan_name(job['scan'])}",
+            duplicate_action="new",
+            pos_x=node.pos_x + SCAN_OFFSET,
+            pos_y=node.pos_y,
+            step_id=node.step_id,
+            branch_id=node.branch_id,
+            canvas_id=node.canvas_id,
+        )
+    else:
+        name = f"{slug(status['node_label'], 60)}-{status['method']}-refine.json"
+        options = imports.ImportOptions(
+            target_node_id=node.id,
+            origin_path=str(path),
+            original_name=name,
+        )
     staging = imports.Staging()
     try:
         device = platform.node() or "this computer"

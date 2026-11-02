@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
 import { api, type LocalJob } from '../api'
-import { localStatusText, tsCheckText } from '../localJobs'
+import { localStatusText, scanText, tsCheckText } from '../localJobs'
 import { Modal } from './Modal'
 import { errorText, withDisplacements } from '../util'
 import { Viewer3D } from './Viewer3D'
@@ -145,6 +145,7 @@ export function LocalJobsDialog({
                 const xyz = job.result?.final_xyz
                 const shown = showMode === job.id && mode && xyz ? withDisplacements(xyz, mode) : null
                 const found = job.result?.frequencies
+                const scanned = scanText(job)
                 return (
                   <Fragment key={job.id}>
                     <tr aria-label={job.id}>
@@ -155,6 +156,7 @@ export function LocalJobsDialog({
                           {job.cores} core{job.cores === 1 ? '' : 's'} · {created(job)}
                           {job.constraints && ' · with constraints'}
                           {job.transition && ' · TS search'}
+                          {job.scan && ` · scan of ${job.scan.coordinates.length} coordinate${job.scan.coordinates.length === 1 ? '' : 's'}, ${job.scan.points} points`}
                         </div>
                       </td>
                       <td>
@@ -186,6 +188,11 @@ export function LocalJobsDialog({
                             {found.level} frequencies at the result (
                             {found.imaginary.length ? `${found.imaginary.length} imaginary` : 'none imaginary'}), imported as a
                             frequency calculation.
+                          </div>
+                        )}
+                        {scanned && (
+                          <div className="small" aria-label="Scan">
+                            {scanned}
                           </div>
                         )}
                         {problem && <div className="small cloud-job-problem">{problem}</div>}
