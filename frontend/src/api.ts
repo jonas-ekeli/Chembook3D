@@ -918,6 +918,12 @@ export type LocalConstraints = {
   dihedrals?: { atoms: number[]; value: number | null }[]
 }
 
+/** D218: a relaxed scan; every coordinate goes from its start to its end over the same points. */
+export type LocalScan = {
+  coordinates: { kind: 'distance' | 'angle' | 'dihedral'; atoms: number[]; start: number; end: number }[]
+  points: number
+}
+
 /** D213: a calculation run on this computer, folder local-jobs/<id>/. */
 /** D215: the imaginary frequencies (cm⁻¹) of a Hessian, the atoms its first imaginary mode
  * moves most (from 0), and whether that mode stays on the reacting atoms. */
@@ -948,6 +954,8 @@ export type LocalJob = {
   /** D215: a transition state search, and the atoms that react */
   transition?: boolean
   reacting?: number[] | null
+  /** D218: a relaxed scan, imported as a node of its own */
+  scan?: LocalScan | null
   status:
     | 'starting'
     | 'queued'
@@ -983,6 +991,11 @@ export type LocalJob = {
     frequencies?: { level: string; imaginary: number[]; count: number } | null
     /** D217: the final structure, sent when the result's TS check has a mode to animate */
     final_xyz?: string | null
+    /** D218: a scan's points: the coordinates' values, the energy and whether it converged */
+    scan?: {
+      coordinates: LocalScan['coordinates']
+      points: { values: number[]; energy: number | null; converged: boolean }[]
+    } | null
   }
   imported?: { node_id: string; derived: boolean; calculation_ids: string[]; at: string; present?: boolean } | null
   import_error?: string | null
@@ -2714,6 +2727,7 @@ export const api = {
     transition?: boolean
     reacting?: number[] | null
     frequencies?: boolean | null
+    scan?: LocalScan | null
   }) => request<LocalJob>('POST', '/local/jobs', body),
   localCore: (body: {
     node_id: string

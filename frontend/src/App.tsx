@@ -41,7 +41,7 @@ import { CloudJobsDialog } from './components/CloudJobsDialog'
 import { useScanPathImports } from './cloudJobs'
 import { LocalJobsDialog } from './components/LocalJobsDialog'
 import { RefineDialog } from './components/RefineDialog'
-import { tsCheckText, useLocalJobs } from './localJobs'
+import { scanText, tsCheckText, useLocalJobs } from './localJobs'
 import { CanvasPane, type CanvasEnergy, type CanvasContextMenu, type CanvasTarget, type TidySides } from './components/Canvas'
 import { EnergyDrawer, type DrawerPath, type DrawerView } from './components/EnergyDrawer'
 import { downloadBlob, errorText } from './util'
@@ -503,6 +503,14 @@ function App() {
   const localImported = (job: LocalJob) => {
     reload()
     const where = job.imported?.derived ? 'a node derived from' : ''
+    if (job.scan) {
+      // D218: a scan comes in as a node of its own.
+      setNotice(
+        `The ${job.level} scan of “${job.node_label}” is done and imported as a node of its own beside it (it can be undone in History).` +
+          (scanText(job) ? ` ${scanText(job)}` : ''),
+      )
+      return
+    }
     setNotice(
       `The ${job.level} ${job.transition ? 'TS search' : 'refine'} of “${job.node_label}” is done and imported onto ${where ? `${where} ` : ''}it (it can be undone in History).` +
         (tsCheckText(job) ? ` ${tsCheckText(job)}` : ''),

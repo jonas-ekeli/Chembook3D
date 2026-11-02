@@ -144,10 +144,13 @@ class Queue:
             time.sleep(LOCK_POLL_S)
 
 
-def read_constraints(job: dict) -> str | None:
-    """geomeTRIC's constraint text from job.json's constraints (atoms counted from 0)."""
+def read_constraints(job: dict, scanned: list[tuple[str, list, float]] | None = None) -> str | None:
+    """geomeTRIC's constraint text from job.json's constraints (atoms counted from 0), with a
+    scan's coordinates held at one point's values (D218)."""
     c = job.get("constraints") or {}
     freeze, held = [], []
+    for kind, atoms, value in scanned or []:
+        held.append(f"{kind} {' '.join(str(int(i) + 1) for i in atoms)} {float(value):.6f}")
     if c.get("frozen"):
         freeze.append("xyz " + ",".join(str(i + 1) for i in c["frozen"]))
     for kind in ("distance", "angle", "dihedral"):
@@ -502,6 +505,16 @@ def versions(method: str) -> dict:
     return found
 
 
+def scan_values(scan: dict) -> list[list[float]]:
+    """D218: per point of a relaxed scan, the value of each of its coordinates (Å or degrees):
+    every coordinate goes from its start to its end in the same number of steps (concerted)."""
+    import numpy as np
+
+    n = int(scan["points"])
+    columns = [np.linspace(c["start"], c["end"], n) for c in scan["coordinates"]]
+    return [[float(column[k]) for column in columns] for k in range(n)]
+
+
 def xyz_frame(symbols, coords_ang, comment: str) -> str:
     lines = [str(len(symbols)), comment]
     lines += [
@@ -543,6 +556,8 @@ def run(folder: Path, lock: Path | None) -> int:
     energies: list[float] = []
     frames: list[list[list[float]]] = []
     last: dict = {"coords": start, "energy": None}
+    frame_points: list[int] = []  # D218: per frame, the scan point it belongs to (from 1)
+    point = {"index": 1}
     try:
         queue = Queue(lock)
         queue.wait(cancel_file.exists)
@@ -568,12 +583,18 @@ def run(folder: Path, lock: Path | None) -> int:
                 x = np.asarray(coords, float).reshape(-1, 3)
                 energy, grad = calculate(x)
                 grad = np.asarray(grad, float).reshape(-1, 3)
-                energies.append(energy)
                 ang = x * BOHR_TO_ANGSTROM
-                frames.append(ang.round(6).tolist())
+                # D218: a scan point starts on the last one's structure; it is kept once.
+                again = bool(frames) and np.allclose(ang, last["coords"], atol=1e-7)
+                if not again:
+                    energies.append(energy)
+                    frames.append(ang.round(6).tolist())
+                    frame_points.append(point["index"])
+                    with traj.open("a", encoding="utf-8") as fh:
+                        fh.write(
+                            xyz_frame(symbols, ang, f"cycle {len(energies)} energy {energy:.10f}")
+                        )
                 last["coords"], last["energy"] = ang, energy
-                with traj.open("a", encoding="utf-8") as fh:
-                    fh.write(xyz_frame(symbols, ang, f"cycle {len(energies)} energy {energy:.10f}"))
                 progress.update(
                     cycle=len(energies),
                     energy=energy,
@@ -636,11 +657,46 @@ def run(folder: Path, lock: Path | None) -> int:
             result["ts_check"]["start"].pop("mode", None)  # only the final mode is shown
             progress.update(phase=None)
         converged = True
-        try:
-            _redirect_geometric_log(log)
-            geometric.optimize.run_optimizer(**options)
-        except geometric.errors.GeomOptNotConvergedError:
-            converged = False
+        _redirect_geometric_log(log)
+        scan = job.get("scan")
+        if scan:
+            # D218: a relaxed scan, one constrained optimization per point, each started from
+            # the one before; a point that does not converge is kept and the scan goes on.
+            values = scan_values(scan)
+            points = []
+            for k, value in enumerate(values):
+                point["index"] = k + 1
+                progress.update(phase=f"Point {k + 1} of {len(values)}")
+                held = [
+                    (c["kind"], c["atoms"], v)
+                    for c, v in zip(scan["coordinates"], value, strict=True)
+                ]
+                text = read_constraints(job, held)
+                (folder / "constraints.txt").write_text(text or "", encoding="utf-8")
+                molecule.xyzs = [np.asarray(last["coords"], float).copy()]
+                options["customengine"] = Engine(molecule)
+                options["constraints"] = str(folder / "constraints.txt")
+                done = True
+                try:
+                    geometric.optimize.run_optimizer(**options)
+                except geometric.errors.GeomOptNotConvergedError:
+                    done = False
+                points.append(
+                    {
+                        "values": [round(v, 6) for v in value],
+                        "frame": len(frames) - 1,
+                        "energy": last["energy"],
+                        "converged": done,
+                    }
+                )
+                converged = converged and done
+            result["scan"] = {**scan, "points": points}
+            progress.update(phase=None)
+        else:
+            try:
+                geometric.optimize.run_optimizer(**options)
+            except geometric.errors.GeomOptNotConvergedError:
+                converged = False
         result["state"] = "converged" if converged else "not_converged"
         x1 = np.asarray(last["coords"]) / BOHR_TO_ANGSTROM
         if frequency_engine is not None and frames and converged:
@@ -670,6 +726,8 @@ def run(folder: Path, lock: Path | None) -> int:
     result["cycles"] = len(energies)
     result["energies"] = energies
     result["frames"] = frames
+    if job.get("scan"):
+        result["frame_points"] = frame_points
     result["energy"] = last["energy"]
     result["elements"] = symbols
     result["coordinates"] = np.asarray(last["coords"]).round(8).tolist()

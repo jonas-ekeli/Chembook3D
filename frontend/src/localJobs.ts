@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, type LocalConstraints, type LocalJob } from './api'
-import { parseAtomList } from './chem'
+import { api, type LocalConstraints, type LocalJob, type LocalScan } from './api'
+import { measure, parseAtomList, type Atom } from './chem'
 import { errorText } from './util'
 
 /** How often the open investigation reads its local jobs while one runs, and otherwise. */
@@ -148,6 +148,51 @@ export function readConstraints(
   }
   const any = out.frozen.length + out.distances.length + out.angles.length + out.dihedrals.length
   return { value: any ? out : null }
+}
+
+export type ScanRow = { atoms: string; start: string; end: string }
+export const MAX_SCAN_COORDINATES = 4
+export const MAX_SCAN_POINTS = 100
+const SCAN_KINDS = { 2: 'distance', 3: 'angle', 4: 'dihedral' } as const
+
+/** D218: the scan of Refine geometry as the request wants it (atoms from 0), or what is wrong
+ * with it. An empty start is the coordinate's current value in `atoms`; all coordinates step
+ * together over the same points (a concerted scan). */
+export function readScan(rows: ScanRow[], points: string, atoms: Atom[]): { value: LocalScan } | { error: string } {
+  const count = atoms.length
+  const n = Number(points)
+  if (!Number.isInteger(n) || n < 2 || n > MAX_SCAN_POINTS) return { error: `A scan has 2 to ${MAX_SCAN_POINTS} points` }
+  if (!rows.length) return { error: 'Add a coordinate to scan' }
+  const coordinates: LocalScan['coordinates'] = []
+  for (const row of rows) {
+    const read = parseAtomList(row.atoms)
+    if ('error' in read) return { error: `Scan: ${read.error}` }
+    const k = read.numbers.length
+    if (k < 2 || k > 4 || new Set(read.numbers).size !== k)
+      return { error: `Scan “${row.atoms}”: give 2, 3 or 4 different atoms` }
+    if (!read.numbers.every((a) => a >= 1 && a <= count)) return { error: `Scan atoms are numbered 1 to ${count}` }
+    const now = measure(read.numbers.map((a) => atoms[a - 1]))
+    const start = row.start.trim() === '' ? (now?.value ?? NaN) : Number(row.start)
+    const end = Number(row.end)
+    if (!Number.isFinite(start)) return { error: `Scan from “${row.start}” is not a number` }
+    if (row.end.trim() === '' || !Number.isFinite(end)) return { error: `Scan of ${row.atoms}: give the value to scan to` }
+    if (Math.abs(end - start) < 1e-6) return { error: `Scan of ${row.atoms}: the start and end are the same` }
+    coordinates.push({ kind: SCAN_KINDS[k as 2 | 3 | 4], atoms: read.numbers.map((a) => a - 1), start, end })
+  }
+  return { value: { coordinates, points: n } }
+}
+
+/** D218: a finished scan's points in a sentence: how many converged and where the energy tops. */
+export function scanText(job: LocalJob): string | null {
+  const points = job.result?.scan?.points
+  if (!points?.length) return null
+  const done = points.filter((p) => p.converged).length
+  const energies = points.map((p) => p.energy)
+  const known = energies.filter((e): e is number => e !== null)
+  const head = `${done} of ${points.length} points converged`
+  if (known.length < 2) return `${head}.`
+  const span = (Math.max(...known) - Math.min(...known)) * 627.509474
+  return `${head}; the energy spans ${span.toFixed(1)} kcal/mol.`
 }
 
 /** D215: what the check of a TS search's final structure found, in a sentence; null when the

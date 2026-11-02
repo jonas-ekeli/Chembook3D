@@ -14,6 +14,11 @@ step, a frequency calculation at the same level on the final structure, as Gauss
 does. Nothing is printed for it, so the molecular mass and rotational temperatures are worked
 out here from the structure (most abundant isotopes); the symmetry number is taken as 1 (the
 worker finds no point group), and the app computes G_qh from the frequencies (D56).
+
+D218: a relaxed scan's result is read as Gaussian's relaxed scan is: every structure with the
+point it belongs to, each point's last structure converged when its optimization was, the
+scanned coordinate (`scan B(1,2)`, D157), and the node's structure the highest top of the
+converged points (else the middle one), as an xTB scan's (D112).
 """
 
 import json
@@ -111,6 +116,52 @@ def frequency_step(data: dict, final: list[Atom], index: int) -> ParsedStep:
     return step
 
 
+def _scan(data: dict, geometries: list[list[Atom]], energies: list) -> ParsedFile:
+    from chembook3d.parsers.xtb import representative
+
+    scan = data["scan"]
+    letters = {"distance": "B", "angle": "A", "dihedral": "D"}
+    scanned = [([int(a) + 1 for a in c["atoms"]], letters[c["kind"]]) for c in scan["coordinates"]]
+    route = Route(
+        text=f"local {data.get('method', '')} relaxed scan",
+        method=data.get("level") or data.get("method"),
+        basis="",
+    )
+    route.job_type = "optimization"
+    points = scan.get("points") or []
+    finals = [
+        p["frame"] for p in points if p.get("converged") and 0 <= p["frame"] < len(geometries)
+    ]
+    step = ParsedStep(
+        index=1,
+        route=route,
+        charge=data.get("charge"),
+        multiplicity=data.get("multiplicity"),
+        geometries=geometries,
+        geometry_energies=[float(e) for e in energies][: len(geometries)],
+        geometry_points=[int(n) for n in data.get("frame_points") or []][: len(geometries)],
+        converged_geometries=finals,
+        scan="relaxed",
+        scan_coordinates=[atoms for atoms, _ in scanned],
+    )
+    if finals:
+        top = finals[representative([step.geometry_energies[i] for i in finals])]
+        step.node_geometry = top
+        step.scf_energy = step.geometry_energies[top]
+    state = data.get("state")
+    step.optimization_converged = state == "converged"
+    step.termination = "normal" if state in ("converged", "not_converged") else "abnormal"
+    for atoms, letter in scanned:
+        add_constraint(step, f"scan {coordinate_name([str(a) for a in atoms], letter)}")
+    for description in constraints_of(data.get("constraints")):
+        add_constraint(step, description)
+    step.missing = [] if step.scf_energy is not None else ["total energy"]
+    if not geometries:
+        step.missing.append("geometry")
+    version = (data.get("versions") or {}).get(str(data.get("program", "")).lower())
+    return ParsedFile(program=str(data.get("program") or "local"), version=version, steps=[step])
+
+
 def parse(text: str) -> ParsedFile:
     try:
         data = json.loads(text)
@@ -136,6 +187,8 @@ def parse(text: str) -> ParsedFile:
             ]
         ]
     state = data.get("state")
+    if data.get("scan"):
+        return _scan(data, geometries, energies)
     method = data.get("level") or data.get("method")
     route = Route(text=f"local {data.get('method', '')} optimization", method=method, basis="")
     route.job_type = "ts_optimization" if data.get("transition") else "optimization"

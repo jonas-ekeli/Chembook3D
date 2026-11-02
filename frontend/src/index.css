@@ -5463,7 +5463,8 @@ table.scan-path-held input.drive-value {
 }
 
 /* D213: Refine geometry's constraints */
-.refine-constraints {
+.refine-constraints,
+.refine-scan {
   display: grid;
   gap: 0.5rem;
 }
@@ -5495,4 +5496,19 @@ table.scan-path-held input.drive-value {
   grid-template-columns: 1fr 8rem auto;
   gap: 0.5rem;
   align-items: end;
+}
+.refine-scan-row {
+  display: grid;
+  grid-template-columns: 1fr 6rem 6rem auto; /* D218: atoms, from, to, remove */
+  gap: 0.5rem;
+  align-items: end;
+}
+.refine-scan-points {
+  display: flex;
+  gap: 0.5rem;
+  align-items: end;
+  justify-content: space-between;
+}
+.refine-scan-points .field {
+  width: 6rem;
 }

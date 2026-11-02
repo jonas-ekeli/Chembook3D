@@ -5,7 +5,7 @@ settings section does them); starting, listing, cancelling and importing jobs ar
 Every write is refused from a web page of another origin, as for cloud jobs (`api/jobs.py`).
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -119,6 +119,21 @@ class ConstraintsIn(BaseModel):
     dihedrals: list[Held] = Field(default_factory=list)
 
 
+class ScanCoordinateIn(BaseModel):
+    kind: Literal["distance", "angle", "dihedral"]
+    atoms: list[int] = Field(description="2, 3 or 4 atoms, counted from 0")
+    start: float = Field(description="Å for a distance, degrees for an angle or dihedral")
+    end: float
+
+
+class ScanIn(BaseModel):
+    coordinates: list[ScanCoordinateIn] = Field(
+        description="1 to 4 coordinates, driven together (concerted): at point k each is at "
+        "its k-th value from start to end"
+    )
+    points: int = Field(ge=2, le=local_jobs.MAX_SCAN_POINTS)
+
+
 class RefineIn(BaseModel):
     node_id: str
     method: str = Field(
@@ -144,6 +159,12 @@ class RefineIn(BaseModel):
         None,
         description="TS search: the atoms (from 0) that react; the result says whether its "
         "imaginary mode stays on them",
+    )
+    scan: ScanIn | None = Field(
+        None,
+        description="D218: a relaxed scan instead of one optimization: the coordinates are held "
+        "at each of `points` values from start to end, each point optimized from the one before; "
+        "imported as a node of its own",
     )
     frequencies: bool | None = Field(
         None,
@@ -245,6 +266,7 @@ def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[s
             body.transition,
             _check_core(body.reacting, count, "Reacting"),
             body.frequencies,
+            body.scan.model_dump() if body.scan else None,
         )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc
