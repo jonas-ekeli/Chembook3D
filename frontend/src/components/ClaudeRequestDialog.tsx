@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type ClaudeRequest } from '../api'
 import { Modal } from './Modal'
+import { errorText } from '../util'
 
 const TITLES: Record<string, string> = {
   dissolve_group: 'Claude asks to dissolve a group',
@@ -33,7 +34,7 @@ export function ClaudeRequestDialog({
       },
       (err: unknown) => {
         setBusy(false)
-        onError(err instanceof Error ? err.message : String(err))
+        onError(errorText(err))
       },
     )
   }

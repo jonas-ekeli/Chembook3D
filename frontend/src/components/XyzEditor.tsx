@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api, ApiError, type Node, type RemoteServer, type XyzLineError } from '../api'
 import { Modal } from './Modal'
+import { errorText } from '../util'
 
 /** Coordinates as xyz text (FR-NODE-03). Saving follows the identity rules in the backend:
  * in place while the node has no calculations (ID-4), otherwise a new derived node (ID-5).
@@ -42,7 +43,7 @@ export function XyzEditor({
       onSaved(result.node, result.derived)
     } catch (err) {
       if (err instanceof ApiError && err.xyzErrors) setErrors(err.xyzErrors)
-      else setMessage(String(err instanceof Error ? err.message : err))
+      else setMessage(errorText(err))
     } finally {
       setSaving(false)
     }

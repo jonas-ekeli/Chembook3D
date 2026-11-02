@@ -3,6 +3,8 @@ import { api, type AlignmentSet, type Node, type Overlay, type OverlayAlign, typ
 import { formatAtomList, parseAtomList, parseXyz } from '../chem'
 import { Modal } from './Modal'
 import { Viewer3D } from './Viewer3D'
+import { download, downloadBlob, errorText } from '../util'
+import { nodeName } from '../names'
 
 /** A31: at most this many structures, for legibility. */
 export const MAX_OVERLAY = 12
@@ -13,19 +15,7 @@ const REFERENCE_SWATCH = '#707070'
 
 const SHARED = '*' // the key of the one list that serves every structure
 
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
-const nodeName = (n: Node) => n.label || 'Untitled node'
 const rmsd = (value: number | null) => (value === null ? '—' : `${value.toFixed(3)} Å`)
-
-function save(url: string, name: string) {
-  const link = document.createElement('a')
-  link.href = url
-  link.download = name
-  link.click()
-}
 
 /** FR-3D-04, FR-3D-07, D80: 2 to 12 structures superposed on one reference, aligned on all
  * atoms, on chosen atoms, or not at all, with an optional mirror image. Atom lists can be
@@ -187,9 +177,7 @@ export function OverlayDialog({ nodes, onClose }: { nodes: Node[]; onClose: () =
   const saveXyz = () => {
     if (!overlay) return
     const text = ordered.map((s) => s.xyz.trimEnd()).join('\n') + '\n'
-    const url = URL.createObjectURL(new Blob([text], { type: 'chemical/x-xyz' }))
-    save(url, 'overlay.xyz')
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    downloadBlob(new Blob([text], { type: 'chemical/x-xyz' }), 'overlay.xyz')
   }
 
   return (
@@ -199,7 +187,7 @@ export function OverlayDialog({ nodes, onClose }: { nodes: Node[]; onClose: () =
       onClose={onClose}
       actions={
         <>
-          <button disabled={!overlay || !!picking} onClick={() => image.current && save(image.current(), 'overlay.png')}>
+          <button disabled={!overlay || !!picking} onClick={() => image.current && download(image.current(), 'overlay.png')}>
             Save image
           </button>
           <button disabled={!overlay} onClick={saveXyz} title="The structures as placed, one after another">

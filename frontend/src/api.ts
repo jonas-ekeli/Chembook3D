@@ -1970,17 +1970,32 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
     body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
     signal,
   })
-  if (!response.ok) {
-    let detail: unknown = null
-    try {
-      detail = ((await response.json()) as { detail?: unknown }).detail
-    } catch {
-      // not JSON
-    }
-    throw new ApiError(response.status, detail)
-  }
+  if (!response.ok) throw await apiError(response)
   if (response.status === 204) return undefined as T
   return (await response.json()) as T
+}
+
+/** The backend's error as an ApiError, with its JSON `detail` when it sent one. */
+async function apiError(response: Response): Promise<ApiError> {
+  let detail: unknown = null
+  try {
+    detail = ((await response.json()) as { detail?: unknown }).detail
+  } catch {
+    // not JSON
+  }
+  return new ApiError(response.status, detail)
+}
+
+/** POST `body` as JSON for a file read as a blob. A refusal throws an ApiError, carrying the
+ * backend's `detail` only with `withDetail` (the CSV exports show the bare HTTP status). */
+async function requestBlob(path: string, body: unknown, withDetail = false): Promise<{ blob: Blob; headers: Headers }> {
+  const response = await fetch(`/api${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) throw withDetail ? await apiError(response) : new ApiError(response.status, null)
+  return { blob: await response.blob(), headers: response.headers }
 }
 
 /** D91: a delete Claude asks for; the app does it only on the user's Confirm. */
@@ -2445,15 +2460,8 @@ export const api = {
   branchPathway: (branchId: string) => request<Pathway>('GET', `/branches/${branchId}/pathway`),
   profiles: (body: ProfileRequest) => request<Profiles>('POST', '/energies/profile', body),
   energyTable: (body: ProfileRequest) => request<EnergyTable>('POST', '/energies/table', body),
-  energyTableCsv: async (body: ProfileRequest): Promise<Blob> => {
-    const response = await fetch('/api/energies/table.csv', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!response.ok) throw new ApiError(response.status, null)
-    return response.blob()
-  },
+  energyTableCsv: async (body: ProfileRequest): Promise<Blob> =>
+    (await requestBlob('/energies/table.csv', body)).blob,
 
   /** D79: the investigation as one read-only HTML file, with the drawer's pathways (A30). */
   exportSnapshot: async (
@@ -2462,26 +2470,14 @@ export const api = {
     view: SharedViewState,
     profileReferenceId: string | null = null,
   ): Promise<{ blob: Blob; name: string }> => {
-    const response = await fetch('/api/snapshot', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths, reference_id: referenceId, view, profile_reference_id: profileReferenceId }),
-    })
-    if (!response.ok) {
-      let detail: unknown = null
-      try {
-        detail = ((await response.json()) as { detail?: unknown }).detail
-      } catch {
-        // not JSON
-      }
-      throw new ApiError(response.status, detail)
-    }
-    const header = response.headers.get('Content-Disposition') ?? ''
+    const { blob, headers } = await requestBlob(
+      '/snapshot',
+      { paths, reference_id: referenceId, view, profile_reference_id: profileReferenceId },
+      true,
+    )
+    const header = headers.get('Content-Disposition') ?? ''
     const encoded = /filename\*=UTF-8''([^;]+)/.exec(header)
-    return {
-      blob: await response.blob(),
-      name: encoded ? decodeURIComponent(encoded[1]) : 'investigation read-only.html',
-    }
+    return { blob, name: encoded ? decodeURIComponent(encoded[1]) : 'investigation read-only.html' }
   },
 
   modes: (calculationId: string) => request<Modes>('GET', `/calculations/${calculationId}/modes`),
@@ -2565,15 +2561,8 @@ export const api = {
     request<StericComputed[]>('POST', `/steric-profiles/${id}/compute`, { node_ids: nodeIds, maps }),
   stericDifference: (id: string, firstId: string, secondId: string) =>
     request<StericMap>('POST', `/steric-profiles/${id}/difference`, { first_id: firstId, second_id: secondId }),
-  stericTableCsv: async (id: string, nodeIds: string[]): Promise<Blob> => {
-    const response = await fetch(`/api/steric-profiles/${id}/table.csv`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ node_ids: nodeIds }),
-    })
-    if (!response.ok) throw new ApiError(response.status, null)
-    return response.blob()
-  },
+  stericTableCsv: async (id: string, nodeIds: string[]): Promise<Blob> =>
+    (await requestBlob(`/steric-profiles/${id}/table.csv`, { node_ids: nodeIds })).blob,
 }
 
 export const STATUS_LABEL: Record<string, string> = Object.fromEntries(

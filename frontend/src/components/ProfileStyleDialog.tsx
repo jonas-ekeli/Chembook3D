@@ -3,6 +3,7 @@ import type { PathShift, ProfileStyle, Profiles, Settings } from '../api'
 import { Modal } from './Modal'
 import { FONTS } from '../profileStyle'
 import { ProfileChart } from './ProfileChart'
+import { errorText } from '../util'
 
 type Choice<K extends keyof ProfileStyle> = [ProfileStyle[K], string][]
 
@@ -134,7 +135,7 @@ export function ProfileStyleDialog({
   )
 
   const save = () =>
-    onSave(style).then(onClose, (err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+    onSave(style).then(onClose, (err: unknown) => setError(errorText(err)))
 
   return (
     <Modal

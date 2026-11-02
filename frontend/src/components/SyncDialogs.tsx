@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { api, ApiError, type SyncConflict, type SyncStatus } from '../api'
+import { api, type SyncConflict, type SyncStatus } from '../api'
 import { Modal } from './Modal'
+import { errorText } from '../util'
 
 // Git sync of an investigation through a private repository (D71). The backend runs git;
 // these dialogs only ask and show what it answers.
@@ -14,10 +15,6 @@ const LABELS: Record<SyncStatus['state'], string> = {
   diverged: 'Both changed',
   unreachable: 'Offline',
   error: 'Sync failed',
-}
-
-function errorText(err: unknown): string {
-  return err instanceof ApiError || err instanceof Error ? err.message : String(err)
 }
 
 function when(iso: string | undefined): string {

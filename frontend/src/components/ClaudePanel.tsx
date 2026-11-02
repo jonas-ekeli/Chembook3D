@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, ApiError, type ClaudeStatus, type LaunchQuestion as Question } from '../api'
+import { api, type ClaudeStatus, type LaunchQuestion as Question } from '../api'
 import { browserKey, openXterm, socketUrl, type Xterm } from '../terminal'
 import { LaunchQuestion } from './LaunchQuestion'
+import { errorText } from '../util'
 
 // D92: the Claude tab of the side panel (SidePanel.tsx), a terminal running the official
 // Claude Code CLI on this computer (src/chembook3d/claude_panel.py). It stays mounted while
@@ -22,11 +23,6 @@ type Session = Xterm & {
 
 /** How often the panel looks for a cloud job's launch that waits for an answer (ms). */
 const QUESTION_POLL = 2500
-
-function errorMessage(err: unknown): string {
-  if (err instanceof ApiError && typeof err.detail === 'string') return err.detail
-  return err instanceof Error ? err.message : String(err)
-}
 
 export function ClaudePanel({
   open,
@@ -76,7 +72,7 @@ export function ClaudePanel({
         setStatusError(null)
         setStatus(next)
       },
-      (err: unknown) => setStatusError(errorMessage(err)),
+      (err: unknown) => setStatusError(errorText(err)),
     )
 
   useEffect(() => {
@@ -162,7 +158,7 @@ export function ClaudePanel({
         return true
       })
     } catch (err) {
-      setPhase({ kind: 'ended', message: errorMessage(err) })
+      setPhase({ kind: 'ended', message: errorText(err) })
       setStatus(null)
     }
   }

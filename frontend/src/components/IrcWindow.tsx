@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import {
   api,
-  ApiError,
   formatDelta,
   geometryToXyz,
   type GeometryRows,
@@ -19,6 +18,8 @@ import { ImportDialog } from './ImportDialog'
 import { Modal } from './Modal'
 import { RemoteFilesDialog } from './RemoteFilesDialog'
 import { Viewer3D } from './Viewer3D'
+import { errorText } from '../util'
+import { nodeName } from '../names'
 
 // D131: a TS node's IRC, kept apart from the node: its path in each direction and the
 // optimization and frequency job of each end point, imported, inspected and removed here. The
@@ -99,11 +100,6 @@ function ConnectionLine({
       )}
     </div>
   )
-}
-
-function errorText(err: unknown): string {
-  if (err instanceof ApiError && err.blockers) return err.blockers.join('; ')
-  return err instanceof Error ? err.message : String(err)
 }
 
 /** How a direction of an IRC ended, as the program said. */
@@ -335,7 +331,7 @@ export function IrcWindow({
         setError(null)
         setIndex((i) => Math.min(i, Math.max(found.points.length - 1, 0)))
       },
-      (err: unknown) => setError(errorText(err)),
+      (err: unknown) => setError(errorText(err, { blockers: true })),
     )
   }, [node.id])
   useEffect(load, [load])
@@ -350,7 +346,7 @@ export function IrcWindow({
         setRead({ id, frames: steps.frames.map((f) => ({ rows: f.geometry, energy: f.energy })) })
         setIndex(0)
       },
-      (err: unknown) => !cancelled && setError(errorText(err)),
+      (err: unknown) => !cancelled && setError(errorText(err, { blockers: true })),
     )
     return () => {
       cancelled = true
@@ -396,7 +392,7 @@ export function IrcWindow({
       },
       (err: unknown) => {
         setRemoving(null)
-        setError(errorText(err))
+        setError(errorText(err, { blockers: true }))
       },
     )
   }
@@ -411,7 +407,7 @@ export function IrcWindow({
       },
       (err: unknown) => {
         setMaking(null)
-        setError(errorText(err))
+        setError(errorText(err, { blockers: true }))
       },
     )
   }
@@ -432,7 +428,7 @@ export function IrcWindow({
   }
 
   const slotName = (slot: Slot) =>
-    `${slot.part === 'path' ? 'into' : `a job on the ${slot.direction} end point into`} the IRC of “${node.label || 'Untitled node'}”`
+    `${slot.part === 'path' ? 'into' : `a job on the ${slot.direction} end point into`} the IRC of “${nodeName(node)}”`
 
   if (browsing) {
     return (
@@ -544,7 +540,7 @@ export function IrcWindow({
 
   return (
     <Modal
-      title={`IRC of “${node.label || 'Untitled node'}”`}
+      title={`IRC of “${nodeName(node)}”`}
       onClose={onClose}
       wide
       actions={
@@ -627,7 +623,7 @@ export function IrcWindow({
                       <p key={same.node_id} className="small">
                         Same structure as{' '}
                         <button className="link" onClick={() => onShowNode(same.node_id)} title="Show this node on the canvas">
-                          {same.label || 'Untitled node'}
+                          {nodeName(same)}
                         </button>{' '}
                         ({same.rmsd.toFixed(3)} Å).
                       </p>

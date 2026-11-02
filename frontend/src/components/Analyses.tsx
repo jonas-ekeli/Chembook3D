@@ -29,6 +29,7 @@ import { EmptyState } from './EmptyState'
 import { Icon } from '../icons'
 import { PALETTE_KEY, useRequest, type Request } from '../commands'
 import { placed } from '../subCanvas'
+import { nodeName } from '../names'
 
 // D83: the Analyses view lists the saved selectivities (S7); each one compares outcomes
 // realised by TS nodes or groups at one level and energy type (S1–S6).
@@ -60,7 +61,7 @@ function OutcomeRow({
     const group = groups.get(id)
     if (group) return `${group.label || 'Group'} (group)`
     const node = nodes.get(id)
-    return node ? node.label || 'Untitled node' : 'a deleted node'
+    return node ? nodeName(node) : 'a deleted node'
   }
   const free = (id: string) => !outcome.members.includes(id)
   const ts = canvas.nodes.filter((n) => n.role === 'transition_state' && free(n.id))
@@ -108,7 +109,7 @@ function OutcomeRow({
             <optgroup label="Transition states">
               {ts.map((n) => (
                 <option key={n.id} value={n.id}>
-                  {placed(canvas, n.id, n.label || 'Untitled node')}
+                  {placed(canvas, n.id, nodeName(n))}
                 </option>
               ))}
             </optgroup>
@@ -126,7 +127,7 @@ function OutcomeRow({
             <optgroup label="Other nodes">
               {others.map((n) => (
                 <option key={n.id} value={n.id}>
-                  {placed(canvas, n.id, n.label || 'Untitled node')}
+                  {placed(canvas, n.id, nodeName(n))}
                 </option>
               ))}
             </optgroup>
@@ -458,7 +459,7 @@ function SelectivityEditor({
               <optgroup label="Nodes">
                 {canvas.nodes.map((n) => (
                   <option key={n.id} value={n.id}>
-                    {placed(canvas, n.id, n.label || 'Untitled node')}
+                    {placed(canvas, n.id, nodeName(n))}
                   </option>
                 ))}
               </optgroup>
@@ -756,7 +757,7 @@ function TurnoverEditor({
   }
 
   const names = new Map<string, string>([
-    ...canvas.nodes.map((n) => [n.id, n.label || 'Untitled node'] as [string, string]),
+    ...canvas.nodes.map((n) => [n.id, nodeName(n)] as [string, string]),
     ...canvas.groups.map((g) => [g.id, `${g.label || 'Group'} (group)`] as [string, string]),
   ])
   const level = energyOptions?.levels.find((l) => l.key === turnover.level)

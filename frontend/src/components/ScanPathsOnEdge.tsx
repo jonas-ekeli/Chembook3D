@@ -2,10 +2,8 @@ import { useState } from 'react'
 import { api, pathMissed, pathTop, type Canvas, type Node, type PathOnEdge, type Settings, type Transition } from '../api'
 import { StepMovie, type Movie } from './StepMovie'
 import { Viewer3D } from './Viewer3D'
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
+import { errorText } from '../util'
+import { nodeName } from '../names'
 
 const pathName = (p: { label: string }) => p.label || 'Untitled path'
 
@@ -155,7 +153,7 @@ export function PathEdgeSection({
   const [error, setError] = useState<string | null>(null)
   const name = (id: string) => {
     const n = canvas.nodes.find((x) => x.id === id)
-    if (n) return n.label || 'Untitled node'
+    if (n) return nodeName(n)
     const g = canvas.groups.find((x) => x.id === id)
     return g ? `${g.label || 'Group'} (group)` : 'deleted'
   }

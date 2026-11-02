@@ -1,19 +1,16 @@
 import { useEffect, useState } from 'react'
-import { api, type Canvas, type Node, type SubDeletePreview, type SubInvestigation, type TransitionSides } from '../api'
+import { api, type Canvas, type SubDeletePreview, type SubInvestigation, type TransitionSides } from '../api'
 import { Modal } from './Modal'
 import { Notes, TextField } from './Fields'
 import { Icon } from '../icons'
 import { useRequest, type Request } from '../commands'
 import { canvasName, canvasOf, chainOf, contentsText, isWithin, nodesInside, subName, subsOf } from '../subCanvas'
+import { errorText } from '../util'
+import { nodeName } from '../names'
 
 // D193: sub-investigations, boxes holding a canvas of their own: the box's panel, making one
 // from a selection, Move to…, the inner node an arrow drawn to a closed box ends at, and Remove.
 
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
-const nodeName = (n: Node) => n.label || 'Untitled node'
 
 /** What a list of ids stands for: nodes, groups and boxes; and the group members listed
  * without their group, which move the whole group (Q60). */

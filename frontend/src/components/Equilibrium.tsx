@@ -19,6 +19,7 @@ import { errorText, scientific } from '../util'
 import { NumberInput } from './AnalysisParts'
 import { Notes, TextField } from './Fields'
 import { Modal } from './Modal'
+import { nodeName } from '../names'
 
 // D171: a conformer equilibrium: the populations of conformers the user chose, the Eyring
 // rates of the TSs between them and the time the set takes to reach equilibrium.
@@ -424,7 +425,7 @@ function AddMembers({ canvas, members, onAdd }: { canvas: Canvas; members: Equil
           .filter((n) => n.kind === 'node')
           .map((n) => (
             <option key={n.id} value={`node:${n.id}`} disabled={have.has(n.id)}>
-              {n.label || 'Untitled node'}
+              {nodeName(n)}
             </option>
           ))}
       </optgroup>
@@ -487,7 +488,7 @@ function AddNext({
       <optgroup label="A TS node">
         {ts.map((n) => (
           <option key={n.id} value={`node:${n.id}`} disabled={taken.has(n.id)}>
-            {n.label || 'Untitled node'}
+            {nodeName(n)}
           </option>
         ))}
       </optgroup>
@@ -555,7 +556,7 @@ export function EquilibriumEditor({
   const groups = new Map(canvas.groups.map((g) => [g.id, g]))
   const describe = (id: string): [string, string] => {
     const node = nodes.get(id)
-    if (node) return [node.label || 'Untitled node', node.role === 'transition_state' ? 'TS' : 'conformer']
+    if (node) return [nodeName(node), node.role === 'transition_state' ? 'TS' : 'conformer']
     const group = groups.get(id)
     if (group) return [group.label || 'Group', 'group']
     return ['a deleted node', '']

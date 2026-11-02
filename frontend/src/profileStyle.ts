@@ -1,8 +1,9 @@
 // D106: the energy profile's style (the backend's `settings.PROFILE_PRESETS`), the colours and
 // dashes it gives each pathway, and the PNG and SVG saved in it.
 
-import type { ProfileStyle, Settings } from './api'
-import { download } from './util'
+import type { Branch, Canvas, ProfileStyle, Settings } from './api'
+import { nodeName } from './names'
+import { download, downloadBlob } from './util'
 
 /** D106: the "Screen" style, the look before profile styles; the backend's
  * `settings.PROFILE_PRESETS["screen"]`, for copies made before D106 and until settings load. */
@@ -58,6 +59,39 @@ export function pathwayColours(colours: string[], style: ProfileStyle, chosen?: 
   return colours.map((colour, i) => chosen?.[i] ?? (set ? set[i % set.length] : colour))
 }
 
+// D174: a pathway's colour is a series colour, kept in code (not a CSS token), since the saved
+// figures keep the colours set here in either theme.
+const NO_BRANCH = '#98a2b3'
+const FALLBACK = ['#2459c6', '#c4320a', '#079455', '#6938ef', '#b54708']
+
+/** The names the energy drawer shows for the nodes and groups of the canvas. */
+export function pathwayLabels(canvas: Pick<Canvas, 'nodes' | 'groups'>): Map<string, string> {
+  const found = new Map<string, string>()
+  for (const n of canvas.nodes) found.set(n.id, nodeName(n))
+  for (const g of canvas.groups) found.set(g.id, g.label || 'Group')
+  return found
+}
+
+/** A pathway's legend entry in the energy drawer and in the read-only copy's drawer (A30): the
+ * colour of the branch it was built on (`branchId`), else of the last branch it passes, else the
+ * next fallback colour by its place `at`; its name is that branch's, or "first → last". */
+export function pathwayLegend(
+  canvas: Pick<Canvas, 'nodes' | 'groups'>,
+  branches: Map<string, Branch>,
+  labels: Map<string, string>,
+  ids: string[],
+  branchId: string | null | undefined,
+  at: number,
+): { colour: string; name: string; branched: boolean } {
+  const branchOf = (id: string) =>
+    canvas.nodes.find((n) => n.id === id)?.branch_id ?? canvas.groups.find((g) => g.id === id)?.outgoing_branch_id ?? null
+  const onBranch = branchId ?? [...ids].reverse().map(branchOf).find((b) => b)
+  const colour = onBranch ? (branches.get(onBranch)?.colour ?? NO_BRANCH) : FALLBACK[at % FALLBACK.length]
+  const branch = branchId ? branches.get(branchId) : undefined
+  const name = branch ? branch.name || 'Unnamed branch' : `${labels.get(ids[0])} → ${labels.get(ids.at(-1)!)}`
+  return { colour, name, branched: Boolean(onBranch) }
+}
+
 /** D195: the colours offered first for a pathway: the colour-blind-safe set, then a few more. */
 export const PATHWAY_PRESETS = [...COLOUR_BLIND, '#2459c6', '#c4320a', '#079455', '#6938ef', '#98a2b3']
 
@@ -80,9 +114,7 @@ function figureText(svg: SVGSVGElement): string {
 }
 
 export function saveProfileSvg(svg: SVGSVGElement, name = 'energy-profile.svg') {
-  const url = URL.createObjectURL(new Blob([figureText(svg)], { type: 'image/svg+xml' }))
-  download(url, name)
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  downloadBlob(new Blob([figureText(svg)], { type: 'image/svg+xml' }), name)
 }
 
 /** The figure at the style's size times its PNG resolution, on white unless the background is

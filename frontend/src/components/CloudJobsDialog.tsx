@@ -2,10 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, type CloudJob } from '../api'
 import { statusText } from '../cloudJobs'
 import { Modal } from './Modal'
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
+import { errorText } from '../util'
 
 function created(job: CloudJob): string {
   const when = new Date(job.created)

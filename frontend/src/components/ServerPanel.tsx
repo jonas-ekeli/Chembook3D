@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, ApiError, serverFields as fields, type LoginStep, type RemoteServer, type ServerFields } from '../api'
+import { api, serverFields as fields, type LoginStep, type RemoteServer, type ServerFields } from '../api'
 import { browserKey, openXterm, socketUrl, type Xterm } from '../terminal'
+import { errorText } from '../util'
 
 // D122: a server's tab in the side panel (SidePanel.tsx). Logged out, it shows the server's
 // details and "Log in", which shows the server's own prompts (password, then the one-time
@@ -14,11 +15,6 @@ type Shell = Xterm & {
   socket: WebSocket | null
   /** The shell or the connection ended, or the pane closed it; a closing socket is expected. */
   ended: boolean
-}
-
-function errorMessage(err: unknown): string {
-  if (err instanceof ApiError && typeof err.detail === 'string') return err.detail
-  return err instanceof Error ? err.message : String(err)
 }
 
 function since(seconds: number | null): string {
@@ -151,7 +147,7 @@ export function ServerPanel({
       term.onResize(({ rows, cols }) => send({ type: 'resize', rows, cols }))
       term.attachCustomKeyEventHandler((event) => !browserKey(event, term))
     } catch (err) {
-      setEnded(errorMessage(err))
+      setEnded(errorText(err))
     }
   }
 
@@ -201,7 +197,7 @@ export function ServerPanel({
     } catch (err) {
       setStep(null)
       setAnswers([])
-      setError(errorMessage(err))
+      setError(errorText(err))
     } finally {
       setBusy(false)
     }
@@ -228,7 +224,7 @@ export function ServerPanel({
       await api.saveServers(servers.map((s) => (s.id === server.id ? edit : fields(s))))
       await onChanged()
     } catch (err) {
-      setError(errorMessage(err))
+      setError(errorText(err))
     }
   }
 
@@ -238,7 +234,7 @@ export function ServerPanel({
       await api.saveServers(servers.filter((s) => s.id !== server.id).map(fields))
       await onChanged()
     } catch (err) {
-      setError(errorMessage(err))
+      setError(errorText(err))
     }
   }
 
@@ -257,7 +253,7 @@ export function ServerPanel({
       await onChanged()
       await attach()
     } catch (err) {
-      setEnded(errorMessage(err))
+      setEnded(errorText(err))
     }
   }
 
@@ -267,7 +263,7 @@ export function ServerPanel({
       await api.remoteClaudeWrites(server.id, allow)
       await onChanged()
     } catch (err) {
-      setError(errorMessage(err))
+      setError(errorText(err))
     }
   }
 

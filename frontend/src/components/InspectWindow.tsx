@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   api,
-  ApiError,
   CALCULATION_TYPES,
   formatDelta,
   geometryToXyz,
@@ -10,7 +9,7 @@ import {
   type InspectTarget,
   type Settings,
 } from '../api'
-import { hartree, withDisplacements } from '../util'
+import { errorText, hartree, withDisplacements } from '../util'
 import { Modal } from './Modal'
 import { Convergence, EnergyChart } from './StepMovie'
 import { Viewer3D } from './Viewer3D'
@@ -31,11 +30,6 @@ const AUTO_REFRESH = 30_000 // ms (A70)
 // A step opens on its last structure, the latest of a job still running, and stays on the last
 // one as Refresh brings more until another is chosen.
 const LAST = Number.MAX_SAFE_INTEGER
-
-function errorText(err: unknown): string {
-  if (err instanceof ApiError && typeof err.detail === 'string') return err.detail
-  return err instanceof Error ? err.message : String(err)
-}
 
 function jobLabel(step: InspectStep): string {
   if (step.job_type === 'structures') return 'Structures'

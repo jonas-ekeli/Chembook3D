@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type Calculation, type Modes } from '../api'
-import { withDisplacements } from '../util'
+import { errorText, withDisplacements } from '../util'
 
 /** Pick a vibrational mode of one of the node's frequency calculations; imaginary modes are
  * listed first (FR-3D-03). */
@@ -35,7 +35,7 @@ export function Vibrations({
     setMode('')
     onChange(null)
     if (!calcId) return
-    api.modes(calcId).then(setModes, (err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+    api.modes(calcId).then(setModes, (err: unknown) => setError(errorText(err)))
     // onChange is a state setter from the parent.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calcId])

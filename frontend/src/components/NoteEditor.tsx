@@ -13,6 +13,7 @@ import {
 } from '../api'
 import { Modal } from './Modal'
 import { cleanNoteHtml } from '../notes'
+import { errorText } from '../util'
 
 const WIDTHS: { value: number; label: string }[] = [
   { value: 200, label: 'Narrow' },
@@ -150,7 +151,7 @@ export function NoteEditor({
         insertPicture(stored.id, at)
       }
     } catch (err) {
-      setError(`The picture could not be added: ${err instanceof Error ? err.message : String(err)}`)
+      setError(`The picture could not be added: ${errorText(err)}`)
     } finally {
       marker.remove()
       setUploading((n) => n - pictures.length)
@@ -236,7 +237,7 @@ export function NoteEditor({
       else await api.createNote(nodeId, fields)
       onSaved()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorText(err))
       setSaving(false)
     }
   }
@@ -247,7 +248,7 @@ export function NoteEditor({
       await api.deleteNote(note.id)
       onSaved()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorText(err))
     }
   }
 

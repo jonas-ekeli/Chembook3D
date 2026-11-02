@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { api, type CloudJob } from './api'
+import { errorText } from './util'
 
 /** D115: how often an open investigation looks on GitHub for scan paths that came back. */
 export const CHECK_EVERY = 150_000
@@ -63,7 +64,7 @@ export function useScanPathImports(
             const result = await api.importPath(job.id)
             if (!stopped) imported.current(result.label, result.node_id, result.on_edge)
           } catch (err) {
-            const message = err instanceof Error ? err.message : String(err)
+            const message = errorText(err)
             // Another tab imported it a moment ago: nothing to say.
             if (!stopped && !message.includes('imported already')) failed.current(job, message)
           }

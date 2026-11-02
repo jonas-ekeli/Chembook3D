@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type AtomMatch, type Node } from '../api'
 import { defaultRotation, parseXyz } from '../chem'
 import { describeMatch } from '../atomMatch'
-import { download, fileName } from '../util'
+import { downloadBlob, errorText, fileName } from '../util'
 import { Modal } from './Modal'
 import { Viewer3D, type AtomMarks } from './Viewer3D'
+import { nodeName } from '../names'
 
 const FORMED = '#2f9e44'
 const BROKEN = '#e03131'
@@ -15,11 +16,6 @@ const PICKED = '#ffd43b'
 
 type Numbers = 'changed' | 'heavy' | 'all'
 
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
-const nodeName = (n: Node) => n.label || 'Untitled node'
 
 /** D113: the two ends side by side, each start atom and the end atom matched to it carrying the
  * same number, bonds that form (green) or break (red) dashed, and pairs fixed by clicking one
@@ -185,9 +181,10 @@ export function AtomMatchDialog({ nodes, onClose }: { nodes: [Node, Node]; onClo
 
   const save = () => {
     if (!match) return
-    const url = URL.createObjectURL(new Blob([match.renumbered_xyz], { type: 'chemical/x-xyz' }))
-    download(url, fileName(`${nodeName(end)} numbered as ${nodeName(start)}.xyz`, 'renumbered.xyz'))
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    downloadBlob(
+      new Blob([match.renumbered_xyz], { type: 'chemical/x-xyz' }),
+      fileName(`${nodeName(end)} numbered as ${nodeName(start)}.xyz`, 'renumbered.xyz'),
+    )
   }
 
   return (

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import {
   api,
-  ApiError,
   formatDelta,
   geometryToXyz,
   type ComparedPoint,
@@ -14,7 +13,7 @@ import {
   type ScanPiece,
   type Settings,
 } from '../api'
-import { download, fileName, hartree } from '../util'
+import { downloadBlob, errorText, fileName, hartree } from '../util'
 import { FileBrowser } from './ImportDialog'
 import { RemoteFilesDialog } from './RemoteFilesDialog'
 import { Modal } from './Modal'
@@ -50,11 +49,6 @@ const COLOURS = [
 ]
 const SPEEDS = [1, 2, 5, 10, 20, 30]
 const HARTREE_KCAL = 627.5094740631
-
-function errorText(err: unknown): string {
-  if (err instanceof ApiError && typeof err.detail === 'string') return err.detail
-  return err instanceof Error ? err.message : String(err)
-}
 
 function scanName(scan: EditorScan): string {
   return scan.steps > 1 ? `${scan.file} (step ${scan.step})` : scan.file
@@ -401,9 +395,7 @@ export function ScanEditor({
 
   const save = () => {
     if (!path || path.frames.length === 0) return
-    const url = URL.createObjectURL(new Blob([path.text], { type: 'chemical/x-xyz' }))
-    download(url, savedName())
-    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    downloadBlob(new Blob([path.text], { type: 'chemical/x-xyz' }), savedName(), 10_000)
   }
 
   /** D138: the joined path written into the server terminal's directory, under the next free
