@@ -27,6 +27,13 @@ def installer(request: Request) -> local_tools.Installer:
     return found
 
 
+def gxtb_installer(request: Request) -> local_tools.Installer:
+    found = getattr(request.app.state, "gxtb_installer", None)
+    if found is None:
+        found = request.app.state.gxtb_installer = local_tools.Installer("gxtb")
+    return found
+
+
 def _open_folder(request: Request):
     investigation = getattr(request.app.state, "investigation", None)
     return investigation.folder if investigation is not None else None
@@ -40,6 +47,8 @@ def _refused(exc: local_jobs.LocalJobError) -> HTTPException:
 
 def _status(request: Request, atoms: int | None = None, model: int | None = None) -> dict[str, Any]:
     out = local_tools.status(installer(request))
+    current = gxtb_installer(request).current
+    out["gxtb"]["install"] = {"state": current.state, "step": current.step, "error": current.error}
     out["methods"] = [
         {
             "value": key,
@@ -68,6 +77,19 @@ def install_tools(request: Request) -> dict[str, Any]:
     _local_page_only(request)
     try:
         installer(request).start(busy=local_jobs.busy(_open_folder(request)))
+    except local_tools.ToolsError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _status(request)
+
+
+@router.post("/tools/gxtb")
+def install_gxtb(request: Request) -> dict[str, Any]:
+    """D216: install g-xTB (the Grimme group's pinned xtb build), optional."""
+    _local_page_only(request)
+    if not local_tools.status()["installed"]:
+        raise HTTPException(422, "Install the local tools first")
+    try:
+        gxtb_installer(request).start(busy=local_jobs.busy(_open_folder(request)))
     except local_tools.ToolsError as exc:
         raise HTTPException(422, str(exc)) from exc
     return _status(request)

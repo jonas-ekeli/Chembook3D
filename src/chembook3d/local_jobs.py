@@ -60,6 +60,7 @@ METHODS = {
     "b97-3c": "B97-3c",
     "r2scan-3c": "r2SCAN-3c",
     "oniom": "ONIOM(r2SCAN-3c:GFN2-xTB)",
+    "gxtb": "g-xTB",  # D216: offered once installed (local_tools.install_gxtb)
 }
 # D214: the methods with a DFT core, its high and low level.
 LAYERED = {"oniom": ("r2scan-3c", "gfn2"), "oniom-stub": ("stub", "stub-low")}
@@ -76,6 +77,8 @@ TIMING = {
     # ONIOM: r2SCAN-3c on the model system (core and link atoms), counted by its size; the
     # GFN2-xTB parts add seconds.
     "oniom": {"seconds": 550.0, "power": 2.7},
+    # g-xTB: a guess (not measured here) of a few times GFN2-xTB's cost, until a job has run.
+    "gxtb": {"seconds": 2.0, "power": 2.0},
     "stub": {"seconds": 1.0, "power": 0.0},
 }
 TIMING_ATOMS, TIMING_CORES = 70, 4
@@ -98,9 +101,12 @@ class JobNotFound(LocalJobError, LookupError):
 
 
 def methods() -> dict[str, str]:
+    offered = dict(METHODS)
+    if local_tools.gxtb_binary() is None:
+        offered.pop("gxtb")
     if os.environ.get("CHEMBOOK3D_LOCAL_STUB") == "1":
-        return {**METHODS, **TEST_METHODS}
-    return dict(METHODS)
+        return {**offered, **TEST_METHODS}
+    return offered
 
 
 def steps(atoms: int) -> int:
@@ -275,6 +281,9 @@ def create_job(
         }
         if layers:
             job["oniom"] = layers
+        if method == "gxtb":
+            job["gxtb"] = str(local_tools.gxtb_binary())
+            job["gxtb_version"] = local_tools.gxtb_status().get("version")
         if transition:
             # D215: a TS search, started from a GFN2-xTB Hessian (the tests' stand-in for it).
             job["transition"] = True

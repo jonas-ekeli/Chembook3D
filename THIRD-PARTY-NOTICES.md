@@ -67,6 +67,9 @@ them as separate programs:
 - [geomeTRIC](https://github.com/leeping/geomeTRIC) (BSD-3-Clause), the optimizer;
 - [dftd4](https://github.com/dftd4/dftd4), [s-dftd3](https://github.com/dftd3/simple-dftd3) and
   [gCP](https://github.com/grimme-lab/gcp) (LGPL-3.0-or-later), the corrections of the 3c methods;
+- optionally [g-xTB](https://github.com/grimme-lab/g-xtb) (GPL-3.0), the Grimme group's build of
+  xtb 6.7.1 with g-xTB, downloaded from that repository at a pinned commit and checked by SHA-256
+  (D216);
 - their dependencies, listed with exact versions in `src/chembook3d/assets/local-tools/`, among
   them OpenBLAS (BSD-3-Clause) on Linux and Intel MKL (Intel Simplified Software License) on
   Windows.

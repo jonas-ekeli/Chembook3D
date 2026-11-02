@@ -45,6 +45,7 @@ ELEMENTS = (
 # What each method is called in the level of theory of the imported calculation.
 METHOD_LABELS = {
     "gfn2": ("tblite", "GFN2-xTB"),
+    "gxtb": ("xTB", "g-xTB"),
     "b97-3c": ("Psi4", "B97-3c"),
     "r2scan-3c": ("Psi4", "r2SCAN-3c"),
     "oniom": ("Psi4", "ONIOM(r2SCAN-3c:GFN2-xTB)"),
@@ -236,6 +237,64 @@ def _gfn2(numbers, charge: int, unpaired: int):
     return gfn2
 
 
+def read_xtb_gradient(text: str, atoms: int):
+    """D216: the energy (Hartree) and gradient (Hartree/Bohr, atoms x 3) of xtb's Turbomole
+    `gradient` file: after the last `cycle` line, one line of coordinates per atom, then one
+    of gradient per atom (Fortran D exponents allowed)."""
+    import numpy as np
+
+    lines = text.splitlines()
+    starts = [i for i, line in enumerate(lines) if "cycle" in line and "energy" in line.lower()]
+    if not starts:
+        raise ValueError("no cycle in the gradient file")
+    head = lines[starts[-1]]
+    energy = float(head.lower().split("energy =")[1].split()[0].replace("D", "E"))
+    rows = lines[starts[-1] + 1 + atoms : starts[-1] + 1 + 2 * atoms]
+    grad = np.array([[float(v.replace("D", "E")) for v in row.split()[:3]] for row in rows])
+    if grad.shape != (atoms, 3):
+        raise ValueError("the gradient file is cut short")
+    return energy, grad
+
+
+def _gxtb(numbers, charge: int, unpaired: int, job: dict, folder: Path):
+    """D216: g-xTB through its xtb program (`--gxtb --grad`), one run per step in
+    `gxtb-run/`, whose restart file starts the next step's SCF."""
+    import subprocess
+
+    binary = Path(job["gxtb"])
+    run_dir = folder / "gxtb-run"
+    run_dir.mkdir(exist_ok=True)
+    symbols = [ELEMENTS[z - 1] for z in numbers]
+    env = dict(os.environ)
+    env["PATH"] = str(binary.parent) + os.pathsep + env.get("PATH", "")  # its DLLs on Windows
+    flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+
+    def gxtb(x):
+        ang = x * BOHR_TO_ANGSTROM
+        (run_dir / "coord.xyz").write_text(xyz_frame(symbols, ang, "chembook3d"), encoding="utf-8")
+        (run_dir / "gradient").unlink(missing_ok=True)
+        argv = [str(binary), "coord.xyz", "--gxtb", "--grad", "--chrg", str(charge)]
+        if unpaired:  # --uhf always makes it unrestricted, so only for open shells
+            argv += ["--uhf", str(unpaired)]
+        with (run_dir / "xtb.out").open("w", encoding="utf-8") as out:
+            done = subprocess.run(  # noqa: S603 - the pinned g-xTB program
+                argv,
+                cwd=run_dir,
+                env=env,
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                creationflags=flags,
+                check=False,
+            )
+        gradient = run_dir / "gradient"
+        if done.returncode != 0 or not gradient.is_file():
+            tail = (run_dir / "xtb.out").read_text(encoding="utf-8", errors="replace")[-600:]
+            raise RuntimeError(f"g-xTB failed (exit {done.returncode}): {tail}")
+        return read_xtb_gradient(gradient.read_text(encoding="utf-8"), len(symbols))
+
+    return gxtb
+
+
 def _psi4(method: str, numbers, charge: int, unpaired: int, job: dict, folder: Path):
     import numpy as np
 
@@ -294,6 +353,8 @@ def _engine(method: str, numbers, start, job: dict, folder: Path, delay: bool = 
         return _stub(start, 0.95, 0.05, 0.0)
     if method == "gfn2":
         return _gfn2(numbers, charge, unpaired)
+    if method == "gxtb":
+        return _gxtb(numbers, charge, unpaired, job, folder)
     if method in ("b97-3c", "r2scan-3c"):
         return _psi4(method, numbers, charge, unpaired, job, folder)
     raise ValueError(f"unknown method {method!r}")
@@ -475,6 +536,8 @@ def run(folder: Path, lock: Path | None) -> int:
         queue.wait(cancel_file.exists)
         progress.update(state="running", started_at=now())
         result["versions"] = versions(method)
+        if job.get("gxtb_version"):
+            result["versions"]["xtb"] = job["gxtb_version"]
         calculate = make_calculator(job, numbers, folder)
 
         import geometric
@@ -577,6 +640,7 @@ def run(folder: Path, lock: Path | None) -> int:
     result["finished_at"] = now()
     progress.stopped.set()
     shutil.rmtree(folder / "scratch", ignore_errors=True)  # Psi4's integrals and orbitals
+    shutil.rmtree(folder / "gxtb-run", ignore_errors=True)  # g-xTB's last run
     write_json(folder / "result.json", result)
     progress.update(state="finished")
     log.close()

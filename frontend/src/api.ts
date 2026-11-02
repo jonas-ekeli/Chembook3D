@@ -875,6 +875,14 @@ export type LocalTools = {
   default_memory_mb: number
   logical_cores: number
   total_memory_mb: number | null
+  /** D216: g-xTB, an optional install of its own */
+  gxtb: {
+    supported: boolean
+    installed: boolean
+    version: string | null
+    up_to_date: boolean
+    install: { state: 'idle' | 'running' | 'done' | 'failed'; step: string; error: string | null }
+  }
   /** the methods a refine offers: value for the request, label to show */
   methods: {
     value: string
@@ -2637,6 +2645,7 @@ export const api = {
     ),
   localTools: (atoms?: number) => request<LocalTools>('GET', `/local/tools${atoms ? `?atoms=${atoms}` : ''}`),
   installLocalTools: () => request<LocalTools>('POST', '/local/tools/install'),
+  installGxtb: () => request<LocalTools>('POST', '/local/tools/gxtb'),
   saveLocalResources: (body: { cores: number | null; memory_mb: number | null }) =>
     request<LocalTools>('PUT', '/local/tools', body),
   localJobs: () => request<LocalJob[]>('GET', '/local/jobs'),

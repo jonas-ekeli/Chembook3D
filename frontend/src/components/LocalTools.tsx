@@ -7,6 +7,45 @@ function minutes(seconds: number | null): string {
   return seconds < 90 ? `${seconds} s` : `${Math.round(seconds / 60)} min`
 }
 
+/** D216: the optional g-xTB install, once the tools are there. */
+export function GxtbControl({ tools, onTools }: { tools: LocalTools | null; onTools: (t: LocalTools) => void }) {
+  const [error, setError] = useState<string | null>(null)
+  if (!tools) return <span className="muted">…</span>
+  if (!tools.gxtb.supported) return <span className="muted">Not offered on this computer</span>
+  const running = tools.gxtb.install.state === 'running'
+  const label = !tools.gxtb.installed ? 'Install g-xTB' : tools.gxtb.up_to_date ? 'Reinstall g-xTB' : 'Update g-xTB'
+  return (
+    <div className="local-tools-install">
+      <button
+        disabled={running || !tools.installed}
+        onClick={() => {
+          setError(null)
+          api.installGxtb().then(onTools, (err: unknown) => setError(errorText(err)))
+        }}
+      >
+        {running ? 'Installing…' : label}
+      </button>
+      <div className="small" role="status" aria-label="g-xTB status">
+        {running && tools.gxtb.install.step}
+        {!running && tools.gxtb.install.state === 'failed' && (
+          <span className="cloud-job-problem">Install failed: {tools.gxtb.install.error}</span>
+        )}
+        {!running && tools.gxtb.install.state !== 'failed' &&
+          (tools.gxtb.installed
+            ? `Installed · ${tools.gxtb.version}${tools.gxtb.up_to_date ? '' : '; this version of the app has a newer one'}`
+            : tools.installed
+              ? 'Not installed'
+              : 'Install the tools first')}
+      </div>
+      {error && (
+        <div className="small cloud-job-problem" role="alert">
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function InstallControl({ tools, onTools }: { tools: LocalTools | null; onTools: (t: LocalTools) => void }) {
   const [error, setError] = useState<string | null>(null)
   if (!tools) return <span className="muted">…</span>
