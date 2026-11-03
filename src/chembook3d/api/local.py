@@ -132,7 +132,12 @@ class ScanIn(BaseModel):
         description="1 to 4 coordinates, driven together (concerted): at point k each is at "
         "its k-th value from start to end; a grid has exactly two"
     )
-    points: int | None = Field(None, ge=2, le=local_jobs.MAX_SCAN_POINTS)
+    # The range is checked by local_jobs.check_scan: 2 to 100 for a scan, while a grid's points
+    # are its coordinates' product (up to 400, D219), which the dialog sends here too.
+    points: int | None = Field(
+        None,
+        description=f"2 to {local_jobs.MAX_SCAN_POINTS}; for a grid the coordinates' own count",
+    )
     grid: bool = Field(
         False,
         description="D219: every pair of the two coordinates' values (gfn2 and gxtb only), "

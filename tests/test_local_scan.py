@@ -216,3 +216,21 @@ def test_a_grid_that_cannot_run_says_why(open_client, scan, method, words):
         "/api/local/jobs", json={"node_id": node_id, "method": method, "scan": scan}
     )
     assert refused.status_code == 422 and words in refused.json()["detail"], refused.json()
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_a_grid_of_more_than_100_points_starts(open_client):
+    """T-LOC-25, D219: a 15 x 15 grid sent as the dialog sends it (the product as its points) is
+    not held to a plain scan's 100 points."""
+    node_id = open_client.post("/api/nodes", json={"label": "w", "xyz": WATER}).json()["id"]
+    grid = {
+        "coordinates": [{**c, "points": 15} for c in GRID["coordinates"]],
+        "points": 225,
+        "grid": True,
+    }
+    started = open_client.post(
+        "/api/local/jobs", json={"node_id": node_id, "method": "stub", "scan": grid}
+    )
+    assert started.status_code == 200, started.json()
+    assert started.json()["scan"]["points"] == 225
+    assert open_client.post(f"/api/local/jobs/{started.json()['id']}/cancel").status_code == 200
