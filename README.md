@@ -1,8 +1,264 @@
 # Chembook3D
 
-A local-first notebook for computational chemistry mechanism investigations. It combines an infinite 2D reaction map, structured records for every structure and calculation, and an interactive 3D viewer.
+[![CI](https://github.com/jonas-ekeli/Chembook3D/actions/workflows/ci.yml/badge.svg)](https://github.com/jonas-ekeli/Chembook3D/actions/workflows/ci.yml)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-**Status:** all five build phases are in: investigations with nodes made by hand or imported (Gaussian, ORCA, xTB, CREST, and ioChem-BD's CML of Gaussian outputs), the reaction map canvas with branches and groups, a 3D view, energy profiles and tables with quasi-harmonic G, and a resume overview.
+A local-first notebook for computational chemistry mechanism investigations. You lay out a
+reaction mechanism on an infinite 2D canvas, attach the calculations behind each structure, look
+at every structure in 3D, and get energy profiles, tables and analyses computed straight from the
+output files, at one level of theory at a time.
+
+![The showcase investigation: Ru olefin metathesis with two catalysts on the canvas, the closed cycle's free energy profile below, and the open warnings on the right](docs/images/showcase-overview.png)
+
+<sub>The showcase investigation, built from the published calculations of Occhipinti *et al.*,
+*Chem. Sci.* 2022 (see [Data credits](#data-credits)): two Ru metathesis catalysts as two
+branches, rotamer groups, ethylene joining and leaving, and the closed cycle's ΔG_qh profile.</sub>
+
+**Contents:** [What it does](#what-it-does) ·
+[Key ideas](#key-ideas) ·
+[How it is built](#how-it-is-built) ·
+[From output file to energy](#from-output-file-to-energy) ·
+[How energies are computed](#how-energies-are-computed) ·
+[Why you can trust the numbers](#why-you-can-trust-the-numbers) ·
+[Testing](#testing) ·
+[Limits](#limits) ·
+[Install](#install-the-tools) ·
+[User guide](docs/user-guide.md) ·
+[Data credits](#data-credits)
+
+## What it does
+
+- **Keeps a mechanism study in one place.** Every structure is a card on a canvas, joined to the
+  next by a transition. Reaction steps, branches (one per catalyst or pathway), groups of
+  conformers and notes sit on the same canvas. The investigation is a normal folder you can copy,
+  back up or sync through a private GitHub repository.
+- **Reads your output files.** Gaussian, ORCA, xTB, CREST and ioChem-BD CML (Gaussian jobs).
+  Geometries, energies, frequencies and thermochemistry come from the file, never typed in, and
+  the file itself is copied into the investigation.
+- **Computes energies you can defend.** Relative energies only within one level of theory,
+  quasi-harmonic free energies validated against a reference script, and a visible warning on
+  every value that rests on something doubtful (a TS without exactly one imaginary frequency, an
+  unconverged optimization, spin contamination, and more).
+- **Analyses on top.** Energy profiles, the energetic span model (TOF, TDTS, TDI), selectivities
+  (ΔΔG‡, ee/de), conformer populations and equilibration times, buried volume and steric maps.
+- **Shows structures in 3D.** View, measure, overlay and animate (optimizations, scans, IRCs,
+  normal modes). Coordinates are edited as text or in a small builder; editing a structure that
+  already has calculations makes a new, derived node, so results stay with the geometry they
+  belong to.
+- **Records history.** Every change, by you, an import or Claude, is in an append-only history,
+  and an import can be undone.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/showcase-node-3d.png" alt="A transition state selected: its free energy relative to the reference, one imaginary frequency, the 3D structure and its coordinates"></td>
+<td width="50%"><img src="docs/images/showcase-energy-table.png" alt="The energy table: relative ΔG_qh and step barriers in kcal/mol beside absolute E, H, G and G_qh in hartree, with free species and a Check column"></td>
+</tr>
+<tr>
+<td><sub>A transition state with its relative ΔG_qh, imaginary-frequency count and 3D structure.</sub></td>
+<td><sub>The energy table states its level, energy type and standard state, and shows the absolute values behind every relative one.</sub></td>
+</tr>
+</table>
+
+## Key ideas
+
+```mermaid
+erDiagram
+    INVESTIGATION ||--o{ NODE : "contains"
+    INVESTIGATION ||--o{ REACTION_STEP : "ordered stages"
+    INVESTIGATION ||--o{ BRANCH : "pathways"
+    BRANCH ||--o{ NODE : "lineage"
+    REACTION_STEP ||--o{ NODE : "stage of"
+    GROUP ||--o{ NODE : "conformers or rotamers"
+    NODE ||--o{ TRANSITION : "from / to"
+    TRANSITION ||--o{ FREE_SPECIES : "joins or leaves"
+    NODE ||--o{ CALCULATION : "has"
+    CALCULATION }o--|| LEVEL_OF_THEORY : "at"
+    CALCULATION }o--|| SOURCE_FILE : "read from"
+```
+
+| Term | Meaning |
+|---|---|
+| **Investigation** | One study, one folder: a SQLite database plus copies of the imported output files. |
+| **Node** | One structure (a minimum or a transition state) with its geometry, charge and multiplicity. A free species (ethylene, a product) is a node that joins or leaves on a transition. |
+| **Transition** | A directed edge between two nodes: one elementary step. The step is kept separate from the reaction step it realises. |
+| **Reaction step** | A stage of the mechanism ("Ethylene complex 3"). Nodes are placed on stages; profiles follow stages in order. |
+| **Branch** | A line of descent, for example one catalyst. Each node belongs to one branch, and lineage is recorded as you work, never rebuilt from which conformer happens to be lowest. |
+| **Group** | Conformers or rotamers of one state. A representative stands for the group; populations are Boltzmann weights. |
+| **Calculation** | One job step read from a file (optimization, frequency, single point, scan, IRC), with its results. |
+| **Level of theory** | Program, method, basis, dispersion, solvation model and solvent. A single point is paired with the level its geometry was optimized at, as in *SP level // geometry level*. |
+
+## How it is built
+
+Chembook3D is a Python server and a browser interface that run on your own computer. Nothing is
+hosted, there is no account, and the server only listens on `127.0.0.1`.
+
+```mermaid
+flowchart LR
+    subgraph PC["Your computer"]
+        UI["Browser tab<br/>React + TypeScript<br/>canvas: React Flow · 3D: 3Dmol.js"]
+        API["Chembook3D server<br/>Python · FastAPI · 127.0.0.1:8765"]
+        DB[("Investigation folder<br/>investigation.sqlite<br/>files/ (copied outputs)")]
+        CP["Claude panel<br/>(optional)"]
+        MCP["chembook3d mcp<br/>notebook tools"]
+        KEEP["SSH keeper<br/>(optional)"]
+        LOC["Local jobs<br/>xTB · CREST · DFT refine<br/>(optional)"]
+    end
+    UI <-->|"REST /api + live updates"| API
+    API <-->|"SQLAlchemy + Alembic"| DB
+    CP --> MCP -->|"same HTTP API"| API
+    API --> KEEP -->|SSH| HPC["HPC cluster<br/>(e.g. Saga)"]
+    API -->|git| GH["Private GitHub repo<br/>(sync, cloud jobs)"]
+    API --> LOC
+```
+
+- **One database per investigation.** All records live in `investigation.sqlite` inside the
+  investigation folder; imported outputs are copied into `files/` with their SHA-256 checksum.
+  Paths are stored relative, so a folder moves between Windows and Linux. Opening an older
+  investigation backs up the database before upgrading its schema.
+- **All rules live in the server.** Identity, lineage and energy rules are Python services; the
+  interface only shows what the server computes. Claude, through `chembook3d mcp`, uses the same
+  HTTP API as the interface, asks before deleting anything, and its changes are marked "claude"
+  in the history.
+- **The optional parts stay optional.** Sync, the HPC terminal, the Claude panel, cloud jobs and
+  local jobs are each switched on by you, and the notebook works without any of them. See the
+  [user guide](docs/user-guide.md).
+
+Developers and coding agents: [docs/architecture.md](docs/architecture.md) is the same picture
+with the module paths, and [docs/code-map.md](docs/code-map.md) says where each feature lives.
+
+## From output file to energy
+
+```mermaid
+flowchart LR
+    subgraph IMP["Import: once per file"]
+        direction TB
+        F["Output file<br/>.log · .out · .cml · .xyz"] --> D["Detect the program<br/>from the content"]
+        D --> P["Parse with the app's own parsers<br/>Gaussian · ORCA · xTB · CREST · CML"]
+        P --> V["Preview, nothing written yet<br/>level of theory · geometry match ≤ 0.001 Å<br/>possible duplicate ≤ 0.05 Å"]
+        V -->|"you confirm"| C["Commit in one transaction<br/>copy the file · write calculations<br/>record history"]
+    end
+    subgraph EN["Energies: when shown"]
+        direction TB
+        L["Pair each energy with its<br/>geometry level: E(SP) // opt"] --> T["Thermochemistry<br/>printed H, G or quasi-harmonic G_qh<br/>at 1 atm or 1 M"]
+        T --> K["Checks travel with every value<br/>imaginary frequencies · convergence · spin …"]
+        K --> A["Profiles · table · energetic span<br/>selectivity · populations"]
+    end
+    IMP --> EN
+```
+
+1. **Detect and parse.** The program is recognised from the file's content. The parsers are
+   written for this app (not a general library), and every value the app uses is read from the
+   file; if a value is missing, it is reported, not guessed.
+2. **Match the geometry.** A calculation is attached to a node only if its final geometry matches
+   the node's within 0.001 Å RMSD after alignment (same atoms in the same order). Within 0.05 Å it
+   is flagged as a possible duplicate and you choose. A different geometry becomes a derived node.
+3. **Preview, then commit.** You see the proposed nodes, levels and warnings before anything is
+   written. The commit is one transaction, and the history entry it writes lets you undo the
+   whole import later. A folder can be imported in one batch the same way.
+
+## How energies are computed
+
+**Only within one level of theory.** A relative energy is the difference of two values at the
+same *composite level* (single-point level // geometry level) and the same energy type. If one
+node lacks a value at that level, the difference is shown as n/a: the app never falls back to
+another level or mixes levels to fill a gap. Calculations in another charge or multiplicity are
+left out of a node's energies, and two spin states at one level give n/a rather than "the latest".
+
+**Energy types.** E (electronic), H and G as printed by the program, and G_qh (quasi-harmonic).
+A composite free energy combines the single point with the thermal correction from the frequency
+job at the geometry level:
+
+> G(SP // opt) = E(SP) + [G − E](frequency job at the opt level)
+
+For MP2, double hybrids, CCSD(T) and similar, E is the method's own total energy, never the SCF
+reference. Counterpoise and ONIOM jobs use their corrected or extrapolated totals.
+
+**Quasi-harmonic free energy (G_qh).** Truhlar's method: real vibrational modes below a cutoff
+(100 cm⁻¹ by default) are raised to the cutoff for the vibrational entropy only; the zero-point
+and thermal energies use the frequencies as computed. Imaginary modes are left out and counted.
+Temperature (298.15 K by default) and cutoff are set per investigation, and every change is in
+the history. Linear molecules use the linear rotor. The method follows
+[`docs/reference/thermochem_corr_G16.py`](docs/reference/thermochem_corr_G16.py), a script kept
+verbatim as the reference.
+
+**Standard state.** 1 atm (ideal gas) by default, and always labelled. Optionally 1 M, which adds
+RT ln(24.4654) = 1.894 kcal/mol at 298.15 K to G and G_qh (never to E or H), at the temperature
+each value was computed at. A free species can also be given its own concentration.
+
+**Units.** Energies are stored in hartree as printed and converted with CODATA 2018 constants,
+the same as the reference script (1 E_h = 627.5094740631 kcal/mol = 2625.4996394799 kJ/mol).
+kcal/mol is the default display unit; kJ/mol, eV and hartree are offered.
+
+**Analyses use the same values.** Profiles subtract a chosen reference node at one level and
+balance atoms with the free species that join or leave. The energetic span model (Kozuch and
+Shaik) gives the TOF, TDTS, TDI and degrees of TOF control; selectivity gives ΔΔG‡ from a
+Boltzmann sum over each outcome's transition states (Curtin–Hammett) and from the lowest one;
+conformer equilibria use Boltzmann weights and Eyring rates. Each analysis carries the warnings of
+the values it used.
+
+## Why you can trust the numbers
+
+**Validated against a reference.** The quasi-harmonic free energy is tested against the
+reference script on public Gaussian 16 outputs (a minimum and a transition state from the
+[GoodVibes](https://github.com/patonlab/GoodVibes) examples). The app's correction agrees with
+the script's own output to the digits it prints, and the test suite also runs the script itself
+at other temperatures and cutoffs and compares. With the cutoff set below every mode, G_qh must
+equal Gaussian's printed G correction within 0.01 kcal/mol, and linear molecules (HCN, CO₂)
+must match Gaussian within 0.001 kcal/mol.
+
+**Warnings never change a value, and never hide.** Each value carries its checks to the canvas,
+the profile (⚠), the energy table's Check column, its CSV export and every analysis:
+
+| Check | Raised when |
+|---|---|
+| W-IMAG-TS · W-TS-NOFREQ | A transition state does not have exactly one imaginary frequency at its geometry level, or has no frequency job there. |
+| W-IMAG-MIN | A minimum has an imaginary frequency. |
+| W-FREQ-NONSTAT · W-OPT-INC · W-TERM | The frequency job is not at a stationary point, the optimization did not converge, or a job ended abnormally. |
+| W-CONSTRAINED | A scan or frozen-coordinate optimization: not a free stationary point, so it never sets a geometry level. |
+| W-SPIN | ⟨S²⟩ differs from S(S+1) by more than 10 % (or exceeds 0.1 for a singlet). |
+| W-CHG | Calculations in another charge or multiplicity were left out. |
+| W-NOFREQ · W-QH · W-PARSE | No frequency job at the geometry level, G_qh cannot be computed, or a value could not be read from the file. |
+| W-TEMP · W-PRESSURE · W-STDSTATE | Values at different temperatures, a printed G at a pressure other than 1 atm, or gas-phase free species joining a solvated system at 1 atm. |
+| W-SCALE · W-G-MODEL | Frequency scale factors, or the programs' free-energy models (RRHO, qRRHO, mRRHO), differ between nodes at one level. |
+| W-GEOM · W-DUP · W-BALANCE | A calculation's geometry does not match its node, two nodes may be duplicates, or atoms or charge do not balance across a transition. |
+
+**Nothing is entered by hand.** Energies come only from files, and are never used to choose
+nodes or pathways for you. Rejected, failed and superseded nodes, and duplicate transition states,
+are left out of selectivities.
+
+**The file stays with the result.** Every calculation points to the copied output file and its
+checksum, so any number can be traced back to the line it came from.
+
+## Testing
+
+Every pull request runs the full suite on **Ubuntu and Windows**, and must pass before it can be
+merged:
+
+| Check | What it runs |
+|---|---|
+| Backend | `ruff` lint and format, then over 1,100 pytest tests, with warnings as errors: parsers on real public outputs, energy rules, thermochemistry against the reference, imports and undo, migrations, sync, analyses. |
+| Frontend | Lint, unit tests and a production build. |
+| UI tests | About 140 Playwright tests, driving the real interface against the real server. |
+| Portability | An investigation made on Windows is opened on Linux and the other way round, its records are checked, and its copied output file must match byte for byte. |
+
+A further job installs the real xTB, CREST, Psi4 and g-xTB and runs the local-calculation tests
+with them. Test outputs are public samples with their sources and licences listed in
+[`tests/fixtures/README.md`](tests/fixtures/README.md); a few rare cases use synthetic Gaussian
+text made by `tests/gaussian_text.py`.
+
+## Limits
+
+- **Programs:** Gaussian, ORCA, xTB and CREST outputs, and ioChem-BD CML of Gaussian jobs. Other
+  programs are added only when real public sample outputs exist to test against.
+- **Free energy models:** G_qh is Truhlar's method only. ORCA's printed G (Grimme's qRRHO) is
+  shown as printed, labelled with its model. No frequency scale factor is applied to G_qh; the
+  frequencies are used as the program printed them.
+- **Not a workflow engine:** the app does not submit or monitor jobs on clusters. It reads what
+  they produce. Optional local jobs (xTB, CREST, DFT refinement) and cloud xTB/CREST jobs are
+  for quick structures, not production runs.
+- **One user, one computer at a time.** No login, no server to share. Sync keeps several
+  computers in step through git, one at a time.
+- **Platforms:** tested on Windows and Linux (including WSL). macOS is untested.
 
 ## Install the tools
 
@@ -92,215 +348,14 @@ Add `--copy showcase.html` to also write its read-only copy, once the interface 
 
 Then import an output file with **Import file…** (or drop it on the node list). To import a whole folder of results at once, browse to it in that dialog and press **Import this folder…**: every output gets a proposed node (by geometry, by a planned node's guess or by file name), which you can check and change before anything is written. Sample outputs are in `tests/fixtures/`. In WSL, the folder and file pickers show the WSL file system; Windows drives are under `/mnt/c`, `/mnt/d` and so on.
 
-## Sync investigations between computers
+## User guide
 
-An investigation can be synced through a private GitHub repository, so you can work on it on
-several computers. Git must be installed (on Windows, [Git for Windows](https://gitforwindows.org)).
+The rest of the app is described in [docs/user-guide.md](docs/user-guide.md):
 
-1. Create an **empty private** repository on GitHub (no README).
-2. Open the investigation, press **Sync with GitHub…** and paste the repository's address.
-3. On another computer, choose **Open from GitHub…** on the start screen.
-
-The app pulls when it opens a linked investigation, and pushes when you close it, press **Sync**,
-or stop the app. If both computers changed it since the last sync, it cannot be merged: the app
-asks which copy to keep and saves the other.
-
-The app never asks for a password or token; Git signs in. On Windows, Git for Windows opens a
-GitHub sign-in in the browser the first time. On Linux or WSL, sign in once with the GitHub CLI:
-
-```sh
-gh auth login
-gh auth setup-git
-```
-
-Use the same Chembook3D version on every computer. When one computer has upgraded an
-investigation, an older version refuses to open it and asks you to update. To update:
-
-```sh
-git pull
-uv sync
-uv run python scripts/build_frontend.py
-```
-
-## Share a read-only copy
-
-**Share read-only copy…** saves the open investigation as one HTML file you can send to a
-supervisor or co-author. It opens in a current browser by double-click, offline, with nothing to
-install, and nothing in it can be changed. It shows the canvas, notes, calculations, 3D
-structures, and energies at every level. The energy profile and table show the pathways shown in
-the profile open under **Profile and table**, relative to that profile's own reference node, or
-one pathway per branch if none is shown. It leaves out
-the folders and file paths on your computer, the output files themselves and the change history.
-
-After updating Chembook3D, build the interface again (`uv run python scripts/build_frontend.py`),
-since the viewer inside the file is built with it.
-
-## Saga and other SSH servers
-
-The **HPC** button opens a tab in the side panel (beside Claude) where you choose the cluster
-(Saga first) and log in to it with your password and the one-time code from your authenticator app, as `ssh` asks for them. Fill
-in your user name once; the host is `saga.sigma2.no`. The first time, the app shows Saga's host
-key fingerprint: compare it with the one Sigma2 publishes, then trust it. Once logged in, the tab
-is a terminal on Saga with your usual login environment, and shows the directory you are in.
-The button and the tab then carry the cluster's name (**Saga**); **+** beside the tab logs in to
-another cluster at the same time.
-
-The connection stays open in a small background process on this computer, so closing
-Chembook3D and starting it again brings back the same terminal without a new login. A restart
-of the computer, sleep that drops the network, or Saga closing the connection needs a new
-login; **Log out** ends it, and it logs itself out after 12 hours without use. Your password
-and code are sent once and never saved, and a refused login is never tried again by itself
-(Sigma2 blocks addresses that keep failing). **Add a cluster…** in the tab's Cluster list adds
-another server; Betzy and Olivia are offered ready-filled.
-
-**Import from here** lists the output files (`.log`, `.out`, `.output`, `.xyz`) in the directory
-the terminal is in. Pick one to import it as from the file browser, or several for a batch
-import that matches each to a node. The files are copied into the investigation with
-`saga:/cluster/…` as their origin; nothing on Saga changes.
-
-**Send to Saga**, beside Save .xyz in a node's coordinates, writes the node's structure as
-`<label>.xyz` into the same directory, ready for an input file. If a file of that name is
-already there, the app asks before replacing it; it never deletes anything on Saga.
-
-**X11 windows**: tick it in the Saga tab and start Xming, and programs such as Molden typed in
-the terminal (`molden TS1-2.out &`) open their windows on this computer, as from a terminal with
-Xming. The display is `localhost:0.0`, Xming's own. The change takes effect in a new shell; the
-tab offers **New shell** and says when no X server answers.
-
-**Inspect** a file without importing it: type `inspect TS1-2.out` in the terminal, or pick a file
-in **Import from here** or in the import dialog's file browser and press **Inspect**. The window
-shows the job steps, plays the optimization with its energy and convergence criteria (as Molden
-shows them), and animates the normal modes. For a job still running, **Refresh** (or **Every
-30 s**) reads it again; **Import this file** goes on to the import. It also opens xyz files and
-xTB's `xtbopt.log`. Nothing is imported and nothing on Saga changes.
-
-To look at several jobs, type `inspect *.log` (any wildcard or several names), tick several files
-in **Import from here**, or type a filter such as `*.log` in the file browser and press **Inspect
-the N matching files**. The window then steps through them with **Previous file** and **Next
-file**, or a list to jump to one.
-
-**Join scans** in the scan editor: type `scans MCB_1_scan.log MCB_1_scan2.log` (or `scans *scan*.log`)
-in the terminal, or tick the files in **Import from here** and press **Scan editor**. In the
-editor, **Add from Saga…** adds more files from the terminal's directory, **Refresh** reads a scan
-still running again and the path follows it, and **Save to Saga** writes the joined path into the
-terminal's directory, never over a file there (a name taken becomes `_v2`). After pulling this
-change, log out of Saga and in again.
-
-**Ask Claude about files on Saga**: while you are logged in, the Claude panel can read the files
-in the directory the Saga terminal is in, and in the directories below it, without importing
-them: "did TS1 converge?", "why did the job in opt2 stop?", "how many imaginary frequencies has
-the last frequency job?". `cd` in the terminal to where the jobs are first; Claude cannot read
-above that directory, cannot log in, and never deletes or runs anything on Saga.
-
-**Let Claude write new files here**: tick it in the Saga tab and Claude may create new files
-(inputs, job scripts, xyz files, notes) in the terminal's directory and in new or existing
-folders below it, until you log out or press **Stop**; it is off again at every login. The tab
-lists what Claude wrote. Claude never replaces, edits or deletes a file: for a change it writes
-a copy such as `TS1_v2.gjf` and shows you the difference, and if you want files deleted it gives
-you an `rm` command to copy and run yourself. Names starting with a dot are refused, and a file
-is at most 1 MB.
-
-## Claude in the app
-
-The **Claude** button opens a panel beside the notebook running
-[Claude Code](https://code.claude.com/docs/en/setup), Anthropic's command-line assistant, with
-your own Claude account (a Pro or Max plan, or another account Claude Code accepts). Chembook3D
-stores no sign-in and sends nothing to Claude itself; what Claude reads in the conversation goes
-to Anthropic under your account's settings.
-
-Install Claude Code once on each computer, in the same system the app runs in (in WSL, inside
-WSL), then run `claude` once in a terminal to sign in:
-
-```sh
-# Windows PowerShell
-irm https://claude.ai/install.ps1 | iex
-# Linux, WSL or macOS
-curl -fsSL https://claude.ai/install.sh | bash
-```
-
-In the panel, **New conversation** starts Claude Code for the open investigation and **Continue
-last conversation** picks up its last one. Claude works on the notebook through the app's own
-notebook tools, asks before changing anything, and cannot run commands, edit files or browse
-the web from the panel. **Hide** keeps it running; **Stop**, closing the investigation or
-reloading the page ends it.
-
-Changes Claude makes appear on the canvas at once and are marked "claude" in the history. When
-Claude wants to delete something, dissolve a group or remove coordinates, the app asks you first
-and does nothing unless you click **Confirm**. When you say "this node", Claude asks the app what
-you have selected.
-
-### Calculations in the cloud
-
-Claude can hand an xTB or CREST calculation to a
-[Claude Code cloud session](https://code.claude.com/docs/en/claude-code-on-the-web) on your
-account, for example "optimise this TS guess with GFN2-xTB in toluene". It writes a job folder
-`jobs/<date>-<name>/` in the investigation (the structures, what to run and return), shows it
-to you, and starts it only when you agree: the app pushes that folder to the investigation's
-GitHub repository and starts the session, and Claude gives you its claude.ai link, where you can
-follow it from any device. The session installs xTB 6.7.1 and CREST 3.0.2 itself, runs the job
-and pushes the outputs to a branch; Claude then fetches them and imports them into the notebook.
-The cloud session never touches the investigation's database.
-
-This needs:
-
-- the investigation linked to a private GitHub repository (see Sync above);
-- Claude Code signed in with a plan that includes Claude Code on the web (Pro, Max, Team or
-  Enterprise), and GitHub connected to it with the
-  [Claude GitHub App](https://github.com/apps/claude) installed on the investigation's
-  repository, once, on github.com, so the session can push its results (without the app,
-  Claude Code uploads the folder instead, and the session's push is refused; install the app
-  and ask Claude to tell the session to push again, its results wait there);
-- the cloud environment's network access at its default, Trusted, so the session can download
-  xTB and CREST from GitHub.
-
-Nothing is approved in a separate terminal. When Claude Code asks something before it starts
-the session (the first time, whether it may trust the investigation folder), the Claude panel
-opens with that question at its top and you answer it there. The session runs in Claude
-Code's auto mode, so it runs the job to the end without waiting for you to approve its steps
-on claude.ai.
-
-The first job also adds `.claude/` to the investigation's repository (the setup script and the
-instructions the cloud session follows). The branches the sessions push stay on GitHub until you
-delete them there.
-
-### Claude Code in your own terminal, or Claude Desktop
-
-The panel's notebook tools are `chembook3d mcp`, an MCP server that talks to the running app on
-this computer. Claude Code in your own terminal, or Claude Desktop, can use them too, to read and
-change the investigation open in the app. It uses your Claude subscription; no API key is needed.
-
-After `uv run chembook3d` has run once, the command is in the project's `.venv`. Add it to
-Claude Code once, with the full path of your Chembook3D folder.
-
-Windows (PowerShell):
-
-```powershell
-claude mcp add --scope user chembook3d C:\path\to\Chembook3D\.venv\Scripts\chembook3d.exe mcp
-```
-
-Linux and WSL:
-
-```sh
-claude mcp add --scope user chembook3d /path/to/Chembook3D/.venv/bin/chembook3d mcp
-```
-
-In WSL, add it in the WSL Claude Code, where the app runs. For Claude Desktop (Windows), add
-this to its `claude_desktop_config.json` (Settings → Developer → Edit Config) and restart it:
-
-```json
-{
-  "mcpServers": {
-    "chembook3d": {
-      "command": "C:\\path\\to\\Chembook3D\\.venv\\Scripts\\chembook3d.exe",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-Start the app and open an investigation first; otherwise Claude's tools say the app is not
-running. If the app runs on another port, add `--url http://127.0.0.1:<port>` after `mcp`
-(in the JSON, as two more entries in `args`).
+- [Sync investigations between computers](docs/user-guide.md#sync-investigations-between-computers) through a private GitHub repository
+- [Share a read-only copy](docs/user-guide.md#share-a-read-only-copy) as one HTML file
+- [Saga and other SSH servers](docs/user-guide.md#saga-and-other-ssh-servers): terminal, import, Inspect and the scan editor
+- [Claude in the app](docs/user-guide.md#claude-in-the-app), [calculations in the cloud](docs/user-guide.md#calculations-in-the-cloud), and [Claude Code or Claude Desktop](docs/user-guide.md#claude-code-in-your-own-terminal-or-claude-desktop) with the notebook tools
 
 ## Develop
 
@@ -318,6 +373,30 @@ See [CLAUDE.md](CLAUDE.md) for the commands and [docs/code-map.md](docs/code-map
 - Decisions and open questions (source of truth): [docs/spec/08-decisions-and-open-questions.md](docs/spec/08-decisions-and-open-questions.md)
 - Implementation roadmap: [docs/spec/09-implementation-roadmap.md](docs/spec/09-implementation-roadmap.md)
 - Reference thermochemistry script (oracle for quasi-harmonic G): [docs/reference/thermochem_corr_G16.py](docs/reference/thermochem_corr_G16.py)
+
+## Data credits
+
+The screenshots in this README and the showcase demo (`scripts/make_showcase_demo.py`) use the
+calculations published with:
+
+> G. Occhipinti, D. L. Nascimento, M. Foscato, D. E. Fogg and V. R. Jensen, "The Janus face of
+> high trans-effect carbenes in olefin metathesis: gateway to both productivity and
+> decomposition", *Chem. Sci.*, 2022, **13**, 5107–5117.
+> [doi:10.1039/D2SC00855F](https://doi.org/10.1039/D2SC00855F)
+
+deposited in ioChem-BD as the collection *beta_H_elimination_NHC_vs_CAAC*, University of Bergen,
+[doi:10.19061/iochem-bd-6-113](https://doi.org/10.19061/iochem-bd-6-113), under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The data are not stored in this
+repository: the demo script downloads them and checks each file against a pinned SHA-256. In the
+screenshots the structures and energies were imported into Chembook3D, the free energies
+recomputed as quasi-harmonic G at 1 M, and the pathways arranged for the demo; these are our
+changes, not the authors'. The ioChem-BD platform itself is described in M. Álvarez-Moreno,
+C. de Graaf, N. López, F. Maseras, J. M. Poblet and C. Bo, *J. Chem. Inf. Model.*, 2015, **55**,
+95–103 ([doi:10.1021/ci500593j](https://doi.org/10.1021/ci500593j)).
+
+The test fixtures come from GoodVibes, cclib, CENSO, morfeus, a tutorial by Geoffrey Weal and the
+same ioChem-BD collection; their sources and licences are in
+[tests/fixtures/README.md](tests/fixtures/README.md) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## License
 

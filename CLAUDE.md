@@ -6,6 +6,7 @@ This file is loaded into every session, so keep it short. Detail belongs in `doc
 - The specification is in `docs/spec/`. Start at `docs/spec/README.md`.
 - `docs/spec/08-decisions-and-open-questions.md` is the source of truth. Cite decision IDs (Dnn, Pnn) in code comments or PRs where a rule comes from the spec, and never implement against an open question (Qnn) without asking Jonas.
 - Build in the phase order of `docs/spec/09-implementation-roadmap.md`. Requirement IDs (FR-…) and test IDs (T-…) there map to `04-functional-requirements.md` and `07-validation-and-test-plan.md`.
+- `docs/architecture.md` (about 5 KB) maps the processes, layers and the import → energy pipeline with module paths; read it before searching the code.
 - `docs/reference/thermochem_corr_G16.py` is Jonas's script, kept verbatim as the oracle for quasi-harmonic G (D56–D58). Do not reformat or "fix" it.
 
 ## Looking things up without reading whole files
