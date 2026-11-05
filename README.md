@@ -19,7 +19,7 @@ branches, rotamer groups, ethylene joining and leaving, and the closed cycle's �
 [How it is built](#how-it-is-built) ·
 [From output file to energy](#from-output-file-to-energy) ·
 [How energies are computed](#how-energies-are-computed) ·
-[Why you can trust the numbers](#why-you-can-trust-the-numbers) ·
+[Validation and checks](#validation-and-checks) ·
 [Testing](#testing) ·
 [Limits](#limits) ·
 [Install](#install-the-tools) ·
@@ -35,7 +35,7 @@ branches, rotamer groups, ethylene joining and leaving, and the closed cycle's �
 - **Reads your output files.** Gaussian, ORCA, xTB, CREST and ioChem-BD CML (Gaussian jobs).
   Geometries, energies, frequencies and thermochemistry come from the file, never typed in, and
   the file itself is copied into the investigation.
-- **Computes energies you can defend.** Relative energies only within one level of theory,
+- **Computes energies by stated rules.** Relative energies only within one level of theory,
   quasi-harmonic free energies validated against a reference script, and a visible warning on
   every value that rests on something doubtful (a TS without exactly one imaginary frequency, an
   unconverged optimization, spin contamination, and more).
@@ -196,7 +196,10 @@ Boltzmann sum over each outcome's transition states (Curtin–Hammett) and from 
 conformer equilibria use Boltzmann weights and Eyring rates. Each analysis carries the warnings of
 the values it used.
 
-## Why you can trust the numbers
+## Validation and checks
+
+How the energy code is tested and what the app checks on each value. What it does not do is
+under [Limits](#limits).
 
 **Validated against a reference.** The quasi-harmonic free energy is tested against the
 reference script on public Gaussian 16 outputs (a minimum and a transition state from the
@@ -206,7 +209,7 @@ at other temperatures and cutoffs and compares. With the cutoff set below every 
 equal Gaussian's printed G correction within 0.01 kcal/mol, and linear molecules (HCN, CO₂)
 must match Gaussian within 0.001 kcal/mol.
 
-**Warnings never change a value, and never hide.** Each value carries its checks to the canvas,
+**Warnings are shown, not applied.** A warning never changes a value. Each value carries its checks to the canvas,
 the profile (⚠), the energy table's Check column, its CSV export and every analysis:
 
 | Check | Raised when |
