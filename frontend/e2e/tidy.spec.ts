@@ -71,6 +71,8 @@ test('Tidy lays the canvas out in step columns; Undo tidy and a selection', asyn
   await page.goto('/')
   await page.getByRole('button', { name: /^Open/ }).first().click()
   const dialog = page.getByRole('dialog')
+  // Wait for the first (home) listing: landing inside fill() it puts the home folder in front.
+  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
   await dialog.getByLabel('Folder path').fill(DEMO)
   await dialog.getByRole('button', { name: 'Go' }).click()
   await dialog.getByRole('button', { name: 'Open', exact: true }).click()
