@@ -446,6 +446,9 @@ export function EnergyDrawer({
       )
   }, [openId, storedKey])
 
+  // A profile being made (New, or the first pathway with none open): a pathway found
+  // meanwhile joins it, not the profile open before it, which it is about to replace.
+  const creating = useRef<Promise<unknown> | null>(null)
   /** D190: a new, empty profile, opened; made after any save still on its way. */
   const newProfile = (): Promise<EnergyProfile> => {
     const made = saving.current
@@ -456,17 +459,18 @@ export function EnergyDrawer({
         return created
       })
     saving.current = made.catch(() => undefined)
+    creating.current = made
+    const done = () => {
+      if (creating.current === made) creating.current = null
+    }
+    made.then(done, done)
     return made
   }
 
-  /** Add a pathway to the open profile, making "Profile 1" first when none is open; two
-   * pathways added at once share the one profile made for them. */
-  const creating = useRef<Promise<unknown> | null>(null)
+  /** Add a pathway to the open profile, or to the one being made; "Profile 1" is made first
+   * when none is open, and two pathways added at once share the one profile made for them. */
   const addPath = (path: Path) => {
-    if (!openRef.current && !creating.current)
-      creating.current = newProfile().finally(() => {
-        creating.current = null
-      })
+    if (!openRef.current && !creating.current) void newProfile().catch(() => undefined)
     const ready = creating.current ?? Promise.resolve()
     ready.then(
       () => setPaths((current) => [...current, path]),
