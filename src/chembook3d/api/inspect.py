@@ -5,6 +5,10 @@ A file on a server is copied into a temporary folder, read from there and copied
 Refresh; the copy is deleted when the window closes. "Import this file" stages the copy (or the
 local file) as the import dialog does, so the import goes on with its preview. Only the app's
 own page uses this, as for the server connection (D122).
+
+D220: a calculation running on this computer (a local job of the open investigation) opens the
+same way: its steps so far, read again on Refresh, with the job's status; it is imported from
+Local jobs, not from here.
 """
 
 import asyncio
@@ -17,11 +21,13 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from chembook3d import local_jobs
 from chembook3d import settings as app_settings
 from chembook3d.api.pathway import CriterionOut, ModesOut, StepFrameOut
 from chembook3d.api.remote import _check, _copy_down, _saved
 from chembook3d.api.routes import _investigation, _staging
 from chembook3d.models import new_id
+from chembook3d.parsers import local_result
 from chembook3d.remote import servers
 from chembook3d.services import imports, inspection
 
@@ -36,6 +42,8 @@ class _Open:
     path: str  # on this computer, or on the server
     server_id: str | None
     copy: Path | None = None  # the temporary folder holding a server's file
+    job_id: str | None = None  # D220: a local job of the investigation in `folder`
+    folder: Path | None = None
     opened: float = field(default_factory=time.monotonic)
 
     @property
@@ -82,6 +90,7 @@ def inspections(app) -> Inspections:
 class InspectIn(BaseModel):
     path: str  # on this computer, or a full path on the server
     server: str | None = None  # a logged-in server's id
+    job: str | None = None  # D220: a local job's id instead (`path` is then only its name)
 
 
 class ImportIn(BaseModel):
@@ -120,6 +129,7 @@ class InspectionOut(BaseModel):
     version: str | None
     warnings: list[str]
     steps: list[InspectStepOut]
+    job: dict | None = None  # D220: the local job's status, as GET /api/local/jobs/{id} gives it
 
 
 def _step_out(step: inspection.Step) -> InspectStepOut:
@@ -178,7 +188,34 @@ async def _fetch(item: _Open) -> None:
     item.copy = folder
 
 
+def _read_job(item: _Open) -> InspectionOut:
+    try:
+        data, status, size = local_jobs.inspect_data(item.folder, item.job_id)
+        parsed = local_result.parse_data(data)
+    except local_jobs.JobNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (local_result.NotLocalResult, ValueError, TypeError) as exc:
+        raise HTTPException(422, f"The job's files cannot be read: {exc}") from exc
+    found = inspection.of_parsed(parsed)
+    return InspectionOut(
+        id=item.id,
+        name=f"{status.get('node_label')} · {status.get('level')}",
+        path=f"{local_jobs.JOBS_DIR}/{item.job_id}",
+        server=None,
+        server_name=None,
+        size=size,
+        read_at=time.time(),
+        program=found.program,
+        version=found.version,
+        warnings=found.warnings,
+        steps=[_step_out(s) for s in found.steps],
+        job=status,
+    )
+
+
 async def _read(item: _Open) -> InspectionOut:
+    if item.job_id is not None:
+        return await asyncio.to_thread(_read_job, item)
     if item.server_id is not None:
         await _fetch(item)
     local = item.local
@@ -213,7 +250,10 @@ def _found(request: Request, inspection_id: str) -> _Open:
 async def open_inspection(body: InspectIn, request: Request) -> InspectionOut:
     """Read a file for the Inspect window; nothing is written to the investigation."""
     _check(request)
-    if body.server is not None:
+    if body.job is not None:
+        item = _Open(new_id(), body.path, None, job_id=body.job)
+        item.folder = _investigation(request).folder
+    elif body.server is not None:
         _saved(body.server)
         item = _Open(new_id(), body.path, body.server)
     else:
@@ -251,6 +291,8 @@ async def import_inspected(inspection_id: str, body: ImportIn, request: Request)
     _check(request)
     investigation = _investigation(request)
     item = _found(request, inspection_id)
+    if item.job_id is not None:
+        raise HTTPException(422, "A local job's result is imported from Local jobs.")
     server = _saved(item.server_id) if item.server_id else None
 
     def stage_and_plan():

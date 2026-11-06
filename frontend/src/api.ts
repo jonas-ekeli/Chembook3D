@@ -558,7 +558,9 @@ export type IrcSummary = {
 }
 
 /** D123c: a file read for the Inspect window: on this computer (`server` null) or on a server. */
-export type InspectTarget = { path: string; server?: string | null }
+/** A file on this computer or a server, or (D220) a local job of the investigation (`job`, its id;
+ * `path` is then only a name to show while it is read). */
+export type InspectTarget = { path: string; server?: string | null; job?: string | null }
 /** One job step of an inspected file; `job_type` "structures" for an xyz file. */
 export type InspectStep = {
   index: number
@@ -593,6 +595,8 @@ export type Inspection = {
   version: string | null
   warnings: string[]
   steps: InspectStep[]
+  /** D220: a local job's status, read with its steps */
+  job?: LocalJob | null
 }
 
 /** D135: a file for the scan editor: on this computer, on a logged-in server, or an imported
@@ -2400,7 +2404,11 @@ export const api = {
     request<RemoteSent>('POST', `${serverPath(id)}/send`, { node_id: nodeId, replace }),
   /** D123c: read a file for the Inspect window, again on Refresh; nothing is imported. */
   inspect: (target: InspectTarget) =>
-    request<Inspection>('POST', '/inspections', { path: target.path, server: target.server ?? null }),
+    request<Inspection>('POST', '/inspections', {
+      path: target.path,
+      server: target.server ?? null,
+      job: target.job ?? null,
+    }),
   refreshInspection: (id: string) => request<Inspection>('POST', `/inspections/${encodeURIComponent(id)}/refresh`),
   closeInspection: (id: string) => request<void>('DELETE', `/inspections/${encodeURIComponent(id)}`),
   /** Stage the inspected file (the copy made last) for the import dialog's preview. */

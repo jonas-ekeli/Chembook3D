@@ -1,41 +1,19 @@
 import { Fragment, useEffect, useState } from 'react'
 import { api, type LocalJob } from '../api'
-import { localStatusText, scanText, tsCheckText } from '../localJobs'
+import { localStatusText, progressText, scanText, tsCheckText } from '../localJobs'
 import { Modal } from './Modal'
 import { errorText, withDisplacements } from '../util'
 import { Viewer3D } from './Viewer3D'
-
-const KCAL = 627.509474
 
 function created(job: LocalJob): string {
   const when = new Date(job.created)
   return Number.isNaN(when.getTime()) ? job.created : when.toLocaleString()
 }
 
-function duration(seconds: number): string {
-  if (seconds < 90) return `${Math.round(seconds)} s`
-  if (seconds < 5400) return `${Math.round(seconds / 60)} min`
-  return `${(seconds / 3600).toFixed(1)} h`
-}
-
-/** The optimizer's progress: step, energy change since the start, largest gradient. */
-function progressText(job: LocalJob): string | null {
-  const { energies, max_gradient: gradient } = job.progress
-  if (!energies.length) return null
-  const parts = []
-  if (energies.length > 1) parts.push(`ΔE ${((energies[energies.length - 1] - energies[0]) * KCAL).toFixed(2)} kcal/mol`)
-  if (gradient !== null) parts.push(`max gradient ${gradient.toExponential(1)} Eh/bohr`)
-  if (job.result?.elapsed_s) parts.push(duration(job.result.elapsed_s))
-  else if (job.progress.started_at && job.active) {
-    const started = new Date(job.progress.started_at).getTime()
-    if (!Number.isNaN(started)) parts.push(`${duration((Date.now() - started) / 1000)} so far`)
-  }
-  return parts.join(' · ')
-}
-
 /** D213: the investigation's calculations on this computer, newest first, with their progress;
  * a waiting or running one can be cancelled, and a finished one's result is imported onto its
- * node by the app (or here, when that failed). */
+ * node by the app (or here, when that failed). D220: Inspect opens a job's steps, also while it
+ * runs, in the Inspect window. */
 export function LocalJobsDialog({
   jobs,
   onChanged,
@@ -43,6 +21,7 @@ export function LocalJobsDialog({
   onImported,
   onSelectNode,
   onSettings,
+  onInspect,
 }: {
   jobs: LocalJob[]
   onChanged: () => void
@@ -50,6 +29,8 @@ export function LocalJobsDialog({
   onImported: (job: LocalJob) => void
   onSelectNode: (id: string) => void
   onSettings: () => void
+  /** D220: open the job in the Inspect window */
+  onInspect: (job: LocalJob) => void
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -200,7 +181,21 @@ export function LocalJobsDialog({
                         )}
                         {problem && <div className="small cloud-job-problem">{problem}</div>}
                       </td>
-                      <td className="cloud-job-actions">{actions(job)}</td>
+                      <td className="cloud-job-actions">
+                        {job.status !== 'starting' && job.status !== 'queued' && (
+                          <button
+                            onClick={() => onInspect(job)}
+                            title={
+                              job.active
+                                ? 'Follow the optimization as it runs: each step in 3D, its energy and convergence criteria'
+                                : 'Each step of the optimization in 3D, its energy and convergence criteria'
+                            }
+                          >
+                            Inspect
+                          </button>
+                        )}
+                        {actions(job)}
+                      </td>
                     </tr>
                     {shown && (
                       <tr>

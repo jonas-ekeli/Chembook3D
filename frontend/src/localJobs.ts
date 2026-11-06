@@ -34,6 +34,29 @@ export function localStatusText(job: LocalJob): string {
 
 /** A finished result the app imports by itself: not imported yet, and not one whose import
  * failed (the user retries those from the jobs list). */
+const KCAL = 627.509474
+
+export function duration(seconds: number): string {
+  if (seconds < 90) return `${Math.round(seconds)} s`
+  if (seconds < 5400) return `${Math.round(seconds / 60)} min`
+  return `${(seconds / 3600).toFixed(1)} h`
+}
+
+/** The optimizer's progress: step, energy change since the start, largest gradient. */
+export function progressText(job: LocalJob): string | null {
+  const { energies, max_gradient: gradient } = job.progress
+  if (!energies.length) return null
+  const parts = []
+  if (energies.length > 1) parts.push(`ΔE ${((energies[energies.length - 1] - energies[0]) * KCAL).toFixed(2)} kcal/mol`)
+  if (gradient !== null) parts.push(`max gradient ${gradient.toExponential(1)} Eh/bohr`)
+  if (job.result?.elapsed_s) parts.push(duration(job.result.elapsed_s))
+  else if (job.progress.started_at && job.active) {
+    const started = new Date(job.progress.started_at).getTime()
+    if (!Number.isNaN(started)) parts.push(`${duration((Date.now() - started) / 1000)} so far`)
+  }
+  return parts.join(' · ')
+}
+
 export function awaitingLocalImport(job: LocalJob): boolean {
   return job.importable && !job.import_error
 }

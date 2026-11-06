@@ -38,7 +38,9 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from chembook3d import local_tools
+from chembook3d.local_worker import CRITERIA, METHOD_LABELS
 from chembook3d.models import Node
+from chembook3d.parsers import local_result
 from chembook3d.services import imports, oniom
 from chembook3d.services import nodes as node_service
 from chembook3d.services.records import RecordError
@@ -48,6 +50,7 @@ JOB_JSON = "job.json"
 PROGRESS = "progress.json"
 RESULT = "result.json"
 CANCEL = "cancel"
+TRAJECTORY = "trajectory.xyz"
 WORKER = "worker.py"
 WORKER_SOURCE = Path(__file__).with_name("local_worker.py")
 ALIVE_S = 30.0  # a heartbeat older than this: the process is gone
@@ -578,6 +581,92 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
             out["result"]["final_xyz"] = _xyz(result)  # D217: to animate the checked mode
     out["importable"] = status in ("converged", "not_converged") and not job.get("imported")
     return out
+
+
+def _trajectory(path: Path, count: int) -> tuple[list[list[list[float]]], list[float | None]]:
+    """trajectory.xyz's whole frames (a frame being written is left out) and the energy each
+    comment line carries (`cycle N energy E`)."""
+    frames: list[list[list[float]]] = []
+    energies: list[float | None] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, PermissionError):
+        return frames, energies
+    i = 0
+    while i + count + 2 <= len(lines):
+        if lines[i].strip() != str(count):
+            break
+        try:
+            frame = [[float(v) for v in line.split()[1:4]] for line in lines[i + 2 : i + 2 + count]]
+        except ValueError:
+            break
+        if any(len(row) != 3 for row in frame):
+            break
+        words = lines[i + 1].split()
+        energy = None
+        if "energy" in words and words.index("energy") + 1 < len(words):
+            try:
+                energy = float(words[words.index("energy") + 1])
+            except ValueError:
+                energy = None
+        frames.append(frame)
+        energies.append(energy)
+        i += count + 2
+    return frames, energies
+
+
+def _criteria(path: Path, count: int) -> list[list[Any]]:
+    """criteria.jsonl as one list per frame (D220); a line being written is left out."""
+    out: list[list[Any]] = [[] for _ in range(count)]
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, PermissionError):
+        return out
+    for line in lines:
+        try:
+            found = json.loads(line)
+            frame = int(found["frame"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        if 0 <= frame < count:
+            out[frame] = found.get("criteria") or []
+    return out
+
+
+def inspect_data(folder: Path, job_id: str) -> tuple[dict[str, Any], dict[str, Any], int]:
+    """D220: what the Inspect window reads for a local job: its result once it has one, else
+    what the worker has written so far, in the result's form with the state "running" (every
+    whole frame of trajectory.xyz with its energy, and each one's criteria); with the job's
+    status and the bytes read."""
+    path = job_dir(folder, job_id)
+    status = job_status(folder, job_id)
+    result = _read(path / RESULT)
+    if result is not None:
+        return result, status, (path / RESULT).stat().st_size
+    job = read_job(folder, job_id)
+    elements = list(job.get("elements") or [])
+    frames, energies = _trajectory(path / TRAJECTORY, len(elements))
+    program, label = METHOD_LABELS.get(job.get("method", ""), (job.get("method"), None))
+    data = {
+        "format": local_result.FORMAT,
+        "method": job.get("method"),
+        "program": program,
+        "level": job.get("level") or label,
+        "charge": job.get("charge"),
+        "multiplicity": job.get("multiplicity"),
+        "constraints": job.get("constraints"),
+        "transition": bool(job.get("transition")),
+        "state": local_result.RUNNING,
+        "elements": elements,
+        "frames": frames,
+        "energies": energies,
+        "criteria": _criteria(path / CRITERIA, len(frames)),
+        "energy": next((e for e in reversed(energies) if e is not None), None),
+    }
+    if not frames:
+        data["coordinates"] = job.get("coordinates")  # the start, until the first step
+    size = sum(f.stat().st_size for f in (path / TRAJECTORY, path / CRITERIA) if f.is_file())
+    return data, status, size
 
 
 def list_jobs(folder: Path) -> list[dict[str, Any]]:

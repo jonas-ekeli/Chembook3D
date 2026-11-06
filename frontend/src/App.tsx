@@ -1123,6 +1123,7 @@ function App() {
             setView('canvas')
             selectNode(id, true)
           }}
+          onInspect={(job) => inspect([{ path: `${job.node_label} · ${job.level}`, job: job.id }])}
           onSettings={() => {
             setShowLocalJobs(false)
             setSettingsSection('local')
