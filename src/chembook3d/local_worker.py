@@ -12,6 +12,8 @@ Files in the job folder:
 - ``progress.json`` (rewritten here): state (queued, running), pid, cycle, energy, largest
   gradient component, and a heartbeat time renewed every few seconds while the process lives.
 - ``trajectory.xyz``: one frame per optimizer step, the comment holding the energy.
+- ``criteria.jsonl``: D220, one line per optimizer step after the first, the convergence criteria
+  geomeTRIC judged that step's structure by (``record_criteria``), for the Inspect window.
 - ``result.json``: written once at the end, with the outcome and the final geometry.
 - ``cancel``: created by the app to ask the job to stop.
 - ``worker.log``: the optimizer's log and any error.
@@ -533,6 +535,42 @@ def grid_cells(scan: dict) -> list[tuple[float, float, list[int]]]:
     return out
 
 
+CRITERIA = "criteria.jsonl"
+
+
+def record_criteria(store) -> None:
+    """D220: hand `store` the five criteria geomeTRIC checks each new structure against, as it
+    works them out in ``Optimizer.evaluateStep`` (the gradient with any held coordinates
+    projected out, the displacement after aligning on the structure before), each as
+    [name, value, threshold, unit]. Its log prints them only with colour codes."""
+    import geometric.optimize
+    from geometric.step import calc_drms_dmax
+
+    optimizer = geometric.optimize.Optimizer
+    original = getattr(optimizer.evaluateStep, "chembook3d_original", optimizer.evaluateStep)
+
+    def evaluate_step(self):
+        try:
+            p = self.params
+            grms, gmax = self.calcGradNorm()
+            drms, dmax = calc_drms_dmax(self.X, self.Xprev)
+            store(
+                [
+                    ["Energy change", float(self.E - self.Eprev), p.Convergence_energy, "Eh"],
+                    ["RMS gradient", float(grms), p.Convergence_grms, "Eh/bohr"],
+                    ["Maximum gradient", float(gmax), p.Convergence_gmax, "Eh/bohr"],
+                    ["RMS displacement", float(drms), p.Convergence_drms, "Å"],
+                    ["Maximum displacement", float(dmax), p.Convergence_dmax, "Å"],
+                ]
+            )
+        except Exception:  # noqa: BLE001, S110 - a view only; never stop the optimization
+            pass
+        return original(self)
+
+    evaluate_step.chembook3d_original = original
+    optimizer.evaluateStep = evaluate_step
+
+
 def xyz_frame(symbols, coords_ang, comment: str) -> str:
     lines = [str(len(symbols)), comment]
     lines += [
@@ -575,6 +613,7 @@ def run(folder: Path, lock: Path | None) -> int:
     frames: list[list[list[float]]] = []
     last: dict = {"coords": start, "energy": None}
     frame_points: list[int] = []  # D218: per frame, the scan point it belongs to (from 1)
+    criteria: list[list] = []  # D220: per frame, the criteria geomeTRIC judged it by
     point = {"index": 1}
     try:
         queue = Queue(lock)
@@ -593,6 +632,17 @@ def run(folder: Path, lock: Path | None) -> int:
 
         traj = folder / "trajectory.xyz"
         traj.write_text("", encoding="utf-8")
+        judged = folder / CRITERIA
+        judged.write_text("", encoding="utf-8")
+
+        def store(found: list) -> None:
+            if not frames:
+                return
+            criteria[-1] = [[name, round(v, 10), t, unit] for name, v, t, unit in found]
+            with judged.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"frame": len(frames) - 1, "criteria": criteria[-1]}) + "\n")
+
+        record_criteria(store)
 
         class Engine(geometric.engine.Engine):
             def calc_new(self, coords, dirname):
@@ -608,6 +658,7 @@ def run(folder: Path, lock: Path | None) -> int:
                     energies.append(energy)
                     frames.append(ang.round(6).tolist())
                     frame_points.append(point["index"])
+                    criteria.append([])
                     with traj.open("a", encoding="utf-8") as fh:
                         fh.write(
                             xyz_frame(symbols, ang, f"cycle {len(energies)} energy {energy:.10f}")
@@ -749,6 +800,7 @@ def run(folder: Path, lock: Path | None) -> int:
     result["cycles"] = len(energies)
     result["energies"] = energies
     result["frames"] = frames
+    result["criteria"] = criteria
     if job.get("scan"):
         result["frame_points"] = frame_points
     result["energy"] = last["energy"]

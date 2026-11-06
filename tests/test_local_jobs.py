@@ -14,8 +14,10 @@ import time
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from chembook3d import local_jobs, local_tools
+from chembook3d.app import create_app
 from chembook3d.parsers import local_result
 from chembook3d.services import imports
 from tests.conftest import WATER
@@ -337,3 +339,73 @@ def test_real_tools_refine_water(open_client, water, monkeypatch):
     assert open_client.post(f"/api/local/jobs/{job['id']}/import").status_code == 200
     calcs = open_client.get(f"/api/nodes/{water}/calculations").json()
     assert calcs[0]["program"] == "tblite"
+
+
+APP = "http://127.0.0.1:8765"
+PAGE = {"origin": APP}  # the app's own page: the Inspect window is page only
+
+
+@pytest.fixture
+def page(tmp_path):
+    with TestClient(create_app(), base_url=APP, client=("127.0.0.1", 50000)) as test_client:
+        body = {"folder": str(tmp_path / "inv"), "name": "Test"}
+        assert test_client.post("/api/investigations", json=body).status_code == 200
+        yield test_client
+
+
+def test_a_running_job_is_inspected(page, stub_tools, monkeypatch):
+    """T-LOC-26 (D220): a running job's steps so far, each after the first with the criteria
+    geomeTRIC judged it by; Refresh reads more; the finished job reads its result."""
+    open_client = page
+    monkeypatch.setenv("CHEMBOOK3D_LOCAL_STUB_DELAY", "0.5")
+    water = open_client.post("/api/nodes", json={"label": "water", "xyz": WATER}).json()["id"]
+    job = open_client.post("/api/local/jobs", json={"node_id": water, "method": "stub"}).json()
+    wait_for(open_client, job["id"], lambda j: j["progress"]["cycle"] >= 3 or not j["active"])
+    body = {"path": job["node_label"], "job": job["id"]}
+    response = open_client.post("/api/inspections", json=body, headers=PAGE)
+    assert response.status_code == 200, response.text
+    shown = response.json()
+    assert shown["path"] == f"local-jobs/{job['id']}" and shown["program"] == "stub"
+    assert shown["job"]["id"] == job["id"]
+    step = shown["steps"][0]
+    assert step["job_type"] == "optimization" and len(step["frames"]) >= 3
+    if shown["job"]["active"]:
+        assert step["optimization_converged"] is None and step["termination"] == "abnormal"
+    assert step["frames"][0]["criteria"] == []
+    names = [c["name"] for c in step["frames"][1]["criteria"]]
+    assert names == [
+        "Energy change",
+        "RMS gradient",
+        "Maximum gradient",
+        "RMS displacement",
+        "Maximum displacement",
+    ]
+    assert step["frames"][1]["criteria"][1]["threshold"] == 3e-4  # geomeTRIC's GAU set
+    assert all(f["energy"] is not None for f in step["frames"])
+    refused = open_client.post(f"/api/inspections/{shown['id']}/import", json={}, headers=PAGE)
+    assert refused.status_code == 422  # imported from Local jobs
+
+    done = wait_for(open_client, job["id"], finished)
+    assert done["status"] == "converged"
+    again = open_client.post(f"/api/inspections/{shown['id']}/refresh", headers=PAGE).json()
+    final = again["steps"][0]
+    assert again["job"]["status"] == "converged" and final["optimization_converged"] is True
+    assert final["termination"] == "normal" and final["frames"][-1]["converged"]
+    assert len(final["frames"]) >= len(step["frames"])
+    met = final["frames"][-1]["criteria"]
+    assert met and met[1]["converged"] is True  # the RMS gradient is met at the end
+    body["job"] = "2026-01-01-none"
+    missing = open_client.post("/api/inspections", json=body, headers=PAGE)
+    assert missing.status_code == 404
+
+
+def test_a_half_written_trajectory_is_read_to_its_last_whole_frame(tmp_path):
+    """T-LOC-26: the frame the worker is writing is left out, as is a criteria line."""
+    frame = "2\ncycle {n} energy -1.{n}\nH 0 0 0\nH 0 0 0.7{n}\n"
+    path = tmp_path / "trajectory.xyz"
+    path.write_text(frame.format(n=1) + frame.format(n=2) + "2\ncycle 3 energy -1.3\nH 0 0")
+    frames, energies = local_jobs._trajectory(path, 2)
+    assert energies == [-1.1, -1.2] and frames[1][1] == [0.0, 0.0, 0.72]
+    judged = tmp_path / "criteria.jsonl"
+    judged.write_text('{"frame": 1, "criteria": [["RMS gradient", 1e-3, 3e-4, "Eh/bohr"]]}\n{"fr')
+    assert local_jobs._criteria(judged, 2) == [[], [["RMS gradient", 1e-3, 3e-4, "Eh/bohr"]]]

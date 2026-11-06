@@ -24,11 +24,16 @@ D219: a 2D grid scan is read the same way, with `scan_grid` (the two coordinates
 and values, and each point's cell), its constraint `grid scan B(1,2) × B(3,4)` (not a `scan`
 one, so it is never shown on an edge as a path, D200) and the node's structure the lowest
 converged point.
+
+D220: each structure carries the convergence criteria geomeTRIC judged it by (`criteria`), and
+`parse_data` also reads what a running job has written so far (state `RUNNING`: not yet
+converged or ended), for the Inspect window.
 """
 
 import json
 
 from chembook3d.parsers.common import (
+    Criterion,
     ParsedFile,
     ParsedStep,
     Route,
@@ -38,6 +43,7 @@ from chembook3d.parsers.common import (
 from chembook3d.xyz import Atom
 
 FORMAT = "chembook3d-local-result"
+RUNNING = "running"  # D220: the state of a job read while it runs
 _LETTERS = {"distances": "B", "angles": "A", "dihedrals": "D"}
 # h² / (8π² k) in K amu Å²: a rotational temperature from a moment of inertia
 ROTATIONAL = 24.254367090467216
@@ -121,6 +127,23 @@ def frequency_step(data: dict, final: list[Atom], index: int) -> ParsedStep:
     return step
 
 
+def _energy(value: object) -> float | None:
+    return None if value is None else float(value)  # type: ignore[arg-type]
+
+
+def _criteria(data: dict, count: int) -> list[list[Criterion]]:
+    """D220: each structure's convergence criteria as geomeTRIC judged it, [name, value,
+    threshold, unit] each (none for the first structure, or from a worker before D220)."""
+    out = []
+    for found in (data.get("criteria") or [])[:count]:
+        row = []
+        for name, value, threshold, unit in found or []:
+            met = abs(value) < threshold if threshold is not None else None
+            row.append(Criterion(str(name), float(value), threshold, met, str(unit)))
+        out.append(row)
+    return out
+
+
 def _linspace(start: float, end: float, count: int) -> list[float]:
     if count < 2:
         return [float(start)]
@@ -149,9 +172,10 @@ def _scan(data: dict, geometries: list[list[Atom]], energies: list) -> ParsedFil
         charge=data.get("charge"),
         multiplicity=data.get("multiplicity"),
         geometries=geometries,
-        geometry_energies=[float(e) for e in energies][: len(geometries)],
+        geometry_energies=[_energy(e) for e in energies][: len(geometries)],
         geometry_points=[int(n) for n in data.get("frame_points") or []][: len(geometries)],
         converged_geometries=finals,
+        geometry_criteria=_criteria(data, len(geometries)),
         scan="relaxed",
         scan_coordinates=[atoms for atoms, _ in scanned],
     )
@@ -183,7 +207,7 @@ def _scan(data: dict, geometries: list[list[Atom]], energies: list) -> ParsedFil
             "cells": [list(p.get("cell") or [0, 0]) for p in points],
         }
     state = data.get("state")
-    step.optimization_converged = state == "converged"
+    step.optimization_converged = None if state == RUNNING else state == "converged"
     step.termination = "normal" if state in ("converged", "not_converged") else "abnormal"
     if grid:
         add_constraint(step, f"grid scan {' × '.join(names)}")
@@ -204,6 +228,12 @@ def parse(text: str) -> ParsedFile:
         data = json.loads(text)
     except ValueError as exc:
         raise NotLocalResult(f"not a local result: {exc}") from exc
+    return parse_data(data)
+
+
+def parse_data(data: object) -> ParsedFile:
+    """`result.json` as read, or (D220) what a running job has written so far, put together by
+    `local_jobs.inspect_data` with the state `RUNNING`."""
     if not isinstance(data, dict) or data.get("format") != FORMAT:
         raise NotLocalResult("not a local result")
     elements = data.get("elements") or []
@@ -235,11 +265,13 @@ def parse(text: str) -> ParsedFile:
         charge=data.get("charge"),
         multiplicity=data.get("multiplicity"),
         geometries=geometries,
-        geometry_energies=[float(e) for e in energies][: len(geometries)],
+        geometry_energies=[_energy(e) for e in energies][: len(geometries)],
+        geometry_criteria=_criteria(data, len(geometries)),
     )
     step.scf_energy = float(data["energy"]) if data.get("energy") is not None else None
     converged = state == "converged"
-    step.optimization_converged = converged
+    # D220: a job still running (read for the Inspect window) has not converged yet
+    step.optimization_converged = None if state == RUNNING else converged
     if converged and geometries:
         step.converged_geometries = [len(geometries) - 1]
     step.termination = "normal" if state in ("converged", "not_converged") else "abnormal"

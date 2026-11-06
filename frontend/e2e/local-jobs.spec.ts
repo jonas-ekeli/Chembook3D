@@ -91,6 +91,54 @@ test('a refine on this computer is followed under Local jobs and imported onto i
   await expect(page.getByRole('button', { name: 'Local jobs', exact: true })).toBeVisible()
 })
 
+// T-UI-89, D220: a local job is followed in the Inspect window while it runs: its steps so far in
+// 3D with their energies and convergence criteria, read again every 5 s until the job ends.
+test('a running local job is inspected as it runs', async ({ page }) => {
+  test.slow()
+  await startPage(page)
+  await page.getByRole('button', { name: /^New/ }).first().click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
+  await dialog.getByLabel('Folder path').fill(E2E_DIR)
+  await dialog.getByRole('button', { name: 'Go' }).click()
+  await dialog.getByLabel('Investigation name').fill('Local inspect')
+  await dialog.getByRole('button', { name: 'Create' }).click()
+  await expect(page.locator('.investigation')).toHaveText('Local inspect')
+  const node = await page.request.post('/api/nodes', { data: { label: 'water', xyz: WATER } })
+  expect(node.ok()).toBeTruthy()
+  // Each step of the test method waits 1 s here (playwright.config.ts), so the job is seen running.
+  const started = await page.request.post('/api/local/jobs', { data: { node_id: (await node.json()).id, method: 'stub' } })
+  expect(started.ok()).toBeTruthy()
+  await page.reload()
+
+  await page.getByRole('button', { name: 'Local jobs · 1 running' }).click()
+  const jobs = page.getByRole('dialog', { name: 'Local jobs' })
+  const row = jobs.getByRole('table', { name: 'Local jobs' }).getByRole('row').nth(1)
+  await expect(row).toContainText(/Running, step [2-9]/, { timeout: 30_000 })
+  await row.getByRole('button', { name: 'Inspect' }).click()
+
+  const window = page.getByRole('dialog', { name: 'Inspect water · stub' })
+  await expect(window.getByLabel('Job status')).toContainText('Running')
+  await expect(window.getByRole('checkbox', { name: 'Every 5 s' })).toBeChecked()
+  await expect(window.getByRole('button', { name: 'Import this file' })).toHaveCount(0)
+  const shown = window.getByLabel('Structure shown')
+  await expect(shown).toContainText(/Structure (\d+) of \1/)
+  const before = Number((await shown.textContent())!.match(/of (\d+)/)![1])
+  // The criteria geomeTRIC judged the step by, against its thresholds.
+  const criteria = window.getByRole('table', { name: 'Convergence criteria' })
+  await expect(criteria).toContainText('RMS gradient')
+  await expect(criteria).toContainText('Maximum displacement')
+
+  // Read again by itself: more steps, and once the job ends, its result and no more reading.
+  await expect(window.getByLabel('Job status')).toContainText('Converged', { timeout: 60_000 })
+  const after = Number((await shown.textContent())!.match(/of (\d+)/)![1])
+  expect(after).toBeGreaterThan(before)
+  await expect(window.getByRole('checkbox', { name: 'Every 5 s' })).not.toBeChecked()
+  await expect(window.getByRole('table', { name: 'Job steps' })).toContainText('✓')
+  await window.getByRole('button', { name: 'Close' }).click()
+  await expect(jobs).toBeVisible()
+})
+
 // T-UI-84, D214: an ONIOM refine suggests its DFT core from the metal, shows its size and link
 // hydrogens, refuses a core that cuts a bond to the metal, and runs with the core chosen.
 const BUTYL = [

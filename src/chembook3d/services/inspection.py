@@ -228,13 +228,21 @@ def read(text: str, name: str = "", folder: Path | None = None) -> Inspection:
         raise InspectFailed(str(exc)) from exc
     if isinstance(parsed, crest.Ensemble):
         return _structures(text, name)
-    steps = [_step(step) for step in parsed.steps]
-    if steps and steps[-1].termination != "normal":
-        warnings.append(
+    found = of_parsed(parsed, warnings)
+    if found.steps and found.steps[-1].termination != "normal":
+        found.warnings.append(
             "The last step has not ended normally: the job is still running, or it stopped."
         )
+    return found
+
+
+def of_parsed(parsed: ParsedFile, warnings: list[str] | None = None) -> Inspection:
+    """A file already parsed, or (D220) a local job's result or what it has written so far."""
     return Inspection(
-        program=parsed.program, version=parsed.version, steps=steps, warnings=warnings
+        program=parsed.program,
+        version=parsed.version,
+        steps=[_step(step) for step in parsed.steps],
+        warnings=list(warnings or []),
     )
 
 

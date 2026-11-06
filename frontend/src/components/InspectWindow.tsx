@@ -9,6 +9,7 @@ import {
   type InspectTarget,
   type Settings,
 } from '../api'
+import { localStatusText, progressText } from '../localJobs'
 import { errorText, hartree, withDisplacements } from '../util'
 import { Modal } from './Modal'
 import { Convergence, EnergyChart } from './StepMovie'
@@ -24,9 +25,13 @@ import { Viewer3D } from './Viewer3D'
 // read at a time; the window's choices (Every 30 s, converged points, speed) stay from file to
 // file (D129). "Copy XYZ" copies the structure shown, the one the player has reached, as an
 // xyz text with the file, step, structure and energy on its comment line (D130).
+// D220: a calculation on this computer (a local job) opens here too, from Local jobs: its steps so
+// far with the job's status, read again every 5 s while it runs (A150); its result is imported
+// from Local jobs, so the window offers no import.
 
 const SPEEDS = [1, 2, 5, 10, 20, 30]
 const AUTO_REFRESH = 30_000 // ms (A70)
+const JOB_REFRESH = 5_000 // ms: a local job writes each step at once (A150)
 // A step opens on its last structure, the latest of a job still running, and stays on the last
 // one as Refresh brings more until another is chosen.
 const LAST = Number.MAX_SAFE_INTEGER
@@ -103,7 +108,9 @@ export function InspectWindow({
   const [speed, setSpeed] = useState(5)
   const [mode, setMode] = useState('')
   const [convergedOnly, setConvergedOnly] = useState(true)
-  const [auto, setAuto] = useState(false)
+  const isJob = Boolean(target.job)
+  // D220: a local job is followed by itself while it runs
+  const [auto, setAuto] = useState(isJob)
   const [copied, setCopied] = useState<string | null>(null)
   // The window's inspection, to close it on the server when the window goes.
   const opened = useRef<string | null>(null)
@@ -122,6 +129,7 @@ export function InspectWindow({
         setStepIndex(firstShown(found.steps))
         setIndex(LAST)
         setBusy(false)
+        if (found.job && !found.job.active) setAuto(false)
       },
       (err: unknown) => {
         if (cancelled) return
@@ -146,6 +154,7 @@ export function InspectWindow({
         setInspection(found)
         setError(null)
         setBusy(false)
+        if (found.job && !found.job.active) setAuto(false) // D220: the job has ended
         // The same step if it is still there; the structure shown is kept by its number.
         setStepIndex((current) =>
           current !== null && found.steps.some((s) => s.index === current) ? current : firstShown(found.steps),
@@ -161,9 +170,9 @@ export function InspectWindow({
 
   useEffect(() => {
     if (!auto) return
-    const timer = setInterval(refresh, AUTO_REFRESH)
+    const timer = setInterval(refresh, isJob ? JOB_REFRESH : AUTO_REFRESH)
     return () => clearInterval(timer)
-  }, [auto, refresh])
+  }, [auto, refresh, isJob])
 
   const step = useMemo(() => inspection?.steps.find((s) => s.index === stepIndex) ?? null, [inspection, stepIndex])
   const frames = useMemo(() => step?.frames ?? [], [step])
@@ -260,7 +269,10 @@ export function InspectWindow({
   const unit = settings?.energy_unit ?? 'kcal/mol'
   const current = shown[at]?.frame ?? null
   const last = [...shown].reverse().find(({ frame }) => frame.energy !== null)?.frame.energy ?? null
-  const title = `Inspect ${inspection?.name ?? baseName(target.path)}`
+  const title = `Inspect ${inspection?.name ?? (isJob ? target.path : baseName(target.path))}`
+  const job = inspection?.job ?? null
+  const jobProgress = job ? progressText(job) : null
+  const every = isJob ? 'Every 5 s' : 'Every 30 s'
 
   return (
     <Modal
@@ -269,20 +281,29 @@ export function InspectWindow({
       wide
       actions={
         <>
-          <label className="check" title="Read the file again every 30 seconds while this window is open">
+          <label
+            className="check"
+            title={
+              isJob
+                ? 'Read the job again every 5 seconds while it runs'
+                : 'Read the file again every 30 seconds while this window is open'
+            }
+          >
             <input type="checkbox" checked={auto} disabled={!inspection} onChange={(event) => setAuto(event.target.checked)} />
-            Every 30 s
+            {every}
           </label>
           <button onClick={refresh} disabled={!inspection || busy} title="Read the file again, for a job still running">
             Refresh
           </button>
-          <button
-            onClick={importIt}
-            disabled={!inspection || !canImport}
-            title={canImport ? 'Go on to the import preview with this file' : 'Open an investigation to import into it'}
-          >
-            Import this file
-          </button>
+          {!isJob && (
+            <button
+              onClick={importIt}
+              disabled={!inspection || !canImport}
+              title={canImport ? 'Go on to the import preview with this file' : 'Open an investigation to import into it'}
+            >
+              Import this file
+            </button>
+          )}
           <button className="primary" onClick={close}>
             Close
           </button>
@@ -317,7 +338,9 @@ export function InspectWindow({
         )}
         {error && <p role="alert">{error}</p>}
         {!inspection && busy && (
-          <p className="muted">{target.server ? `Copying ${target.path} …` : `Reading ${target.path} …`}</p>
+          <p className="muted">
+            {target.server ? `Copying ${target.path} …` : isJob ? 'Reading the job …' : `Reading ${target.path} …`}
+          </p>
         )}
         {inspection && (
           <>
@@ -327,6 +350,13 @@ export function InspectWindow({
               {new Date(inspection.read_at * 1000).toLocaleTimeString()}
               {busy && <span className="muted"> · reading again…</span>}
             </p>
+            {job && (
+              <p className="small" aria-label="Job status">
+                <strong>{localStatusText(job)}</strong>
+                {jobProgress && ` · ${jobProgress}`}
+                {job.result?.error && <span className="criterion-unmet"> · {job.result.error}</span>}
+              </p>
+            )}
             {inspection.warnings.map((warning) => (
               <p key={warning} className="warning small">
                 {warning}
@@ -458,7 +488,7 @@ export function InspectWindow({
                     >
                       Copy XYZ
                     </button>
-                    {onScanEditor && step.scan && (
+                    {onScanEditor && step.scan && !isJob && (
                       <button
                         className="small"
                         onClick={() => onScanEditor(target)}
@@ -530,8 +560,13 @@ export function InspectWindow({
               </div>
             )}
             <p className="muted small">
-              Read without importing: nothing is written to the investigation
-              {inspection.server_name ? ` or on ${inspection.server_name}; the copy is deleted when this window closes` : ''}.
+              {isJob
+                ? 'Read without importing: the app imports the result when the job is done, as Local jobs shows.'
+                : 'Read without importing: nothing is written to the investigation'}
+              {!isJob &&
+                (inspection.server_name
+                  ? ` or on ${inspection.server_name}; the copy is deleted when this window closes.`
+                  : '.')}
             </p>
           </>
         )}
