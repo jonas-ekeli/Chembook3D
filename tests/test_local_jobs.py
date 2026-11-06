@@ -321,6 +321,10 @@ def test_real_tools_refine_water_with_dft(open_client, water, monkeypatch):
     done = wait_for(open_client, job["id"], finished, timeout=600)
     assert done["status"] == "converged", done["result"]["error"]
     assert -76.5 < done["result"]["energy"] < -76.3  # B97-3c water, hartree
+    # D220: psi4.out prints what scf_progress reads (each step's SCF iterations, then the gradient)
+    out = (folder_of(open_client) / "local-jobs" / job["id"] / "psi4.out").read_text()
+    assert "==> Iterations <==" in out and "Energy and wave function converged" in out
+    assert local_jobs._SCF_ITERATION.findall(out) and "-Total Gradient:" in out
     assert open_client.post(f"/api/local/jobs/{job['id']}/import").status_code == 200
     calcs = open_client.get(f"/api/nodes/{water}/calculations").json()
     assert calcs[0]["program"] == "Psi4" and calcs[0]["constraints"] == ["constrained B(1,2)"]
@@ -404,8 +408,41 @@ def test_a_half_written_trajectory_is_read_to_its_last_whole_frame(tmp_path):
     frame = "2\ncycle {n} energy -1.{n}\nH 0 0 0\nH 0 0 0.7{n}\n"
     path = tmp_path / "trajectory.xyz"
     path.write_text(frame.format(n=1) + frame.format(n=2) + "2\ncycle 3 energy -1.3\nH 0 0")
-    frames, energies = local_jobs._trajectory(path, 2)
+    frames, energies, points = local_jobs._trajectory(path, 2)
     assert energies == [-1.1, -1.2] and frames[1][1] == [0.0, 0.0, 0.72]
+    assert points == [None, None]
     judged = tmp_path / "criteria.jsonl"
     judged.write_text('{"frame": 1, "criteria": [["RMS gradient", 1e-3, 3e-4, "Eh/bohr"]]}\n{"fr')
     assert local_jobs._criteria(judged, 2) == [[], [["RMS gradient", 1e-3, 3e-4, "Eh/bohr"]]]
+
+
+PSI4_OUT = """
+   ==> Iterations <==
+
+                        Total Energy        Delta E     RMS |[F,P]|
+
+   @DF-RKS iter SAD:   -75.50772041125475   -7.55077e+01   0.00000e+00
+   @DF-RKS iter   1:   -75.95376270516553   -4.46041e-01   3.03235e-02 DIIS/ADIIS
+   @DF-RKS iter   2:   -76.00706051432137   -5.32978e-02   2.54458e-02 DIIS/ADIIS
+"""
+
+
+def test_how_far_a_dft_step_has_got(tmp_path):
+    """T-LOC-27, D220: the SCF iteration of the step Psi4 is computing, read from psi4.out."""
+    out = tmp_path / "psi4.out"
+    assert local_jobs.scf_progress(out) is None  # not started
+    out.write_text("Psi4 header\n" * 50000 + PSI4_OUT)  # more than the tail read
+    assert local_jobs.scf_progress(out) == {
+        "iteration": 2,
+        "delta_e": -5.32978e-02,
+        "converged": False,
+    }
+    with out.open("a") as fh:
+        fh.write("\n  Energy and wave function converged.\n\n  ==> Post-Iterations <==\n")
+    assert local_jobs.scf_progress(out)["converged"] is True
+    with out.open("a") as fh:
+        fh.write("\n  -Total Gradient:\n     Atom            X                  Y   \n")
+    assert local_jobs.scf_progress(out) is None  # the step is done
+    with out.open("a") as fh:  # the next step's SCF starts
+        fh.write(PSI4_OUT.replace("iter   2:", "iter   2x").split("iter   2x")[0])
+    assert local_jobs.scf_progress(out)["iteration"] == 1

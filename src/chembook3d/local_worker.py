@@ -11,7 +11,9 @@ Files in the job folder:
   coordinates in Angstrom, optional constraints.
 - ``progress.json`` (rewritten here): state (queued, running), pid, cycle, energy, largest
   gradient component, and a heartbeat time renewed every few seconds while the process lives.
-- ``trajectory.xyz``: one frame per optimizer step, the comment holding the energy.
+- ``trajectory.xyz``: one frame per optimizer step, the comment holding the energy (and, D220,
+  a scan's point: ``cycle 4 energy -5.07 point 2``).
+- ``scan-points.jsonl``: D220, a scan's points as each one ends (as ``result.json`` lists them).
 - ``criteria.jsonl``: D220, one line per optimizer step after the first, the convergence criteria
   geomeTRIC judged that step's structure by (``record_criteria``), for the Inspect window.
 - ``result.json``: written once at the end, with the outcome and the final geometry.
@@ -536,6 +538,7 @@ def grid_cells(scan: dict) -> list[tuple[float, float, list[int]]]:
 
 
 CRITERIA = "criteria.jsonl"
+SCAN_POINTS = "scan-points.jsonl"
 
 
 def record_criteria(store) -> None:
@@ -659,10 +662,11 @@ def run(folder: Path, lock: Path | None) -> int:
                     frames.append(ang.round(6).tolist())
                     frame_points.append(point["index"])
                     criteria.append([])
+                    comment = f"cycle {len(energies)} energy {energy:.10f}"
+                    if job.get("scan"):  # D220: its point, for the Inspect window
+                        comment += f" point {point['index']}"
                     with traj.open("a", encoding="utf-8") as fh:
-                        fh.write(
-                            xyz_frame(symbols, ang, f"cycle {len(energies)} energy {energy:.10f}")
-                        )
+                        fh.write(xyz_frame(symbols, ang, comment))
                 last["coords"], last["energy"] = ang, energy
                 progress.update(
                     cycle=len(energies),
@@ -763,6 +767,8 @@ def run(folder: Path, lock: Path | None) -> int:
                 )
                 if cells is not None:
                     points[-1]["cell"] = cells[k]
+                with (folder / SCAN_POINTS).open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(points[-1]) + "\n")  # D220: for the Inspect window
                 converged = converged and done
             result["scan"] = {**scan, "points": points}
             progress.update(phase=None)

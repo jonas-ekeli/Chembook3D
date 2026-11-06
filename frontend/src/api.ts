@@ -580,6 +580,8 @@ export type InspectStep = {
   frames: StepFrame[]
   modes: Modes | null
   missing: string[]
+  /** D219: a 2D grid scan's coordinates and cells (D220: every cell while the grid still runs) */
+  grid?: StepGrid | null
 }
 export type Inspection = {
   id: string
@@ -998,6 +1000,8 @@ export type LocalJob = {
     heartbeat_at: string | null
     /** D215: a Hessian being computed, e.g. "Starting Hessian 12/27" */
     phase?: string | null
+    /** D220: the SCF of the DFT step Psi4 is computing */
+    scf?: { iteration: number; delta_e: number | null; converged: boolean } | null
   }
   result?: {
     state: string

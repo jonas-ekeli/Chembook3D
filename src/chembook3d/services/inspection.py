@@ -59,6 +59,7 @@ class Step:
     frames: list[trajectory.Frame]
     modes: Modes | None
     missing: list[str]
+    grid: dict | None = None  # D219: a 2D grid scan's coordinates and cells (D220: running too)
 
 
 @dataclass
@@ -107,6 +108,7 @@ def _step(step: ParsedStep) -> Step:
         frames=frames,
         modes=_modes(step),
         missing=list(step.missing),
+        grid=step.scan_grid,
     )
 
 
