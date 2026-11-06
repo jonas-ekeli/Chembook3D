@@ -102,6 +102,12 @@ export default function KetcherDrawer({
           disableMacromoleculesEditor
           buttons={BUTTONS}
           onInit={(k: Ketcher) => {
+            // Ketcher calls onInit again, with the same instance, once its (lazily loaded)
+            // macromolecules editor is up. A second setMolecule would put the start drawing back
+            // over what is drawn by then, and Indigo's worker answers a convert to whichever
+            // listener of that kind is waiting, so it could also leave a getSmiles or getMolfile
+            // running beside it waiting for ever.
+            if (ketcher.current === k) return
             ketcher.current = k
             window.ketcher = k
             const done = () => setReady(true)
