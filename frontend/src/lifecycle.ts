@@ -87,10 +87,23 @@ export function startPresence() {
   void keepInTouch()
 }
 
+let shuttingDown = false
+
+/** Whether Shut down was pressed in this tab and the backend has not answered yet. The backend
+ * closes the investigation first, so the tab hears it was closed before the push is done; the
+ * tab must then stay where it is, not go to the start page as for an ordinary close. */
+export const isShuttingDown = () => shuttingDown
+
 /** Shut down in the app (FR-RUN-04): the backend closes the investigation and stops. */
 export async function shutDown() {
-  const result = await api.shutDown()
-  update({ stopped: { how: 'shutdown', sync: result.sync } })
+  shuttingDown = true
+  try {
+    const result = await api.shutDown()
+    update({ stopped: { how: 'shutdown', sync: result.sync } })
+  } catch (err) {
+    shuttingDown = false
+    throw err
+  }
 }
 
 function subscribe(listener: () => void) {

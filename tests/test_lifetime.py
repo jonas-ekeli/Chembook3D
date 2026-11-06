@@ -4,14 +4,17 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 
 import pytest
 from fastapi.testclient import TestClient
 
+from chembook3d.api import lifetime as module
 from chembook3d.api.lifetime import Lifetime
 from chembook3d.app import create_app
+from chembook3d.sync import SyncStatus
 
 DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 APP = "http://127.0.0.1:5173"  # any page on this computer
@@ -125,6 +128,44 @@ def test_shut_down_only_from_a_page_on_this_computer(open_client):
     time.sleep(1)
     assert calls == ["exit"]
     assert open_client.get("/api/presence", params={"tab": "t"}).json()["stopping"]
+
+
+def test_a_second_shut_down_waits_for_the_first(open_client, monkeypatch):
+    """Shut down closes the investigation before its slow push; a press in the meantime (from the
+    start page another tab now shows) must not stop the server under the first, whose answer
+    was then cancelled at the graceful-shutdown timeout."""
+    found = open_client.app.state.lifetime
+    calls = []
+    found.exit = lambda: calls.append("exit")
+    pushing, release = threading.Event(), threading.Event()
+
+    def slow_push(investigation, timeout):
+        investigation.close()
+        pushing.set()
+        release.wait(5)
+        return SyncStatus("ok", "Pushed to GitHub.")
+
+    monkeypatch.setattr(module, "close_and_push", slow_push)
+    answers = {}
+
+    def press(name):
+        answers[name] = open_client.post("/api/shutdown", headers={"Origin": APP})
+
+    first = threading.Thread(target=press, args=("first",))
+    first.start()
+    assert pushing.wait(5)
+    second = threading.Thread(target=press, args=("second",))
+    second.start()
+    second.join(0.5)
+    assert second.is_alive() and not found.stopping  # waits for the push, stops nothing yet
+    release.set()
+    first.join(5)
+    second.join(5)
+    for name in ("first", "second"):
+        assert answers[name].status_code == 200
+        assert answers[name].json() == {"sync": "Pushed to GitHub."}
+    time.sleep(1)
+    assert calls == ["exit"]
 
 
 # ---------- real servers ----------
