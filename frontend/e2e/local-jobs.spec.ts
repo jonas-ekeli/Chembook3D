@@ -139,6 +139,46 @@ test('a running local job is inspected as it runs', async ({ page }) => {
   await expect(jobs).toBeVisible()
 })
 
+// T-UI-90, D220: a running 2D grid scan is inspected point by point: the map fills in as its
+// points converge, the ones not run yet left empty.
+test('a running grid scan fills in its map in the Inspect window', async ({ page }) => {
+  test.slow()
+  await startPage(page)
+  await page.getByRole('button', { name: /^New/ }).first().click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
+  await dialog.getByLabel('Folder path').fill(E2E_DIR)
+  await dialog.getByRole('button', { name: 'Go' }).click()
+  await dialog.getByLabel('Investigation name').fill('Grid inspect')
+  await dialog.getByRole('button', { name: 'Create' }).click()
+  await expect(page.locator('.investigation')).toHaveText('Grid inspect')
+  const node = await page.request.post('/api/nodes', { data: { label: 'w', xyz: WATER } })
+  const oh = { kind: 'distance', atoms: [0, 1], start: 0.9, end: 1.2, points: 3 }
+  const scan = { grid: true, points: 6, coordinates: [oh, { ...oh, atoms: [0, 2], points: 2 }] }
+  const started = await page.request.post('/api/local/jobs', {
+    data: { node_id: (await node.json()).id, method: 'stub', scan },
+  })
+  expect(started.ok()).toBeTruthy()
+  await page.reload()
+
+  await page.getByRole('button', { name: 'Local jobs · 1 running' }).click()
+  const row = page.getByRole('dialog', { name: 'Local jobs' }).getByRole('table', { name: 'Local jobs' }).getByRole('row').nth(1)
+  await expect(row).toContainText(/Running, point [2-5] of 6/, { timeout: 60_000 })
+  await row.getByRole('button', { name: 'Inspect' }).click()
+  const window = page.getByRole('dialog', { name: 'Inspect w · stub' })
+  const map = window.getByRole('figure', { name: 'Energy surface' })
+  await expect(map).toBeVisible()
+  await expect(map.getByRole('button', { name: /^Point 1: .*above the lowest/ })).toHaveCount(1)
+  await expect(map.getByRole('button', { name: /^Point 6: .*not run yet/ })).toHaveCount(1)
+  await expect(window.getByLabel('Structure shown')).toContainText(/scan point \d of 6/)
+  await expect(window.getByLabel('Job status')).toContainText('Converged', { timeout: 90_000 })
+  await expect(map.getByRole('button', { name: /not run yet/ })).toHaveCount(0)
+  await expect(map.getByRole('button', { name: /above the lowest/ })).toHaveCount(6)
+  // A cell shows its point's structure.
+  await map.getByRole('button', { name: /^Point 4:/ }).click()
+  await expect(window.getByLabel('Structure shown')).toContainText('scan point 4 of 6')
+})
+
 // T-UI-84, D214: an ONIOM refine suggests its DFT core from the metal, shows its size and link
 // hydrogens, refuses a core that cuts a bond to the metal, and runs with the core chosen.
 const BUTYL = [

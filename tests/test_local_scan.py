@@ -13,10 +13,12 @@ import pytest
 from chembook3d import local_worker
 from tests.conftest import WATER
 from tests.test_local_jobs import (  # noqa: F401 - the fixtures
+    PAGE,
     REAL,
     finished,
     folder_of,
     no_worker_left,
+    page,
     stub_tools,
     wait_for,
 )
@@ -234,3 +236,37 @@ def test_a_grid_of_more_than_100_points_starts(open_client):
     assert started.status_code == 200, started.json()
     assert started.json()["scan"]["points"] == 225
     assert open_client.post(f"/api/local/jobs/{started.json()['id']}/cancel").status_code == 200
+
+
+def _point(job: dict) -> int:
+    phase = job["progress"].get("phase") or ""
+    return int(phase.split()[1]) if phase.startswith("Point ") else 0
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_a_running_grid_scan_is_inspected_point_by_point(page, monkeypatch):  # noqa: F811
+    """T-LOC-27, D220: a running grid shows the points done so far, each structure with its
+    point, and every cell of the grid, so its map fills in; when done, all of them."""
+    monkeypatch.setenv("CHEMBOOK3D_LOCAL_STUB_DELAY", "0.3")
+    node_id = page.post("/api/nodes", json={"label": "w", "xyz": WATER}).json()["id"]
+    job = page.post(
+        "/api/local/jobs", json={"node_id": node_id, "method": "stub", "scan": GRID}
+    ).json()
+    wait_for(page, job["id"], lambda j: _point(j) >= 3 or not j["active"], timeout=120)
+    body = {"path": "w", "job": job["id"]}
+    shown = page.post("/api/inspections", json=body, headers=PAGE).json()
+    step = shown["steps"][0]
+    assert step["scan"] == "relaxed" and len(step["grid"]["cells"]) == 6 and step["points"] == 6
+    assert step["grid"]["cells"][:3] == [[0, 0], [0, 1], [1, 1]]
+    frames = step["frames"]
+    assert all(f["point"] for f in frames) and frames[0]["point"] == 1
+    done = {f["point"] for f in frames if f["converged"]}
+    assert {1, 2} <= done
+    if shown["job"]["active"]:
+        assert step["optimization_converged"] is None and len(done) < 6
+
+    wait_for(page, job["id"], finished, timeout=120)
+    again = page.post(f"/api/inspections/{shown['id']}/refresh", headers=PAGE).json()
+    step = again["steps"][0]
+    assert {f["point"] for f in step["frames"] if f["converged"]} == set(range(1, 7))
+    assert step["points"] == 6 and len(step["grid"]["cells"]) == 6

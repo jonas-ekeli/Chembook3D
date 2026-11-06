@@ -15,6 +15,7 @@ export function SurfaceMap({
   grid,
   energies,
   converged,
+  pending,
   current,
   settings,
   onPick,
@@ -23,6 +24,8 @@ export function SurfaceMap({
   /** per scan point (from 1, index point - 1): its converged structure's energy, or null */
   energies: (number | null)[]
   converged: boolean[]
+  /** D220: per scan point, not run yet (a grid still running): left empty, not crossed */
+  pending?: boolean[]
   current: number | null
   settings: Settings | null
   onPick: (point: number) => void
@@ -56,8 +59,10 @@ export function SurfaceMap({
           const title =
             `Point ${point}: ${across.name} ${label(across.values, i, across.unit)} ${across.unit}, ` +
             `${up.name} ${label(up.values, j, up.unit)} ${up.unit}` +
-            (energy === null ? ', no energy' : `, ${formatDelta(energy - low, settings)} ${unit} above the lowest`) +
-            (converged[k] ? '' : ', not converged')
+            (pending?.[k]
+              ? ', not run yet'
+              : (energy === null ? ', no energy' : `, ${formatDelta(energy - low, settings)} ${unit} above the lowest`) +
+                (converged[k] ? '' : ', not converged'))
           return (
             <g key={point} className="surface-cell" onClick={() => onPick(point)} aria-label={title} role="button">
               <title>{title}</title>
@@ -69,7 +74,7 @@ export function SurfaceMap({
                 className={energy === null ? 'surface-empty' : undefined}
                 style={energy === null ? undefined : { fill: `rgb(${r} ${g} ${b})` }}
               />
-              {!converged[k] && (
+              {!converged[k] && !pending?.[k] && (
                 <text x={x + cell / 2} y={y + cell / 2} className="surface-unconverged">
                   ×
                 </text>

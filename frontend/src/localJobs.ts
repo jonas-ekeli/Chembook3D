@@ -16,6 +16,14 @@ export function localStatusText(job: LocalJob): string {
       return 'Waiting for another local job'
     case 'running':
       if (job.progress.phase) return `Running, ${job.progress.phase.toLowerCase()}`
+      if (job.progress.scf) {
+        // D220: a DFT step takes minutes; how far the one in progress has got
+        const { iteration, delta_e: change, converged } = job.progress.scf
+        const doing = converged
+          ? `gradient (SCF converged in ${iteration} iterations)`
+          : `SCF iteration ${iteration}${change !== null ? `, ΔE ${change.toExponential(1)} Eh` : ''}`
+        return `Running, step ${job.progress.cycle + 1}: ${doing}`
+      }
       return job.progress.cycle ? `Running, step ${job.progress.cycle}` : 'Running'
     case 'cancelling':
       return 'Stopping'

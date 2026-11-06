@@ -204,7 +204,10 @@ def _scan(data: dict, geometries: list[list[Atom]], energies: list) -> ParsedFil
                 }
                 for name, c in zip(names, scan["coordinates"], strict=True)
             ],
-            "cells": [list(p.get("cell") or [0, 0]) for p in points],
+            # D220: a running grid's every cell (its points so far fill some of them)
+            "cells": [list(c) for c in scan["cells"]]
+            if scan.get("cells")
+            else [list(p.get("cell") or [0, 0]) for p in points],
         }
     state = data.get("state")
     step.optimization_converged = None if state == RUNNING else state == "converged"

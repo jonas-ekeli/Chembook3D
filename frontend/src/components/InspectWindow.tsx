@@ -13,6 +13,7 @@ import { localStatusText, progressText } from '../localJobs'
 import { errorText, hartree, withDisplacements } from '../util'
 import { Modal } from './Modal'
 import { Convergence, EnergyChart } from './StepMovie'
+import { SurfaceMap } from './SurfaceMap'
 import { Viewer3D } from './Viewer3D'
 
 // D123c: the Inspect window reads an output or xyz file, on this computer or on a server,
@@ -186,6 +187,27 @@ export function InspectWindow({
   }, [frames, filterable, convergedOnly])
   const count = shown.length
   const at = Math.min(index, Math.max(count - 1, 0))
+  // D219, D220: a 2D grid's points, as the step movie shows them: the structure that stands for
+  // each (its converged one, else its last so far) and its energy once converged.
+  const gridPoints = useMemo(() => {
+    const grid = step?.grid
+    if (!grid) return null
+    return grid.cells.map((_, k) => {
+      const mine = frames.map((frame, n) => ({ frame, n })).filter(({ frame }) => frame.point === k + 1)
+      const done = mine.filter(({ frame }) => frame.converged).at(-1)
+      const chosen = done ?? mine.at(-1)
+      return { n: chosen?.n ?? null, converged: Boolean(done), energy: done ? done.frame.energy : null }
+    })
+  }, [step, frames])
+  const pickPoint = (point: number) => {
+    const frame = gridPoints?.[point - 1]?.n
+    if (frame === null || frame === undefined) return
+    setPlaying(false)
+    const position = shown.findIndex(({ n }) => n === frame)
+    if (position >= 0) return setIndex(position)
+    setConvergedOnly(false)
+    setIndex(frame)
+  }
   const xyzFrames = useMemo(
     () => shown.map(({ frame, n }) => geometryToXyz(frame.geometry, `structure ${n + 1}`)),
     [shown],
@@ -273,6 +295,8 @@ export function InspectWindow({
   const job = inspection?.job ?? null
   const jobProgress = job ? progressText(job) : null
   const every = isJob ? 'Every 5 s' : 'Every 30 s'
+  // D220: the point a running scan is optimizing now: not crossed as unconverged on the map
+  const runningPoint = job?.active ? Math.max(0, ...frames.map((f) => f.point ?? 0)) : 0
 
   return (
     <Modal
@@ -530,6 +554,17 @@ export function InspectWindow({
                         </>
                       )}
                     </p>
+                  )}
+                  {!vibration && step.grid && gridPoints && (
+                    <SurfaceMap
+                      grid={step.grid}
+                      energies={gridPoints.map((p) => p.energy)}
+                      converged={gridPoints.map((p) => p.converged)}
+                      pending={gridPoints.map((p, k) => p.n === null || (!p.converged && k + 1 === runningPoint))}
+                      current={current?.point ?? null}
+                      settings={settings}
+                      onPick={pickPoint}
+                    />
                   )}
                   {!vibration && (
                     <>

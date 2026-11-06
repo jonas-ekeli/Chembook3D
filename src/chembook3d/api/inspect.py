@@ -115,6 +115,7 @@ class InspectStepOut(BaseModel):
     frames: list[StepFrameOut]
     modes: ModesOut | None
     missing: list[str]  # what the file does not say, as the import lists it
+    grid: dict | None = None  # D219/D220: a 2D grid scan's coordinates and cells
 
 
 class InspectionOut(BaseModel):
@@ -177,6 +178,7 @@ def _step_out(step: inspection.Step) -> InspectStepOut:
         if step.modes
         else None,
         missing=step.missing,
+        grid=step.grid,
     )
 
 
@@ -197,6 +199,10 @@ def _read_job(item: _Open) -> InspectionOut:
     except (local_result.NotLocalResult, ValueError, TypeError) as exc:
         raise HTTPException(422, f"The job's files cannot be read: {exc}") from exc
     found = inspection.of_parsed(parsed)
+    planned = (status.get("scan") or {}).get("points")
+    for step in found.steps:
+        if step.scan and planned:  # a running scan's points: all it will have, not those so far
+            step.points = max(step.points, int(planned))
     return InspectionOut(
         id=item.id,
         name=f"{status.get('node_label')} · {status.get('level')}",

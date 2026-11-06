@@ -38,7 +38,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from chembook3d import local_tools
-from chembook3d.local_worker import CRITERIA, METHOD_LABELS
+from chembook3d.local_worker import CRITERIA, METHOD_LABELS, SCAN_POINTS, grid_cells
 from chembook3d.models import Node
 from chembook3d.parsers import local_result
 from chembook3d.services import imports, oniom
@@ -553,7 +553,10 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
         "started_at": progress.get("started_at"),
         "heartbeat_at": progress.get("heartbeat_at"),
         "phase": progress.get("phase"),  # D215: a Hessian being computed
+        "scf": None,
     }
+    if status == "running" and job.get("method") in PSI4_METHODS and not progress.get("phase"):
+        out["progress"]["scf"] = scf_progress(path / "psi4.out")  # D220
     if result is not None:
         out["result"] = {
             key: result.get(key)
@@ -583,15 +586,24 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
     return out
 
 
-def _trajectory(path: Path, count: int) -> tuple[list[list[list[float]]], list[float | None]]:
-    """trajectory.xyz's whole frames (a frame being written is left out) and the energy each
-    comment line carries (`cycle N energy E`)."""
+def _word_after(words: list[str], key: str) -> str | None:
+    if key in words and words.index(key) + 1 < len(words):
+        return words[words.index(key) + 1]
+    return None
+
+
+def _trajectory(
+    path: Path, count: int
+) -> tuple[list[list[list[float]]], list[float | None], list[int | None]]:
+    """trajectory.xyz's whole frames (a frame being written is left out), the energy each
+    comment line carries and a scan's point (`cycle N energy E point P`)."""
     frames: list[list[list[float]]] = []
     energies: list[float | None] = []
+    points: list[int | None] = []
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (FileNotFoundError, PermissionError):
-        return frames, energies
+        return frames, energies, points
     i = 0
     while i + count + 2 <= len(lines):
         if lines[i].strip() != str(count):
@@ -603,16 +615,63 @@ def _trajectory(path: Path, count: int) -> tuple[list[list[list[float]]], list[f
         if any(len(row) != 3 for row in frame):
             break
         words = lines[i + 1].split()
-        energy = None
-        if "energy" in words and words.index("energy") + 1 < len(words):
-            try:
-                energy = float(words[words.index("energy") + 1])
-            except ValueError:
-                energy = None
+        try:
+            energy = float(_word_after(words, "energy") or "")
+        except ValueError:
+            energy = None
+        point = _word_after(words, "point")
         frames.append(frame)
         energies.append(energy)
+        points.append(int(point) if point and point.isdigit() else None)
         i += count + 2
-    return frames, energies
+    return frames, energies, points
+
+
+def _lines(path: Path) -> list[dict[str, Any]]:
+    """A jsonl file's whole lines; a line being written is left out."""
+    out = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, PermissionError):
+        return out
+    for line in lines:
+        try:
+            found = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(found, dict):
+            out.append(found)
+    return out
+
+
+# D220: Psi4's SCF iterations (`@DF-RKS iter  12:  -1234.5678  -1.2e-05  3.4e-06 DIIS`), read
+# from the end of psi4.out to tell how far the step in progress has got.
+_SCF_ITERATION = re.compile(r"@\S+ iter\s+(\d+):\s+(-?\d+\.\d+)\s+(-?\d+\.\d+e[+-]\d+)")
+SCF_TAIL = 262_144  # bytes: more than one SCF of a large system prints
+PSI4_METHODS = {"b97-3c", "r2scan-3c", "oniom"}
+
+
+def scf_progress(path: Path) -> dict[str, Any] | None:
+    """The SCF of the step Psi4 is computing: its last iteration and energy change, or that it
+    has converged and the gradient is being computed; None when no step is in progress."""
+    try:
+        with path.open("rb") as fh:
+            fh.seek(max(0, path.stat().st_size - SCF_TAIL))
+            text = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    start = text.rfind("==> Iterations <==")
+    if start < 0:
+        return None
+    block = text[start:]
+    if "-Total Gradient:" in block:
+        return None  # the step's gradient is done; the optimizer takes its next step
+    found = _SCF_ITERATION.findall(block)
+    return {
+        "iteration": int(found[-1][0]) if found else 0,
+        "delta_e": float(found[-1][2]) if found else None,
+        "converged": "Energy and wave function converged" in block,
+    }
 
 
 def _criteria(path: Path, count: int) -> list[list[Any]]:
@@ -645,7 +704,7 @@ def inspect_data(folder: Path, job_id: str) -> tuple[dict[str, Any], dict[str, A
         return result, status, (path / RESULT).stat().st_size
     job = read_job(folder, job_id)
     elements = list(job.get("elements") or [])
-    frames, energies = _trajectory(path / TRAJECTORY, len(elements))
+    frames, energies, frame_points = _trajectory(path / TRAJECTORY, len(elements))
     program, label = METHOD_LABELS.get(job.get("method", ""), (job.get("method"), None))
     data = {
         "format": local_result.FORMAT,
@@ -665,7 +724,15 @@ def inspect_data(folder: Path, job_id: str) -> tuple[dict[str, Any], dict[str, A
     }
     if not frames:
         data["coordinates"] = job.get("coordinates")  # the start, until the first step
-    size = sum(f.stat().st_size for f in (path / TRAJECTORY, path / CRITERIA) if f.is_file())
+    if job.get("scan"):
+        # A scan's points so far, and for a grid every cell, so its map fills in.
+        scan = {**job["scan"], "points": _lines(path / SCAN_POINTS)}
+        if scan.get("grid"):
+            scan["cells"] = [cell for _, _, cell in grid_cells(scan)]
+        data["scan"] = scan
+        data["frame_points"] = [p or 0 for p in frame_points]
+    files = (path / TRAJECTORY, path / CRITERIA, path / SCAN_POINTS)
+    size = sum(f.stat().st_size for f in files if f.is_file())
     return data, status, size
 
 
