@@ -70,6 +70,7 @@ import { ClaudeRequestDialog } from './components/ClaudeRequestDialog'
 import { SidePanel, type SideTab } from './components/SidePanel'
 import { HPC, hpcLabel } from './hpc'
 import { LaunchNotices, ShutDownDialog } from './components/ShutDown'
+import { isShuttingDown } from './lifecycle'
 import { StartPage } from './components/StartPage'
 import { Menu, type MenuItem } from './components/MoreMenu'
 import { TIDY_MODES, type Positions, type TidyBox, type TidyLink } from './tidy'
@@ -473,6 +474,9 @@ function App() {
   // D91: changes Claude (or another tab) makes show at once; Claude's deletes wait for an answer.
   // D159: the investigation's thermochemistry is in the settings, so they are read again too.
   const claudeRequests = useLive(investigation === undefined ? undefined : investigation?.folder ?? null, async (folder) => {
+    // Shut down closes the investigation before it pushes and stops: stay in its dialog until
+    // then, so the tab does not show the start page with its own Shut down button meanwhile.
+    if (isShuttingDown()) return
     if (identity.current !== folder) {
       // Do not load records until their identity and remembered view have been reset together.
       const version = identityVersion.current

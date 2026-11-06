@@ -62,6 +62,9 @@ class Lifetime:
     # tools (D213): each answers whether it is still going.
     holds: list[Callable[[], bool]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # Held while the Shut down button closes and pushes the investigation: a second press waits
+    # for the first instead of stopping the server under it (the first was then cancelled).
+    shutting_down: threading.Lock = field(default_factory=threading.Lock)
 
     def seen(self, tab: str, now: float | None = None) -> None:
         with self.lock:
@@ -244,14 +247,17 @@ def shut_down(request: Request):
     if not origin or urlsplit(origin).hostname not in LOOPBACK:
         raise HTTPException(403, "Only the app's own page can shut it down")
     found = lifetime(request)
-    investigation = getattr(request.app.state, "investigation", None)
-    message = None
-    if investigation is not None:
-        request.app.state.investigation = None
-        status = close_and_push(investigation, timeout=SHUTDOWN_PUSH_TIMEOUT)
-        if status is not None:
-            message = status.message
-            print(f"Chembook3D sync: {message}", flush=True)
-    found.sync = message
-    found.stop("Shut down in the app")
-    return ShutdownOut(sync=message)
+    with found.shutting_down:
+        if found.stopping:  # pressed again (another tab) while the first press was pushing
+            return ShutdownOut(sync=found.sync)
+        investigation = getattr(request.app.state, "investigation", None)
+        message = None
+        if investigation is not None:
+            request.app.state.investigation = None
+            status = close_and_push(investigation, timeout=SHUTDOWN_PUSH_TIMEOUT)
+            if status is not None:
+                message = status.message
+                print(f"Chembook3D sync: {message}", flush=True)
+        found.sync = message
+        found.stop("Shut down in the app")
+        return ShutdownOut(sync=message)
