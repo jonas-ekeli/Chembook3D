@@ -1,0 +1,126 @@
+{
+  "_about": "Download file names built from the user's text: `text` becomes `name` with the fallback \"default\". Read by tests/test_downloads.py (api/downloads.py, the reference) and frontend/tests/util.test.mjs (fileName in frontend/src/util.ts), so the two cannot drift apart.",
+  "fallback": "default",
+  "cases": [
+    {
+      "note": "Jonas's primes keep int2, int2' and int2'' apart",
+      "text": "int2'",
+      "name": "int2'"
+    },
+    {
+      "text": "int2''",
+      "name": "int2''"
+    },
+    {
+      "note": "en dash, double dagger and Greek letters stay",
+      "text": "TS1–2‡ β-H",
+      "name": "TS1–2‡ β-H"
+    },
+    {
+      "text": "Ru–CAAC (κ²-N,P) 1,2-shift",
+      "name": "Ru–CAAC (κ²-N,P) 1,2-shift"
+    },
+    {
+      "note": "CJK and an emoji outside the Basic Multilingual Plane",
+      "text": "配位子 ligand 🧪",
+      "name": "配位子 ligand 🧪"
+    },
+    {
+      "note": "a combining accent stays as typed, not normalised",
+      "text": "e\u0301thene",
+      "name": "e\u0301thene"
+    },
+    {
+      "note": "each character Windows refuses becomes _",
+      "text": "<>:\"/\\|?*",
+      "name": "_________"
+    },
+    {
+      "text": "scan 1/2: Cl–C–C–Cl",
+      "name": "scan 1_2_ Cl–C–C–Cl"
+    },
+    {
+      "text": "C:\\runs\\TS1.log",
+      "name": "C__runs_TS1.log"
+    },
+    {
+      "note": "control characters, tab and newline included, become _",
+      "text": "a\tb\nc\rd\u0000e\u001fg\u007fh",
+      "name": "a_b_c_d_e_g_h"
+    },
+    {
+      "note": "C1 control characters are not in the rule and stay",
+      "text": "\u0080\u009f",
+      "name": "\u0080\u009f"
+    },
+    {
+      "note": "spaces around it and dots and spaces at its end go",
+      "text": "  name. . ",
+      "name": "name"
+    },
+    {
+      "note": "a no-break space is not a space for the rule",
+      "text": "\u00a0name\u00a0",
+      "name": "\u00a0name\u00a0"
+    },
+    {
+      "note": "only dots: the fallback",
+      "text": "...",
+      "name": "default"
+    },
+    {
+      "text": " . . ",
+      "name": "default"
+    },
+    {
+      "note": "empty: the fallback",
+      "text": "",
+      "name": "default"
+    },
+    {
+      "text": "   ",
+      "name": "default"
+    },
+    {
+      "note": "a leading dot stays",
+      "text": ".hidden",
+      "name": ".hidden"
+    },
+    {
+      "text": "v1.2.",
+      "name": "v1.2"
+    },
+    {
+      "note": "an inner space before a dot stays",
+      "text": "name .xyz",
+      "name": "name .xyz"
+    },
+    {
+      "note": "a refused character at the end is replaced, not dropped",
+      "text": "trailing:",
+      "name": "trailing_"
+    },
+    {
+      "note": "Windows reserved device names are not changed by the rule",
+      "text": "CON",
+      "name": "CON"
+    },
+    {
+      "text": "nul.txt",
+      "name": "nul.txt"
+    },
+    {
+      "text": "LPT1",
+      "name": "LPT1"
+    },
+    {
+      "note": "no length limit: a long name is kept whole",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "text": "ββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββ.",
+      "name": "ββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββββ"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import { api, standardStateCorrection, type Settings, type StandardState } from '../api'
+import { api, displayUnit, standardStateCorrection, type Settings, type StandardState } from '../api'
 import { NumberSetting } from './NumberSetting'
 import type { SettingSection } from './SettingsDialog'
 
@@ -32,7 +32,7 @@ export function thermoSection({
       defaults.standard_state !== settings.standard_state)
   const name = investigationName ?? 'the open investigation'
   const correction = (
-    standardStateCorrection(settings.qh_temperature) * settings.energy_factors[settings.energy_unit]
+    standardStateCorrection(settings.qh_temperature) * displayUnit(settings).factor
   ).toFixed(settings.energy_decimals[settings.energy_unit] + 2)
   return {
     id: 'thermochemistry',

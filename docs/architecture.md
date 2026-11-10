@@ -69,14 +69,24 @@ flowchart LR
 
 `tests/` (pytest, fixtures in `tests/fixtures/` with sources in its README), `frontend/tests/`
 (Node unit tests, `npm run test:unit`), `frontend/e2e/` (Playwright against the real backend on
-:8766, with a fake SSH server on :8767). CI (`.github/workflows/ci.yml`, Ubuntu + Windows): Backend,
-Frontend, UI tests, Portability (`tests/portability.py` makes an investigation on one OS and
-opens it on the other), and Local tools (installs the real tools and runs `tests/test_local_*.py`).
+:8766, with a fake SSH server on :8767). The frontend unit tests import the pure `.ts` modules
+directly (Node strips the types) and cover the API client, energy units and corrections, XYZ
+parsing and measuring, Tidy, edge label placement, the profile axis, the read-only copy's data and
+file names; CI runs them as `npm run test:coverage`, which prints Node's coverage of `src/`.
+`tests/fixtures/file-names.json` holds download file name examples that both the backend's
+`api/downloads.py` and the frontend's `fileName` are tested on. The frontend's TypeScript is
+compiled with `strict`, and `npm run lint` (oxlint) fails on a warning as well as an error.
+CI (`.github/workflows/ci.yml`, Ubuntu + Windows): Backend, Frontend, UI tests, Portability
+(`tests/portability.py` makes an investigation on one OS and opens it on the other), and Local
+tools (installs the real tools and runs `tests/test_local_*.py`).
+`tests/test_migrations.py` upgrades a seeded database from every schema revision, checks that a
+failed upgrade leaves the file and its backup unchanged, and runs every downgrade.
 Sweeps: `tests/test_parser_sweeps.py` reads every fixture output with LF and CRLF line ends (the
 results must be equal) and cut off at 25 byte offsets (the parsers may refuse with their own
 error, never crash); `tests/test_energies.py` checks G_qh against Jonas's script on a grid of
 molecules, temperatures and cutoffs; `tests/test_import_undo.py` checks that an undone import
-leaves every table row and stored file as before. Backend runs pytest in parallel (`-n auto`, pytest-xdist) and lists the 25 slowest tests; a test
+leaves every table row and stored file as before.
+Backend runs pytest in parallel (`-n auto`, pytest-xdist) and lists the 25 slowest tests; a test
 running over 2 minutes prints its traceback (`faulthandler_timeout`). Every job has a time limit,
 a newer push to a pull request cancels the older run, and actions are pinned to commit SHAs
 (Dependabot proposes updates, `.github/dependabot.yml`).

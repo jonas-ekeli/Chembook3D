@@ -14,3 +14,5 @@
 | `sterics/` | `1.xyz` … `18.xyz` (metal complexes, the metal is atom 1) and `reference_data.csv` (the atoms left out and SambVca's %V_bur for each, 3.5 Å, Bondi ×1.17, no hydrogens) | morfeus's buried volume test data, [digital-chemistry-laboratory/morfeus](https://github.com/digital-chemistry-laboratory/morfeus) commit `e5dacf9`, `tests/data/buried_volume/` (line endings changed to LF) | MIT, `sterics/LICENSE-morfeus.txt` |
 
 The files are copies of the originals, changed only where the table says so (a renamed file, LF line endings); `xtb/dce_scan/` was made for this repository. Cases none of them cover (an ORCA relaxed scan, whose sample is 6 MB, ORCA `opt freq`, xTB `--ohess`, multi-job ORCA files) are made in the tests by joining two real files. A Gaussian `--Link1--` chain with a custom GenECP basis set and dispersion set by IOps (D59) is written by `tests/gaussian_text.py` (`custom_chain`, `custom_single_point`).
+
+`file-names.json` is not an output: it lists download file names (text and the expected name) that `tests/test_downloads.py` and `frontend/tests/util.test.mjs` both check, written for this repository.

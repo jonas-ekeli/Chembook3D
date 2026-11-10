@@ -10,6 +10,7 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
   - `src/util.ts` `errorText`: a caught error as shown text; `{ blockers: true }` shows an ApiError's `blockers` instead. `download` (a URL) and `downloadBlob` (a Blob).
   - `src/names.ts` `nodeName`: a label, else "Untitled node".
   - `src/api.ts` `request` for JSON and `requestBlob` for a file fetched as a blob.
+  - `src/api.ts` `displayUnit(settings)`: the display unit and its hartree factor (P17), kcal/mol before the settings load. Use it (or `energyFactor`, `convertEnergy`) rather than reading `energy_factors` directly: an unknown unit throws instead of showing hartree under another unit's label.
 
 ## Look of the interface (D174, D185)
 
@@ -26,6 +27,7 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 - Records in `models.py`, Alembic revisions in `migrations/`, rules in `services/`.
 - Who owns the open folder (lock, `_OwnedSession`): see "Notebook identity and ownership".
 - A new, empty database gets its schema from the models in one commit and is stamped at the latest revision (`_create_schema`); only an existing one runs the migrations (`_migrate`, after its backup). `tests/test_migrations.py` checks that both give the same schema, so a migration that adds a column with a server default needs the same `server_default` on the model.
+- `_migrate` runs every pending revision and the foreign key check in one transaction (an explicit `BEGIN`, since Python's sqlite3 module would commit each DDL statement on its own), so a failed upgrade leaves the database exactly as its backup. `tests/test_migrations.py` seeds a row in every table at every revision and upgrades it, checks that a failed upgrade changes no byte, and walks every `downgrade()` back to the base and up again. A downgrade drops a foreign key by name only when the model names it too (a database created from the models has the others unnamed); dropping the column drops its key.
 - In `api/routes.py`, create, open, clone and close each take a number when they start (`_begin_switch`). One that finishes after a later one started was overtaken: it closes its own investigation again and answers 409 `superseded` (`_set_open`, `tests/test_overtaken_switch.py`).
 - `CHEMBOOK3D_SLOW_REQUESTS` (seconds; CI sets 2) makes `app.SlowRequests` print every request that took longer, long polls left out.
 
@@ -63,6 +65,7 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 - `energy-request.spec.ts` delays/refuses all five scientific choices (type, level, reference, pathways, BSSE) and reverses profile/table/CSV completion.
 - `investigation-identity.spec.ts` covers two tabs opening/switching/closing, an initially idle start page, stale responses/view writes, reload and a delayed close outcome.
 - `frontend/tests/api-identity.test.mjs` exercises the real API client with deferred fetch bodies and no installed frontend dependencies.
+- The other `frontend/tests/*.test.mjs` test the frontend's pure modules (`chem.ts`, `tidy.ts`, `labelLayout.ts`, `profileAxis.ts`, `snapshot/data.ts`, `util.ts`, the energy helpers in `api.ts`). Node loads the `.ts` files itself; `tests/resolve-ts.mjs` only adds the `.ts` extension the app's imports leave out. A module Node cannot load (React, CSS, `.tsx`) is not imported: its pure part is moved into a `.ts` module, as `profileAxis.ts` was. `npm run test:coverage` (what CI runs) adds Node's coverage of `src/`.
 
 ## Output parsers and importing a file (D61, D64)
 
@@ -113,6 +116,7 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 - Download file names built from the user's text (node, basis set, investigation) all go through `api/downloads.py` (`file_name`, `attachment`) and its mirror `fileName` in `frontend/src/util.ts`.
 - Only <>:"/\|?* and control characters become `_`, so primes, spaces and Greek letters stay.
 - The header carries an ASCII `filename` and the real name in `filename*`.
+- `tests/fixtures/file-names.json` holds shared examples (text and the expected name), read by both `tests/test_downloads.py` and `frontend/tests/util.test.mjs`, so the two copies of the rule cannot drift apart. Add a case there, not to one side only.
 
 ## Atom matching (D113, A59)
 
@@ -238,7 +242,7 @@ Routes for all of these are in `api/pathway.py`.
 
 ### Profile chart and style (D106–D111, D181)
 
-- `ProfileChart.tsx` draws a profile in the app's profile style, set in `ProfileStyleDialog.tsx`.
+- `ProfileChart.tsx` draws a profile in the app's profile style, set in `ProfileStyleDialog.tsx`. Its pure maths is in `profileAxis.ts`: the y range (`valueRange`), round ticks and their decimals, and text widths and wrapping (D198).
 - D181: the drawer and the read-only copy pass `textScale={SCREEN_TEXT}` and `pointing`, for the hover tooltip, click to select and the selection's halo. PNG and SVG are saved from `profileFigure.figureOf`, a fresh render without either, so nothing on screen reaches them.
 - D106: the setting `profile_style`, cleaned by `settings.clean_profile_style`; presets `PROFILE_PRESETS` mirrored as `SCREEN_STYLE` in `profileStyle.ts`, which also saves the PNG and SVG.
 - D108: `edge_tags` hides the "no TS" tags, and a top-right legend moves below the title where the title, measured in the figure's font, would reach it.
