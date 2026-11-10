@@ -1,14 +1,18 @@
 """FastAPI application: the local API plus the built web interface."""
 
 import asyncio
+import os
+import sys
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from starlette.types import Scope
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from chembook3d import __version__, cloud_jobs, local_tools
 from chembook3d.api.batch_imports import router as batch_router
@@ -84,6 +88,36 @@ uv run chembook3d</pre>
 """
 
 
+class SlowRequests:
+    """Set CHEMBOOK3D_SLOW_REQUESTS to a number of seconds (CI does) to print every HTTP request
+    whose answer took longer than that to start, so a test that timed out shows where the
+    time went. Long polls (a `wait` in the query: /api/live, /api/presence) are left out."""
+
+    def __init__(self, app: ASGIApp, seconds: float):
+        self.app = app
+        self.seconds = seconds
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or "wait" in parse_qs(scope["query_string"].decode()):
+            await self.app(scope, receive, send)
+            return
+        start = time.monotonic()
+
+        async def timed(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                took = time.monotonic() - start
+                if took > self.seconds:
+                    print(
+                        f"Chembook3D slow request: {scope['method']} {scope['path']} took "
+                        f"{took:.1f} s (status {message['status']})",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+            await send(message)
+
+        await self.app(scope, receive, timed)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.investigation = None
@@ -125,6 +159,8 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.state.lifetime.holds.append(lambda: app.state.gxtb_installer.current.state == "running")
     app.add_middleware(ChangeTracker, live=app.state.live)
     app.add_middleware(TabRequests, lifetime=app.state.lifetime)  # D107
+    if slow := os.environ.get("CHEMBOOK3D_SLOW_REQUESTS"):
+        app.add_middleware(SlowRequests, seconds=float(slow))
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import RLock
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -628,12 +629,37 @@ def close_and_push(
         return sync.SyncStatus("error", str(exc))
 
 
-def _set_open(request: Request, investigation: Investigation, status=None) -> InvestigationOut:
-    current = getattr(request.app.state, "investigation", None)
+# Create, open and close each take a number when they start. A create or open that finishes
+# after a later one has started was overtaken: it must not replace what the later one opened
+# (or close what it left open), so it closes its own investigation again and reports 409.
+_SWITCHING = RLock()
+SUPERSEDED = (
+    "A later create, open or close started while this one was running, so this investigation "
+    "was closed again"
+)
+
+
+def _begin_switch(request: Request) -> int:
+    with _SWITCHING:
+        state = request.app.state
+        state.switches = getattr(state, "switches", 0) + 1
+        return state.switches
+
+
+def _set_open(
+    request: Request, investigation: Investigation, switch: int, status=None
+) -> InvestigationOut:
+    with _SWITCHING:
+        superseded = getattr(request.app.state, "switches", 0) != switch
+        if not superseded:
+            current = getattr(request.app.state, "investigation", None)
+            request.app.state.investigation = investigation
+    if superseded:
+        close_and_push(investigation)
+        raise HTTPException(409, {"superseded": True, "message": SUPERSEDED})
     if current is not None:
         close_and_push(current)
     _staging(request).clear()
-    request.app.state.investigation = investigation
     _remember(investigation, opened=True)
     return _investigation_out(investigation, status)
 
@@ -651,11 +677,12 @@ def current_investigation(request: Request):
 
 @router.post("/investigations", response_model=InvestigationOut)
 def create(body: CreateInvestigationIn, request: Request):
+    switch = _begin_switch(request)
     try:
         investigation = create_investigation(Path(body.folder), body.name)
     except InvestigationError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return _set_open(request, investigation)
+    return _set_open(request, investigation, switch)
 
 
 def _conflict(folder: Path, status: sync.SyncStatus) -> HTTPException:
@@ -664,7 +691,9 @@ def _conflict(folder: Path, status: sync.SyncStatus) -> HTTPException:
     return HTTPException(409, {"sync_conflict": {**out.model_dump(), "folder": str(folder)}})
 
 
-def _open_folder(request: Request, folder: Path, force: bool, upgrade: bool) -> InvestigationOut:
+def _open_folder(
+    request: Request, folder: Path, force: bool, upgrade: bool, switch: int
+) -> InvestigationOut:
     current = getattr(request.app.state, "investigation", None)
     if current is not None and folder.resolve() == current.folder.resolve():
         return _investigation_out(current)
@@ -699,32 +728,36 @@ def _open_folder(request: Request, folder: Path, force: bool, upgrade: bool) -> 
     finally:
         if ownership is not None and investigation is None:
             ownership.release()
-    return _set_open(request, investigation, status)
+    return _set_open(request, investigation, switch, status)
 
 
 @router.post("/investigations/open", response_model=InvestigationOut)
 def open_(body: OpenInvestigationIn, request: Request):
-    return _open_folder(request, Path(body.folder), body.force, body.upgrade)
+    switch = _begin_switch(request)
+    return _open_folder(request, Path(body.folder), body.force, body.upgrade, switch)
 
 
 @router.post("/investigations/clone", response_model=InvestigationOut)
 def clone(body: CloneInvestigationIn, request: Request):
     """FR-SYNC-03: Open from GitHub."""
+    switch = _begin_switch(request)
     folder = Path(body.folder).expanduser()
     try:
         sync.clone(body.url, folder)
     except sync.SyncError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return _open_folder(request, folder, force=False, upgrade=False)
+    return _open_folder(request, folder, force=False, upgrade=False, switch=switch)
 
 
 @router.post("/investigations/close", response_model=SyncOut | None)
 def close(request: Request):
-    investigation = getattr(request.app.state, "investigation", None)
-    check_investigation_identity(request, investigation)
+    check_investigation_identity(request)
+    with _SWITCHING:
+        _begin_switch(request)
+        investigation = getattr(request.app.state, "investigation", None)
+        request.app.state.investigation = None
     status = None
     if investigation is not None:
-        request.app.state.investigation = None
         status = close_and_push(investigation)
     _staging(request).clear()
     return _sync_out(status)
@@ -791,6 +824,7 @@ def sync_resolve(body: ResolveIn, request: Request):
         with ownership.operation(folder) if ownership is not None else nullcontext():
             try:
                 if ownership is not None:
+                    _begin_switch(request)
                     request.app.state.investigation = None
                     current.close(release_ownership=False)
                     _staging(request).clear()

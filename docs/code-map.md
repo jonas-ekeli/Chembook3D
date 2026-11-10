@@ -25,6 +25,9 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 - `investigation.py` refuses a database from a newer app (`InvestigationTooNew`) and, on request, asks before upgrading (`NeedsUpgrade`).
 - Records in `models.py`, Alembic revisions in `migrations/`, rules in `services/`.
 - Who owns the open folder (lock, `_OwnedSession`): see "Notebook identity and ownership".
+- A new, empty database gets its schema from the models in one commit and is stamped at the latest revision (`_create_schema`); only an existing one runs the migrations (`_migrate`, after its backup). `tests/test_migrations.py` checks that both give the same schema, so a migration that adds a column with a server default needs the same `server_default` on the model.
+- In `api/routes.py`, create, open, clone and close each take a number when they start (`_begin_switch`). One that finishes after a later one started was overtaken: it closes its own investigation again and answers 409 `superseded` (`_set_open`, `tests/test_overtaken_switch.py`).
+- `CHEMBOOK3D_SLOW_REQUESTS` (seconds; CI sets 2) makes `app.SlowRequests` print every request that took longer, long polls left out.
 
 ## Notebook identity and ownership (F02)
 
