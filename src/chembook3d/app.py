@@ -90,7 +90,7 @@ uv run chembook3d</pre>
 
 class SlowRequests:
     """Set CHEMBOOK3D_SLOW_REQUESTS to a number of seconds (CI does) to print every HTTP request
-    whose answer took longer than that to start, so a test that timed out shows where the
+    whose answer took that long or longer to start, so a test that timed out shows where the
     time went. Long polls (a `wait` in the query: /api/live, /api/presence) are left out."""
 
     def __init__(self, app: ASGIApp, seconds: float):
@@ -101,12 +101,12 @@ class SlowRequests:
         if scope["type"] != "http" or "wait" in parse_qs(scope["query_string"].decode()):
             await self.app(scope, receive, send)
             return
-        start = time.monotonic()
+        start = time.perf_counter()
 
         async def timed(message: Message) -> None:
             if message["type"] == "http.response.start":
-                took = time.monotonic() - start
-                if took > self.seconds:
+                took = time.perf_counter() - start
+                if took >= self.seconds:
                     print(
                         f"Chembook3D slow request: {scope['method']} {scope['path']} took "
                         f"{took:.1f} s (status {message['status']})",
