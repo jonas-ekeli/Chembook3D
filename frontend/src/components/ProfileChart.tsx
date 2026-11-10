@@ -10,6 +10,7 @@ import {
 import { createPortal } from 'react-dom'
 import {
   balanceText,
+  displayUnit,
   energyTypeName,
   formatDelta,
   type PathShift,
@@ -21,23 +22,7 @@ import {
 import { minus } from '../cardEnergy'
 import { closesCycle } from '../util'
 import { dashOf, FONTS, pathwayColours, styleOf } from '../profileStyle'
-
-/** Round numbers for the y axis. */
-function ticks(min: number, max: number, count = 5): number[] {
-  const span = max - min || 1
-  const raw = span / count
-  const magnitude = 10 ** Math.floor(Math.log10(raw))
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((s) => s >= raw) ?? raw
-  const found = []
-  for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-9; v += step) found.push(Number(v.toFixed(10)))
-  return found
-}
-
-/** The fewest decimals that write every tick exactly. */
-function tickDecimals(values: number[]): number {
-  for (let d = 0; d < 6; d++) if (values.every((v) => Number(v.toFixed(d)) === v)) return d
-  return 6
-}
+import { textWidth, tickDecimals, ticks, valueRange, wrapText } from '../profileAxis'
 
 /** The figure's own colours, in every saved PNG and SVG whatever the theme (D185). */
 const PAPER = {
@@ -60,53 +45,6 @@ const DARK: typeof PAPER = {
   tagEdge: 'var(--warn-strong)',
   tagText: 'var(--warn-text)',
   faint: 'var(--text-faint)',
-}
-
-let measure: CanvasRenderingContext2D | null | undefined
-
-/** The width of `text` in the figure's font, measured by the browser; estimated where it
- * cannot measure. */
-function textWidth(text: string, size: number, family: string, weight = 400): number {
-  if (measure === undefined) {
-    try {
-      measure = document.createElement('canvas').getContext('2d')
-    } catch {
-      measure = null
-    }
-  }
-  if (!measure) return text.length * size * 0.6
-  measure.font = `${weight} ${size}px ${family}`
-  return measure.measureText(text).width
-}
-
-/** D198: `text` broken into lines no wider than `width`, after a space, `_`, `-`, `/` or `.`
- * where it can, and inside a word only when the word alone is wider than a line. The lines joined
- * give the text back (a space at a break ends its line and is not counted in its width). */
-function wrapText(text: string, width: number, size: number, family: string): string[] {
-  const fits = (line: string) => textWidth(line.trimEnd(), size, family) <= width
-  if (fits(text)) return [text]
-  const lines: string[] = []
-  let line = ''
-  for (const piece of text.match(/[^ _\-/.]+[ _\-/.]*|[ _\-/.]+/g) ?? []) {
-    if (fits(line + piece)) {
-      line += piece
-      continue
-    }
-    // A piece wider than a line is cut where the line is full; any other starts a new line.
-    if (fits(piece) && line) {
-      lines.push(line)
-      line = ''
-    }
-    for (const char of piece) {
-      if (line && !fits(line + char)) {
-        lines.push(line)
-        line = ''
-      }
-      line += char
-    }
-  }
-  if (line) lines.push(line)
-  return lines
 }
 
 /** D198: the lines of a wrapped text, each under the one before, in its `<text>`. */
@@ -184,8 +122,7 @@ export function ProfileChart({
   const paint = dark ? DARK : PAPER
   // D185: black lines of a black or grey style would vanish on the dark theme's background.
   const colours = pathwayColours(branchColours, style, chosen).map((c) => (dark && c === '#000000' ? 'var(--text)' : c))
-  const unit = settings?.energy_unit ?? 'kcal/mol'
-  const factor = settings?.energy_factors[unit] ?? 1
+  const { unit, factor } = displayUnit(settings)
   const W = style.width
   const H = style.height
   const f = style.font_size * textScale
@@ -328,12 +265,7 @@ export function ProfileChart({
   const extraBottom = (bottomRows ? below.length : Math.max(0, below.length - 1)) * row
 
   const values = data.profiles.flatMap((p) => p.points.map((pt) => pt.relative).filter((v): v is number => v !== null))
-  const shown = [0, ...values.map((v) => v * factor)]
-  let lo = Math.min(...shown)
-  let hi = Math.max(...shown)
-  const pad = (hi - lo || 1) * 0.12
-  lo -= pad
-  hi += pad
+  const { lo, hi } = valueRange(values.map((v) => v * factor))
   const innerTop = margin.top + extraTop
   const innerH = plotH - extraTop - extraBottom
   const y = (v: number) => innerTop + innerH - ((v * factor - lo) / (hi - lo)) * innerH
