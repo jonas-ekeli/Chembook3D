@@ -469,6 +469,13 @@ def _migrate(engine: Engine, db_path: Path, allow_upgrade: bool = True) -> str |
             # Alembic keeps its running context in module globals, so two migrations at once
             # (two investigations opened by different requests) break each other; one at a time.
             with _MIGRATIONS, connection.begin():
+                # As in _create_schema: without an explicit BEGIN, Python's sqlite3 module runs
+                # each CREATE, DROP and ALTER as its own commit, so a migration that failed
+                # halfway would leave a half-migrated database. With it, every revision and the
+                # foreign key check below are one transaction, rolled back as a whole on any
+                # error (NFR-DATA-03). PRAGMA foreign_keys stays outside: SQLite ignores it
+                # inside a transaction.
+                connection.exec_driver_sql("BEGIN")
                 command.upgrade(_alembic_config(connection), "head")
                 broken = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
                 if broken:

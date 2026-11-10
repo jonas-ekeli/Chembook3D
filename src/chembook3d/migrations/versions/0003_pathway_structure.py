@@ -141,10 +141,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     with op.batch_alter_table("nodes", schema=None) as batch_op:
-        batch_op.drop_constraint("fk_nodes_origin_branch_id", type_="foreignkey")
-        batch_op.drop_constraint("fk_nodes_group_id", type_="foreignkey")
-        batch_op.drop_constraint("fk_nodes_step_id", type_="foreignkey")
-        batch_op.drop_constraint("fk_nodes_branch_id", type_="foreignkey")
+        # Dropping a column in batch mode drops its foreign key too. The keys are not
+        # dropped by name: a database created from the models has them unnamed.
         batch_op.drop_index(batch_op.f("ix_nodes_step_id"))
         batch_op.drop_index(batch_op.f("ix_nodes_group_id"))
         batch_op.drop_index(batch_op.f("ix_nodes_branch_id"))
