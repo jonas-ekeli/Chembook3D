@@ -40,6 +40,16 @@ def home(tmp_path, monkeypatch) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def own_temp(tmp_path, monkeypatch):
+    """Each test gets its own temp folder: the tests count the app's chembook3d-remote-* and
+    chembook3d-read-* copies there, and tests running in parallel would see each other's."""
+    path = tmp_path / "temp"
+    path.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(path))
+    return path
+
+
 @pytest.fixture
 def saga(tmp_path):
     fake = FakeSaga(tmp_path / "saga").start()

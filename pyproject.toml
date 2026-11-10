@@ -31,6 +31,7 @@ dev = [
     "geometric>=1.1",
     "httpx2>=2.13.1",
     "pytest>=8",
+    "pytest-xdist>=3.6",
     "ruff>=0.6",
 ]
 
@@ -43,6 +44,8 @@ packages = ["src/chembook3d"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# A test still running after 2 minutes prints every thread's traceback (it is not stopped).
+faulthandler_timeout = 120
 
 [tool.ruff]
 line-length = 100

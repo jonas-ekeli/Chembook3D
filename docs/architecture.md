@@ -72,3 +72,7 @@ flowchart LR
 :8766, with a fake SSH server on :8767). CI (`.github/workflows/ci.yml`, Ubuntu + Windows): Backend,
 Frontend, UI tests, Portability (`tests/portability.py` makes an investigation on one OS and
 opens it on the other), and Local tools (installs the real tools and runs `tests/test_local_*.py`).
+Backend runs pytest in parallel (`-n auto`, pytest-xdist) and lists the 25 slowest tests; a test
+running over 2 minutes prints its traceback (`faulthandler_timeout`). Every job has a time limit,
+a newer push to a pull request cancels the older run, and actions are pinned to commit SHAs
+(Dependabot proposes updates, `.github/dependabot.yml`).
