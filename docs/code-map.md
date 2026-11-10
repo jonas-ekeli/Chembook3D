@@ -737,7 +737,8 @@ Routes for all of these are in `api/pathway.py`.
 ## Backend tests
 
 - `tests/`: pytest. `tests/portability.py` is the cross-OS zip check CI runs (T-OPS-01).
-- `tests/fixtures/` holds public sample outputs: `gaussian/` from GoodVibes, `orca/`, `xtb/`, `crest/`, `iochem/` (ioChem-BD CML) and `sterics/` (SambVca reference set). Sources and licences are in `tests/fixtures/README.md`.
+- `tests/fixtures/` holds public sample outputs: `gaussian/` from GoodVibes and cclib, `orca/`, `xtb/`, `crest/`, `iochem/` (ioChem-BD CML) and `sterics/` (SambVca reference set). Sources and licences are in `tests/fixtures/README.md`.
+- `tests/test_parser_sweeps.py` reads every fixture with CRLF line ends and cut off at many points, calling the parsers directly so a crash is not hidden by the Inspect window's retry.
 - `tests/gaussian_text.py` writes small synthetic outputs for cases the samples lack, including the custom-basis `--Link1--` chains (`python -m tests.gaussian_text <folder>` writes them for the UI tests).
 - Notebook identity and ownership tests: see that section.
 

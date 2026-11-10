@@ -327,6 +327,8 @@ def test_a_refused_login_is_not_tried_again(local, saga):
     )
     assert step["kind"] == "failed" and "refused the login" in step["message"]
     assert saga.record.answers[-1] == ["wrong"] and len(saga.record.answers) == 3
+    # What is tested is that nothing happens: no new attempt to connect within a second. There
+    # is no event to wait for instead, so this sleep is the time watched.
     time.sleep(1)
     assert len(saga.connections) == 3 and saga.record.logins == 0
     assert not _status(local)["connected"]
@@ -366,6 +368,8 @@ def test_a_lost_connection_is_reported_and_not_logged_in_again(local, saga):
         assert "connection to Saga was lost" in messages[-1]["message"]
     status = _status(local)
     assert not status["connected"] and "Log in again" in status["lost"]
+    # What is tested is that nothing happens: no new login within a second. There is no event
+    # to wait for instead, so this sleep is the time watched.
     time.sleep(1)
     assert saga.record.logins == 1
 
@@ -579,8 +583,12 @@ def test_the_keeper_logs_out_after_the_idle_time_and_ends_when_empty(
         return await client.call("answer", login=step["login"], answers=[CODE])
 
     assert asyncio.run(log_in())["kind"] == "connected"
-    time.sleep(2.0)
-    assert asyncio.run(client.status())["sessions"] == []  # logged out: nothing typed for 1 s
+    logged_in = time.monotonic()
+    deadline = logged_in + 10
+    while asyncio.run(client.status())["sessions"]:  # logged out: nothing typed for 1 s
+        assert time.monotonic() < deadline
+        time.sleep(0.05)
+    assert time.monotonic() - logged_in >= 1.0  # not before the idle time
     thread.join(10)  # and then ended, with nothing left to hold
     assert not thread.is_alive()
     assert not (folder / keeper.KEEPER_FILE).exists()

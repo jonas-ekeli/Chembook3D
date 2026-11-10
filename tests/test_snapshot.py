@@ -47,13 +47,21 @@ def import_ts_from(client, folder: Path) -> str:
     return commit(client, plan, **named(plan), origin_device="cluster.example.org")["node_id"]
 
 
-def test_copy_is_one_page_with_the_investigation(open_client, page, tmp_path):
+class LastMinuteOfTheYear(datetime):
+    """The clock the export reads, fixed so its date cannot change while the test runs."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 12, 31, 23, 59, 59, tzinfo=tz)
+
+
+def test_copy_is_one_page_with_the_investigation(open_client, page, tmp_path, monkeypatch):
     # FR-SHARE-01, FR-SHARE-02
     node_id = import_ts_from(open_client, tmp_path / "results")
+    monkeypatch.setattr(snapshot, "datetime", LastMinuteOfTheYear)
     response = export(open_client)
     assert response.headers["content-type"].startswith("text/html")
-    today = f"{datetime.now():%Y-%m-%d}"
-    assert f'filename="Test read-only {today}.html"' in response.headers["content-disposition"]
+    assert 'filename="Test read-only 2026-12-31.html"' in response.headers["content-disposition"]
     assert "<title>Test · Chembook3D (read-only)</title>" in response.text
 
     data = data_of(response)

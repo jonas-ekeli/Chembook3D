@@ -81,6 +81,11 @@ CI (`.github/workflows/ci.yml`, Ubuntu + Windows): Backend, Frontend, UI tests, 
 tools (installs the real tools and runs `tests/test_local_*.py`).
 `tests/test_migrations.py` upgrades a seeded database from every schema revision, checks that a
 failed upgrade leaves the file and its backup unchanged, and runs every downgrade.
+Sweeps: `tests/test_parser_sweeps.py` reads every fixture output with LF and CRLF line ends (the
+results must be equal) and cut off at 25 byte offsets (the parsers may refuse with their own
+error, never crash); `tests/test_energies.py` checks G_qh against Jonas's script on a grid of
+molecules, temperatures and cutoffs; `tests/test_import_undo.py` checks that an undone import
+leaves every table row and stored file as before.
 Backend runs pytest in parallel (`-n auto`, pytest-xdist) and lists the 25 slowest tests; a test
 running over 2 minutes prints its traceback (`faulthandler_timeout`). Every job has a time limit,
 a newer push to a pull request cancels the older run, and actions are pinned to commit SHAs

@@ -254,9 +254,12 @@ def _read_normal_modes(lines: list[str], start: int, atom_count: int) -> tuple[l
             for row in range(rows):
                 if i + row >= len(lines):
                     break
-                values = lines[i + row].split()[1:]
+                try:
+                    values = [float(value) for value in lines[i + row].split()[1:]]
+                except ValueError:  # a file cut off inside a number: the table ends here
+                    break
                 for index, value in zip(indices, values, strict=False):
-                    columns.setdefault(index, []).append(float(value))
+                    columns.setdefault(index, []).append(value)
             i += rows
             continue
         i += 1

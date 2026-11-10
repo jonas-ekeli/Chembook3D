@@ -3,12 +3,24 @@
 import shutil
 from pathlib import Path
 
+import pytest
+from sqlalchemy import text
+
 from chembook3d.models import HistoryEntry, Node, SourceFile
 from chembook3d.services import history
 from tests import gaussian_text as g
 from tests.test_batch_import import nodes, row, run, scan
 from tests.test_gaussian_parser import truncated_opt
-from tests.test_import import calculations, commit, copied_files, named, node, upload
+from tests.test_import import (
+    calculations,
+    commit,
+    copied_files,
+    fixture,
+    folder,
+    named,
+    node,
+    upload,
+)
 from tests.test_pre_optimization import (
     DFT_END,
     GUESS,
@@ -357,3 +369,91 @@ def test_copies_are_kept_until_the_undo_commits(open_client, monkeypatch):
     assert removed == []
     undo(open_client, import_entry(open_client, "w.out"))
     assert [p.parent.name for p in removed] == ["files"]
+
+
+# ---------- the undo leaves the investigation as it was ----------
+
+# The tables an undo leaves alone on purpose. `history`: the import's own entries stay and the
+# undo adds its own (P15, D102). `levels_of_theory`, `custom_bases`, `custom_dispersions`: the
+# levels and the custom basis set and dispersion names the import made stay (A49). In these the
+# rows from before must be unchanged and the only new rows are those the import or undo wrote.
+KEPT_TABLES = {"history", "levels_of_theory", "custom_bases", "custom_dispersions"}
+ORCA_IR = Path(__file__).parent / "fixtures" / "orca" / "dvb_ir.out"
+
+
+def database(client) -> dict[str, set[tuple]]:
+    """Every row of every table, as read straight from SQLite, without `updated_at`: a node
+    the import changed is written again by the undo putting its fields back, so its
+    `updated_at` is the time of the undo (a new change, P15), not the time before."""
+    found = {}
+    with client.app.state.investigation.sessions() as session:
+        connection = session.connection()
+        tables = connection.execute(
+            text("SELECT name FROM sqlite_master WHERE type = 'table'")
+        ).scalars()
+        for name in list(tables):
+            result = connection.execute(text(f'SELECT * FROM "{name}"'))
+            kept = [i for i, column in enumerate(result.keys()) if column != "updated_at"]
+            found[name] = {tuple(row[i] for i in kept) for row in result}
+    return found
+
+
+def stored_files(client) -> dict[str, bytes | None]:
+    """Every path under files/, with its bytes (None for a folder)."""
+    root = folder(client) / "files"
+    if not root.exists():
+        return {}
+    return {
+        p.relative_to(root).as_posix(): (p.read_bytes() if p.is_file() else None)
+        for p in root.rglob("*")
+    }
+
+
+IMPORTS = {
+    "gaussian": lambda client, planned: [("HCN_singlet.out", fixture("HCN_singlet.out"), {})],
+    "orca": lambda client, planned: [("dvb_ir.out", ORCA_IR.read_bytes(), {})],
+    "crest": lambda client, planned: [("crest_conformers.xyz", CREST.read_bytes(), {})],
+    "custom basis": lambda client, planned: [("chain.log", g.custom_chain(), "named")],
+    "onto a planned node": lambda client, planned: [
+        ("A.log", g.opt_freq(GUESS, DFT_END), {"target_node_id": planned, "status": "done"})
+    ],
+    "two files": lambda client, planned: [
+        ("HCN_singlet.out", fixture("HCN_singlet.out"), {}),
+        ("dvb_ir.out", ORCA_IR.read_bytes(), {}),
+    ],
+}
+
+
+@pytest.mark.parametrize("case", list(IMPORTS))
+def test_undo_restores_the_database_and_files_exactly(open_client, case):
+    # T-IMP-18, D102: after import and undo, every row and every stored file is as before.
+    # A node and an earlier import already there make sure nothing else is touched.
+    planned = open_client.post(
+        "/api/nodes", json={"label": "guess", "xyz": xyz(GUESS), "charge": 1}
+    ).json()["id"]
+    water = g.output(g.step("#P B3LYP/6-31G(d) Opt", [g.WATER], converged=True))
+    commit(open_client, upload(open_client, "w.out", water))
+    before, files_before = database(open_client), stored_files(open_client)
+
+    imported = IMPORTS[case](open_client, planned)
+    for name, content, options in imported:
+        node_id = options.get("target_node_id") if isinstance(options, dict) else None
+        plan = upload(open_client, name, content, node_id)
+        if options == "named":
+            options = named(plan)
+        commit(open_client, plan, **{"duplicate_action": "new", **options})
+    during = database(open_client)
+    assert stored_files(open_client) != files_before
+    for name, _, _ in reversed(imported):
+        undo(open_client, import_entry(open_client, name))
+
+    after = database(open_client)
+    assert after.keys() == before.keys()
+    for table in before:
+        if table in KEPT_TABLES:
+            assert before[table] <= after[table], table
+            if table != "history":
+                assert after[table] <= during[table], table
+        else:
+            assert after[table] == before[table], table
+    assert stored_files(open_client) == files_before
