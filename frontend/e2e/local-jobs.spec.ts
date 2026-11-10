@@ -345,7 +345,10 @@ test('a relaxed scan on this computer comes in as a scan node', async ({ page })
 // T-UI-88, D219: a 2D grid scan of water's two O–H bonds; it comes in as a node whose step
 // movie shows the energy surface, and a cell shows its point.
 test('a 2D grid scan shows its energy surface', async ({ page }) => {
-  test.slow()
+  // The UI tests run the stub engine with a 1 s sleep per energy (CHEMBOOK3D_LOCAL_STUB_DELAY in
+  // playwright.config.ts), and the 9 points of this grid take about 50 energies: about 55 s of
+  // planned work on every run, which a 60 s wait left almost no room for.
+  test.setTimeout(180_000)
   await startPage(page)
   await page.getByRole('button', { name: /^New/ }).first().click()
   const dialog = page.getByRole('dialog')
@@ -380,7 +383,7 @@ test('a 2D grid scan shows its energy surface', async ({ page }) => {
   await second.getByLabel('Grid points').fill('3')
   await refine.getByRole('button', { name: 'Start' }).click()
   await expect(refine).toHaveCount(0)
-  await expect(page.getByText(/The stub grid scan of “start” is done .* 9 of 9 points converged/)).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText(/The stub grid scan of “start” is done .* 9 of 9 points converged/)).toBeVisible({ timeout: 120_000 })
 
   await page.locator('.react-flow__node').filter({ hasText: 'start grid B(1,2) × B(1,3)' }).click()
   const movie = page.getByLabel('Node inspector').getByLabel('Optimization steps')
