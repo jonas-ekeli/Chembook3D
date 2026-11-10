@@ -1,6 +1,6 @@
 # Chembook3D specification pack
 
-Specifications (no code) for Chembook3D, a local-first notebook for computational chemistry mechanism investigations. Written 2026-09-29 from the alignment interview that Jonas confirmed.
+Specifications (no code) for Chembook3D, a local-first notebook for computational chemistry mechanism investigations. Written 2026-09-29 from the alignment interview that Jonas confirmed, and updated since as decisions are added (08 holds them all).
 
 | # | Document | Contents |
 |---|---|---|
@@ -11,7 +11,7 @@ Specifications (no code) for Chembook3D, a local-first notebook for computationa
 | 05 | [data-and-calculation-integrations](05-data-and-calculation-integrations.md) | Records, file copying, parsers, thermochemistry, units, provenance |
 | 06 | [architecture-and-operations](06-architecture-and-operations.md) | Stack, storage, packaging, NFRs |
 | 07 | [validation-and-test-plan](07-validation-and-test-plan.md) | T-… tests: lineage, identity, import, energies, portability |
-| 08 | [decisions-and-open-questions](08-decisions-and-open-questions.md) | D1–D58, assumptions, confirmed proposals P1–P30, open questions, exclusions, risks |
+| 08 | [decisions-and-open-questions](08-decisions-and-open-questions.md) | Decisions (Dnn), assumptions (Ann), confirmed proposals P1–P30, open questions (Qnn), exclusions, risks |
 | 09 | [implementation-roadmap](09-implementation-roadmap.md) | Phases 0–6 with requirements, tests and prerequisites |
 
 Background: [alignment-record.md](alignment-record.md) (interview log) and [alignment-summary.md](alignment-summary.md) (confirmed summary).
