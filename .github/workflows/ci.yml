@@ -53,7 +53,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: npm run test:unit
+      # The unit tests (frontend/tests), with Node's own line and branch coverage of src/ in the log.
+      - run: npm run test:coverage
       - run: npm run build
 
   ui:

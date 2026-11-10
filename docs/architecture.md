@@ -69,7 +69,12 @@ flowchart LR
 
 `tests/` (pytest, fixtures in `tests/fixtures/` with sources in its README), `frontend/tests/`
 (Node unit tests, `npm run test:unit`), `frontend/e2e/` (Playwright against the real backend on
-:8766, with a fake SSH server on :8767). CI (`.github/workflows/ci.yml`, Ubuntu + Windows): Backend,
+:8766, with a fake SSH server on :8767). The frontend unit tests import the pure `.ts` modules
+directly (Node strips the types) and cover the API client, energy units and corrections, XYZ
+parsing and measuring, Tidy, edge label placement, the profile axis, the read-only copy's data and
+file names; CI runs them as `npm run test:coverage`, which prints Node's coverage of `src/`.
+`tests/fixtures/file-names.json` holds download file name examples that both the backend's
+`api/downloads.py` and the frontend's `fileName` are tested on. CI (`.github/workflows/ci.yml`, Ubuntu + Windows): Backend,
 Frontend, UI tests, Portability (`tests/portability.py` makes an investigation on one OS and
 opens it on the other), and Local tools (installs the real tools and runs `tests/test_local_*.py`).
 Backend runs pytest in parallel (`-n auto`, pytest-xdist) and lists the 25 slowest tests; a test

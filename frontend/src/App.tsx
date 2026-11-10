@@ -2,6 +2,7 @@ import { ReactFlowProvider } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   api,
+  displayUnit,
   ApiError,
   setInvestigationIdentity,
   energyTypeName,
@@ -1257,8 +1258,8 @@ function App() {
           nodes={[...canvas.nodes, ...canvas.species]}
           asSpecies={importRequest.species ?? false}
           linked={investigation.linked}
-          energyUnit={settings?.energy_unit ?? 'kcal/mol'}
-          energyFactor={settings ? (settings.energy_factors[settings.energy_unit] ?? 1) : 627.5094740631}
+          energyUnit={displayUnit(settings).unit}
+          energyFactor={displayUnit(settings).factor}
           queued={Math.max(0, importRequest.files.length - 1)}
           position={importRequest.position}
           onClose={nextImport}

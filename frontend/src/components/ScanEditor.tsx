@@ -12,6 +12,7 @@ import {
   type ScanEditorTarget,
   type ScanPiece,
   type Settings,
+  displayUnit,
 } from '../api'
 import { downloadBlob, errorText, fileName, hartree } from '../util'
 import { FileBrowser } from './ImportDialog'
@@ -48,7 +49,6 @@ const COLOURS = [
   '#bcbd22',
 ]
 const SPEEDS = [1, 2, 5, 10, 20, 30]
-const HARTREE_KCAL = 627.5094740631
 
 function scanName(scan: EditorScan): string {
   return scan.steps > 1 ? `${scan.file} (step ${scan.step})` : scan.file
@@ -323,8 +323,7 @@ export function ScanEditor({
 
   const frame = frames[at] ?? null
   const zeroEnergy = frames[zero]?.energy ?? null
-  const unit = settings?.energy_unit ?? 'kcal/mol'
-  const factor = settings ? (settings.energy_factors[unit] ?? HARTREE_KCAL) : HARTREE_KCAL
+  const { unit, factor } = displayUnit(settings)
   const previewScan = preview ? byKey.get(preview.scan) : undefined
   const previewPoint = preview ? previewScan?.points[preview.index] : undefined
 
