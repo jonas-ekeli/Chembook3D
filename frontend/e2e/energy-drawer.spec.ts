@@ -372,6 +372,10 @@ test('energy drawer: a step moved along the axis takes the later steps with it',
   await expect(move.getByRole('button', { name: 'Move back' })).toBeDisabled()
   await step.selectOption({ label: '3. B-S2' })
   await move.getByRole('button', { name: 'Move on' }).click()
+  // The move is saved after it is drawn; the reload below must come after that save.
+  const saved = page.waitForResponse(
+    (r) => r.request().method() === 'PATCH' && r.url().includes('/energy-profiles/') && (r.request().postData() ?? '').includes('"by":2'),
+  )
   await move.getByRole('button', { name: 'Move on' }).click()
   await expect(step.locator('option:checked')).toHaveText('3. B-S2 (+2)')
   await expect(b.locator('.pathway-nodes')).toContainText('B-S1 → +2 B-S2')
@@ -385,6 +389,7 @@ test('energy drawer: a step moved along the axis takes the later steps with it',
   expect(after.s3 - after.s2).toBeCloseTo(column, 0)
 
   // Saved with the profile and in the saved figure.
+  expect((await saved).ok()).toBe(true)
   await page.reload()
   await expect(b.getByRole('group', { name: 'Move B along the axis' }).locator('option', { hasText: '(+2)' })).toHaveCount(1)
   const svg = await savedSvg(page)
