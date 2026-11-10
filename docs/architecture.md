@@ -79,6 +79,8 @@ compiled with `strict`, and `npm run lint` (oxlint) fails on a warning as well a
 CI (`.github/workflows/ci.yml`, Ubuntu + Windows): Backend, Frontend, UI tests, Portability
 (`tests/portability.py` makes an investigation on one OS and opens it on the other), and Local
 tools (installs the real tools and runs `tests/test_local_*.py`).
+`tests/test_migrations.py` upgrades a seeded database from every schema revision, checks that a
+failed upgrade leaves the file and its backup unchanged, and runs every downgrade.
 Backend runs pytest in parallel (`-n auto`, pytest-xdist) and lists the 25 slowest tests; a test
 running over 2 minutes prints its traceback (`faulthandler_timeout`). Every job has a time limit,
 a newer push to a pull request cancels the older run, and actions are pinned to commit SHAs
