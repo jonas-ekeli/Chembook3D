@@ -179,6 +179,7 @@ Routes for all of these are in `api/pathway.py`.
 - `services/view_state.py` cleans what is saved and drops deleted records when it is read.
 - `GET`/`PUT /api/view-state` (quiet in `live.QUIET`, not an MCP tool).
 - `App.tsx` restores it once per investigation shown (`shown`) and saves every change after that. The drawer's tab and profile id live in `App`'s `drawerView` (type `DrawerView` in `EnergyDrawer.tsx`, `ViewState['drawer']` without `open`), and the drawer starts from them (`saved`).
+- Until the restore has answered (`viewRestored === shown`) the canvas bar and the work area are not drawn, so nothing chosen before it arrives is overwritten (`e2e/view-state.spec.ts`, "what is opened before the saved view arrives is kept").
 - Switching notebooks (`resetInvestigation`): see "Notebook identity and ownership".
 
 ## Frontend main pieces

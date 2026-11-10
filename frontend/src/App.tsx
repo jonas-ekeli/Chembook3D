@@ -332,6 +332,10 @@ function App() {
   // D105: counts the investigations shown; the view is restored once for each, and saved only
   // after that, so the defaults shown while it loads never overwrite what was remembered.
   const [shown, setShown] = useState(0)
+  // The investigation shown whose view has been restored: until then the canvas and the drawer
+  // are not drawn, so nothing clicked or chosen before the saved view arrives is overwritten
+  // by it (a slow answer used to close the drawer just opened and drop its new pathway).
+  const [viewRestored, setViewRestored] = useState(0)
   const restored = useRef<number | null>(null)
   // What was saved last; null until the restored view has been seen, which is not saved again.
   // Opening an investigation must not change its database (D71: nothing new to sync).
@@ -367,6 +371,7 @@ function App() {
       if (!current || version !== identityVersion.current) return
       restored.current = shown
       lastSaved.current = seen
+      setViewRestored(shown)
     }
     api.viewState().then((saved) => {
       if (!current || version !== identityVersion.current) return
@@ -2452,7 +2457,7 @@ function App() {
             <Icon name="sliders" />
           </button>
         </header>
-        {view === 'canvas' && (
+        {view === 'canvas' && viewRestored === shown && (
           // D180: the canvas's own controls, in one row under the app bar.
           <div className="canvasbar">
             {openCanvas !== null && (
@@ -2574,7 +2579,9 @@ function App() {
           </div>
         )}
         <div className="app-body">
-        {view === 'canvas' ? (
+        {viewRestored !== shown ? (
+          <div className="work-column" aria-busy="true" />
+        ) : view === 'canvas' ? (
           <div className="work-column">
             <div className="workspace">
               <Outline
