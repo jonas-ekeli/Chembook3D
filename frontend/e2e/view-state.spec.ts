@@ -84,3 +84,27 @@ test('the energy view, filters, groups and drawer are back after a reload and af
     await page.request.post(`/api/groups/${group.id}/dissolve`, { data: { restore_branches: true } })
   }
 })
+
+test('what is opened before the saved view arrives is kept', async ({ page }) => {
+  // D105: on a slow computer the saved view can arrive after the canvas could be used. Nothing
+  // is drawn until it has, so it cannot close the drawer just opened or drop its new pathway.
+  await forgetView(page.request, join(E2E_DIR, 'demo'))
+  await openDemo(page)
+  await page.route('**/api/view-state', async (route) => {
+    if (route.request().method() === 'GET') await new Promise((done) => setTimeout(done, 1500))
+    await route.continue()
+  })
+  const restored = page.waitForResponse((r) => r.url().includes('/api/view-state') && r.request().method() === 'GET')
+  await page.reload()
+  await expect(canvasNode(page, 'T-S0')).toBeVisible()
+  await page.getByRole('button', { name: 'Profile and table' }).click()
+  const drawer = page.getByLabel('Energy drawer')
+  await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+  const b = drawer.getByRole('group', { name: 'Pathway B' })
+  await expect(b).toContainText('T-S0 → B-S1')
+  await restored
+  // The view's answer has been handled: the drawer and its pathway are still there.
+  await expect(page.getByRole('button', { name: 'Profile and table' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(b).toBeVisible()
+  await expect(b).toContainText('T-S0 → B-S1')
+})
