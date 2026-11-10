@@ -7,12 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from alembic.autogenerate import compare_metadata
-from alembic.migration import MigrationContext
-from sqlalchemy import create_engine
 
-from chembook3d import investigation as inv
-from chembook3d.models import Base
 from tests.test_overlay import xyz_text
 from tests.test_pathway import get, history, node, patch, post
 
@@ -53,14 +48,6 @@ def compute(client, profile_id: str, node_ids: list[str], maps=False) -> list[di
         {"node_ids": node_ids, "maps": maps},
         status=200,
     )
-
-
-def test_migration_matches_the_models(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'db.sqlite'}")
-    with engine.begin() as connection:
-        inv.command.upgrade(inv._alembic_config(connection), "head")
-        context = MigrationContext.configure(connection)
-        assert compare_metadata(context, Base.metadata) == []
 
 
 @pytest.mark.parametrize("row", REFERENCE, ids=[r["idx"] for r in REFERENCE])

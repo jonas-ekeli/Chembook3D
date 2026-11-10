@@ -19,6 +19,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import cache
 from pathlib import Path
 from threading import Condition, RLock
 from typing import BinaryIO
@@ -33,7 +34,7 @@ from sqlalchemy import Engine, create_engine, event, func, select
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session, sessionmaker
 
-from chembook3d.models import Branch, InvestigationInfo, Node, NodeKind, utcnow
+from chembook3d.models import Base, Branch, InvestigationInfo, Node, NodeKind, utcnow
 
 log = logging.getLogger(__name__)
 _MIGRATIONS = RLock()  # one Alembic upgrade at a time in this process
@@ -400,17 +401,45 @@ def _write_lock(folder: Path, token: str) -> None:
     (folder / LOCK_NAME).write_text(json.dumps(lock), encoding="utf-8")
 
 
+@cache
+def _scripts() -> ScriptDirectory:
+    """The migration scripts, read once per process: reading them executes every revision file."""
+    config = Config()
+    config.set_main_option("script_location", "chembook3d:migrations")
+    return ScriptDirectory.from_config(config)
+
+
+def _create_schema(engine: Engine, scripts: ScriptDirectory) -> None:
+    """A new, empty database gets the latest schema straight from the models and is marked as
+    being at the latest revision. Replaying every migration on it did the same in about forty
+    commits, which on a slow disk took long enough for a create to time out. The migrations
+    are kept for databases written by an earlier version; tests/test_migrations.py checks that
+    both roads give the same schema."""
+    with engine.connect() as connection:
+        # Python's sqlite3 module runs CREATE statements outside any transaction, each its own
+        # commit; an explicit BEGIN makes the whole schema one commit, and all or nothing.
+        connection.exec_driver_sql("BEGIN")
+        if connection.exec_driver_sql("SELECT name FROM sqlite_master").first() is not None:
+            raise InvestigationError("the database has tables but no schema revision")
+        Base.metadata.create_all(connection)
+        MigrationContext.configure(connection).stamp(scripts, "head")
+        connection.commit()
+
+
 def _migrate(engine: Engine, db_path: Path, allow_upgrade: bool = True) -> str | None:
     """Bring the schema to the latest revision. Before changing an existing database, copy
     it to backups/ (NFR-DATA-03). Returns the backup path, or None when nothing changed.
     A revision this app does not know was written by a newer app: nothing is changed (D71)."""
+    scripts = _scripts()
+    head = scripts.get_current_head()
     with engine.connect() as connection:
         current = MigrationContext.configure(connection).get_current_revision()
-        scripts = ScriptDirectory.from_config(_alembic_config(connection))
-        head = scripts.get_current_head()
-        known = {script.revision for script in scripts.walk_revisions()}
     if current == head:
         return None
+    if current is None:
+        _create_schema(engine, scripts)
+        return None
+    known = {script.revision for script in scripts.walk_revisions()}
     if current is not None and current not in known:
         raise InvestigationTooNew(current, head)
     if current is not None and not allow_upgrade:

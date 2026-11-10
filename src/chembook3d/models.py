@@ -71,10 +71,10 @@ class InvestigationInfo(Base):
     name: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     # Names of the one-off repairs (services/repairs.py) this investigation has had (D100).
-    repairs: Mapped[list[Any]] = mapped_column(default=list)
+    repairs: Mapped[list[Any]] = mapped_column(default=list, server_default="[]")
     # D105: what the notebook showed when last used (energy level, type, reference, filters,
     # expanded groups, the energy drawer's pathways); view only, not in the history.
-    view_state: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    view_state: Mapped[dict[str, Any]] = mapped_column(default=dict, server_default="{}")
     # D159: the investigation's G_qh temperature (K) and cutoff (cm⁻¹) and the standard state
     # of G and G_qh, every change in the history (services/thermo_settings.py). None until set
     # from the app's settings (at creation, or by the repair `thermochemistry`).
@@ -254,7 +254,7 @@ class Calculation(Base):
     node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), index=True)
     type: Mapped[str] = mapped_column(String(32), default=CalculationType.OTHER)
     program: Mapped[str] = mapped_column(String(32), default="")
-    program_version: Mapped[str] = mapped_column(String(32), default="")
+    program_version: Mapped[str] = mapped_column(String(32), default="", server_default=text("''"))
     level_id: Mapped[str | None] = mapped_column(
         ForeignKey("levels_of_theory.id", ondelete="SET NULL"), default=None
     )
@@ -264,11 +264,13 @@ class Calculation(Base):
     )
     # The level as parsed from the file; `level_id` may later point to a user override (P13).
     parsed_level: Mapped[dict[str, Any] | None] = mapped_column(default=None)
-    route: Mapped[str] = mapped_column(Text, default="")
-    title: Mapped[str] = mapped_column(Text, default="")
+    route: Mapped[str] = mapped_column(Text, default="", server_default=text("''"))
+    title: Mapped[str] = mapped_column(Text, default="", server_default=text("''"))
     step_index: Mapped[int | None] = mapped_column(Integer, default=None)  # 1-based, in file
     step_count: Mapped[int | None] = mapped_column(Integer, default=None)
-    termination: Mapped[str] = mapped_column(String(16), default="unknown")
+    termination: Mapped[str] = mapped_column(
+        String(16), default="unknown", server_default="unknown"
+    )
     charge: Mapped[int | None] = mapped_column(Integer, default=None)
     multiplicity: Mapped[int | None] = mapped_column(Integer, default=None)
     # The geometry this calculation ended on, [[element, x, y, z], ...] (W-GEOM, INV-6).
@@ -276,16 +278,17 @@ class Calculation(Base):
     # D168: the geometry an optimization started from, so a later optimization that started
     # where an earlier one ended shows that one as its pre-optimization (D100, D165).
     start_geometry: Mapped[list[Any] | None] = mapped_column(default=None)
-    parse_warnings: Mapped[list[Any]] = mapped_column(default=list)  # W-PARSE fields
+    # W-PARSE fields
+    parse_warnings: Mapped[list[Any]] = mapped_column(default=list, server_default="[]")
     # D157: what held the structure (a scan, frozen coordinates or atoms), as the parser
     # describes it; such an optimization is never a geometry level (W-CONSTRAINED).
-    constraints: Mapped[list[Any]] = mapped_column(default=list)
+    constraints: Mapped[list[Any]] = mapped_column(default=list, server_default="[]")
     source_file_id: Mapped[str | None] = mapped_column(
         ForeignKey("source_files.id", ondelete="SET NULL"), default=None, index=True
     )
     notes: Mapped[str] = mapped_column(Text, default="")
     # D117: the scan points (1-based) a scan path leaves out; its file is never changed.
-    removed_points: Mapped[list[Any]] = mapped_column(default=list)
+    removed_points: Mapped[list[Any]] = mapped_column(default=list, server_default="[]")
     # D131: an IRC part of a TS node ("path", "end_opt" or "end_freq"), never one of the node's
     # own calculations, and its direction: the path's as the file states it ("forward",
     # "reverse" or "both"), or the end of the path an end point's job was run from.
@@ -799,7 +802,7 @@ class ConformerEquilibrium(Base):
     start_id: Mapped[str | None] = mapped_column(String(32), default=None)
     # D173: TS nodes and groups of the step that follows, for the Curtin–Hammett check; each is
     # balanced by the free species along its route from the lowest conformer.
-    next_ids: Mapped[list[Any]] = mapped_column(default=list)
+    next_ids: Mapped[list[Any]] = mapped_column(default=list, server_default="[]")
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
@@ -828,9 +831,9 @@ class NodeNote(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     collapsed: Mapped[bool] = mapped_column(default=False)
     width: Mapped[int] = mapped_column(Integer, default=260)  # px on the canvas at zoom 1
-    placement: Mapped[str] = mapped_column(String(16), default="corner")
-    offset_x: Mapped[int] = mapped_column(Integer, default=40)
-    offset_y: Mapped[int] = mapped_column(Integer, default=40)
+    placement: Mapped[str] = mapped_column(String(16), default="corner", server_default="corner")
+    offset_x: Mapped[int] = mapped_column(Integer, default=40, server_default="40")
+    offset_y: Mapped[int] = mapped_column(Integer, default=40, server_default="40")
     height: Mapped[int | None] = mapped_column(Integer, default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
