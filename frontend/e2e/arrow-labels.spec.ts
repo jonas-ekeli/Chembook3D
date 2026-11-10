@@ -1,25 +1,9 @@
-import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { forgetView } from './demoView.ts'
+import { expect, test } from '@playwright/test'
+import { openDemo } from './helpers.ts'
 
 // T-UI-53, D176 (UI6): one pill per arrow. ΔX into a transition state reads "ΔG‡" on an amber
 // pill, other edges "ΔG"; the warning is a "!" badge and "no TS" a tag inside the pill; the
 // pill's outline is the transition's status (solid done, dashed planned).
-
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByRole('group', { name: 'Node T-S0', exact: true })).toBeVisible()
-}
 
 type Canvas = {
   nodes: { id: string; label: string }[]
@@ -63,38 +47,31 @@ test('arrow labels: barriers as ΔG‡, warning and "no TS" inside one pill, sta
   await page.request.patch(`/api/transitions/${step.id}`, { data: { status: 'done' } })
   const made: string[] = []
   let group: string | null = null
-  try {
-    await page.reload()
-    await expect(out).toHaveCSS('border-top-style', 'solid')
-    await expect(out).toHaveAttribute('title', 'Transition: Done')
+  await page.reload()
+  await expect(out).toHaveCSS('border-top-style', 'solid')
+  await expect(out).toHaveAttribute('title', 'Transition: Done')
 
-    // D111: an arrow into a group counts it as a TS only through a TS representative.
-    for (const [label, role] of [
-      ['TS-arrow', 'transition_state'],
-      ['Min-arrow', 'minimum'],
-    ]) {
-      const node = await page.request.post('/api/nodes', { data: { label, role, pos_x: 1200, pos_y: 0 } })
-      expect(node.ok()).toBe(true)
-      made.push((await node.json()).id)
-    }
-    const grouped = await page.request.post('/api/groups/reconnect', { data: { member_ids: made, label: 'G-arrow' } })
-    expect(grouped.ok()).toBe(true)
-    group = (await grouped.json()).id as string
-    const drawn = await page.request.post('/api/transitions', { data: { source_id: id('A-S3'), target_id: group } })
-    expect(drawn.ok()).toBe(true)
-    const into = pill((await drawn.json()).id)
-    await page.reload()
-    await expect(into.locator('.edge-energy-type')).toHaveText('ΔG')
-    await expect(into.locator('.no-ts')).toBeVisible()
-    await page.request.patch(`/api/groups/${group}`, { data: { representative_id: made[0] } })
-    await page.reload()
-    await expect(into.locator('.edge-energy-type')).toHaveText('ΔG‡')
-    await expect(into).toHaveClass(/\bbarrier\b/)
-    await expect(into.locator('.no-ts')).toHaveCount(0)
-  } finally {
-    await page.request.patch(`/api/transitions/${step.id}`, { data: { status: 'planned' } })
-    // The group with its members and the new arrow, so the demo is as it was.
-    if (group) await page.request.delete(`/api/groups/${group}`)
-    else for (const node of made) await page.request.delete(`/api/nodes/${node}`)
+  // D111: an arrow into a group counts it as a TS only through a TS representative.
+  for (const [label, role] of [
+    ['TS-arrow', 'transition_state'],
+    ['Min-arrow', 'minimum'],
+  ]) {
+    const node = await page.request.post('/api/nodes', { data: { label, role, pos_x: 1200, pos_y: 0 } })
+    expect(node.ok()).toBe(true)
+    made.push((await node.json()).id)
   }
+  const grouped = await page.request.post('/api/groups/reconnect', { data: { member_ids: made, label: 'G-arrow' } })
+  expect(grouped.ok()).toBe(true)
+  group = (await grouped.json()).id as string
+  const drawn = await page.request.post('/api/transitions', { data: { source_id: id('A-S3'), target_id: group } })
+  expect(drawn.ok()).toBe(true)
+  const into = pill((await drawn.json()).id)
+  await page.reload()
+  await expect(into.locator('.edge-energy-type')).toHaveText('ΔG')
+  await expect(into.locator('.no-ts')).toBeVisible()
+  await page.request.patch(`/api/groups/${group}`, { data: { representative_id: made[0] } })
+  await page.reload()
+  await expect(into.locator('.edge-energy-type')).toHaveText('ΔG‡')
+  await expect(into).toHaveClass(/\bbarrier\b/)
+  await expect(into.locator('.no-ts')).toHaveCount(0)
 })

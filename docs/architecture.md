@@ -69,8 +69,10 @@ flowchart LR
 
 `tests/` (pytest, fixtures in `tests/fixtures/` with sources in its README), `frontend/tests/`
 (Node unit tests, `npm run test:unit`), `frontend/e2e/` (Playwright against the real backend on
-:8766, with a fake SSH server on :8767; `E2E_PORT` and `E2E_SAGA_PORT` move them). The
-frontend unit tests import the pure `.ts` modules directly (Node strips the types) and cover the API client, energy units and corrections, XYZ
+:8766, with a fake SSH server on :8767, one test at a time, moved by `E2E_PORT` and
+`E2E_SAGA_PORT`; each test opens its own copy of the demo investigation, and the shared helpers
+are in `e2e/helpers.ts`). The frontend unit tests
+import the pure `.ts` modules directly (Node strips the types) and cover the API client, energy units and corrections, XYZ
 parsing and measuring, Tidy, edge label placement, the profile axis, the read-only copy's data and
 file names; CI runs them as `npm run test:coverage`, which prints Node's coverage of `src/`.
 `tests/fixtures/file-names.json` holds download file name examples that both the backend's

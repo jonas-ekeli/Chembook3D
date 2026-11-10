@@ -1,12 +1,9 @@
-import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
-import { forgetView } from './demoView.ts'
+import { openDemo, startPage } from './helpers.ts'
 
-// axe-core's checks on the start page and on an open canvas (the demo investigation, with its
-// energies drawn): no violation of impact "critical" or "serious" is allowed.
-const E2E_DIR = process.env.E2E_DIR!
+// axe-core's checks on the start page and on an open canvas (the test's own copy of the demo,
+// with its energies drawn): no violation of impact "critical" or "serious" is allowed.
 
 async function violations(page: Page): Promise<string[]> {
   const results = await new AxeBuilder({ page }).analyze()
@@ -22,12 +19,6 @@ test('the start page has no critical or serious accessibility violations', async
 })
 
 test('an open canvas has no critical or serious accessibility violations', async ({ page }) => {
-  const folder = join(E2E_DIR, 'demo')
-  await forgetView(page.request, folder)
-  expect((await page.request.post('/api/investigations/open', { data: { folder } })).ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.getByRole('group', { name: 'Node T-S0', exact: true })).toBeVisible()
-  await expect(page.locator('.edge-label').filter({ hasText: 'ΔG' }).first()).toBeVisible()
+  await openDemo(page)
   expect(await violations(page)).toEqual([])
-  await page.request.post('/api/investigations/close')
 })

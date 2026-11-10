@@ -1,25 +1,10 @@
-import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { forgetView } from './demoView.ts'
+import { openDemo, pageSettled } from './helpers.ts'
 
 // T-UI-63, D187: the app stays locked to the window. Every pane scrolls on its own and the page
 // is never taller than the window, so the wheel anywhere leaves the page at the top.
 
-const E2E_DIR = process.env.E2E_DIR!
-
 test.use({ viewport: { width: 1100, height: 600 } })
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-}
 
 /** How far the page itself could scroll, and how far it has. */
 function pageScroll(page: Page) {
@@ -29,12 +14,21 @@ function pageScroll(page: Page) {
   }))
 }
 
+// The wheel events the page has had, counted by a listener added as the page loads: one added
+// just before a wheel may not be known yet to the part of the browser that scrolls, which then
+// does not pass the wheel to the page at all.
+const wheels = (page: Page) => page.evaluate(() => (window as unknown as { wheels?: number }).wheels ?? 0)
+
 async function wheelOver(page: Page, target: Locator) {
+  // Outside the window the wheel would reach nothing at all.
+  await expect(target).toBeInViewport()
   const box = (await target.boundingBox())!
   await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height / 2, 20))
+  const before = await wheels(page)
   await page.mouse.wheel(0, 2000)
-  // Let the wheel's scroll land before reading it.
-  await page.waitForTimeout(150)
+  // The page has had the wheel and done what it does with it before reading the scroll.
+  await expect.poll(() => wheels(page)).toBe(before + 1)
+  await pageSettled(page)
   expect(await pageScroll(page)).toEqual({ extra: 0, top: 0 })
 }
 
@@ -43,6 +37,11 @@ test.afterEach(async ({ request }) => {
 })
 
 test('the wheel never scrolls the page past the app', async ({ page }) => {
+  await page.addInitScript(() => {
+    const counted = window as unknown as { wheels: number }
+    counted.wheels = 0
+    window.addEventListener('wheel', () => (counted.wheels += 1), { capture: true, passive: true })
+  })
   await openDemo(page)
   const outline = page.getByRole('complementary', { name: 'Outline' })
   const nodes = outline.getByRole('list', { name: 'Nodes' })
@@ -51,13 +50,13 @@ test('the wheel never scrolls the page past the app', async ({ page }) => {
   expect(await nodes.evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true)
   expect(await pageScroll(page)).toEqual({ extra: 0, top: 0 })
 
-  await wheelOver(page, nodes)
   await wheelOver(page, outline)
   // The outline took the wheel itself.
-  const moved = await outline.evaluate(
-    (aside) => aside.scrollTop + aside.querySelector('[aria-label="Nodes"]')!.scrollTop,
-  )
-  expect(moved).toBeGreaterThan(0)
+  await expect.poll(() => outline.evaluate((aside) => aside.scrollTop)).toBeGreaterThan(0)
+  // So does the node list, below the window's edge until the outline scrolled.
+  await nodes.scrollIntoViewIfNeeded()
+  await wheelOver(page, nodes)
+  await expect.poll(() => nodes.evaluate((list) => list.scrollTop)).toBeGreaterThan(0)
   await wheelOver(page, page.locator('header').first())
   await wheelOver(page, page.locator('.react-flow__pane'))
 

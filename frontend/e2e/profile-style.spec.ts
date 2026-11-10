@@ -1,26 +1,9 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
-import { forgetView } from './demoView.ts'
+import { openDemo } from './helpers.ts'
 
 // T-UI-11, FR-EN-10, FR-EN-11, D106: the profile style with its presets and preview, the saved
 // images in that style, and the drawer made taller, its list hidden and the profile zoomed.
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
-  await startPage(page)
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByRole('group', { name: 'Node T-S0', exact: true })).toBeVisible()
-}
 
 async function saved(page: Page, item: string): Promise<Buffer> {
   const download = page.waitForEvent('download')
@@ -118,7 +101,6 @@ test('profile style, saved images and zoom', async ({ page }) => {
     await expect(chart).toHaveAttribute('width', '960')
   } finally {
     await page.request.put('/api/settings', { data: { profile_style: screen } })
-    await forgetView(page.request, join(E2E_DIR, 'demo'))
   }
 })
 
@@ -202,7 +184,6 @@ test('"no TS" tags can be hidden and the title keeps clear of the legend', async
     await page.screenshot({ path: 'test-results/profile-names-bottom.png' })
   } finally {
     await page.request.put('/api/settings', { data: { profile_style: screen } })
-    await forgetView(page.request, join(E2E_DIR, 'demo'))
   }
 })
 
@@ -216,18 +197,18 @@ test('long names along the bottom wrap inside their columns', async ({ page }) =
     'B-S2': 'B_cycloaddition_scan_top_TSGO',
     'B-S3': 'B_metallacyclobutane_cis_opt',
   }
-  const renamed: { id: string; label: string }[] = []
   try {
     await page.request.put('/api/settings', {
       data: { profile_style: { ...screen, width: 480, name_position: 'bottom' } },
     })
     await openDemo(page)
+    let renamed = 0
     for (const node of (await (await page.request.get('/api/nodes')).json()) as { id: string; label: string }[])
       if (long[node.label]) {
         await page.request.patch(`/api/nodes/${node.id}`, { data: { label: long[node.label] } })
-        renamed.push(node)
+        renamed += 1
       }
-    expect(renamed).toHaveLength(4)
+    expect(renamed).toBe(4)
     await page.getByRole('button', { name: 'Profile and table' }).click()
     const drawer = page.getByLabel('Energy drawer')
     await drawer.getByLabel('Add branch pathway').selectOption({ label: 'A' })
@@ -257,8 +238,6 @@ test('long names along the bottom wrap inside their columns', async ({ page }) =
     expect(column[2].y).toBeGreaterThan(lower.y + lower.height - 2)
     await page.screenshot({ path: 'test-results/profile-names-wrap.png' })
   } finally {
-    for (const node of renamed) await page.request.patch(`/api/nodes/${node.id}`, { data: { label: node.label } })
     await page.request.put('/api/settings', { data: { profile_style: screen } })
-    await forgetView(page.request, join(E2E_DIR, 'demo'))
   }
 })

@@ -1,20 +1,5 @@
-import { expect, test, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
-
-const E2E_DIR = process.env.E2E_DIR!
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  await page.getByRole('button', { name: /^New/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(E2E_DIR)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(E2E_DIR)
-  await dialog.getByLabel('Investigation name').fill(name)
-  await dialog.getByRole('button', { name: 'Create' }).click()
-  await expect(page.locator('.investigation')).toHaveText(name)
-}
+import { expect, test } from '@playwright/test'
+import { newInvestigation } from './helpers.ts'
 
 function xyz(...elements: string[]): string {
   return [String(elements.length), '', ...elements.map((e, i) => `${e} ${(i * 1.5).toFixed(3)} 0 0`)].join('\n')

@@ -1,8 +1,7 @@
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
+import { E2E_DIR, newInvestigation } from './helpers.ts'
 
-const E2E_DIR = process.env.E2E_DIR!
 // Synthetic --Link1-- chains with a custom basis set, written by global-setup.ts
 const CUSTOM = join(E2E_DIR, 'gaussian')
 // TS searches that read the basis set from another job's checkpoint (D104)
@@ -18,19 +17,6 @@ async function openFolder(page: Page, folder: string, file: RegExp) {
   await expect(dialog.getByRole('button', { name: file })).toBeVisible()
   await dialog.getByRole('button', { name: 'Import this folder…' }).click()
   return page.getByRole('dialog', { name: 'Import a folder of results' })
-}
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  await page.getByRole('button', { name: /^New/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(E2E_DIR)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(E2E_DIR)
-  await dialog.getByLabel('Investigation name').fill(name)
-  await dialog.getByRole('button', { name: 'Create' }).click()
-  await expect(page.locator('.investigation')).toHaveText(name)
 }
 
 test('a folder of results is imported at once', async ({ page }) => {

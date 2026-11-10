@@ -1,13 +1,11 @@
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
-import { forgetView } from './demoView.ts'
+import { expect, test } from '@playwright/test'
+import { E2E_DIR, openDemo, newInvestigation, nameCustom } from './helpers.ts'
 
 // D122, T-SSH-06: log in to Saga (here tests/fake_ssh_server.py on port 8767 or E2E_SAGA_PORT,
 // see playwright.config.ts) with password and one-time code, trusting its host key first; use the
 // terminal; reload and find the same shell without logging in again; log out.
-const E2E_DIR = process.env.E2E_DIR!
 const SAGA_PORT = process.env.E2E_SAGA_PORT ?? '8767'
 // Synthetic --Link1-- chains with a custom basis set, written by global-setup.ts
 const CUSTOM = join(E2E_DIR, 'gaussian')
@@ -15,18 +13,6 @@ const WORK = join(E2E_DIR, 'saga', 'cluster', 'work', 'ru-caac')
 const FIXTURES = resolve(import.meta.dirname, '..', '..', 'tests', 'fixtures')
 
 test.describe.configure({ mode: 'serial' }) // the second test finds the server saved and trusted
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-}
 
 test('log in to Saga with password and code, and come back to the same shell', async ({ page }) => {
   mkdirSync(join(E2E_DIR, 'saga', 'cluster', 'work', 'ru-caac'), { recursive: true })
@@ -135,25 +121,6 @@ test('log in to Saga with password and code, and come back to the same shell', a
   await panel.getByRole('button', { name: 'Remove from the list' }).click()
   await expect(panel.getByLabel('Cluster').locator('option')).toHaveText(['Saga', 'Add a cluster…'])
 })
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  await page.getByRole('button', { name: /^New/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(E2E_DIR)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(E2E_DIR)
-  await dialog.getByLabel('Investigation name').fill(name)
-  await dialog.getByRole('button', { name: 'Create' }).click()
-  await expect(page.locator('.investigation')).toHaveText(name)
-}
-
-async function nameCustom(dialog: ReturnType<Page['getByRole']>, label: string, value: string) {
-  const field = dialog.getByLabel(label)
-  await field.fill(value)
-  await field.press('Enter')
-}
 
 test('import outputs from the directory the Saga terminal is in', async ({ page }) => {
   // D122e, T-SSH-07

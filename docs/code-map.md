@@ -749,6 +749,10 @@ Routes for all of these are in `api/pathway.py`.
 ## UI tests
 
 - `frontend/e2e/`: Playwright UI tests against the real backend, one spec per feature (for example `e2e/refetch.spec.ts`, `e2e/local-jobs.spec.ts`, `frontend/e2e/equilibrium.spec.ts`).
+  - `playwright.config.ts` starts the backend (:8766) and the fake SSH server (:8767) and runs one test at a time (`workers: 1`: the backend has one open investigation). Everything goes to a fresh temporary folder (`E2E_DIR`), app settings included.
+  - `e2e/global-setup.ts` builds the demo once into `E2E_DIR/demo-template` (`scripts/make_demo.py`) and writes the synthetic Gaussian files.
+  - `e2e/helpers.ts` holds what the specs share. `openDemo` opens the test's own copy of the demo (`demoFolder`: copied from the template on first use, without the lock and owner files, under `E2E_DIR/demo-copies/`), so a test may change the demo freely and needs no clean-up; the same test opening it again gets the same copy. Also `browseTo` and `openFolder` (the folder dialog, waiting for the listing), `newInvestigation`, `startPage`, `investigationCommand`, `canvasNode`, `pressInView` and `bringIntoView` (fit the canvas before clicking, see #188), `dragBy`, `deferred` and `pageSettled`.
+  - No fixed waits: hold an answer back with `deferred` and a route, wait for the response (`page.waitForResponse`, then `response.finished()`) or the request that follows it, and use `pageSettled` before asserting that something did not happen. App settings are shared by all tests: a test that changes one puts it back in a `finally`.
 - `frontend/tests/`: Node unit tests (`npm run test:unit`, Node 24+), such as `frontend/tests/api-identity.test.mjs`.
 - The identity specs (`energy-request.spec.ts`, `investigation-identity.spec.ts`): see "Notebook identity and ownership".
 - `e2e/accessibility.spec.ts`: axe-core (`@axe-core/playwright`) on the start page and an open canvas; no critical or serious violation.

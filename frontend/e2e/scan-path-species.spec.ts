@@ -1,10 +1,9 @@
-import { expect, test, type Locator, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
+import { expect, test } from '@playwright/test'
+import { E2E_DIR, startPage, canvasNode } from './helpers.ts'
 
 // T-UI-23, T-UI-24, D120: a scan path along an edge where a free species joins, shown apart and
 // sent as a job. The complex is made up: a ruthenium alkylidene with two chlorides, and ethylene
 // bound side-on.
-const E2E_DIR = process.env.E2E_DIR!
 
 const ALKYLIDENE = [
   ['C', -0.6, 0.0, 1.75],
@@ -39,10 +38,6 @@ const COMPLEX = [
 
 function xyz(atoms: readonly (readonly [string, number, number, number])[]): string {
   return `${atoms.length}\n\n${atoms.map(([e, x, y, z]) => `${e} ${x} ${y} ${z}`).join('\n')}\n`
-}
-
-function canvasNode(page: Page, label: string): Locator {
-  return page.getByRole('group', { name: `Node ${label}`, exact: true })
 }
 
 test('a species that joins is shown apart and can be set farther out', async ({ page }) => {

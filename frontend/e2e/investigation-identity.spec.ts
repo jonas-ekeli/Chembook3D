@@ -1,20 +1,12 @@
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { investigationCommand } from './appBar.ts'
-
-function deferred() {
-  let resolve!: () => void
-  const promise = new Promise<void>((done) => { resolve = done })
-  return { promise, resolve }
-}
+import { browseTo, investigationCommand, deferred } from './helpers.ts'
 
 async function openFolder(page: Page, folder: string) {
   if (await page.locator('header .investigation').count()) await investigationCommand(page, 'Open investigation…')
   else await page.getByRole('button', { name: 'Open investigation…', exact: true }).click()
+  await browseTo(page, folder)
   const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(folder)
-  await dialog.getByRole('button', { name: 'Go' }).click()
   await dialog.getByRole('button', { name: 'Open', exact: true }).click()
   await expect(dialog).toHaveCount(0)
 }

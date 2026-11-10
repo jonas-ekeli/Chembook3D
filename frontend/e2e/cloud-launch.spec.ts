@@ -2,12 +2,11 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
-import { startPage } from './appBar.ts'
+import { E2E_DIR, startPage } from './helpers.ts'
 
 // D93, A40: a cloud job's `claude --cloud` launch stops at a question (here the stand-in's
 // folder trust question, see playwright.config.ts). The app answers nothing itself: the Claude
 // panel opens with the launch's screen, and the user answers it there.
-const E2E_DIR = process.env.E2E_DIR!
 
 const WATER = '3\nwater\nO 0.0 0.0 0.1173\nH 0.0 0.7572 -0.4692\nH 0.0 -0.7572 -0.4692\n'
 

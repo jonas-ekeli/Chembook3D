@@ -1,9 +1,8 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
+import { newInvestigation, canvasNode } from './helpers.ts'
 
 // T-UI-41, D139: change a structure in the Edit structure window, undo and redo, put another
 // node's structure beside it, and save in place, as a new node, or not at all.
-const E2E_DIR = process.env.E2E_DIR!
 
 const ETHANE = `8
 
@@ -23,23 +22,6 @@ O 0.000 0.000 0.117
 H 0.000 0.757 -0.469
 H 0.000 -0.757 -0.469
 `
-
-function canvasNode(page: Page, label: string): Locator {
-  return page.getByRole('group', { name: `Node ${label}`, exact: true })
-}
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  await page.getByRole('button', { name: /^New/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(E2E_DIR)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(E2E_DIR)
-  await dialog.getByLabel('Investigation name').fill(name)
-  await dialog.getByRole('button', { name: 'Create' }).click()
-  await expect(page.locator('.investigation')).toHaveText(name)
-}
 
 type ApiNode = { id: string; label: string; formula: string | null; derived_from_id: string | null }
 
