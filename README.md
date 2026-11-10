@@ -23,8 +23,11 @@ branches, rotamer groups, ethylene joining and leaving, and the closed cycle's �
 [Testing](#testing) ·
 [Limits](#limits) ·
 [Install](#install-the-tools) ·
+[Run it](#run-it) ·
 [User guide](docs/user-guide.md) ·
-[Data credits](#data-credits)
+[Develop](#develop) ·
+[Data credits](#data-credits) ·
+[License](#license)
 
 ## What it does
 
@@ -45,6 +48,11 @@ branches, rotamer groups, ethylene joining and leaving, and the closed cycle's �
   normal modes). Coordinates are edited as text or in a small builder; editing a structure that
   already has calculations makes a new, derived node, so results stay with the geometry they
   belong to.
+- **Runs quick calculations on this computer.** Optional local jobs refine a structure with
+  GFN2-xTB, g-xTB or a fast DFT method (B97-3c, r2SCAN-3c, ONIOM) through Psi4: optimizations,
+  transition-state searches, relaxed scans and frequencies, imported onto the node when done.
+- **Works next to your cluster.** An optional terminal on Saga or another SSH server lists, inspects
+  and imports output files there without copying them by hand.
 - **Records history.** Every change, by you, an import or Claude, is in an append-only history,
   and an import can be undone.
 
@@ -101,7 +109,7 @@ flowchart LR
         CP["Claude panel<br/>(optional)"]
         MCP["chembook3d mcp<br/>notebook tools"]
         KEEP["SSH keeper<br/>(optional)"]
-        LOC["Local jobs<br/>xTB · CREST · DFT refine<br/>(optional)"]
+        LOC["Local jobs<br/>GFN2-xTB · g-xTB · DFT via Psi4<br/>(optional)"]
     end
     UI <-->|"REST /api + live updates"| API
     API <-->|"SQLAlchemy + Alembic"| DB
@@ -151,7 +159,8 @@ flowchart LR
    file; if a value is missing, it is reported, not guessed.
 2. **Match the geometry.** A calculation is attached to a node only if its final geometry matches
    the node's within 0.001 Å RMSD after alignment (same atoms in the same order). Within 0.05 Å it
-   is flagged as a possible duplicate and you choose. A different geometry becomes a derived node.
+   is flagged as a possible duplicate and you choose. Both tolerances are defaults you can change
+   in Settings. A different geometry becomes a derived node.
 3. **Preview, then commit.** You see the proposed nodes, levels and warnings before anything is
    written. The commit is one transaction, and the history entry it writes lets you undo the
    whole import later. A folder can be imported in one batch the same way.
@@ -209,7 +218,9 @@ at other temperatures and cutoffs and compares. With the cutoff set below every 
 equal Gaussian's printed G correction within 0.01 kcal/mol, and linear molecules (HCN, CO₂)
 must match Gaussian within 0.001 kcal/mol.
 
-**Warnings are shown, not applied.** A warning never changes a value. Each value carries its checks to the canvas,
+**Warnings are shown, not applied.** A warning never adjusts a value; where a value cannot be
+used at all (for example a printed G at another pressure, or no frequency job for a composite
+free energy) it is shown as n/a with its warning. Each value carries its checks to the canvas,
 the profile (⚠), the energy table's Check column, its CSV export and every analysis:
 
 | Check | Raised when |
@@ -244,8 +255,8 @@ merged:
 | UI tests | About 140 Playwright tests, driving the real interface against the real server. |
 | Portability | An investigation made on Windows is opened on Linux and the other way round, its records are checked, and its copied output file must match byte for byte. |
 
-A further job installs the real xTB, CREST, Psi4 and g-xTB and runs the local-calculation tests
-with them. Test outputs are public samples with their sources and licences listed in
+A further job, not yet required for merging, installs the local-calculation tools (Psi4, tblite,
+geomeTRIC and g-xTB) and runs the local-calculation tests with them. Test outputs are public samples with their sources and licences listed in
 [`tests/fixtures/README.md`](tests/fixtures/README.md); a few rare cases use synthetic Gaussian
 text made by `tests/gaussian_text.py`.
 
@@ -257,7 +268,7 @@ text made by `tests/gaussian_text.py`.
   shown as printed, labelled with its model. No frequency scale factor is applied to G_qh; the
   frequencies are used as the program printed them.
 - **Not a workflow engine:** the app does not submit or monitor jobs on clusters. It reads what
-  they produce. Optional local jobs (xTB, CREST, DFT refinement) and cloud xTB/CREST jobs are
+  they produce. Optional local jobs (GFN2-xTB, g-xTB, fast DFT) and cloud xTB/CREST jobs are
   for quick structures, not production runs.
 - **One user, one computer at a time.** No login, no server to share. Sync keeps several
   computers in step through git, one at a time.
@@ -331,7 +342,8 @@ On Windows it goes on the desktop and in the Start menu, on Linux in the app men
 3. rebuilds the interface only when `frontend/` changed since the last build, and installs new Python packages if the update asks for them;
 4. starts the server in the background, with no terminal window, and the tab turns into the app.
 
-If Chembook3D is already running, the shortcut only opens a tab. Started this way, the server stops by itself about 10 seconds after you close the last Chembook3D tab (a reload is fine), or after 5 minutes without any tab; **Shut down** in the top bar stops it at once. What the launcher did is in `launcher.log` in the app's config folder (`%LOCALAPPDATA%\chembook3d` on Windows, `~/.config/chembook3d` on Linux and WSL). If your browser puts background tabs to sleep for a long time, the server may stop while a tab is asleep; start it again with the shortcut.
+If Chembook3D is already running, the shortcut only opens a tab. Started this way, the server stops by itself about 10 seconds after you close the last Chembook3D tab (a reload is fine), or after 5 minutes without any tab; **Shut down Chembook3D** in the investigation menu (the
+investigation's name in the top bar), or **Shut down** on the start screen, stops it at once. What the launcher did is in `launcher.log` in the app's config folder (`%LOCALAPPDATA%\chembook3d` on Windows, `~/.config/chembook3d` on Linux and WSL). If your browser puts background tabs to sleep for a long time, the server may stop while a tab is asleep; start it again with the shortcut.
 
 Run `uv run chembook3d shortcut` again if the shortcut stops working, for example after moving the checkout or reinstalling uv, Python or Node.js.
 
@@ -349,7 +361,7 @@ uv run python scripts/make_showcase_demo.py showcase-investigation
 
 Add `--copy showcase.html` to also write its read-only copy, once the interface is built.
 
-Then import an output file with **Import file…** (or drop it on the node list). To import a whole folder of results at once, browse to it in that dialog and press **Import this folder…**: every output gets a proposed node (by geometry, by a planned node's guess or by file name), which you can check and change before anything is written. Sample outputs are in `tests/fixtures/`. In WSL, the folder and file pickers show the WSL file system; Windows drives are under `/mnt/c`, `/mnt/d` and so on.
+Then import an output file with **Import…** at the top of the outline (or drop it on the canvas). To import a whole folder of results at once, browse to it in that dialog and press **Import this folder…**: every output gets a proposed node (by geometry, by a planned node's guess or by file name), which you can check and change before anything is written. Sample outputs are in `tests/fixtures/`. In WSL, the folder and file pickers show the WSL file system; Windows drives are under `/mnt/c`, `/mnt/d` and so on.
 
 ## User guide
 
@@ -358,17 +370,24 @@ The rest of the app is described in [docs/user-guide.md](docs/user-guide.md):
 - [Sync investigations between computers](docs/user-guide.md#sync-investigations-between-computers) through a private GitHub repository
 - [Share a read-only copy](docs/user-guide.md#share-a-read-only-copy) as one HTML file
 - [Saga and other SSH servers](docs/user-guide.md#saga-and-other-ssh-servers): terminal, import, Inspect and the scan editor
+- [Calculations on this computer](docs/user-guide.md#calculations-on-this-computer): installing the local tools and refining a structure
 - [Claude in the app](docs/user-guide.md#claude-in-the-app), [calculations in the cloud](docs/user-guide.md#calculations-in-the-cloud), and [Claude Code or Claude Desktop](docs/user-guide.md#claude-code-in-your-own-terminal-or-claude-desktop) with the notebook tools
 
 ## Develop
 
+The checks CI runs, from the root of the checkout:
+
 ```sh
 uv sync
 uv run ruff check .
-uv run pytest
+uv run ruff format --check .
+uv run pytest -W error
 ```
 
-See [CLAUDE.md](CLAUDE.md) for the commands and [docs/code-map.md](docs/code-map.md) for where each feature lives.
+and in `frontend/`: `npm ci`, `npm run lint`, `npm run test:unit`, `npm run build`, then
+`npm run test:e2e` for the UI tests. [CLAUDE.md](CLAUDE.md) has the full list of commands,
+[docs/architecture.md](docs/architecture.md) maps the code, and
+[docs/code-map.md](docs/code-map.md) says where each feature lives.
 
 ## Specification
 

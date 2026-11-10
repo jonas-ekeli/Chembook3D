@@ -6,16 +6,19 @@ can be combined with GPL-3.0.
 
 ## Test fixtures
 
-The sample outputs in `tests/fixtures/` are unchanged copies from public projects. Each folder
-holds its licence file, and [tests/fixtures/README.md](tests/fixtures/README.md) names the source
-and commit.
+The sample outputs in `tests/fixtures/` are copies of public files, renamed or with LF line
+endings in a few cases; [tests/fixtures/README.md](tests/fixtures/README.md) names each source,
+commit and change, and where its licence text is. `xtb/dce_scan/` was made for this repository and
+is under its licence.
 
 | Folder | From | Licence |
 |---|---|---|
 | `gaussian/` | [GoodVibes](https://github.com/patonlab/GoodVibes); the two `dvb_scan_*` files from [cclib](https://github.com/cclib/cclib) | MIT; BSD-3-Clause |
 | `orca/`, `xtb/` | [cclib](https://github.com/cclib/cclib) | BSD-3-Clause |
 | `crest/` | [CENSO](https://github.com/grimme-lab/CENSO) | LGPL-3.0 |
+| `orca/irc/` | Geoffrey Weal's [ORCA mechanism tutorial](https://github.com/geoffreyweal/ORCA_Mechanism_Procedure) | GPL-3.0 |
 | `sterics/` | [morfeus](https://github.com/digital-chemistry-laboratory/morfeus) | MIT |
+| `iochem/` | Occhipinti, Nascimento, Foscato, Fogg and Jensen, *Chem. Sci.* 2022, 13, 5107, deposited in [ioChem-BD](https://doi.org/10.19061/iochem-bd-6-113) (University of Bergen) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 
 ## Reference thermochemistry script
 
@@ -25,8 +28,9 @@ copyright 2017 Robert Paton, University of Oxford; its text is in `tests/fixture
 
 ## Web interface
 
-The built interface bundles npm packages under the MIT, ISC and BSD-3-Clause licences, among them
-3Dmol.js, React, React Flow and xterm.js, and the Eclipse Layout Kernel (elkjs, under EPL-2.0 or
+The built interface bundles npm packages under the MIT, ISC, BSD-3-Clause, Apache-2.0 and other
+permissive licences, among them 3Dmol.js, React, React Flow and xterm.js; the Ketcher structure
+editor and its Indigo engine (EPAM Systems, Apache-2.0); and the Eclipse Layout Kernel (elkjs, under EPL-2.0 or
 GPL-3.0-or-later; used here under GPL-3.0-or-later) for Tidy with springs. The build writes their licence texts to
 `frontend/dist/third-party-licenses.md`, and the read-only HTML copy carries the same texts in a
 comment at its top.

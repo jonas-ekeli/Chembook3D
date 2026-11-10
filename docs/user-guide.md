@@ -1,13 +1,174 @@
 # Chembook3D user guide
 
-The guides for the parts of Chembook3D beyond the basics. Installing and starting the app are in the [README](../README.md#install-the-tools).
+How to use Chembook3D once it runs. Installing and starting the app are in the
+[README](../README.md#install-the-tools); what the app computes, and by which rules, is in the
+README's [How energies are computed](../README.md#how-energies-are-computed).
 
+- [Find your way around](#find-your-way-around)
+- [Build the mechanism](#build-the-mechanism)
+- [Energy profiles and the table](#energy-profiles-and-the-table)
+- [Analyses](#analyses)
+- [Structures in 3D](#structures-in-3d)
+- [Calculations on this computer](#calculations-on-this-computer)
 - [Sync investigations between computers](#sync-investigations-between-computers)
 - [Share a read-only copy](#share-a-read-only-copy)
 - [Saga and other SSH servers](#saga-and-other-ssh-servers)
 - [Claude in the app](#claude-in-the-app)
   - [Calculations in the cloud](#calculations-in-the-cloud)
   - [Claude Code in your own terminal, or Claude Desktop](#claude-code-in-your-own-terminal-or-claude-desktop)
+
+## Find your way around
+
+The start screen creates or opens an investigation folder. Inside an investigation:
+
+- the **outline** on the left lists reaction steps, branches, groups and nodes, with **Add node**
+  and **Import…** at its top;
+- the **canvas** in the middle holds the node cards and the transitions between them; the tabs
+  above it switch to **Analyses** and **History**;
+- the **inspector** on the right shows what is selected: a node's structure, calculations and
+  energies, or a group, branch or transition;
+- the **top bar** holds the investigation menu (click the investigation's name: sync, basis sets,
+  read-only copy, **Shut down Chembook3D**), Settings, Local jobs, and the optional HPC and Claude
+  panels.
+
+Most actions are also in a right-click menu on a card, an arrow or the empty canvas, and every
+command can be found by name in the command palette (Ctrl+K, ⌘K on a Mac). Press **?** for the
+keyboard shortcuts. Settings marks which settings belong to this computer and which to the open
+investigation.
+
+## Build the mechanism
+
+**Nodes.** **Add node** makes an empty node; **Import…** reads an output file into a new node, or
+a CREST ensemble into a group. You can also drop files on the canvas, or on a selected node's
+inspector to add calculations to it. The preview shows which node each job goes to and its level
+of theory before anything is written; see the README for how a file is
+[matched to a node](../README.md#from-output-file-to-energy). A whole folder is imported with
+**Import this folder…** in the import dialog's file browser.
+
+**Transitions, steps and branches.** Draw an arrow from one card to another to add a transition.
+Reaction steps (the stages of the mechanism) are listed in the outline, where you can reorder
+them; a node is placed on a step. Branches hold lines of descent, for example one per catalyst;
+**Split into branches…** on a node starts new ones from it. Free species that join or leave on a
+transition (ethylene, a product) are added with **Free species…** on the transition, or imported
+with **Import free species…**.
+
+**Groups.** Select conformers or rotamers and use **Create group…** (or **Add to group…** for an
+existing one). A representative stands for the group on the canvas, and the cards can show each
+member's Boltzmann population. **Order members…** sets their order; **Expand groups** /
+**Collapse groups** in the canvas bar opens or closes them all.
+
+**Keeping a large canvas readable.**
+
+- **Tidy** in the canvas bar lays the canvas out **In step columns**, **With springs** (a new
+  layout where a cycle comes out as a loop), or **With springs, in place**; **Undo tidy** puts it
+  back. **Tidy selection** and **Tidy canvas** are in the right-click menus, and **Arrange branch**
+  in a branch's inspector.
+- **Move into new sub-investigation…** folds a part of the mechanism into one box; **Expand here**
+  opens it in place, and **Remove sub-investigation…** dissolves it again.
+- **Add pinned note** pins a note to a card; notes can hold text and images.
+
+**History and undo.** Every change is listed in the **History** tab, marked as made by you, an
+import or Claude. A single field can be set back with **Restore old value**; an import, or a whole
+batch import, is undone with **Undo import** or **Undo batch** on its entry, after a preview of
+what will be removed.
+
+## Energy profiles and the table
+
+**Profile and table** in the canvas bar opens the energy drawer under the canvas. The canvas bar
+also chooses the level of theory, the energy type (E, H, G or G_qh), the reference node, and
+whether counterpoise-corrected values are used (**with BSSE**).
+
+1. Right-click the first node of a pathway and choose **Start energy pathway here**.
+2. In the drawer, continue the pathway one step at a time (**Continue with**), or add a branch
+   pathway beside it. A pathway that comes back to its first state closes the cycle.
+3. The **Profile** tab draws it; the **Table** tab lists relative values, step barriers and the
+   absolute energies behind them, with a Check column for the warnings.
+
+A drawer can keep several saved profiles, each with its own pathways and reference: **New**, and
+the profile menu's **Rename**, **Duplicate** and **Delete…**. **Style…** changes the profile's
+look, and **Export** writes **Profile as PNG**, **Profile as SVG** or **Table as CSV**.
+
+Temperature, the quasi-harmonic cutoff and the standard state (1 atm or 1 M) are set per
+investigation in Settings → **Thermochemistry**; every change is recorded in the history.
+
+## Analyses
+
+The **Analyses** tab holds analyses that are saved with the investigation and carry the warnings
+of the values they use:
+
+- **New selectivity**: ΔΔG‡ and ee/de between outcomes, each a set of transition states (also
+  **Selectivity…** on a multi-selection).
+- **New turnover**: the energetic span model (TOF, TDTS, TDI) of a closed cycle.
+- **New conformer equilibrium**: populations and equilibration times between conformers (also
+  **Conformer equilibrium…** on a multi-selection).
+
+**Sterics.** **Compare sterics** on a selection, or in a branch's inspector, computes the buried
+volume and steric maps; **Choose its atoms…** picks the centre and the atoms left out (the other
+ligands). Settings → **Steric maps** sets the map colours.
+
+## Structures in 3D
+
+Selecting a node shows its structure in the inspector (Space opens it larger). The 3D view
+measures distances, angles and dihedrals, plays an optimization, scan or IRC step by step,
+animates normal modes, and can be popped out into its own window. **Overlay in 3D** on a selection of
+2 to 12 nodes aligns them in one view; **Save as new set…** keeps the alignment. **Match atoms…**
+on two selected nodes finds which atom in one is which atom in the other.
+
+**Editing a structure.** Coordinates can be edited as text, copied (**Copy xyz**) or saved
+(**Save .xyz**). **Edit structure in 3D…** opens the structure editor: change distances, angles
+and dihedrals, swap elements, add fragments or a molecule from **SMILES…**, **Add hydrogens**,
+**Flip** a fragment, and **Minimize** (a quick force-field clean-up) with chosen atoms frozen and
+distances, angles or dihedrals held. **Draw…** opens a 2D drawing
+editor (Ketcher), and **Draw from this structure…** starts it from the current structure.
+Editing a node that already has calculations makes a new, derived node.
+
+**IRC.** **IRC…** on a transition-state node opens the IRC window. It keeps the TS's IRC apart
+from the node: **Import IRC…** adds the path in each direction, and **Import end-point job…** the
+optimization and frequency job at each end. The chart joins both directions through the TS.
+
+**Scan editor.** The **Scan editor** in the top bar joins several scan outputs into one path,
+which can be reversed, trimmed and split, and saves it; files can come from this computer or from an SSH server (see
+[Join scans](#join-scans)). **Scan path…** on two nodes joined by a transition asks a cloud session
+for an xTB path between them (see [Calculations in the cloud](#calculations-in-the-cloud)).
+
+**Inspect** reads an output file without importing it: the job steps, the optimization with its
+energy and convergence criteria, and the normal modes. It is offered in the import dialog's file
+browser, in the HPC tab and for local jobs.
+
+## Calculations on this computer
+
+Chembook3D can refine a structure on your own computer: an optimization, a transition-state
+search, a relaxed scan, or frequencies, imported onto the node when it is done. It is optional,
+and meant for quick structures, not production runs. Windows and Linux on x86-64 are supported.
+
+**Install the tools once.** Settings → **Local calculations** → **Install** downloads Psi4,
+tblite, geomeTRIC and the dispersion corrections from conda-forge, about 1.5 GB, with no account.
+It takes 5 to 10 minutes and keeps going if you close the tab. The tools go into the app's own
+data folder (`%LOCALAPPDATA%\chembook3d\tools` on Windows, `~/.local/share/chembook3d/tools` on
+Linux), never into an investigation. **Install g-xTB** adds the Grimme group's g-xTB (about
+40 MB). The same section sets how many cores and how much memory a job may use. Without the
+interface, `uv run python -m chembook3d.local_tools install` (and `install-gxtb`) does the same.
+
+**Refine a structure.** **Refine geometry…** on a node (right-click menu or inspector) opens the
+job dialog:
+
+| Method | What it is |
+|---|---|
+| GFN2-xTB | Tight binding; seconds to minutes. |
+| g-xTB | Newer tight binding, closer to DFT, a few times GFN2-xTB's cost (after **Install g-xTB**). |
+| B97-3c, r2SCAN-3c | Fast composite DFT through Psi4; hours for a 70-atom metal complex. |
+| ONIOM(r2SCAN-3c:GFN2-xTB) | r2SCAN-3c on the metal and the atoms around it, GFN2-xTB on the rest. |
+
+Set the charge and multiplicity, then choose what to run: **Search for a transition state** (with
+the reacting atoms, if you know them), a **Relaxed scan** of one coordinate, several coordinates
+together, or a **2D grid** shown as a surface map (GFN2-xTB and g-xTB only), **Frequencies at the
+result** (GFN2-xTB and g-xTB), and held distances, angles or dihedrals. The dialog shows an
+estimate of how long the job takes, which gets better after each job on this computer.
+
+**Follow and import.** Jobs run one at a time, as programs of their own, so they keep running when
+the app is closed. **Local jobs** in the top bar lists them with **Inspect** (live, every 5 s),
+**Cancel** and **Show node**. Each job is a folder under `local-jobs/` in the investigation, which
+sync leaves out; the result is imported onto its node when the job ends.
 
 ## Sync investigations between computers
 
@@ -18,8 +179,9 @@ several computers. Git must be installed (on Windows, [Git for Windows](https://
 2. Open the investigation, press **Sync with GitHub…** and paste the repository's address.
 3. On another computer, choose **Open from GitHub…** on the start screen.
 
-The app pulls when it opens a linked investigation, and pushes when you close it, press **Sync**,
-or stop the app. If both computers changed it since the last sync, it cannot be merged: the app
+The app pulls when it opens a linked investigation, and pushes when you close it, stop the app,
+or sync by hand: the sync chip in the top bar shows the state ("Up to date", "Not pushed", …) and
+syncs when clicked, as does **Sync with GitHub** in the investigation menu. If both computers changed it since the last sync, it cannot be merged: the app
 asks which copy to keep and saves the other.
 
 The app never asks for a password or token; Git signs in. On Windows, Git for Windows opens a
@@ -70,8 +232,10 @@ and code are sent once and never saved, and a refused login is never tried again
 (Sigma2 blocks addresses that keep failing). **Add a cluster…** in the tab's Cluster list adds
 another server; Betzy and Olivia are offered ready-filled.
 
-**Import from here** lists the output files (`.log`, `.out`, `.output`, `.xyz`) in the directory
-the terminal is in. Pick one to import it as from the file browser, or several for a batch
+### Import and send files
+
+**Import from here** lists the output files (`.log`, `.out`, `.output`, `.xyz`, `.cml`; tick
+**Show every file** for the rest) in the directory the terminal is in. Pick one to import it as from the file browser, or several for a batch
 import that matches each to a node. The files are copied into the investigation with
 `saga:/cluster/…` as their origin; nothing on Saga changes.
 
@@ -79,10 +243,14 @@ import that matches each to a node. The files are copied into the investigation 
 `<label>.xyz` into the same directory, ready for an input file. If a file of that name is
 already there, the app asks before replacing it; it never deletes anything on Saga.
 
-**X11 windows**: tick it in the Saga tab and start Xming, and programs such as Molden typed in
+### X11 windows
+
+Tick **X11 windows** in the Saga tab and start Xming, and programs such as Molden typed in
 the terminal (`molden TS1-2.out &`) open their windows on this computer, as from a terminal with
 Xming. The display is `localhost:0.0`, Xming's own. The change takes effect in a new shell; the
 tab offers **New shell** and says when no X server answers.
+
+### Inspect a job
 
 **Inspect** a file without importing it: type `inspect TS1-2.out` in the terminal, or pick a file
 in **Import from here** or in the import dialog's file browser and press **Inspect**. The window
@@ -96,20 +264,24 @@ in **Import from here**, or type a filter such as `*.log` in the file browser an
 the N matching files**. The window then steps through them with **Previous file** and **Next
 file**, or a list to jump to one.
 
-**Join scans** in the scan editor: type `scans MCB_1_scan.log MCB_1_scan2.log` (or `scans *scan*.log`)
+### Join scans
+
+To join scans in the scan editor, type `scans MCB_1_scan.log MCB_1_scan2.log` (or `scans *scan*.log`)
 in the terminal, or tick the files in **Import from here** and press **Scan editor**. In the
 editor, **Add from Saga…** adds more files from the terminal's directory, **Refresh** reads a scan
 still running again and the path follows it, and **Save to Saga** writes the joined path into the
-terminal's directory, never over a file there (a name taken becomes `_v2`). After pulling this
-change, log out of Saga and in again.
+terminal's directory, never over a file there (a name taken becomes `_v2`). After updating Chembook3D, log out of Saga and in again
+so the background connection picks up the new version.
 
-**Ask Claude about files on Saga**: while you are logged in, the Claude panel can read the files
+### Claude and files on Saga
+
+While you are logged in, the Claude panel can read the files
 in the directory the Saga terminal is in, and in the directories below it, without importing
 them: "did TS1 converge?", "why did the job in opt2 stop?", "how many imaginary frequencies has
 the last frequency job?". `cd` in the terminal to where the jobs are first; Claude cannot read
 above that directory, cannot log in, and never deletes or runs anything on Saga.
 
-**Let Claude write new files here**: tick it in the Saga tab and Claude may create new files
+Tick **Let Claude write new files here** in the Saga tab and Claude may create new files
 (inputs, job scripts, xyz files, notes) in the terminal's directory and in new or existing
 folders below it, until you log out or press **Stop**; it is off again at every login. The tab
 lists what Claude wrote. Claude never replaces, edits or deletes a file: for a change it writes
