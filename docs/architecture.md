@@ -74,6 +74,5 @@ Frontend, UI tests, Portability (`tests/portability.py` makes an investigation o
 opens it on the other), and Local tools (installs the real tools and runs `tests/test_local_*.py`).
 Backend runs pytest in parallel (`-n auto`, pytest-xdist) and lists the 25 slowest tests; a test
 running over 2 minutes prints its traceback (`faulthandler_timeout`). Every job has a time limit,
-a newer push to a pull request cancels the older run, actions are pinned to commit SHAs
-(Dependabot proposes updates, `.github/dependabot.yml`), and the `merge_group` trigger lets a
-merge queue on main run the same checks.
+a newer push to a pull request cancels the older run, and actions are pinned to commit SHAs
+(Dependabot proposes updates, `.github/dependabot.yml`).
