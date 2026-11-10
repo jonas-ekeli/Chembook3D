@@ -51,7 +51,8 @@ export async function browseTo(page: Page, folder: string) {
   await dialog.getByRole('button', { name: 'Go' }).click()
   const listing = (await (await listed).json()) as { entries: { name: string }[] }
   await expect(dialog.getByLabel('Folder path')).toHaveValue(folder)
-  if (listing.entries.length) await expect(list.getByRole('listitem')).toContainText(listing.entries.map((entry) => entry.name))
+  const names = listing.entries.map((entry) => entry.name)
+  if (names.length) await expect(list.getByRole('listitem')).toContainText(names)
   else await expect(list.getByText('No subfolders')).toBeVisible()
 }
 

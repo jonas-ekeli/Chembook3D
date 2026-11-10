@@ -9,6 +9,9 @@ import { openDemo, canvasNode } from './helpers.ts'
 const card = canvasNode
 
 test('the node panel: header, stat strip, ⋯ menu by keyboard, jump bar', async ({ page }) => {
+  // A window low enough that what follows Calculations fills the panel, so the jump bar can
+  // scroll it up to the header (in the full height, the demo's A-S2 has too little below it).
+  await page.setViewportSize({ width: 1600, height: 800 })
   await openDemo(page)
   await page.getByRole('button', { name: 'Energy', exact: true }).click()
   await card(page, 'T-S0').click()
@@ -89,5 +92,7 @@ test('the stat strip flags a TS whose frequency job has no imaginary frequency',
   await expect(imaginary).toHaveText('0 ⚠ TS expects 1')
   await expect(imaginary).toHaveClass(/warn/)
   await expect(inspector.locator('.node-head .ts-mark')).toHaveText('TS')
+  // A minimum again: no warning.
+  await inspector.getByLabel('Role').selectOption('minimum')
   await expect(imaginary).toHaveText('0')
 })
