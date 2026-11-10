@@ -203,8 +203,9 @@ test('the command palette and the canvas keys', async ({ page }) => {
   await expect(card(page, 'A-S2').locator('.cnode-energy')).toHaveText('ΔG 14.80')
 
   // The app bar shows the way in and its key.
-  const search = page.getByRole('button', { name: 'Search and commands' })
+  const search = page.getByRole('button', { name: 'Search…', exact: true })
   await expect(search).toContainText('Ctrl K')
+  await expect(search).toHaveAccessibleDescription(/Search nodes, branches, steps and commands/)
   await search.click()
   const palette = page.getByRole('dialog', { name: 'Command palette' })
   await expect(palette.getByRole('combobox')).toBeFocused()

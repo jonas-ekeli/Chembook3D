@@ -23,3 +23,6 @@ artifacts and publishes nothing.
   the app, and README screenshots in dark mode.
 - CI: parallel pytest, time limits and pinned actions; then dependency audits, CodeQL, a
   Python 3.13 backend job, a bundle size budget and a release build.
+- Tests: a 500-node stress case timed in pytest and in the browser, axe-core accessibility checks
+  (and fixes for what they found on the start page and the app bar), tests for the last two HTTP
+  routes no test called, and coverage of the Saga keeper and the local worker processes.

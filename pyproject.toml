@@ -28,6 +28,7 @@ chembook3d = "chembook3d.cli:main"
 
 [dependency-groups]
 dev = [
+    "coverage>=7.10",
     "geometric>=1.1",
     "httpx2>=2.13.1",
     "pytest>=8",
@@ -46,6 +47,16 @@ packages = ["src/chembook3d"]
 testpaths = ["tests"]
 # A test still running after 2 minutes prints every thread's traceback (it is not stopped).
 faulthandler_timeout = 120
+
+[tool.coverage.run]
+# Not run in CI. `uv run coverage run -m pytest -W error -n auto`, then
+# `uv run python scripts/coverage_combine.py` and `uv run coverage report` (docs/architecture.md,
+# Tests). "subprocess" also measures the processes the tests start: the pytest-xdist workers, the
+# Saga keeper (remote/keeper.py) and the local worker, which runs from a copy of local_worker.py
+# in its job folder (hence the second pattern; the combine script counts it as local_worker.py).
+include = ["*/src/chembook3d/*", "*/local-jobs/*/worker.py"]
+patch = ["subprocess"]
+parallel = true
 
 [tool.ruff]
 line-length = 100

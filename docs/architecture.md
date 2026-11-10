@@ -69,7 +69,7 @@ flowchart LR
 
 `tests/` (pytest, fixtures in `tests/fixtures/` with sources in its README), `frontend/tests/`
 (Node unit tests, `npm run test:unit`), `frontend/e2e/` (Playwright against the real backend on
-:8766, with a fake SSH server on :8767). CI (`.github/workflows/ci.yml`, Ubuntu + Windows): Backend,
+:8766, with a fake SSH server on :8767; `E2E_PORT` and `E2E_SAGA_PORT` move them). CI (`.github/workflows/ci.yml`, Ubuntu + Windows): Backend,
 Frontend, UI tests, Portability (`tests/portability.py` makes an investigation on one OS and
 opens it on the other), and Local tools (installs the real tools and runs `tests/test_local_*.py`).
 `tests/test_migrations.py` upgrades a seeded database from every schema revision, checks that a
@@ -87,3 +87,19 @@ the numbers are in the script). A pushed `v*` tag runs `.github/workflows/releas
 the interface, copies it into the package (`chembook3d/static/`, `chembook3d/static-snapshot/`),
 runs `uv build`, checks the wheel with `scripts/check_wheel.py` and keeps the wheel and the source
 archive as workflow artifacts; it publishes nothing. Changes are listed in `CHANGELOG.md`.
+
+The stress case (NFR-PERF-01, 500 nodes and 1,000 edges, `tests/stress.py`) is timed by
+`tests/test_stress.py`, which prints the times of the canvas and energy routes at the end of every
+pytest run, and by `frontend/e2e/stress.spec.ts` (time until the canvas and its energies are
+drawn). `frontend/e2e/accessibility.spec.ts` runs axe-core on the start page and an open canvas.
+
+Coverage (not run in CI): the configuration in `pyproject.toml` (`[tool.coverage.run]`, with
+`patch = ["subprocess"]`) also measures the processes the tests start, such as the Saga keeper
+and the local worker. `scripts/coverage_combine.py` joins the data files and counts the
+worker's copy in each job folder as `local_worker.py`:
+
+```sh
+uv run coverage run -m pytest -W error -n auto
+uv run python scripts/coverage_combine.py
+uv run coverage report
+```

@@ -731,6 +731,7 @@ Routes for all of these are in `api/pathway.py`.
 - `scripts/make_showcase_demo.py` builds the showcase demo (D170) from published ioChem-BD CML files, downloaded into a cache and checked against `scripts/showcase_manifest.json`. It drives the app's own HTTP API through a TestClient, so it shows what a user's clicks would do (tests in `tests/test_showcase_demo.py`).
 - `scripts/build_frontend.py` runs `npm ci` and `npm run build` the same way on Windows, Linux and WSL, and refuses a Windows Node.js found through the PATH under WSL.
 - `scripts/check_wheel.py`: the release build's check that a wheel carries `chembook3d/static/` and `chembook3d/static-snapshot/snapshot.html`.
+- `scripts/coverage_combine.py`: joins a coverage run's data files, counting the local worker's copies in job folders as `local_worker.py` (docs/architecture.md, Tests).
 - `frontend/scripts/bundle-budget.mjs`: the last step of `npm run build`; the size budgets of the main chunk and `snapshot.html`.
 
 ## Backend tests
@@ -739,9 +740,13 @@ Routes for all of these are in `api/pathway.py`.
 - `tests/fixtures/` holds public sample outputs: `gaussian/` from GoodVibes, `orca/`, `xtb/`, `crest/`, `iochem/` (ioChem-BD CML) and `sterics/` (SambVca reference set). Sources and licences are in `tests/fixtures/README.md`.
 - `tests/gaussian_text.py` writes small synthetic outputs for cases the samples lack, including the custom-basis `--Link1--` chains (`python -m tests.gaussian_text <folder>` writes them for the UI tests).
 - Notebook identity and ownership tests: see that section.
+- `tests/stress.py` builds the stress investigation (500 nodes, 1,000 edges; `python -m tests.stress <folder>`); `tests/test_stress.py` times the routes the canvas loads, and `conftest.pytest_terminal_summary` prints the times.
 
 ## UI tests
 
 - `frontend/e2e/`: Playwright UI tests against the real backend, one spec per feature (for example `e2e/refetch.spec.ts`, `e2e/local-jobs.spec.ts`, `frontend/e2e/equilibrium.spec.ts`).
 - `frontend/tests/`: Node unit tests (`npm run test:unit`, Node 24+), such as `frontend/tests/api-identity.test.mjs`.
 - The identity specs (`energy-request.spec.ts`, `investigation-identity.spec.ts`): see "Notebook identity and ownership".
+- `e2e/accessibility.spec.ts`: axe-core (`@axe-core/playwright`) on the start page and an open canvas; no critical or serious violation.
+- `e2e/stress.spec.ts`: builds the stress investigation and reports how long its canvas takes to draw.
+- `E2E_PORT` and `E2E_SAGA_PORT` (default 8766 and 8767) move the backend and the fake SSH server, for a second run on one computer.

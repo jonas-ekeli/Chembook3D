@@ -33,3 +33,19 @@ def open_client(client, tmp_path):
     )
     assert response.status_code == 200, response.text
     return client
+
+
+def pytest_terminal_summary(terminalreporter):
+    """NFR-PERF-01: the times `tests/test_stress.py` records, printed at the end of every run
+    (also under pytest-xdist, which passes the properties back with each report)."""
+    timed = [
+        (name, value)
+        for report in terminalreporter.stats.get("passed", [])
+        if report.when == "call"
+        for name, value in report.user_properties
+        if name.startswith("stress seconds")
+    ]
+    if timed:
+        terminalreporter.section("stress case (500 nodes, 1,000 edges)")
+        for name, value in timed:
+            terminalreporter.write_line(f"{name.removeprefix('stress seconds, ')}: {value:.3f} s")

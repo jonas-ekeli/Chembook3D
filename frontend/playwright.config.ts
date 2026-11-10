@@ -7,8 +7,10 @@ import { defineConfig } from '@playwright/test'
 // Everything the tests write goes to a fresh temporary folder, including app settings.
 // realpath expands Windows short names (RUNNER~1), matching the paths the backend shows.
 process.env.E2E_DIR ??= realpathSync.native(mkdtempSync(join(tmpdir(), 'chembook3d-e2e-')))
-const port = 8766
-const SAGA_PORT = 8767 // the fake Saga of the SSH server tests (D122)
+// E2E_PORT and E2E_SAGA_PORT move both servers, for a second run on the same computer.
+const port = Number(process.env.E2E_PORT ?? 8766)
+// The fake Saga of the SSH server tests (D122); saga.spec.ts reads the same variable.
+const SAGA_PORT = Number((process.env.E2E_SAGA_PORT ??= '8767'))
 
 // D92: the Claude panel runs tests/fake_claude.py instead of Claude Code, through a `claude`
 // command as Windows (a .cmd file, as npm installs it) or a shell would find it.
