@@ -31,7 +31,7 @@ This file is loaded into every session, so keep it short. Detail belongs in `doc
 ## Commands
 - Backend setup: `uv sync`
 - Lint and format: `uv run ruff check .` and `uv run ruff format --check .`
-- Tests: `uv run pytest -W error`
+- Tests: `uv run pytest -W error` (add `-n auto` to run in parallel, as CI does)
 - Frontend: `cd frontend && npm ci && npm run lint && npm run test:unit && npm run build`
 - UI tests: `uv sync` and build the frontend, then `cd frontend && npm run test:e2e` (starts the backend on port 8766 and a fake SSH server on 8767 itself). In a container with a preinstalled Chromium, set `PLAYWRIGHT_CHROMIUM_PATH` to it instead of running `playwright install`.
 - Schema changes: add an Alembic revision under `src/chembook3d/migrations/versions/`; opening an older investigation backs up its database, then migrates it.

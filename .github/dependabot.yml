@@ -1,0 +1,11 @@
+# The workflow's actions are pinned to commit SHAs; Dependabot proposes the update when an
+# action releases a new version (one grouped pull request a week at most).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
