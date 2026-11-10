@@ -345,21 +345,6 @@ function App() {
   const [shareError, setShareError] = useState<string | null>(null)
   const resizing = useRef<{ x: number; width: number } | null>(null)
 
-  useEffect(() => {
-    api.currentInvestigation().then(
-      (inv) => {
-        if (identity.current !== undefined) return
-        if (inv) opened(inv)
-        else closed()
-      },
-      (err: unknown) => {
-        if (identity.current !== undefined) return
-        closed()
-        setError(`Backend not reachable: ${errorText(err)}`)
-      },
-    )
-  }, [])
-
   // D105: open on what the investigation showed when it was last used. Records deleted since
   // are left out by the backend; a level or type no longer offered falls back as usual.
   const shownFolder = investigation?.folder ?? null
@@ -476,6 +461,97 @@ function App() {
       current = false
     }
   }, [investigation, view, canvas])
+
+  /** fresh: the investigation was closed in between (to resolve a sync conflict), so it is
+   * shown anew even if it is the one this render still has. */
+  const resetInvestigation = (inv: Investigation | null) => {
+    identity.current = inv?.folder ?? null
+    identityVersion.current += 1
+    setInvestigationIdentity(identity.current)
+    fetched.current += 1
+    viewFetched.current += 1
+    restored.current = null
+    lastSaved.current = null
+    setEnergyView(null)
+    setCanvasId(null)
+    setDrawerPaths([])
+    setDrawerReference(null)
+    setImportRequest(null)
+    setBatchFolder(null)
+    setRemoteFiles(null)
+    setRemoteBatch(null)
+    setEditingNode(null)
+    setIrcNode(null)
+    setRefineNode(null)
+    setSubDialog(null)
+    setBoxEnd(null)
+    setUndoing(null)
+    setOpenAnalysis(null)
+    setSharing(null)
+    setShowBases(false)
+    setShowSettings(false)
+    setShowJobs(false)
+    setShowLocalJobs(false)
+    setLinking(false)
+    setConflict(null)
+    setCanvas(EMPTY_CANVAS)
+    setHistory([])
+    setEnergyOptions(null)
+    setEnergyLevel(null)
+    setReferenceId(null)
+    choose(null)
+    setFilters(NO_FILTERS)
+    setExpanded(new Set())
+    setDrawerOpen(false)
+    setDrawerView(null)
+    setDrawerKey((k) => k + 1)
+    setInvestigation(inv)
+    setShown((n) => n + 1)
+    setView('canvas')
+    api.settings().then(setSettings, () => undefined)
+  }
+
+  const closed = () => {
+    resetInvestigation(null)
+    setSync(null)
+    setError(null)
+    setNotice(null)
+  }
+
+  const opened = (inv: Investigation, fresh = false) => {
+    if (inv.sync) setSync(inv.sync)
+    else if (!inv.linked) setSync(null)
+    // Opened, but the pull did not get through (FR-SYNC-04): say why.
+    const syncProblem = inv.sync && SYNC_PROBLEMS.includes(inv.sync.state) ? `Sync: ${inv.sync.message}` : null
+    // Opening the investigation already shown keeps the canvas and selection: resetting them when
+    // the answer arrives would drop whatever was clicked in the meantime.
+    if (!fresh && identity.current === inv.folder) {
+      setError(null)
+      setNotice(syncProblem)
+      setView('canvas')
+      return
+    }
+    resetInvestigation(inv)
+    setError(null)
+    setNotice(syncProblem)
+  }
+
+  // On start, the investigation the backend has open, if any. Declared after `opened` and
+  // `closed`, which it calls.
+  useEffect(() => {
+    api.currentInvestigation().then(
+      (inv) => {
+        if (identity.current !== undefined) return
+        if (inv) opened(inv)
+        else closed()
+      },
+      (err: unknown) => {
+        if (identity.current !== undefined) return
+        closed()
+        setError(`Backend not reachable: ${errorText(err)}`)
+      },
+    )
+  }, [])
 
   // D91: changes Claude (or another tab) makes show at once; Claude's deletes wait for an answer.
   // D159: the investigation's thermochemistry is in the settings, so they are read again too.
@@ -596,80 +672,6 @@ function App() {
     () => ({ view: shownView, type: shownType, showEdges: edgeEnergies, referenceId, settings }),
     [shownView, shownType, edgeEnergies, referenceId, settings],
   )
-
-  /** fresh: the investigation was closed in between (to resolve a sync conflict), so it is
-   * shown anew even if it is the one this render still has. */
-  const resetInvestigation = (inv: Investigation | null) => {
-    identity.current = inv?.folder ?? null
-    identityVersion.current += 1
-    setInvestigationIdentity(identity.current)
-    fetched.current += 1
-    viewFetched.current += 1
-    restored.current = null
-    lastSaved.current = null
-    setEnergyView(null)
-    setCanvasId(null)
-    setDrawerPaths([])
-    setDrawerReference(null)
-    setImportRequest(null)
-    setBatchFolder(null)
-    setRemoteFiles(null)
-    setRemoteBatch(null)
-    setEditingNode(null)
-    setIrcNode(null)
-    setRefineNode(null)
-    setSubDialog(null)
-    setBoxEnd(null)
-    setUndoing(null)
-    setOpenAnalysis(null)
-    setSharing(null)
-    setShowBases(false)
-    setShowSettings(false)
-    setShowJobs(false)
-    setShowLocalJobs(false)
-    setLinking(false)
-    setConflict(null)
-    setCanvas(EMPTY_CANVAS)
-    setHistory([])
-    setEnergyOptions(null)
-    setEnergyLevel(null)
-    setReferenceId(null)
-    choose(null)
-    setFilters(NO_FILTERS)
-    setExpanded(new Set())
-    setDrawerOpen(false)
-    setDrawerView(null)
-    setDrawerKey((k) => k + 1)
-    setInvestigation(inv)
-    setShown((n) => n + 1)
-    setView('canvas')
-    api.settings().then(setSettings, () => undefined)
-  }
-
-  const closed = () => {
-    resetInvestigation(null)
-    setSync(null)
-    setError(null)
-    setNotice(null)
-  }
-
-  const opened = (inv: Investigation, fresh = false) => {
-    if (inv.sync) setSync(inv.sync)
-    else if (!inv.linked) setSync(null)
-    // Opened, but the pull did not get through (FR-SYNC-04): say why.
-    const syncProblem = inv.sync && SYNC_PROBLEMS.includes(inv.sync.state) ? `Sync: ${inv.sync.message}` : null
-    // Opening the investigation already shown keeps the canvas and selection: resetting them when
-    // the answer arrives would drop whatever was clicked in the meantime.
-    if (!fresh && identity.current === inv.folder) {
-      setError(null)
-      setNotice(syncProblem)
-      setView('canvas')
-      return
-    }
-    resetInvestigation(inv)
-    setError(null)
-    setNotice(syncProblem)
-  }
 
   const openFailed = (folder: string) => (err: unknown) => {
     if (err instanceof ApiError && err.lock) {

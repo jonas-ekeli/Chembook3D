@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && vite build --config vite.snapshot.config.ts",
-    "lint": "oxlint",
+    "lint": "oxlint --deny-warnings",
     "test:unit": "node --import ./tests/resolve-ts.mjs --test tests/*.test.mjs",
     "test:coverage": "node --import ./tests/resolve-ts.mjs --test --experimental-test-coverage --test-coverage-include=\"src/**\" tests/*.test.mjs",
     "preview": "vite preview",
