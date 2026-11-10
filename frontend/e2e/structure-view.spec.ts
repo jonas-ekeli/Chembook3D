@@ -1,26 +1,5 @@
-import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { forgetView } from './demoView.ts'
-
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(canvasNode(page, 'T-S0')).toBeVisible()
-  await expect(page.locator('.edge-label').filter({ hasText: 'ΔG' }).first()).toBeVisible()
-}
-
-function canvasNode(page: Page, label: string): Locator {
-  return page.getByRole('group', { name: `Node ${label}`, exact: true })
-}
+import { openDemo, canvasNode } from './helpers.ts'
 
 /** The atoms drawn on a card, as their positions in the sketch. */
 async function atomPositions(card: Locator): Promise<string[]> {

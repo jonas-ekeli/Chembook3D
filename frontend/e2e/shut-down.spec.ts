@@ -1,6 +1,6 @@
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
-import { investigationCommand } from './appBar.ts'
+import { expect, test, type Request } from '@playwright/test'
+import { investigationCommand, pageSettled } from './helpers.ts'
 
 // D107 (FR-RUN-04). The other tests need the backend running, so here the shut-down itself is
 // answered by the test; tests/test_lifetime.py and tests/test_launcher.py stop real servers.
@@ -62,6 +62,10 @@ test('Shut down in an open investigation stays in its dialog until the app has s
     await answered // ... then it pushes, and stops
     await route.fulfill({ json: { sync: 'Pushed to GitHub.' } })
   })
+  const polls: Request[] = []
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/live') polls.push(request)
+  })
   await page.goto('/')
   await investigationCommand(page, 'Shut down Chembook3D')
   const dialog = page.getByRole('dialog', { name: 'Shut down Chembook3D?' })
@@ -69,9 +73,11 @@ test('Shut down in an open investigation stays in its dialog until the app has s
     async (response) => response.url().includes('/api/live') && (await response.json()).investigation === null,
   )
   await dialog.getByRole('button', { name: 'Shut down', exact: true }).click()
-  await closeHeard
-  // The tab used to go to the start page here; give it the time it took, then look.
-  await page.waitForTimeout(1000)
+  const close = (await closeHeard).request()
+  // The tab used to go to the start page on hearing of the close. It has handled that answer
+  // once it asks for the next one.
+  await expect.poll(() => polls.indexOf(close) >= 0 && polls.at(-1) !== close).toBe(true)
+  await pageSettled(page)
   await expect(dialog.getByRole('button', { name: 'Shutting down…' })).toBeDisabled()
   await expect(page.locator('main.start')).toHaveCount(0)
 

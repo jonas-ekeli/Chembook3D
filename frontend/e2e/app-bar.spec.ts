@@ -1,25 +1,9 @@
-import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { forgetView } from './demoView.ts'
-import { showOverview } from './appBar.ts'
+import { openDemo, showOverview } from './helpers.ts'
 
 // T-UI-57, D180 (UI2): one 44 px app bar and, in the canvas view only, a 40 px canvas toolbar.
 // The investigation's commands are in the menu on its name, Shut down last and in red; the view
 // tabs are Canvas, History and Analyses; at narrow widths the bars keep one row.
-
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-}
 
 const height = async (page: Page, selector: string) => (await page.locator(selector).boundingBox())!.height
 

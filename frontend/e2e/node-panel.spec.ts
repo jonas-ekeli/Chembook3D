@@ -1,27 +1,12 @@
-import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { forgetView } from './demoView.ts'
+import { expect, test } from '@playwright/test'
+import { openDemo, canvasNode } from './helpers.ts'
 
 // T-UI-56, D179 (UI3): the node panel leads with what the node is and its numbers. A sticky
 // header holds the TS tag and the name on one line, two actions and a ⋯ menu for the rare ones,
 // a meta row, the stat strip (the card's ΔG, the imaginary frequencies, the absolute energy) and
 // a jump bar that scrolls the one panel to each section.
 
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-}
-
-const card = (page: Page, label: string) => page.getByRole('group', { name: `Node ${label}`, exact: true })
+const card = canvasNode
 
 test('the node panel: header, stat strip, ⋯ menu by keyboard, jump bar', async ({ page }) => {
   await openDemo(page)
@@ -100,13 +85,9 @@ test('the stat strip flags a TS whose frequency job has no imaginary frequency',
   const imaginary = inspector.locator('.node-head').getByRole('definition').nth(1)
   await expect(imaginary).toHaveText('0')
   await inspector.getByLabel('Role').selectOption('transition_state')
-  try {
-    // W-IMAG-TS on its frequency job: amber, with a ⚠ and what a TS needs.
-    await expect(imaginary).toHaveText('0 ⚠ TS expects 1')
-    await expect(imaginary).toHaveClass(/warn/)
-    await expect(inspector.locator('.node-head .ts-mark')).toHaveText('TS')
-  } finally {
-    await inspector.getByLabel('Role').selectOption('minimum')
-  }
+  // W-IMAG-TS on its frequency job: amber, with a ⚠ and what a TS needs.
+  await expect(imaginary).toHaveText('0 ⚠ TS expects 1')
+  await expect(imaginary).toHaveClass(/warn/)
+  await expect(inspector.locator('.node-head .ts-mark')).toHaveText('TS')
   await expect(imaginary).toHaveText('0')
 })

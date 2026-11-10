@@ -1,26 +1,11 @@
-import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { forgetView } from './demoView.ts'
+import { expect, test } from '@playwright/test'
+import { openDemo } from './helpers.ts'
 
 // T-UI-51, D174 (UI5): one button and field system. Labels stay on one line at a 1280 px window,
 // the canvas tools are icon and short label with the full name kept, a destructive button has
 // the normal border, and keyboard focus shows a ring.
 
-const E2E_DIR = process.env.E2E_DIR!
-
 test.use({ viewport: { width: 1280, height: 800 } })
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-}
 
 test('buttons keep one line, the canvas tools are short, focus shows a ring', async ({ page }) => {
   await openDemo(page)

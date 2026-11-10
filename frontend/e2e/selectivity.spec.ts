@@ -1,29 +1,8 @@
-import { join } from 'node:path'
-import { expect, test, type Locator, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
-import { forgetView } from './demoView.ts'
+import { expect, test } from '@playwright/test'
+import { openDemo, canvasNode } from './helpers.ts'
 
 // T-UI-06, FR-SEL-01…07, D83, D103: a selectivity from two TSs selected on the canvas, its result at
 // two temperatures and with only the lowest TS, an experiment, the history, and deleting it.
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
-  await startPage(page)
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(canvasNode(page, 'T-S0')).toBeVisible()
-}
-
-function canvasNode(page: Page, label: string): Locator {
-  return page.getByRole('group', { name: `Node ${label}`, exact: true })
-}
 
 test('selectivity from two transition states', async ({ page }) => {
   await openDemo(page)

@@ -2,11 +2,10 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
-import { startPage } from './appBar.ts'
+import { E2E_DIR, startPage } from './helpers.ts'
 
 // T-UI-19, D115: a scan path that came back from its cloud session is imported by itself as a
 // node between its two ends, shown as its edge's chip (D121), and the Cloud jobs list shows where each job stands.
-const E2E_DIR = process.env.E2E_DIR!
 
 const START = [
   ['O', 0.0, 0.0, 0.1173],

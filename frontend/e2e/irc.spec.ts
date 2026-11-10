@@ -1,23 +1,9 @@
 import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
+import { expect, test } from '@playwright/test'
+import { E2E_DIR, newInvestigation } from './helpers.ts'
 
-const E2E_DIR = process.env.E2E_DIR!
 // A TS with its IRC both ways and a job on the forward end point, written by global-setup.ts
 const IRC = join(E2E_DIR, 'irc')
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  await page.getByRole('button', { name: /^New/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(E2E_DIR)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(E2E_DIR)
-  await dialog.getByLabel('Investigation name').fill(name)
-  await dialog.getByRole('button', { name: 'Create' }).click()
-  await expect(page.locator('.investigation')).toHaveText(name)
-}
 
 test("a TS node's IRC is imported, inspected and removed in its own window", async ({ page }) => {
   // D131, T-UI-34

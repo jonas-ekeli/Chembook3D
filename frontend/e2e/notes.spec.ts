@@ -2,13 +2,11 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
-import { forgetView } from './demoView.ts'
+import { E2E_DIR, openDemo, canvasNode, dragBy } from './helpers.ts'
 
 // T-UI-08, FR-NOTE-01…05, D85: a note pinned to a node's card, with formatted text, an SVG
 // pasted as text, a PNG chosen from disk, an empty clipboard, HTML that tries to run a script,
 // collapsing, moving it to another corner, the history, the read-only copy, and deleting it.
-const E2E_DIR = process.env.E2E_DIR!
 
 // A drawing as ChemDraw's "Save As SVG" writes one, with a script and a handler to be removed.
 const SVG = `<?xml version="1.0" encoding="UTF-8"?>
@@ -22,24 +20,6 @@ const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==',
   'base64',
 )
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
-  await startPage(page)
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(canvasNode(page, 'T-S0')).toBeVisible()
-}
-
-function canvasNode(page: Page, label: string): Locator {
-  return page.getByRole('group', { name: `Node ${label}`, exact: true })
-}
 
 /** Which corner of the card its note sits outside of, from where both are drawn. */
 async function corner(page: Page, label: string): Promise<string> {
@@ -175,17 +155,6 @@ test('a note pinned to a node card, with text and pictures', async ({ page, cont
   await expect(history).toContainText('Deleted the pinned note “Rotamer check”')
 
 })
-
-/** Drags from the middle of `handle` by (dx, dy) screen px. */
-async function dragBy(page: Page, handle: Locator, dx: number, dy: number) {
-  const box = (await handle.boundingBox())!
-  const x = box.x + box.width / 2
-  const y = box.y + box.height / 2
-  await page.mouse.move(x, y)
-  await page.mouse.down()
-  await page.mouse.move(x + dx, y + dy, { steps: 8 })
-  await page.mouse.up()
-}
 
 type SavedNote = { id: string; placement: string; offset_x: number; offset_y: number; width: number; height: number | null }
 

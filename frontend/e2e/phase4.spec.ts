@@ -1,29 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { expect, test, type Locator, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
-import { forgetView } from './demoView.ts'
-
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  // Values below are in kcal/mol; an earlier test may have left another unit set.
-  await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
-  await startPage(page)
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(canvasNode(page, 'T-S0')).toBeVisible()
-}
-
-function canvasNode(page: Page, label: string): Locator {
-  return page.getByRole('group', { name: `Node ${label}`, exact: true })
-}
+import { expect, test, type Page } from '@playwright/test'
+import { openDemo, canvasNode } from './helpers.ts'
 
 async function setUnit(page: Page, unit: string) {
   await page.getByRole('button', { name: 'Settings' }).click()
@@ -123,26 +100,22 @@ test('a free species on one edge counts on every node card after it', async ({ p
   )
   // A species with no energies: every card after the edge it joins on has no balanced value.
   const species = await (await page.request.post('/api/nodes', { data: { label: 'substrate', kind: 'species' } })).json()
-  try {
-    await page.request.put(`/api/transitions/${edge.id}/species`, {
-      data: { species_id: species.id, direction: 'joins', count: 1 },
-    })
-    await page.reload()
-    await expect(canvasNode(page, 'T-S0')).toBeVisible()
-    await page.getByRole('button', { name: 'Energy', exact: true }).click()
-    await canvasNode(page, 'T-S0').click()
-    await page.getByLabel('Node inspector').getByRole('button', { name: 'Use as energy reference' }).click()
-    await expect(canvasNode(page, 'T-S0')).toContainText('ΔG 0.00')
-    // D175: no value is a quiet "—" on the card, the reason in its tooltip.
-    for (const label of ['A-S1', 'A-S2', 'A-S3']) {
-      const shown = canvasNode(page, label).locator('.cnode-energy')
-      await expect(shown).toHaveText('—')
-      await expect(shown).toHaveAttribute('title', /^ΔG n\/a: /)
-    }
-    await expect(canvasNode(page, 'B-S3')).toContainText('ΔG −6.00')
-  } finally {
-    await page.request.delete(`/api/nodes/${species.id}`)
+  await page.request.put(`/api/transitions/${edge.id}/species`, {
+    data: { species_id: species.id, direction: 'joins', count: 1 },
+  })
+  await page.reload()
+  await expect(canvasNode(page, 'T-S0')).toBeVisible()
+  await page.getByRole('button', { name: 'Energy', exact: true }).click()
+  await canvasNode(page, 'T-S0').click()
+  await page.getByLabel('Node inspector').getByRole('button', { name: 'Use as energy reference' }).click()
+  await expect(canvasNode(page, 'T-S0')).toContainText('ΔG 0.00')
+  // D175: no value is a quiet "—" on the card, the reason in its tooltip.
+  for (const label of ['A-S1', 'A-S2', 'A-S3']) {
+    const shown = canvasNode(page, label).locator('.cnode-energy')
+    await expect(shown).toHaveText('—')
+    await expect(shown).toHaveAttribute('title', /^ΔG n\/a: /)
   }
+  await expect(canvasNode(page, 'B-S3')).toContainText('ΔG −6.00')
 })
 
 test('a line between collapsed groups shows the energy of the edge between their representatives', async ({ page }) => {
@@ -158,27 +131,20 @@ test('a line between collapsed groups shows the energy of the edge between their
     const made = await page.request.post('/api/groups/reconnect', { data: { member_ids: members.map(id), label } })
     groups.push((await made.json()).id)
   }
-  try {
-    await page.reload()
-    const line = page.locator('.edge-label', { has: page.locator('.edge-count', { hasText: '2 edges' }) })
-    const between = line.filter({ hasNot: page.getByText('no TS') })
-    await expect(between).toHaveCount(1)
-    await expect(between.locator('.edge-energy')).toHaveCount(0) // no representatives yet
+  await page.reload()
+  const line = page.locator('.edge-label', { has: page.locator('.edge-count', { hasText: '2 edges' }) })
+  const between = line.filter({ hasNot: page.getByText('no TS') })
+  await expect(between).toHaveCount(1)
+  await expect(between.locator('.edge-energy')).toHaveCount(0) // no representatives yet
 
-    // A-S1 → A-S2 is ΔG 18.00; the line shows it once both representatives are on that edge.
-    await page.request.patch(`/api/groups/${groups[0]}`, { data: { representative_id: id('A-S1') } })
-    await page.reload()
-    await expect(between.locator('.edge-energy')).toHaveCount(0) // S2 has none yet
-    await page.request.patch(`/api/groups/${groups[1]}`, { data: { representative_id: id('A-S2') } })
-    await page.reload()
-    await expect(between.locator('.edge-energy')).toHaveText('ΔG‡ 18.00')
-    await expect(between).toContainText('2 edges')
-  } finally {
-    // Leave the demo as it was: members keep their branches.
-    for (const group of groups) {
-      await page.request.post(`/api/groups/${group}/dissolve`, { data: { restore_branches: true } })
-    }
-  }
+  // A-S1 → A-S2 is ΔG 18.00; the line shows it once both representatives are on that edge.
+  await page.request.patch(`/api/groups/${groups[0]}`, { data: { representative_id: id('A-S1') } })
+  await page.reload()
+  await expect(between.locator('.edge-energy')).toHaveCount(0) // S2 has none yet
+  await page.request.patch(`/api/groups/${groups[1]}`, { data: { representative_id: id('A-S2') } })
+  await page.reload()
+  await expect(between.locator('.edge-energy')).toHaveText('ΔG‡ 18.00')
+  await expect(between).toContainText('2 edges')
 })
 
 test('profile along branches with a "no TS" connection, the energy table and exports', async ({ page }) => {
@@ -272,28 +238,23 @@ test('a catalytic cycle closes at the resting state', async ({ page }) => {
   await openDemo(page)
   const canvas = await (await page.request.get('/api/canvas')).json()
   const id = (label: string) => canvas.nodes.find((n: { label: string }) => n.label === label).id
-  const closing = await (
-    await page.request.post('/api/transitions', { data: { source_id: id('B-S3'), target_id: id('T-S0') } })
-  ).json()
-  try {
-    await page.reload()
-    await expect(canvasNode(page, 'T-S0')).toBeVisible()
-    await page.getByRole('button', { name: 'Profile and table' }).click()
-    const drawer = page.getByLabel('Energy drawer')
-    await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
-    const b = drawer.getByRole('group', { name: 'Pathway B' })
-    await expect(b).toContainText('T-S0 → B-S1 → B-S2 → B-S3 → T-S0 ↻')
-    await expect(b).toContainText('Cycle closed.')
-    await expect(b.getByRole('group', { name: 'Continue with' })).toHaveCount(0)
+  const closing = await page.request.post('/api/transitions', { data: { source_id: id('B-S3'), target_id: id('T-S0') } })
+  expect(closing.ok()).toBe(true)
+  await page.reload()
+  await expect(canvasNode(page, 'T-S0')).toBeVisible()
+  await page.getByRole('button', { name: 'Profile and table' }).click()
+  const drawer = page.getByLabel('Energy drawer')
+  await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+  const b = drawer.getByRole('group', { name: 'Pathway B' })
+  await expect(b).toContainText('T-S0 → B-S1 → B-S2 → B-S3 → T-S0 ↻')
+  await expect(b).toContainText('Cycle closed.')
+  await expect(b.getByRole('group', { name: 'Continue with' })).toHaveCount(0)
 
-    const chart = drawer.getByRole('img', { name: 'Energy profile' })
-    await expect(chart).toContainText('T-S0 ↻')
+  const chart = drawer.getByRole('img', { name: 'Energy profile' })
+  await expect(chart).toContainText('T-S0 ↻')
 
-    await drawer.getByRole('button', { name: 'Table', exact: true }).click()
-    await expect(drawer.getByRole('table', { name: 'Energy table' }).locator('tbody tr')).toHaveCount(4) // each node once
-  } finally {
-    await page.request.delete(`/api/transitions/${closing.id}`)
-  }
+  await drawer.getByRole('button', { name: 'Table', exact: true }).click()
+  await expect(drawer.getByRole('table', { name: 'Energy table' }).locator('tbody tr')).toHaveCount(4) // each node once
 })
 
 test('the 1 M standard state is an investigation setting the energy view names', async ({ page }) => {

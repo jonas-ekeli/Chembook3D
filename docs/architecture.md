@@ -69,7 +69,8 @@ flowchart LR
 
 `tests/` (pytest, fixtures in `tests/fixtures/` with sources in its README), `frontend/tests/`
 (Node unit tests, `npm run test:unit`), `frontend/e2e/` (Playwright against the real backend on
-:8766, with a fake SSH server on :8767). CI (`.github/workflows/ci.yml`, Ubuntu + Windows): Backend,
+:8766, with a fake SSH server on :8767, one test at a time; each test opens its own copy of the
+demo investigation, and the shared helpers are in `e2e/helpers.ts`). CI (`.github/workflows/ci.yml`, Ubuntu + Windows): Backend,
 Frontend, UI tests, Portability (`tests/portability.py` makes an investigation on one OS and
 opens it on the other), and Local tools (installs the real tools and runs `tests/test_local_*.py`).
 Backend runs pytest in parallel (`-n auto`, pytest-xdist) and lists the 25 slowest tests; a test

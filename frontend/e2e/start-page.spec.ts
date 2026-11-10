@@ -1,11 +1,9 @@
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
-import { startPage } from './appBar.ts'
+import { E2E_DIR, startPage } from './helpers.ts'
 
 // D182 (UI10), T-UI-59: the start page lists recent investigations by name with their folder,
 // when they were opened and their size; empty views explain themselves and offer the first step.
-
-const E2E_DIR = process.env.E2E_DIR!
 
 test('the start page names recent investigations, and empty views offer a first step', async ({ page }) => {
   const stamp = Date.now()

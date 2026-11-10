@@ -1,24 +1,9 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { forgetView } from './demoView.ts'
+import { openDemo } from './helpers.ts'
 
 // T-UI-62, D185: the theme setting (Light, Dark, Follow system), set on <html> before the app
 // loads and following the system live; the dark colours; saved figures stay light.
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByRole('group', { name: 'Node T-S0', exact: true })).toBeVisible()
-}
 
 const theme = (page: Page) => page.evaluate(() => document.documentElement.dataset.theme)
 const colour = (page: Page, selector: string, property: 'color' | 'backgroundColor') =>
@@ -78,8 +63,16 @@ test('a dark theme, following the system or chosen, with saved figures kept ligh
     await page.emulateMedia({ colorScheme: 'light' })
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
     await choice.getByRole('button', { name: 'Light' }).click()
+    // The choice is in force once the app has mirrored it for index.html.
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('chembook3d.theme'))).toBe('light')
+    // A listener of our own hears the system's change after the app's, which was added first.
+    await page.evaluate(() => {
+      const query = matchMedia('(prefers-color-scheme: dark)')
+      const changed = new Promise<void>((resolve) => query.addEventListener('change', () => resolve(), { once: true }))
+      Object.assign(window, { systemQuery: query, systemChanged: changed })
+    })
     await page.emulateMedia({ colorScheme: 'dark' })
-    await page.waitForTimeout(300)
+    await page.evaluate(() => (window as unknown as { systemChanged: Promise<void> }).systemChanged)
     expect(await theme(page)).toBe('light')
   } finally {
     await page.request.put('/api/settings', { data: { theme: 'system' } })

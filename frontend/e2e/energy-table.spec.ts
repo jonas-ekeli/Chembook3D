@@ -1,29 +1,10 @@
-import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
-import { forgetView } from './demoView.ts'
+import { expect, test } from '@playwright/test'
+import { openDemo } from './helpers.ts'
 
 // T-UI-54, D177 (UI4): the drawer's energy table puts the relative energies first: Label (with a
 // TS tag) · Step · Branch · ΔX · ΔX‡ of step, then the absolute values under one header, then
 // Free species and Check; a constant Level and Thermochemistry are a caption; the header stays;
 // the row of the node selected on the canvas is highlighted.
-
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  // Values below are in kcal/mol; an earlier test may have left another unit set.
-  await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
-  await startPage(page)
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByRole('group', { name: 'Node T-S0', exact: true })).toBeVisible()
-}
 
 test('energy table: relative energies first, barrier of each step, selected row highlighted', async ({ page }) => {
   await openDemo(page)

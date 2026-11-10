@@ -1,29 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { expect, test, type Locator, type Page } from '@playwright/test'
-import { investigationCommand, startPage } from './appBar.ts'
-import { forgetView } from './demoView.ts'
-
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
-  await startPage(page)
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(canvasNode(page, 'T-S0')).toBeVisible()
-}
-
-function canvasNode(page: Page, label: string): Locator {
-  return page.getByRole('group', { name: `Node ${label}`, exact: true })
-}
+import { expect, test } from '@playwright/test'
+import { E2E_DIR, openDemo, investigationCommand, canvasNode } from './helpers.ts'
 
 test('a read-only copy opens from disk with no server and changes nothing', async ({ page, context }) => {
   // T-SHARE-01, T-SHARE-02; FR-SHARE-01…04, D79, A30

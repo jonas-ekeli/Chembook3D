@@ -1,32 +1,11 @@
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { investigationCommand, startPage } from './appBar.ts'
+import { E2E_DIR, newInvestigation, nameCustom, investigationCommand, deferred, pageSettled } from './helpers.ts'
 
-const E2E_DIR = process.env.E2E_DIR!
 const FIXTURES = resolve(import.meta.dirname, '..', '..', 'tests', 'fixtures', 'gaussian')
 // Synthetic --Link1-- chains with a custom basis set, written by global-setup.ts
 const CUSTOM = join(E2E_DIR, 'gaussian')
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  const button = page.getByRole('button', { name: /^New/ }).first()
-  await button.click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(E2E_DIR)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(E2E_DIR)
-  await dialog.getByLabel('Investigation name').fill(name)
-  await dialog.getByRole('button', { name: 'Create' }).click()
-  await expect(page.locator('.investigation')).toHaveText(name)
-}
-
-async function nameCustom(dialog: ReturnType<Page['getByRole']>, label: string, value: string) {
-  const field = dialog.getByLabel(label)
-  await field.fill(value)
-  await field.press('Enter')
-}
 
 function elementsRow(dialog: ReturnType<Page['getByRole']>, element: string) {
   return dialog.getByRole('row').filter({ has: dialog.page().getByLabel(`Include ${element}`, { exact: true }) })
@@ -181,23 +160,25 @@ test('a late preview answer does not undo a name given after it', async ({ page 
   await dialog.getByLabel('Upload a file').setInputFiles(join(CUSTOM, 'MeI_TS.out'))
   const steps = dialog.getByRole('table', { name: 'Job steps' })
   await expect(steps.getByRole('row')).toHaveCount(6)
+  // The first preview is held back until the second has answered and its answer is drawn.
+  const held = deferred()
   let first = true
   await page.route('**/preview', async (route) => {
     if (first) {
       first = false
-      await new Promise((r) => setTimeout(r, 1000))
+      await held.promise
     }
     await route.continue()
   })
-  let answers = 0
-  page.on('response', (response) => {
-    if (response.url().endsWith('/preview')) answers += 1
-  })
   await nameCustom(dialog, 'Name for the custom basis set', 'modDZ')
   await nameCustom(dialog, 'Name for the custom dispersion', 'GD3MBJ')
-  await expect.poll(() => answers).toBe(2)
-  await page.waitForTimeout(500) // let the app handle the late answer
-  await expect(steps.getByRole('row').nth(5)).toContainText('Gaussian PBEPBE-GD3MBJ/modDZ', { timeout: 1000 })
+  const named = steps.getByRole('row').nth(5)
+  await expect(named).toContainText('Gaussian PBEPBE-GD3MBJ/modDZ')
+  const late = page.waitForResponse((response) => response.url().endsWith('/preview'))
+  held.resolve()
+  await (await late).finished()
+  await pageSettled(page)
+  await expect(named).toContainText('Gaussian PBEPBE-GD3MBJ/modDZ')
   await dialog.getByRole('button', { name: 'Cancel' }).click()
 })
 

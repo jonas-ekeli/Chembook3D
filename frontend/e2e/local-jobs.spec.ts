@@ -1,10 +1,9 @@
 import { expect, test } from '@playwright/test'
-import { startPage } from './appBar.ts'
+import { E2E_DIR, startPage } from './helpers.ts'
 
 // T-UI-83, D213: Refine geometry runs on this computer (here the worker's test method with the
 // app's own Python, playwright.config.ts), Local jobs follows it, and its result is imported onto
 // the node by itself; a running job can be cancelled.
-const E2E_DIR = process.env.E2E_DIR!
 
 const WATER = '3\nwater\nO 0.000000 0.000000 0.117300\nH 0.000000 0.757200 -0.469200\nH 0.000000 -0.757200 -0.469200\n'
 

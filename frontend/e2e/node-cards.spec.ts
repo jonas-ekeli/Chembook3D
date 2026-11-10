@@ -1,27 +1,12 @@
-import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { forgetView } from './demoView.ts'
+import { openDemo, canvasNode } from './helpers.ts'
 
 // T-UI-52, D175 (UI1): node cards read at the zoom the canvas opens at. The energy sits in the
 // title row with a real minus sign, a TS carries an amber "TS" tag, a planned node is dashed,
 // the status is a dot and a word, and the connection handles show only on a hovered or selected
 // card, or on every card while an arrow is being drawn.
 
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-}
-
-const card = (page: Page, label: string) => page.getByRole('group', { name: `Node ${label}`, exact: true })
+const card = canvasNode
 const handleOpacity = (node: Locator) =>
   node.locator('.react-flow__handle-right').evaluate((element) => getComputedStyle(element).opacity)
 const dot = (node: Locator) =>

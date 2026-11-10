@@ -1,9 +1,8 @@
 import { readFileSync } from 'node:fs'
-import { expect, test, type Locator, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
+import { expect, test } from '@playwright/test'
+import { newInvestigation, canvasNode } from './helpers.ts'
 
 // T-UI-03, FR-3D-04, FR-3D-07, D80: overlays on typed atoms, saved as an alignment set.
-const E2E_DIR = process.env.E2E_DIR!
 
 const CORE = [
   ['C', 0.0, 0.0, 0.0],
@@ -19,23 +18,6 @@ function xyz(atoms: readonly (readonly [string, number, number, number])[]): str
 
 /** Turned 90° about z and shifted, so only an alignment puts it back. */
 const turned = CORE.map(([e, x, y, z]) => [e, -y + 2, x - 1, z + 3] as const)
-
-function canvasNode(page: Page, label: string): Locator {
-  return page.getByRole('group', { name: `Node ${label}`, exact: true })
-}
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  await page.getByRole('button', { name: /^New/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(E2E_DIR)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(E2E_DIR)
-  await dialog.getByLabel('Investigation name').fill(name)
-  await dialog.getByRole('button', { name: 'Create' }).click()
-  await expect(page.locator('.investigation')).toHaveText(name)
-}
 
 test('overlay three structures on chosen atoms and save the set', async ({ page }) => {
   test.slow() // software WebGL is slow on the Windows runners
