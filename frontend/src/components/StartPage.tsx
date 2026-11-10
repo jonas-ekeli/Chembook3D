@@ -44,19 +44,18 @@ function Action({
   onClick: () => void
 }) {
   const id = `start-${icon}`
-  // The card's name is its title only, so it reads (and is found) as before D182.
+  // The card's name is its title only, so it reads (and is found) as before D182; the line
+  // under it is its description. The name comes from the title itself, not an aria-label, so
+  // the name holds the visible text (WCAG 2.5.3, e2e/accessibility.spec.ts).
   return (
-    <button
-      className={`start-action${primary ? ' primary-card' : ''}`}
-      aria-label={name}
-      aria-describedby={id}
-      onClick={onClick}
-    >
+    <button className={`start-action${primary ? ' primary-card' : ''}`} aria-describedby={id} onClick={onClick}>
       <b>
         <Icon name={icon} />
         {name}
       </b>
-      <span id={id}>{description}</span>
+      <span id={id} aria-hidden="true">
+        {description}
+      </span>
     </button>
   )
 }

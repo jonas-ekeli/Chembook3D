@@ -274,6 +274,11 @@ def test_log_in_use_the_terminal_and_find_it_again_after_a_restart(local, saga, 
     assert step["kind"] == "connected"
     assert saga.record.answers == [[PASSWORD], [CODE]] and saga.record.logins == 1
     # The keeper sends its shell command; the fake shell ignores it but reports a directory.
+    # The fake server records it when its session task runs, which can come just after the
+    # keeper has its channel and reports the login (seen under coverage, which is slower).
+    deadline = time.monotonic() + 10
+    while not saga.record.commands and time.monotonic() < deadline:
+        time.sleep(0.05)
     assert saga.record.commands == [keeper.SHELL_COMMAND]
 
     status = _status(local)
@@ -355,6 +360,24 @@ def test_a_key_the_user_already_trusts_needs_no_question(local, saga, home):
     step = _step(local.post("/api/remote/servers/saga/login", json={}, headers=ORIGIN))
     assert step["kind"] == "prompts"
     assert local.delete(f"/api/remote/logins/{step['login']}", headers=ORIGIN).status_code == 200
+    assert saga.record.answers == []
+
+
+def test_asking_for_the_next_step_of_a_login_that_ended(local, saga, home):
+    """The page asks for a login's next step (POST /api/remote/logins/{id}/next) after a
+    "waiting" answer; a login cancelled meanwhile, or never started, says to log in again."""
+    _point_at(local, saga)
+    (home / ".ssh").mkdir()
+    (home / ".ssh" / "known_hosts").write_text(
+        f"[127.0.0.1]:{saga.port} ssh-ed25519 {saga.public_key}\n", encoding="utf-8"
+    )
+    step = _step(local.post("/api/remote/servers/saga/login", json={}, headers=ORIGIN))
+    url = f"/api/remote/logins/{step['login']}/next"
+    assert local.post(url).status_code == 403  # only the app's own page
+    assert local.delete(f"/api/remote/logins/{step['login']}", headers=ORIGIN).status_code == 200
+    for path in (url, "/api/remote/logins/made-up/next"):
+        response = local.post(path, headers=ORIGIN)
+        assert response.status_code == 409 and "Log in again" in response.json()["detail"]
     assert saga.record.answers == []
 
 

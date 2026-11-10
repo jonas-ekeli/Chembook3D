@@ -138,6 +138,37 @@ def test_gxtb_is_offered_only_once_installed(open_client, monkeypatch, tmp_path)
     assert status["gxtb"]["installed"] is False and status["gxtb"]["install"]["state"] == "idle"
 
 
+def test_the_settings_page_installs_gxtb(open_client, monkeypatch, config_dir):
+    """D216: Install g-xTB in the settings (POST /api/local/tools/gxtb) needs the local tools
+    first, runs the install in the app's own thread and shows its progress; another web page
+    cannot start it. The download itself is replaced here (T-LOC-14 tests it)."""
+    if local_tools.conda_platform() is None:
+        pytest.skip("g-xTB is offered on Windows and Linux (x86-64) only")
+    monkeypatch.setenv("CHEMBOOK3D_TOOLS_DIR", str(config_dir / "tools"))
+    monkeypatch.delenv("CHEMBOOK3D_LOCAL_PYTHON", raising=False)
+    monkeypatch.delenv("CHEMBOOK3D_GXTB", raising=False)
+    response = open_client.post("/api/local/tools/gxtb")
+    assert response.status_code == 422 and "Install the local tools first" in response.text
+
+    monkeypatch.setenv("CHEMBOOK3D_LOCAL_PYTHON", sys.executable)  # counts as installed
+    installed = []
+
+    def install_gxtb(conda, say):
+        say("Downloading g-xTB")
+        installed.append(conda)
+
+    monkeypatch.setattr(local_tools, "install_gxtb", install_gxtb)
+    bad = {"origin": "https://example.com"}
+    assert open_client.post("/api/local/tools/gxtb", headers=bad).status_code == 403
+    response = open_client.post("/api/local/tools/gxtb")
+    assert response.status_code == 200, response.text
+    assert response.json()["gxtb"]["install"]["state"] in ("running", "done")
+    open_client.app.state.gxtb_installer.wait(30)
+    status = open_client.get("/api/local/tools").json()
+    assert status["gxtb"]["install"] == {"state": "done", "step": "Installed", "error": None}
+    assert installed == [local_tools.conda_platform()]
+
+
 @pytest.mark.usefixtures("stub_tools")
 def test_refine_with_gxtb(open_client, fake_gxtb):
     """T-LOC-15: a refine with (a stand-in for) g-xTB, imported at the level "xTB g-xTB"; a

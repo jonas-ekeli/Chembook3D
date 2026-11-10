@@ -3,9 +3,10 @@ import { join, resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { E2E_DIR, openDemo, newInvestigation, nameCustom } from './helpers.ts'
 
-// D122, T-SSH-06: log in to Saga (here tests/fake_ssh_server.py on port 8767, see
-// playwright.config.ts) with password and one-time code, trusting its host key first; use the
+// D122, T-SSH-06: log in to Saga (here tests/fake_ssh_server.py on port 8767 or E2E_SAGA_PORT,
+// see playwright.config.ts) with password and one-time code, trusting its host key first; use the
 // terminal; reload and find the same shell without logging in again; log out.
+const SAGA_PORT = process.env.E2E_SAGA_PORT ?? '8767'
 // Synthetic --Link1-- chains with a custom basis set, written by global-setup.ts
 const CUSTOM = join(E2E_DIR, 'gaussian')
 const WORK = join(E2E_DIR, 'saga', 'cluster', 'work', 'ru-caac')
@@ -24,7 +25,7 @@ test('log in to Saga with password and code, and come back to the same shell', a
   await expect(panel).toContainText('Not logged in')
 
   await panel.getByLabel('Host').fill('127.0.0.1')
-  await panel.getByLabel('Port').fill('8767')
+  await panel.getByLabel('Port').fill(SAGA_PORT)
   await panel.getByLabel('User name').fill('jonas')
   await panel.getByRole('button', { name: 'Save' }).click()
   await expect(panel.getByRole('button', { name: 'Save' })).toHaveCount(0)
@@ -41,7 +42,7 @@ test('log in to Saga with password and code, and come back to the same shell', a
 
   const terminal = panel.getByTestId('server-terminal')
   await expect(terminal).toContainText('Welcome to the fake Saga.')
-  await expect(panel).toContainText('jonas@127.0.0.1:8767')
+  await expect(panel).toContainText(`jonas@127.0.0.1:${SAGA_PORT}`)
   // Logged in: the button and the tab take the cluster's name, and "+" can add another.
   await expect(page.getByRole('complementary', { name: 'Saga' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Saga', exact: true })).toBeVisible()

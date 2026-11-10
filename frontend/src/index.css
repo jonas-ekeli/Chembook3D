@@ -458,6 +458,10 @@ button.start-action.primary-card {
 .start-action.primary-card b {
   color: var(--accent);
 }
+/* --muted on --accent-soft is under 4.5:1 (axe, e2e/accessibility.spec.ts). */
+.start-action.primary-card span {
+  color: var(--text-2);
+}
 .start-heading {
   font-size: 13px;
   font-weight: 600;

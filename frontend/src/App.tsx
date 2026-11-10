@@ -2387,17 +2387,18 @@ function App() {
               Analyses
             </button>
           </nav>
-          {/* D184: the command palette, also opened by Ctrl K (⌘ K) */}
+          {/* D184: the command palette, also opened by Ctrl K (⌘ K). Its name is its visible
+              label, "Search…" (WCAG 2.5.3); the title describes it and aria-keyshortcuts
+              gives the key, so the key's own text is left out of the name. */}
           <button
             className="command-search"
             onClick={() => setPalette(true)}
             title={`Search nodes, branches, steps and commands (${PALETTE_KEY})`}
-            aria-label="Search and commands"
             aria-keyshortcuts={MAC ? 'Meta+K' : 'Control+K'}
           >
             <Icon name="search" />
             <span className="tb-label">Search…</span>
-            <kbd>{PALETTE_KEY}</kbd>
+            <kbd aria-hidden="true">{PALETTE_KEY}</kbd>
           </button>
           <span className="spacer" />
           <button

@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && vite build --config vite.snapshot.config.ts",
+    "build": "tsc -b && vite build && vite build --config vite.snapshot.config.ts && node scripts/bundle-budget.mjs",
     "lint": "oxlint --deny-warnings",
     "test:unit": "node --import ./tests/resolve-ts.mjs --test tests/*.test.mjs",
     "test:coverage": "node --import ./tests/resolve-ts.mjs --test --experimental-test-coverage --test-coverage-include=\"src/**\" tests/*.test.mjs",
@@ -30,6 +30,7 @@
     "react-markdown": "^10.1.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@playwright/test": "^1.63.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",

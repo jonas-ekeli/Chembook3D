@@ -69,8 +69,9 @@ flowchart LR
 
 `tests/` (pytest, fixtures in `tests/fixtures/` with sources in its README), `frontend/tests/`
 (Node unit tests, `npm run test:unit`), `frontend/e2e/` (Playwright against the real backend on
-:8766, with a fake SSH server on :8767, one test at a time; each test opens its own copy of the
-demo investigation, and the shared helpers are in `e2e/helpers.ts`). The frontend unit tests
+:8766, with a fake SSH server on :8767, one test at a time, moved by `E2E_PORT` and
+`E2E_SAGA_PORT`; each test opens its own copy of the demo investigation, and the shared helpers
+are in `e2e/helpers.ts`). The frontend unit tests
 import the pure `.ts` modules directly (Node strips the types) and cover the API client, energy units and corrections, XYZ
 parsing and measuring, Tidy, edge label placement, the profile axis, the read-only copy's data and
 file names; CI runs them as `npm run test:coverage`, which prints Node's coverage of `src/`.
@@ -90,4 +91,29 @@ leaves every table row and stored file as before.
 Backend runs pytest in parallel (`-n auto`, pytest-xdist) and lists the 25 slowest tests; a test
 running over 2 minutes prints its traceback (`faulthandler_timeout`). Every job has a time limit,
 a newer push to a pull request cancels the older run, and actions are pinned to commit SHAs
-(Dependabot proposes updates, `.github/dependabot.yml`).
+(Dependabot proposes updates to them, to `uv.lock` and to `frontend/package-lock.json` weekly,
+grouped, `.github/dependabot.yml`). Not required checks: Backend on Python 3.13 (Ubuntu), Dependency
+audit (`pip-audit` on `uv.lock`, `npm audit --omit=dev --audit-level=high`) and CodeQL
+(`.github/workflows/codeql.yml`, Python and TypeScript, also weekly). `npm run build` ends with
+`frontend/scripts/bundle-budget.mjs`, which prints the size of the main chunk and of
+`snapshot.html` and fails when one is over its budget (about 15% above the size when it was set;
+the numbers are in the script). A pushed `v*` tag runs `.github/workflows/release.yml`: it builds
+the interface, copies it into the package (`chembook3d/static/`, `chembook3d/static-snapshot/`),
+runs `uv build`, checks the wheel with `scripts/check_wheel.py` and keeps the wheel and the source
+archive as workflow artifacts; it publishes nothing. Changes are listed in `CHANGELOG.md`.
+
+The stress case (NFR-PERF-01, 500 nodes and 1,000 edges, `tests/stress.py`) is timed by
+`tests/test_stress.py`, which prints the times of the canvas and energy routes at the end of every
+pytest run, and by `frontend/e2e/stress.spec.ts` (time until the canvas and its energies are
+drawn). `frontend/e2e/accessibility.spec.ts` runs axe-core on the start page and an open canvas.
+
+Coverage (not run in CI): the configuration in `pyproject.toml` (`[tool.coverage.run]`, with
+`patch = ["subprocess"]`) also measures the processes the tests start, such as the Saga keeper
+and the local worker. `scripts/coverage_combine.py` joins the data files and counts the
+worker's copy in each job folder as `local_worker.py`:
+
+```sh
+uv run coverage run -m pytest -W error -n auto
+uv run python scripts/coverage_combine.py
+uv run coverage report
+```

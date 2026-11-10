@@ -15,16 +15,25 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend (${{ matrix.os }})
+    # The required checks are named "Backend (ubuntu-latest)" and "Backend (windows-latest)":
+    # they use .python-version (3.11, the oldest supported). The include adds a third job on
+    # Python 3.13, named "Backend (ubuntu-latest, Python 3.13)", that is not required.
+    name: Backend (${{ matrix.os }}${{ matrix.python && format(', Python {0}', matrix.python) || '' }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        python: [""]
+        include:
+          - os: ubuntu-latest
+            python: "3.13"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          python-version: ${{ matrix.python }}  # empty: .python-version
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -56,6 +65,24 @@ jobs:
       # The unit tests (frontend/tests), with Node's own line and branch coverage of src/ in the log.
       - run: npm run test:coverage
       - run: npm run build
+
+  # Known advisories in the locked Python packages (uv.lock, every group) and the frontend's
+  # runtime packages. Not a required check, so an advisory published today does not block
+  # unrelated pull requests; fix it in a pull request of its own.
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      - name: pip-audit
+        run: |
+          uv export --frozen --all-groups --no-emit-project --format requirements-txt -o "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit==2.10.1 -r "$RUNNER_TEMP/requirements.txt" --require-hashes --disable-pip --progress-spinner off
+      - name: npm audit
+        run: npm audit --omit=dev --audit-level=high
+        working-directory: frontend
 
   ui:
     name: UI tests (${{ matrix.os }})

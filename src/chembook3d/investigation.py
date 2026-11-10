@@ -323,6 +323,11 @@ class Investigation:
     sessions: sessionmaker[Session]
     ownership: InvestigationOwnership
 
+    def __post_init__(self) -> None:
+        # An investigation dropped without close() still closes its pooled SQLite
+        # connections; Python 3.13 warns (ResourceWarning) about one left to the collector.
+        finalize(self, self.engine.dispose)
+
     @property
     def name(self) -> str:
         with self.sessions() as session:
