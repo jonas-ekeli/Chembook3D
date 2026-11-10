@@ -95,6 +95,21 @@ def test_orca_reads_the_expectation_value_and_the_ideal_one(open_client):
     assert calculation["warnings"] == []
 
 
+def test_gaussian_reads_a_real_unrestricted_job(open_client):
+    # The public fixture dvb_un_sp.log (cclib): a UB3LYP/STO-3G single point of the
+    # divinylbenzene cation, a doublet; <S**2> = 0.7778 before annihilation, 0.7504 after.
+    (step,) = gaussian.parse(read("gaussian", "dvb_un_sp.log")).steps
+    assert (step.route.method, step.charge, step.multiplicity) == ("UB3LYP", 1, 2)
+    assert step.termination == "normal" and step.scf_energy == -382.08139272
+    assert (step.printed[S2], step.printed[S2_AFTER]) == ("0.7778", "0.7504")
+    node_id = import_new(open_client, "gaussian", "dvb_un_sp.log")["node_id"]
+    (calculation,) = calculations(open_client, node_id)
+    assert calculation["spin"]["s2"] == 0.7778 and calculation["spin"]["after"] == 0.7504
+    assert calculation["spin"]["multiplicity"] == 2
+    assert calculation["spin"]["contaminated"] is False  # 3.7 % off 0.75
+    assert "W-SPIN" not in codes(open_client, node_id)
+
+
 @pytest.mark.parametrize(
     ("s2", "multiplicity", "contaminated"),
     [

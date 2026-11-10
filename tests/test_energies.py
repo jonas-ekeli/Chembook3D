@@ -3,6 +3,7 @@ Test IDs from docs/spec/07 §6 and §3 are named in each test. The oracle for G_
 script docs/reference/thermochem_corr_G16.py and its .thch outputs (D56–D58)."""
 
 import csv
+import functools
 import io
 import math
 import re
@@ -17,6 +18,7 @@ from chembook3d import thermochem
 from chembook3d.models import Calculation, CalculationResult
 from chembook3d.parsers import gaussian
 from chembook3d.services import levels, pathways
+from chembook3d.units import GAS_CONSTANT, J_PER_MOL_HARTREE
 from tests import gaussian_text as g
 from tests.test_gaussian_parser import FIXTURES, MINIMUM, TS, TS_SP
 from tests.test_import import calculations, commit, fixture, import_ts, named, upload
@@ -119,6 +121,183 @@ def test_quasi_harmonic_matches_the_script_at_other_settings(
     assert qh["correction"] == pytest.approx(expected, abs=1e-12)
     default = thch("aziridinium-phos-full-c1.thch")
     assert abs(qh["correction"] - default) > TOLERANCE  # the settings matter
+
+
+# A wider grid against the script itself (T-EN-05, D56–D58). Three molecules: a minimum, a TS
+# with one imaginary mode, and HCN, a linear molecule. The script stops on a linear molecule
+# whose rotational temperatures print as asterisks (D58), but this G09 job prints one
+# "Rotational temperature", which the script reads as a linear rotor, the same rotor as D164.
+# The script takes whole numbers only for -t and -c. Cutoff 0 raises no mode; 5000 cm⁻¹ is
+# above every real mode.
+GRID_MOLECULES = [MINIMUM, TS, "HCN_singlet.out"]
+GRID_TEMPERATURES = [50, 150, 298, 500, 1000]
+GRID_CUTOFFS = [0, 50, 100, 250, 5000]
+# The script reads the multiplicity and the rotational symmetry number from the file, not from
+# options, so open-shell and symmetric cases are copies of the samples with those two lines
+# edited (multiplicity, σ). The script and the app both read the same edited copy.
+VARIANTS = [(1, 1), (2, 1), (3, 1), (1, 2), (3, 12)]
+
+
+def variant_text(name: str, multiplicity: int, symmetry_number: int) -> str:
+    text = fixture(name)
+    if (multiplicity, symmetry_number) == (1, 1):
+        return text
+    edited = text.replace(" Multiplicity = 1", f" Multiplicity = {multiplicity}").replace(
+        " Rotational symmetry number  1.", f" Rotational symmetry number {symmetry_number:2d}."
+    )
+    assert edited != text
+    return edited
+
+
+@functools.cache
+def variant_step(name: str, multiplicity: int = 1, symmetry_number: int = 1):
+    """The parsed frequency step of a sample or its edited copy, parsed once per module."""
+    step = gaussian.parse(variant_text(name, multiplicity, symmetry_number)).steps[-1]
+    assert (step.multiplicity, step.thermo["symmetry_number"]) == (multiplicity, symmetry_number)
+    return step
+
+
+def app_qh(step, **changes) -> thermochem.QuasiHarmonic:
+    t = step.thermo
+    given = {
+        "frequencies": step.frequencies,
+        "scf_energy": step.scf_energy,
+        "molecular_mass": t["molecular_mass"],
+        "multiplicity": step.multiplicity,
+        "rotational_temperatures": t["rotational_temperatures"],
+        "symmetry_number": t["symmetry_number"],
+        "point_group": t["point_group"],
+    }
+    return thermochem.quasi_harmonic(**{**given, **changes})
+
+
+@pytest.fixture(scope="module")
+def script_folder(tmp_path_factory) -> Path:
+    """One folder for the script's inputs and the .thch files it writes beside them."""
+    return tmp_path_factory.mktemp("script")
+
+
+def run_script(folder: Path, name: str, variant: tuple[int, int], *options: str):
+    source = folder / f"m{variant[0]}s{variant[1]}_{name}"
+    if not source.exists():  # written once per module, as bytes so the line ends stay LF
+        source.write_bytes(variant_text(name, *variant).encode("utf-8"))
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), str(source), *options],
+        capture_output=True,
+        text=True,
+        cwd=folder,
+    )
+
+
+def script_correction(folder: Path, name: str, variant=(1, 1), *, temperature, cutoff) -> float:
+    run = run_script(folder, name, variant, "-t", str(temperature), "-c", str(cutoff))
+    assert run.returncode == 0, run.stderr
+    return float(re.search(r"Thermic correction: (\S+) H", run.stdout).group(1))
+
+
+@pytest.mark.parametrize("cutoff", GRID_CUTOFFS)
+@pytest.mark.parametrize("temperature", GRID_TEMPERATURES)
+@pytest.mark.parametrize("name", GRID_MOLECULES)
+def test_quasi_harmonic_matches_the_script_on_a_grid(script_folder, name, temperature, cutoff):
+    # T-EN-05 over 3 molecules × 5 temperatures × 5 cutoffs, with the P29 tolerance.
+    expected = script_correction(script_folder, name, temperature=temperature, cutoff=cutoff)
+    step = variant_step(name)
+    qh = app_qh(step, temperature=temperature, cutoff=cutoff)
+    assert abs(qh.g_corr - expected) < TOLERANCE
+    assert qh.g_corr == pytest.approx(expected, abs=1e-12)  # same digits
+    assert qh.imaginary_excluded == (1 if name == TS else 0)
+    if cutoff == 0:
+        assert qh.raised_modes == 0
+    if cutoff == max(GRID_CUTOFFS):
+        assert max(step.frequencies) < cutoff and qh.raised_modes == qh.real_modes
+
+
+@pytest.mark.parametrize("variant", VARIANTS[1:])
+@pytest.mark.parametrize("name", GRID_MOLECULES)
+def test_quasi_harmonic_matches_the_script_open_shell_and_symmetric(script_folder, name, variant):
+    # T-EN-05 for a doublet, a triplet and σ > 1, at two settings each. Against the formula
+    # too: only S_elec = R ln(multiplicity) and S_rot's −R ln σ change, so G moves by
+    # −RT ln(multiplicity) + RT ln σ from the closed-shell, σ = 1 molecule.
+    multiplicity, sigma = variant
+    for temperature, cutoff in [(298, 100), (500, 50)]:
+        expected = script_correction(
+            script_folder, name, variant, temperature=temperature, cutoff=cutoff
+        )
+        qh = app_qh(variant_step(name, *variant), temperature=temperature, cutoff=cutoff)
+        assert abs(qh.g_corr - expected) < TOLERANCE
+        assert qh.g_corr == pytest.approx(expected, abs=1e-12)
+        closed = app_qh(variant_step(name), temperature=temperature, cutoff=cutoff)
+        rt = GAS_CONSTANT * temperature / J_PER_MOL_HARTREE
+        shift = -rt * math.log(multiplicity) + rt * math.log(sigma)
+        assert qh.g_corr - closed.g_corr == pytest.approx(shift, abs=1e-9)
+
+
+# ---------- the cases G_qh cannot be computed for ----------
+
+
+def not_computable(step, **changes) -> thermochem.NotComputable:
+    with pytest.raises(thermochem.NotComputable) as caught:
+        app_qh(step, **changes)
+    return caught.value
+
+
+@pytest.mark.parametrize(("temperature", "cutoff"), [(0.0, 100.0), (-10.0, 100.0), (298.15, -1.0)])
+def test_no_qh_for_a_temperature_at_or_below_zero_or_a_negative_cutoff(temperature, cutoff):
+    error = not_computable(variant_step(MINIMUM), temperature=temperature, cutoff=cutoff)
+    assert error.code == "W-QH"
+    assert error.message == "the temperature must be above zero and the cutoff not negative"
+
+
+def test_no_qh_for_a_temperature_too_low_as_the_script_refuses(script_folder):
+    # At 1 K, hcν/kT of the highest modes overflows exp(); the script stops there too.
+    error = not_computable(variant_step(MINIMUM), temperature=1.0)
+    assert (error.code, error.message) == ("W-QH", "the temperature is too low to compute G_qh")
+    run = run_script(script_folder, MINIMUM, (1, 1), "-t", "1")
+    assert run.returncode != 0 and "Temperature may be too low" in run.stderr
+    assert app_qh(variant_step(MINIMUM), temperature=10.0).g_corr  # 10 K is still fine
+
+
+def test_no_qh_without_real_frequencies():
+    step = variant_step(TS)
+    error = not_computable(step, frequencies=[f for f in step.frequencies if f < 0])
+    assert error.code == "W-NOFREQ"
+    assert error.message == "the frequency calculation has no real frequencies"
+
+
+def test_no_qh_for_a_single_atom():
+    # A single atom has no vibrations; Gaussian prints zero rotational temperatures for it.
+    # The script stops with "No frequencies found"; the app gives W-NOFREQ.
+    error = not_computable(
+        variant_step(MINIMUM),
+        frequencies=[],
+        rotational_temperatures=[0.0, 0.0, 0.0],
+        point_group="KH",
+        molecular_mass=39.96238,
+    )
+    assert error.code == "W-NOFREQ"
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"scf_energy": None}, "values not read from the file: SCF energy"),
+        (
+            {"molecular_mass": None, "symmetry_number": None},
+            "values not read from the file: molecular mass, rotational symmetry number",
+        ),
+        ({"rotational_temperatures": None}, "values not read from the file: rotational"),
+        ({"rotational_temperatures": [1.0, 2.0]}, "three rotational temperatures"),
+        ({"point_group": "D*H", "rotational_temperatures": [0.0, 1.0, 2.0]}, "linear"),
+    ],
+)
+def test_no_qh_when_values_are_missing_or_do_not_fit(changes, message):
+    error = not_computable(variant_step(MINIMUM), **changes)
+    assert error.code == "W-PARSE" and message in error.message
+
+
+def test_standard_state_correction_needs_a_temperature_above_zero():
+    with pytest.raises(ValueError, match="above zero"):
+        thermochem.standard_state_correction(0.0)
 
 
 @pytest.mark.parametrize("name", [MINIMUM, TS])
