@@ -1,22 +1,8 @@
 import { join, resolve } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
+import { expect, test } from '@playwright/test'
+import { newInvestigation } from './helpers.ts'
 
-const E2E_DIR = process.env.E2E_DIR!
 const FIXTURES = resolve(import.meta.dirname, '..', '..', 'tests', 'fixtures')
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  await page.getByRole('button', { name: /^New/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(E2E_DIR)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(E2E_DIR)
-  await dialog.getByLabel('Investigation name').fill(name)
-  await dialog.getByRole('button', { name: 'Create' }).click()
-  await expect(page.locator('.investigation')).toHaveText(name)
-}
 
 function dihedral(text: string | null): number {
   const match = /Dihedral (-?\d+\.\d)°/.exec(text ?? '')

@@ -1,39 +1,10 @@
-import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
-import { forgetView } from './demoView.ts'
+import { expect, test } from '@playwright/test'
+import { openDemo, newInvestigation } from './helpers.ts'
 
 // T-UI-55, D178 (UI8): a quieter outline. Section heads with a count fold their section; step
 // rows read as text with their actions only under the pointer or the keyboard; steps move by
 // their buttons, Alt+↑/↓ or the grip; one line per node with its branch colour, a status dot,
 // the TS tag and the formula.
-
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-}
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  await page.getByRole('button', { name: /^New/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(E2E_DIR)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(E2E_DIR)
-  await dialog.getByLabel('Investigation name').fill(name)
-  await dialog.getByRole('button', { name: 'Create' }).click()
-  await expect(page.locator('.investigation')).toHaveText(name)
-}
 
 // Later tests start with no investigation open, even when this one fails.
 test.afterEach(async ({ request }) => {

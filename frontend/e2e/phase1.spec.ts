@@ -1,9 +1,5 @@
-import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
-import { forgetView } from './demoView.ts'
-
-const E2E_DIR = process.env.E2E_DIR!
+import { expect, test } from '@playwright/test'
+import { E2E_DIR, browseTo, openDemo, startPage } from './helpers.ts'
 
 const WATER = `3
 water
@@ -11,24 +7,6 @@ O 0.000000 0.000000 0.117300
 H 0.000000 0.757200 -0.469200
 H 0.000000 -0.757200 -0.469200
 `
-
-async function browseTo(page: Page, folder: string) {
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(folder)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(folder)
-}
-
-async function openInvestigation(page: Page, folder: string) {
-  await forgetView(page.request, folder)
-  await page.goto('/')
-  const open = page.getByRole('button', { name: /^Open/ }).first()
-  await open.click()
-  await browseTo(page, folder)
-  await page.getByRole('dialog').getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-}
 
 test('create an investigation, add a node by hand and edit its coordinates', async ({ page }) => {
   await startPage(page)
@@ -110,7 +88,7 @@ test('create an investigation, add a node by hand and edit its coordinates', asy
 
 test('editing coordinates of a node with a calculation creates a derived node', async ({ page }) => {
   // T-ID-02, ID-5
-  await openInvestigation(page, join(E2E_DIR, 'demo'))
+  await openDemo(page)
   await page.getByRole('list', { name: 'Nodes' }).getByRole('button', { name: /ethylene opt/ }).click()
   const inspector = page.getByLabel('Node inspector')
   await expect(inspector.getByText('1 calculation', { exact: true })).toBeVisible()
@@ -136,7 +114,7 @@ test('editing coordinates of a node with a calculation creates a derived node', 
 
 test('xyz can be copied and saved as a file', async ({ page }) => {
   // FR-3D-06
-  await openInvestigation(page, join(E2E_DIR, 'demo'))
+  await openDemo(page)
   await page.getByRole('list', { name: 'Nodes' }).getByRole('button', { name: /water guess/ }).click()
   const inspector = page.getByLabel('Node inspector')
   await inspector.getByRole('button', { name: 'Copy' }).click()
@@ -164,7 +142,7 @@ test('xyz can be copied and saved as a file', async ({ page }) => {
 
 test('deleting a node asks first and lists what goes', async ({ page }) => {
   // NFR-UX-01
-  await openInvestigation(page, join(E2E_DIR, 'demo'))
+  await openDemo(page)
   await page.getByRole('button', { name: /ethylene opt/ }).first().click()
   await page.getByRole('button', { name: 'More node actions' }).click()
   await page.getByRole('menuitem', { name: 'Delete node' }).click()
@@ -182,14 +160,19 @@ test('deleting a node asks first and lists what goes', async ({ page }) => {
 
 test('the energy unit setting is kept', async ({ page }) => {
   // FR-SET-01
-  await openInvestigation(page, join(E2E_DIR, 'demo'))
-  await page.getByRole('button', { name: 'Settings' }).click()
-  // Reload only once the setting is saved.
-  const saved = page.waitForResponse((r) => r.url().endsWith('/api/settings') && r.request().method() === 'PUT')
-  await page.getByLabel('Energy unit').selectOption('kJ/mol')
-  expect((await saved).ok()).toBe(true)
-  await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click()
-  await page.reload()
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await expect(page.getByLabel('Energy unit')).toHaveValue('kJ/mol')
+  await openDemo(page)
+  try {
+    await page.getByRole('button', { name: 'Settings' }).click()
+    // Reload only once the setting is saved.
+    const saved = page.waitForResponse((r) => r.url().endsWith('/api/settings') && r.request().method() === 'PUT')
+    await page.getByLabel('Energy unit').selectOption('kJ/mol')
+    expect((await saved).ok()).toBe(true)
+    await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click()
+    await page.reload()
+    await page.getByRole('button', { name: 'Settings' }).click()
+    await expect(page.getByLabel('Energy unit')).toHaveValue('kJ/mol')
+  } finally {
+    // App settings are shared by all the UI tests.
+    await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
+  }
 })

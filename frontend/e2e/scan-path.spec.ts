@@ -1,8 +1,7 @@
-import { expect, test, type Locator, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
+import { expect, test } from '@playwright/test'
+import { newInvestigation, canvasNode } from './helpers.ts'
 
 // T-UI-18, D114: a scan path between two nodes joined by an edge, one of them a TS guess.
-const E2E_DIR = process.env.E2E_DIR!
 
 // Glycerol, the first conformer of the CREST fixture.
 const GLYCEROL = [
@@ -28,23 +27,6 @@ function xyz(atoms: readonly (readonly [string, number, number, number])[]): str
 
 /** The atoms in reverse order, turned 90° about z and shifted. */
 const reversed = [...GLYCEROL].reverse().map(([e, x, y, z]) => [e, -y + 2, x - 1, z + 3] as const)
-
-function canvasNode(page: Page, label: string): Locator {
-  return page.getByRole('group', { name: `Node ${label}`, exact: true })
-}
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  await page.getByRole('button', { name: /^New/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(E2E_DIR)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(E2E_DIR)
-  await dialog.getByLabel('Investigation name').fill(name)
-  await dialog.getByRole('button', { name: 'Create' }).click()
-  await expect(page.locator('.investigation')).toHaveText(name)
-}
 
 test('a scan path to a TS guess asks for its coordinates and sends the job', async ({ page }) => {
   test.slow() // software WebGL is slow on the Windows runners

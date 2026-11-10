@@ -1,11 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { expect, test, type Locator, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
+import { expect, test, type Locator } from '@playwright/test'
+import { newInvestigation, canvasNode } from './helpers.ts'
 
 // T-UI-05, FR-STER-01…05, D81: a steric profile set up on one node, shared with a copy of it,
 // and compared with maps, a difference map and a CSV.
-const E2E_DIR = process.env.E2E_DIR!
 
 // Ni(CO)3 with an NHC (SIPr), from morfeus's test data (tests/fixtures/sterics, MIT). SambVca:
 // %V_bur 36.1 with atoms 1-7 (Ni and the three CO) left out.
@@ -24,10 +23,6 @@ function turned(text: string): string {
     .join('\n')
 }
 
-function canvasNode(page: Page, label: string): Locator {
-  return page.getByRole('group', { name: `Node ${label}`, exact: true })
-}
-
 /** The colour at the left end of a map's colour bar, under the map. */
 async function lowestColour(map: Locator): Promise<number[]> {
   return map.evaluate((canvas: HTMLCanvasElement) => {
@@ -41,19 +36,6 @@ async function lowestColour(map: Locator): Promise<number[]> {
 async function near(colour: Promise<number[]>, expected: number[]): Promise<boolean> {
   const got = await colour
   return got.every((value, i) => Math.abs(value - expected[i]) <= 4)
-}
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  await page.getByRole('button', { name: /^New/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(E2E_DIR)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(E2E_DIR)
-  await dialog.getByLabel('Investigation name').fill(name)
-  await dialog.getByRole('button', { name: 'Create' }).click()
-  await expect(page.locator('.investigation')).toHaveText(name)
 }
 
 test('buried volume and steric maps from a saved profile', async ({ page }) => {

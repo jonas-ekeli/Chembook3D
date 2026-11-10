@@ -1,15 +1,11 @@
 import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import { E2E_DIR, canvasNode } from './helpers.ts'
 
 // T-MCP-11, D91: what Claude changes through `chembook3d mcp` shows at once, the tab reports
 // what is selected, and a delete Claude asks for happens only on the user's Confirm. Claude is
 // played here by requests carrying its client name, as the MCP server sends them.
-const E2E_DIR = process.env.E2E_DIR!
 const CLAUDE = { 'X-Chembook-Client': 'claude' }
-
-function canvasNode(page: Page, label: string) {
-  return page.getByRole('group', { name: `Node ${label}`, exact: true })
-}
 
 test.afterEach(async ({ request }) => {
   await request.post('/api/investigations/close')

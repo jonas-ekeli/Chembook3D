@@ -1,56 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, test, type Locator, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
-import { forgetView } from './demoView.ts'
+import { expect, test, type Page, type Request } from '@playwright/test'
+import { E2E_DIR, browseTo, openDemo, newInvestigation, investigationCommand, canvasNode, pressInView, deferred, pageSettled } from './helpers.ts'
 
-const E2E_DIR = process.env.E2E_DIR!
 // Synthetic Gaussian files with a custom basis set, written by global-setup.ts
 const CUSTOM = join(E2E_DIR, 'gaussian')
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(canvasNode(page, 'T-S0')).toBeVisible()
-  // The energies arrive last; until they have, the canvas may still redraw and drop a click.
-  await expect(page.locator('.edge-label').filter({ hasText: 'ΔG' }).first()).toBeVisible()
-}
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  await page.getByRole('button', { name: /^New/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(E2E_DIR)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(E2E_DIR)
-  await dialog.getByLabel('Investigation name').fill(name)
-  await dialog.getByRole('button', { name: 'Create' }).click()
-  await expect(page.locator('.investigation')).toHaveText(name)
-}
-
-function canvasNode(page: Page, label: string): Locator {
-  return page.getByRole('group', { name: `Node ${label}`, exact: true })
-}
-
-// A new group is placed right of its members, which for the last step column is past the canvas's
-// right edge (under the inspector), and it grows to the right when expanded or laid out in a row.
-// Playwright would scroll the canvas to reach a button there, but React Flow scrolls its wrapper
-// straight back, so the click lands on whatever is then under the pointer: often the pane, which
-// clears the selection and leaves the button's action undone. Fit the view first, as a user would
-// bring the group into sight, and click only once the target is in view (short of sub-pixel rounding).
-async function pressInView(page: Page, target: Locator, options?: { position: { x: number; y: number } }) {
-  await page.getByRole('button', { name: 'Fit View', exact: true }).click()
-  await expect(target).toBeInViewport({ ratio: 0.99 })
-  await target.click(options)
-}
 
 async function canvasRecords(page: Page) {
   const response = await page.request.get('/api/canvas')
@@ -235,93 +189,87 @@ test('add a node to a group and cycle its members through a column, a row and th
   // Without a timeout a failing toPass retries until the test's time is up and never says which
   // expectation failed.
   const settle = { timeout: 15_000 }
-  try {
-    // A20: the group and a node selected together offer "Add to group".
-    const box = page.getByRole('group', { name: 'Group G4' })
-    await canvasNode(page, 'A-S1').click({ modifiers: ['Control'] })
-    await expect(selection.getByRole('heading')).toHaveText('1 node and 1 group selected')
-    await expect(selection.getByRole('button', { name: 'Create group…' })).toBeDisabled()
-    await selection.getByRole('button', { name: 'Add to “G4”…' }).click()
-    const add = page.getByRole('dialog', { name: 'Add to group' })
-    await expect(add).toContainText('A-S1 becomes a member of “G4”')
-    await add.getByRole('button', { name: 'Add 1 node' }).click()
-    await expect(inspector.getByRole('heading', { name: 'G4' })).toBeVisible()
-    await expect(box).toContainText('3 members')
-    await expect(canvasNode(page, 'A-S1')).toHaveCount(0) // inside the collapsed group
+  // A20: the group and a node selected together offer "Add to group".
+  const box = page.getByRole('group', { name: 'Group G4' })
+  await canvasNode(page, 'A-S1').click({ modifiers: ['Control'] })
+  await expect(selection.getByRole('heading')).toHaveText('1 node and 1 group selected')
+  await expect(selection.getByRole('button', { name: 'Create group…' })).toBeDisabled()
+  await selection.getByRole('button', { name: 'Add to “G4”…' }).click()
+  const add = page.getByRole('dialog', { name: 'Add to group' })
+  await expect(add).toContainText('A-S1 becomes a member of “G4”')
+  await add.getByRole('button', { name: 'Add 1 node' }).click()
+  await expect(inspector.getByRole('heading', { name: 'G4' })).toBeVisible()
+  await expect(box).toContainText('3 members')
+  await expect(canvasNode(page, 'A-S1')).toHaveCount(0) // inside the collapsed group
 
-    // A21: a button in the expanded group cycles grid, column, row and back to the grid.
-    await pressInView(page, box.getByRole('button', { name: 'Expand group' }))
-    // D89: A-S1 joined last, so it is last in the members' order; the button beside the layout
-    // button opens the order, and every layout below follows it.
-    await pressInView(page, box.getByRole('button', { name: 'Order members' }))
-    const order = page.getByRole('dialog', { name: 'Member order' })
-    const listed = order.getByRole('list', { name: 'Members in order' }).getByRole('listitem')
-    await expect(listed).toHaveText([/A-S3/, /B-S3/, /A-S1/])
-    await expect(order.getByRole('button', { name: 'Move A-S3 up' })).toBeDisabled()
-    await order.getByRole('button', { name: 'Move A-S1 up' }).click()
-    await order.getByRole('button', { name: 'Move A-S1 up' }).click()
-    await expect(listed).toHaveText([/A-S1/, /A-S3/, /B-S3/])
-    await expect(order.getByRole('button', { name: 'Move A-S1 up' })).toBeDisabled()
-    await order.getByRole('button', { name: 'Done' }).click()
-    await expect(async () => {
-      const group = (await canvasRecords(page)).groups.find((g: { label: string }) => g.label === 'G4')
-      expect(group.member_ids).toHaveLength(3)
-      expect(group.member_ids[0]).toBe((await canvasRecords(page)).nodes.find((n: { label: string }) => n.label === 'A-S1').id)
-    }).toPass(settle)
-    const members = ['A-S1', 'A-S3', 'B-S3'].map((label) => canvasNode(page, label))
-    for (const member of members) await expect(member).toBeVisible()
-    const places = () => Promise.all(members.map(async (m) => (await m.boundingBox())!))
-    await pressInView(page, box.getByRole('button', { name: 'Stack members vertically' }))
-    await expect(box.getByRole('button', { name: 'Line members up horizontally' })).toBeVisible()
-    await expect(async () => {
-      const [a, b, c] = await places()
-      expect(Math.abs(a.x - b.x) + Math.abs(b.x - c.x)).toBeLessThan(2)
-      expect(b.y).toBeGreaterThan(a.y + a.height - 2)
-      expect(c.y).toBeGreaterThan(b.y + b.height - 2)
-    }).toPass(settle)
-    await pressInView(page, box.getByRole('button', { name: 'Line members up horizontally' }))
-    await expect(box.getByRole('button', { name: 'Arrange members in a grid' })).toBeVisible()
-    await expect(async () => {
-      const [a, b, c] = await places()
-      expect(Math.abs(a.y - b.y) + Math.abs(b.y - c.y)).toBeLessThan(2)
-      expect(b.x).toBeGreaterThan(a.x + a.width - 2)
-      expect(c.x).toBeGreaterThan(b.x + b.width - 2)
-    }).toPass(settle)
-    // Stored with the group, so it is still there after reopening.
-    await expect(async () => {
-      const group = (await canvasRecords(page)).groups.find((g: { label: string }) => g.label === 'G4')
-      expect(group.layout).toBe('horizontal')
-    }).toPass(settle)
-    await pressInView(page, box.getByRole('button', { name: 'Arrange members in a grid' }))
-    await expect(box.getByRole('button', { name: 'Stack members vertically' })).toBeVisible()
-    await expect(async () => {
-      const [a, b, c] = await places() // three members: two columns, two rows
-      expect(Math.abs(a.y - b.y)).toBeLessThan(2)
-      expect(b.x).toBeGreaterThan(a.x + a.width - 2)
-      expect(Math.abs(a.x - c.x)).toBeLessThan(2)
-      expect(c.y).toBeGreaterThan(a.y + a.height - 2)
-    }).toPass(settle)
-    await expect(async () => {
-      const group = (await canvasRecords(page)).groups.find((g: { label: string }) => g.label === 'G4')
-      expect(group.layout).toBe('grid')
-    }).toPass(settle)
+  // A21: a button in the expanded group cycles grid, column, row and back to the grid.
+  await pressInView(page, box.getByRole('button', { name: 'Expand group' }))
+  // D89: A-S1 joined last, so it is last in the members' order; the button beside the layout
+  // button opens the order, and every layout below follows it.
+  await pressInView(page, box.getByRole('button', { name: 'Order members' }))
+  const order = page.getByRole('dialog', { name: 'Member order' })
+  const listed = order.getByRole('list', { name: 'Members in order' }).getByRole('listitem')
+  await expect(listed).toHaveText([/A-S3/, /B-S3/, /A-S1/])
+  await expect(order.getByRole('button', { name: 'Move A-S3 up' })).toBeDisabled()
+  await order.getByRole('button', { name: 'Move A-S1 up' }).click()
+  await order.getByRole('button', { name: 'Move A-S1 up' }).click()
+  await expect(listed).toHaveText([/A-S1/, /A-S3/, /B-S3/])
+  await expect(order.getByRole('button', { name: 'Move A-S1 up' })).toBeDisabled()
+  await order.getByRole('button', { name: 'Done' }).click()
+  await expect(async () => {
+    const group = (await canvasRecords(page)).groups.find((g: { label: string }) => g.label === 'G4')
+    expect(group.member_ids).toHaveLength(3)
+    expect(group.member_ids[0]).toBe((await canvasRecords(page)).nodes.find((n: { label: string }) => n.label === 'A-S1').id)
+  }).toPass(settle)
+  const members = ['A-S1', 'A-S3', 'B-S3'].map((label) => canvasNode(page, label))
+  for (const member of members) await expect(member).toBeVisible()
+  const places = () => Promise.all(members.map(async (m) => (await m.boundingBox())!))
+  await pressInView(page, box.getByRole('button', { name: 'Stack members vertically' }))
+  await expect(box.getByRole('button', { name: 'Line members up horizontally' })).toBeVisible()
+  await expect(async () => {
+    const [a, b, c] = await places()
+    expect(Math.abs(a.x - b.x) + Math.abs(b.x - c.x)).toBeLessThan(2)
+    expect(b.y).toBeGreaterThan(a.y + a.height - 2)
+    expect(c.y).toBeGreaterThan(b.y + b.height - 2)
+  }).toPass(settle)
+  await pressInView(page, box.getByRole('button', { name: 'Line members up horizontally' }))
+  await expect(box.getByRole('button', { name: 'Arrange members in a grid' })).toBeVisible()
+  await expect(async () => {
+    const [a, b, c] = await places()
+    expect(Math.abs(a.y - b.y) + Math.abs(b.y - c.y)).toBeLessThan(2)
+    expect(b.x).toBeGreaterThan(a.x + a.width - 2)
+    expect(c.x).toBeGreaterThan(b.x + b.width - 2)
+  }).toPass(settle)
+  // Stored with the group, so it is still there after reopening.
+  await expect(async () => {
+    const group = (await canvasRecords(page)).groups.find((g: { label: string }) => g.label === 'G4')
+    expect(group.layout).toBe('horizontal')
+  }).toPass(settle)
+  await pressInView(page, box.getByRole('button', { name: 'Arrange members in a grid' }))
+  await expect(box.getByRole('button', { name: 'Stack members vertically' })).toBeVisible()
+  await expect(async () => {
+    const [a, b, c] = await places() // three members: two columns, two rows
+    expect(Math.abs(a.y - b.y)).toBeLessThan(2)
+    expect(b.x).toBeGreaterThan(a.x + a.width - 2)
+    expect(Math.abs(a.x - c.x)).toBeLessThan(2)
+    expect(c.y).toBeGreaterThan(a.y + a.height - 2)
+  }).toPass(settle)
+  await expect(async () => {
+    const group = (await canvasRecords(page)).groups.find((g: { label: string }) => g.label === 'G4')
+    expect(group.layout).toBe('grid')
+  }).toPass(settle)
 
-    // Dissolve, with members back in their branches.
-    await pressInView(page, canvasNode(page, 'T-S0'))
-    await expect(page.getByLabel('Node inspector').getByRole('heading', { name: 'T-S0' })).toBeVisible()
-    await pressInView(page, box, { position: { x: 20, y: 10 } })
-    // An expectation (unlike a click) gives up before the test's time runs out, so the clean-up
-    // below still has a page to work with.
-    await expect(inspector.getByRole('button', { name: 'Remove group…' })).toBeVisible()
-    await inspector.getByRole('button', { name: 'Remove group…' }).click()
-    const remove = page.getByRole('dialog', { name: 'Remove group?' })
-    await remove.getByRole('button', { name: 'Dissolve group' }).click()
-    await expect(box).toHaveCount(0)
-  } finally {
-    // Leave the demo as it was for the tests after this one, even if a step above failed.
-    const left = (await canvasRecords(page)).groups.find((g: { label: string }) => g.label === 'G4')
-    if (left) await page.request.post(`/api/groups/${left.id}/dissolve`, { data: { restore_branches: true } })
-  }
+  // Dissolve, with members back in their branches.
+  await pressInView(page, canvasNode(page, 'T-S0'))
+  await expect(page.getByLabel('Node inspector').getByRole('heading', { name: 'T-S0' })).toBeVisible()
+  await pressInView(page, box, { position: { x: 20, y: 10 } })
+  // An expectation (unlike a click) gives up before the test's time runs out, so the clean-up
+  // below still has a page to work with.
+  await expect(inspector.getByRole('button', { name: 'Remove group…' })).toBeVisible()
+  await inspector.getByRole('button', { name: 'Remove group…' }).click()
+  const remove = page.getByRole('dialog', { name: 'Remove group?' })
+  await remove.getByRole('button', { name: 'Dissolve group' }).click()
+  await expect(box).toHaveCount(0)
 })
 
 test('groups holding one conformer per branch read as one path, and a branch filter unpacks them', async ({ page }) => {
@@ -395,40 +343,49 @@ test('view modes and filters never change stored data', async ({ page }) => {
 test('reopening the investigation already shown keeps what was selected meanwhile', async ({ page }) => {
   // The open dialog closes before the backend answers; that answer used to clear the selection
   // (and made "arrange a branch" below lose its branch on slow runners).
-  await openDemo(page)
+  const folder = await openDemo(page)
+  const answer = deferred()
   await page.route('**/api/investigations/open', async (route) => {
-    await new Promise((r) => setTimeout(r, 1000))
+    await answer.promise
     await route.continue()
   })
-  const answered = page.waitForResponse('**/api/investigations/open')
-  await openDemo(page)
+  await investigationCommand(page, 'Open investigation…')
+  await browseTo(page, folder)
+  await page.getByRole('dialog').getByRole('button', { name: 'Open', exact: true }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
   await page.getByRole('list', { name: 'Branch list' }).getByRole('button', { name: /^A/ }).click()
-  await answered
-  await page.waitForTimeout(500) // let the app handle the answer
-  await expect(page.getByLabel('Branch inspector')).toBeVisible({ timeout: 1000 })
+  await expect(page.getByLabel('Branch inspector')).toBeVisible()
+  const answered = page.waitForResponse('**/api/investigations/open')
+  answer.resolve()
+  await (await answered).finished()
+  await pageSettled(page)
+  await expect(page.getByLabel('Branch inspector')).toBeVisible()
 })
 
 test('a late canvas answer does not drop the node just added', async ({ page }) => {
   // Windows CI: the answer to an earlier canvas fetch arrived after a later one, so the canvas
   // lost the node just added and its inspector disappeared.
   await newInvestigation(page, 'Late answer')
-  let delivered: () => void = () => undefined
-  const late = new Promise<void>((resolve) => (delivered = resolve))
-  let delayed = false
+  const held = deferred()
+  let late: Request | undefined
   await page.route('**/api/canvas', async (route) => {
-    if (delayed) return route.continue()
-    delayed = true
+    if (late) return route.continue()
+    late = route.request()
     const response = await route.fetch() // answered now (one node), delivered after the next
-    await new Promise((r) => setTimeout(r, 1500))
+    await held.promise
     await route.fulfill({ response })
-    delivered()
   })
   await page.getByRole('button', { name: 'Add node', exact: true }).click()
   await page.getByRole('button', { name: 'Add node', exact: true }).click()
-  await late
-  await page.waitForTimeout(500) // let the app handle the late answer
-  await expect(page.getByLabel('Node inspector')).toBeVisible({ timeout: 1000 })
-  await expect(page.getByRole('list', { name: 'Nodes' }).getByRole('listitem')).toHaveCount(2)
+  const nodes = page.getByRole('list', { name: 'Nodes' }).getByRole('listitem')
+  await expect(nodes).toHaveCount(2)
+  await expect(page.getByLabel('Node inspector')).toBeVisible()
+  const delivered = page.waitForEvent('requestfinished', (request) => request === late)
+  held.resolve()
+  await delivered
+  await pageSettled(page)
+  await expect(page.getByLabel('Node inspector')).toBeVisible()
+  await expect(nodes).toHaveCount(2)
 })
 
 test('arrange a branch and inspect a transition', async ({ page }) => {

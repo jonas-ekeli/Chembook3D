@@ -1,24 +1,8 @@
-import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { startPage } from './appBar.ts'
-import { forgetView } from './demoView.ts'
+import { expect, test } from '@playwright/test'
+import { openDemo, pageSettled } from './helpers.ts'
 
 // After a change, the app fetches the energy view once (it was fetched twice, the first answer
 // dropped), and the investigation's history only while History is shown.
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await startPage(page)
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByRole('group', { name: 'Node T-S0', exact: true })).toBeVisible()
-}
 
 test('a change fetches the energy view once, and the history only when shown', async ({ page }) => {
   await openDemo(page)
@@ -32,12 +16,16 @@ test('a change fetches the energy view once, and the history only when shown', a
   // A change made elsewhere (as Claude's are) reloads the open tab.
   const canvas = await (await page.request.get('/api/canvas')).json()
   const node = canvas.nodes.find((n: { label: string }) => n.label === 'T-S0')
-  const reloaded = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/canvas')
+  const answered = (path: string) => page.waitForResponse((r) => new URL(r.url()).pathname === path)
+  const reloaded = answered('/api/canvas')
+  const options = answered('/api/energies/options')
   const changed = await page.request.patch(`/api/nodes/${node.id}`, { data: { notes: `${node.notes} ` } })
   expect(changed.ok()).toBe(true)
   await reloaded
   await expect.poll(() => count('/api/energies/view')).toBe(1)
-  await page.waitForTimeout(1000) // a second fetch came after the options arrived
+  // A second fetch came once the options had arrived; it would have been asked for by now.
+  await (await options).finished()
+  await pageSettled(page)
   expect(count('/api/energies/view')).toBe(1)
   expect(count('/api/history')).toBe(0)
 

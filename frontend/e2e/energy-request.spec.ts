@@ -1,17 +1,7 @@
-import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { forgetView } from './demoView.ts'
-
-const demo = join(process.env.E2E_DIR!, 'demo')
-
-function deferred() {
-  let resolve!: () => void
-  const promise = new Promise<void>((done) => { resolve = done })
-  return { promise, resolve }
-}
+import { demoFolder, deferred } from './helpers.ts'
 
 async function openProfile(page: Page) {
-  await forgetView(page.request, demo)
   // Supply a second choice without importing another scientific fixture. Its request is
   // deliberately refused below; the test concerns ownership of the previous real result.
   await page.route('**/api/energies/options', async (route) => {
@@ -21,7 +11,7 @@ async function openProfile(page: Page) {
     options.levels.push({ ...options.levels[0], key: 'pending-level', label: 'Pending second level' })
     await route.fulfill({ response, json: options })
   })
-  await page.request.post('/api/investigations/open', { data: { folder: demo } })
+  await page.request.post('/api/investigations/open', { data: { folder: demoFolder() } })
   await page.goto('/')
   await expect(page.getByRole('group', { name: 'Node T-S0', exact: true })).toBeVisible()
   const energy = page.getByRole('group', { name: 'Energy view' })
@@ -78,7 +68,6 @@ for (const choice of ['type', 'level', 'reference', 'pathways', 'BSSE'] as const
     } finally {
       gate.resolve()
       await page.unrouteAll({ behavior: 'wait' })
-      await forgetView(page.request, demo)
     }
   })
 }
@@ -138,7 +127,6 @@ test('a late profile/table and CSV response cannot replace or export a newer sci
     gate.resolve()
     csvGate.resolve()
     await page.unrouteAll({ behavior: 'wait' })
-    await forgetView(page.request, demo)
   }
 })
 
@@ -157,7 +145,6 @@ test('a CSV failure keeps the matching scientific result and figure exports avai
     await page.keyboard.press('Escape')
   } finally {
     await page.unrouteAll({ behavior: 'wait' })
-    await forgetView(page.request, demo)
   }
 })
 
@@ -167,13 +154,11 @@ async function changeElsewhere(page: Page) {
   const node = canvas.nodes.find((n: { label: string }) => n.label === 'T-S0')
   const changed = await page.request.patch(`/api/nodes/${node.id}`, { data: { notes: `${node.notes} ` } })
   expect(changed.ok()).toBe(true)
-  return () => page.request.patch(`/api/nodes/${node.id}`, { data: { notes: node.notes } })
 }
 
 test('a refresh of the same request keeps the result up and holds exports until it arrives', async ({ page }) => {
   const gate = deferred()
   let pending = 0
-  let undo: (() => Promise<unknown>) | undefined
   try {
     const { drawer } = await openProfile(page)
     await page.route(/\/api\/energies\/(profile|table)$/, async (route) => {
@@ -182,7 +167,7 @@ test('a refresh of the same request keeps the result up and holds exports until 
       await gate.promise
       await route.fulfill({ response })
     })
-    undo = await changeElsewhere(page)
+    await changeElsewhere(page)
     await expect.poll(() => pending).toBe(2)
     // No "Loading…" flash on every edit: the last numbers for this request stay drawn.
     await expect(drawer.getByRole('img', { name: 'Energy profile' })).toBeVisible()
@@ -196,13 +181,10 @@ test('a refresh of the same request keeps the result up and holds exports until 
   } finally {
     gate.resolve()
     await page.unrouteAll({ behavior: 'wait' })
-    await undo?.()
-    await forgetView(page.request, demo)
   }
 })
 
 test('a drawer error clears once the energies are fetched again successfully', async ({ page }) => {
-  let undo: (() => Promise<unknown>) | undefined
   try {
     const { drawer } = await openProfile(page)
     await page.route('**/api/energy-profiles', (route) =>
@@ -214,12 +196,10 @@ test('a drawer error clears once the energies are fetched again successfully', a
     await expect(drawer.getByRole('alert')).toContainText('Profile not made')
     await page.unroute('**/api/energy-profiles')
     const refetched = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/energies/table')
-    undo = await changeElsewhere(page)
+    await changeElsewhere(page)
     await refetched
     await expect(drawer.getByRole('alert')).toHaveCount(0)
   } finally {
     await page.unrouteAll({ behavior: 'wait' })
-    await undo?.()
-    await forgetView(page.request, demo)
   }
 })

@@ -1,18 +1,14 @@
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { forgetView } from './demoView.ts'
+import { E2E_DIR, demoFolder, openFolder, canvasNode } from './helpers.ts'
 
 // T-UI-75 (D199): Tidy lays the canvas out in step columns for every branch, orders each column
 // so the arrows do not cross, and leaves no card on another; Undo tidy puts every card back. On
 // a selection it moves only the selected cards, clear of the ones that stay.
-const E2E_DIR = process.env.E2E_DIR!
-const DEMO = join(E2E_DIR, 'demo')
-
 type Canvas = { nodes: { id: string; label: string; pos_x: number; pos_y: number }[] }
-type Places = Record<string, { x: number; y: number }>
 type Edges = { transitions: { source_id: string; target_id: string; source_side: string; target_side: string }[] }
 
-const card = (page: Page, label: string) => page.getByRole('group', { name: `Node ${label}`, exact: true })
+const card = canvasNode
 
 async function places(page: Page): Promise<Record<string, { id: string; x: number; y: number }>> {
   const canvas = (await (await page.request.get('/api/canvas')).json()) as Canvas
@@ -36,24 +32,17 @@ async function overlapping(page: Page): Promise<string[]> {
   return found
 }
 
-let original: Places = {}
-
-// The demo is shared: it gets its own layout back, and later tests start with it closed.
+// Later tests start with no investigation open, even when this one fails.
 test.afterEach(async ({ request }) => {
-  if (Object.keys(original).length) {
-    await request.post('/api/investigations/open', { data: { folder: DEMO } })
-    await request.put('/api/positions', { data: { positions: original } })
-  }
   await request.post('/api/investigations/close')
 })
 
 test('Tidy lays the canvas out in step columns; Undo tidy and a selection', async ({ page }) => {
-  await forgetView(page.request, DEMO)
   // Muddle the mechanism first: rotamer B above A in one column and below it in the next (two
   // crossing arrows), and B-S3 half over A-S3.
-  await page.request.post('/api/investigations/open', { data: { folder: DEMO } })
+  const demo = demoFolder()
+  await page.request.post('/api/investigations/open', { data: { folder: demo } })
   const before = await places(page)
-  original = Object.fromEntries(Object.values(before).map((p) => [p.id, { x: p.x, y: p.y }]))
   const muddle: Record<string, { x: number; y: number }> = {
     'A-S1': { x: 240, y: 440 },
     'B-S1': { x: 240, y: 220 },
@@ -66,17 +55,8 @@ test('Tidy lays the canvas out in step columns; Undo tidy and a selection', asyn
     data: { positions: Object.fromEntries(Object.entries(muddle).map(([label, p]) => [before[label].id, p])) },
   })
   const muddled = await places(page)
-  await page.request.post('/api/investigations/close')
 
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  // Wait for the first (home) listing: landing inside fill() it puts the home folder in front.
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(DEMO)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await openFolder(page, demo)
   await expect(card(page, 'T-S0')).toBeVisible()
   expect(await overlapping(page)).toContain('A-S3 / B-S3')
 
@@ -124,8 +104,7 @@ test('Tidy lays the canvas out in step columns; Undo tidy and a selection', asyn
   for (const label of Object.keys(muddled))
     if (label !== 'A-S3' && label !== 'B-S3') expect(selected[label], label).toEqual(muddled[label])
   expect(selected['A-S3'].x).toBe(selected['B-S3'].x)
-  // Earlier tests leave cards of their own on the shared demo, which may lie on each other and
-  // stay put: only the two tidied cards must be clear.
+  // Only the two tidied cards must be clear: the others stay where the muddle put them.
   const tidiedCards = async () =>
     (await overlapping(page)).filter((pair) => pair.split(' / ').some((name) => name === 'A-S3' || name === 'B-S3'))
   await expect.poll(tidiedCards).toEqual([])
@@ -145,7 +124,6 @@ test('Tidy lays the canvas out in step columns; Undo tidy and a selection', asyn
 // each arrow leaves and arrives on the sides that face each other; Undo tidy puts every card and
 // every side back.
 test('Tidy with springs draws a cycle as a loop', async ({ page }) => {
-  original = {}
   const folder = join(E2E_DIR, `springs-${Date.now()}`)
   await page.request.post('/api/investigations', { data: { folder, name: 'Springs' } })
   const labels = ['14e', 'π', 'TS1', 'MCB', 'TS2', 'product π']
@@ -233,7 +211,6 @@ test('Tidy with springs draws a cycle as a loop', async ({ page }) => {
 // round with one card dragged far out settles into an even loop in the same order round its
 // middle, about where it was, with nothing on anything.
 test('Tidy with springs in place keeps the cards near their places', async ({ page }) => {
-  original = {}
   const folder = join(E2E_DIR, `settle-${Date.now()}`)
   await page.request.post('/api/investigations', { data: { folder, name: 'Settle' } })
   const labels = ['14e', 'π', 'TS1', 'MCB', 'TS2', 'product π']
@@ -283,7 +260,6 @@ test('Tidy with springs in place keeps the cards near their places', async ({ pa
 // T-UI-81 (D210): the canvas toolbar expands every group on the canvas at once while any is
 // collapsed, then collapses them all.
 test('Expand and collapse all groups from the toolbar', async ({ page }) => {
-  original = {}
   const folder = join(E2E_DIR, `groups-${Date.now()}`)
   await page.request.post('/api/investigations', { data: { folder, name: 'Groups' } })
   const ids: string[] = []

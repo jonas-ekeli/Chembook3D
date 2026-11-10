@@ -1,21 +1,5 @@
-import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { forgetView } from './demoView.ts'
-
-const E2E_DIR = process.env.E2E_DIR!
-
-async function openDemo(page: Page) {
-  await forgetView(page.request, join(E2E_DIR, 'demo'))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Open/ }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(join(E2E_DIR, 'demo'))
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByRole('group', { name: 'Node T-S0', exact: true })).toBeVisible()
-}
+import { expect, test } from '@playwright/test'
+import { openDemo } from './helpers.ts'
 
 test('settings are a two-pane page that says where each setting is kept', async ({ page }) => {
   // T-UI-60, D183.

@@ -2,9 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { investigationCommand, startPage } from './appBar.ts'
-
-const E2E_DIR = process.env.E2E_DIR!
+import { E2E_DIR, browseTo, newInvestigation, investigationCommand } from './helpers.ts'
 
 function git(cwd: string, ...args: string[]) {
   execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd })
@@ -21,19 +19,9 @@ function emptyRepository(name: string): string {
 
 async function chooseFolder(page: Page, parent: string, name: string, button: string) {
   const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('list', { name: 'Folders' })).toBeVisible()
-  await dialog.getByLabel('Folder path').fill(parent)
-  await dialog.getByRole('button', { name: 'Go' }).click()
-  await expect(dialog.getByLabel('Folder path')).toHaveValue(parent)
+  await browseTo(page, parent)
   await dialog.getByLabel('Investigation name').fill(name)
   await dialog.getByRole('button', { name: button }).click()
-}
-
-async function newInvestigation(page: Page, name: string) {
-  await startPage(page)
-  await page.getByRole('button', { name: /^New/ }).first().click()
-  await chooseFolder(page, E2E_DIR, name, 'Create')
-  await expect(page.locator('.investigation')).toHaveText(name)
 }
 
 test('link to an empty repository, sync, and keep a copy when both changed', async ({ page }) => {
