@@ -384,8 +384,9 @@ uv run ruff format --check .
 uv run pytest -W error
 ```
 
-and in `frontend/`: `npm ci`, `npm run lint`, `npm run test:unit`, `npm run build`, then
-`npm run test:e2e` for the UI tests. [CLAUDE.md](CLAUDE.md) has the full list of commands,
+and in `frontend/`: `npm ci`, `npm run lint`, `npm run test:unit`, `npm run build` (which also
+checks the bundle size budget), then `npm run test:e2e` for the UI tests. CI also runs the
+backend on Python 3.13, audits the dependencies and runs CodeQL; these are not required checks. [CLAUDE.md](CLAUDE.md) has the full list of commands,
 [docs/architecture.md](docs/architecture.md) maps the code, and
 [docs/code-map.md](docs/code-map.md) says where each feature lives.
 

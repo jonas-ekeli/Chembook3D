@@ -75,4 +75,13 @@ opens it on the other), and Local tools (installs the real tools and runs `tests
 Backend runs pytest in parallel (`-n auto`, pytest-xdist) and lists the 25 slowest tests; a test
 running over 2 minutes prints its traceback (`faulthandler_timeout`). Every job has a time limit,
 a newer push to a pull request cancels the older run, and actions are pinned to commit SHAs
-(Dependabot proposes updates, `.github/dependabot.yml`).
+(Dependabot proposes updates to them, to `uv.lock` and to `frontend/package-lock.json` weekly,
+grouped, `.github/dependabot.yml`). Not required checks: Backend on Python 3.13 (Ubuntu), Dependency
+audit (`pip-audit` on `uv.lock`, `npm audit --omit=dev --audit-level=high`) and CodeQL
+(`.github/workflows/codeql.yml`, Python and TypeScript, also weekly). `npm run build` ends with
+`frontend/scripts/bundle-budget.mjs`, which prints the size of the main chunk and of
+`snapshot.html` and fails when one is over its budget (about 15% above the size when it was set;
+the numbers are in the script). A pushed `v*` tag runs `.github/workflows/release.yml`: it builds
+the interface, copies it into the package (`chembook3d/static/`, `chembook3d/static-snapshot/`),
+runs `uv build`, checks the wheel with `scripts/check_wheel.py` and keeps the wheel and the source
+archive as workflow artifacts; it publishes nothing. Changes are listed in `CHANGELOG.md`.

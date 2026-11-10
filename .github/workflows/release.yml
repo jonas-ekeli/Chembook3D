@@ -1,0 +1,50 @@
+name: Release build
+
+# Builds the wheel and the source archive for a version tag (v1.2.3) and keeps them as workflow
+# artifacts. It publishes nothing: no PyPI upload, no GitHub release, no tag. Push a tag (or run
+# it by hand) and download the files from the run's summary page.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Wheel and source archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6.8.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: uv sync --locked
+      - run: uv run python scripts/build_frontend.py
+      # The app serves a packaged chembook3d/static/ (app.static_dir) and exports the read-only
+      # copy from chembook3d/static-snapshot/ (api/snapshot.py). Neither is in the repository,
+      # so a plain `uv build` would make a wheel without the interface.
+      - name: Put the built interface into the package
+        run: |
+          cp -r frontend/dist src/chembook3d/static
+          cp -r frontend/dist-snapshot src/chembook3d/static-snapshot
+      - run: uv build
+      - run: uv run python scripts/check_wheel.py dist/chembook3d-*.whl
+      # The wheel installs on its own and finds its interface there, not in the checkout.
+      - name: Install the wheel into a fresh environment
+        run: |
+          uv venv "$RUNNER_TEMP/wheel-env"
+          VIRTUAL_ENV="$RUNNER_TEMP/wheel-env" uv pip install dist/chembook3d-*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel-env/bin/python" -c "from chembook3d.app import static_dir; found = static_dir(); print(found); assert 'site-packages' in str(found)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: chembook3d-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
