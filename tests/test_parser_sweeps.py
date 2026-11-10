@@ -15,7 +15,7 @@ from chembook3d.parsers import crest, orca, xtb
 from chembook3d.services import imports
 
 FIXTURES = Path(__file__).parent / "fixtures"
-NOT_OUTPUTS = {".txt", ".md", ".csv", ".thch", ".inp"}  # licences, notes, reference data
+NOT_OUTPUTS = {".txt", ".md", ".csv", ".thch", ".inp", ".json"}  # licences, notes, reference data
 IRC = FIXTURES / "orca" / "irc"
 TRAJECTORIES = ["orca_IRC_F_trj.xyz", "orca_IRC_B_trj.xyz"]
 # The errors a reader declares for a file it cannot read; anything else is a crash.
