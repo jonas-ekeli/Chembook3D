@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   concentrationCorrection,
   concentrationText,
+  displayUnit,
   type Concentration,
   type Node,
   type NodeFields,
@@ -47,8 +48,7 @@ export function SpeciesConcentration({
   const choice = pending?.kind ?? own?.kind ?? 'default'
   const molarity = Number(typing?.molarity ?? '')
   const valid = !!typing && typing.molarity.trim() !== '' && Number.isFinite(molarity) && molarity > 0
-  const unit = settings?.energy_unit ?? 'kcal/mol'
-  const factor = settings?.energy_factors[unit] ?? 1
+  const { unit, factor } = displayUnit(settings)
   const decimals = settings?.energy_decimals[unit] ?? 2
   const temperature = settings?.qh_temperature ?? 298.15
   const standard = settings?.standard_state ?? '1 atm'
