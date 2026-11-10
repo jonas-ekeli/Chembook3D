@@ -444,7 +444,8 @@ export function EnergyDrawer({
         () => undefined,
         (err: unknown) => setError(errorText(err)),
       )
-  }, [openId, storedKey])
+    // `inInvestigation` is the same function on every render (held in a ref), so it never re-runs this.
+  }, [openId, storedKey, inInvestigation])
 
   // A profile being made (New, or the first pathway with none open): a pathway found
   // meanwhile joins it, not the profile open before it, which it is about to replace.

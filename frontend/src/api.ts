@@ -2821,15 +2821,38 @@ export const STATUS_LABEL: Record<string, string> = Object.fromEntries(
 /** Rejected and superseded items are drawn faded (03 §3). */
 export const FADED_STATUSES = new Set<string>(['rejected', 'superseded'])
 
+/** The display unit until the settings arrive (D28), and its factor, the backend's
+ * `units.HARTREE_IN["kcal/mol"]` (P17). */
+export const DEFAULT_ENERGY_UNIT = 'kcal/mol'
+export const HARTREE_IN_KCAL_MOL = 627.5094740631
+
+/** The hartree to `unit` factor from the backend's `factors` (P17). Without the settings
+ * (`factors` empty) only the default unit is known. Any other unit is an error, never a factor
+ * of 1, which would show hartree labelled with another unit. */
+export function energyFactor(unit: string, factors: Record<string, number>): number {
+  const factor = Object.hasOwn(factors, unit) ? factors[unit] : unit === DEFAULT_ENERGY_UNIT ? HARTREE_IN_KCAL_MOL : undefined
+  if (factor === undefined || !Number.isFinite(factor)) throw new Error(`Unknown energy unit '${unit}'`)
+  return factor
+}
+
+/** The display unit of `settings` and its factor; kcal/mol before the settings load. */
+export function displayUnit(settings: Pick<Settings, 'energy_unit' | 'energy_factors'> | null | undefined): {
+  unit: string
+  factor: number
+} {
+  const unit = settings?.energy_unit ?? DEFAULT_ENERGY_UNIT
+  return { unit, factor: energyFactor(unit, settings?.energy_factors ?? {}) }
+}
+
 /** Energies are stored in hartree; the factors come from the backend (P17). */
 export function convertEnergy(hartree: number, unit: string, factors: Record<string, number>): number {
-  return hartree * (factors[unit] ?? 1)
+  return hartree * energyFactor(unit, factors)
 }
 
 /** A relative energy in the display unit, with the unit's decimals (EN-9). */
 export function formatDelta(hartree: number | null, settings: Settings | null): string {
   if (hartree === null) return 'n/a'
-  const unit = settings?.energy_unit ?? 'kcal/mol'
+  const unit = settings?.energy_unit ?? DEFAULT_ENERGY_UNIT
   const value = convertEnergy(hartree, unit, settings?.energy_factors ?? {})
   const text = value.toFixed(settings?.energy_decimals[unit] ?? 2)
   return /^-0\.?0*$/.test(text) ? text.slice(1) : text // no "-0.00"
@@ -2841,6 +2864,8 @@ export type StandardState = '1 atm' | '1 M'
 /** D95: G(1 M) − G(1 atm) of one molecule in hartree, RT ln(V_m / 1 L mol⁻¹) with V_m = RT / 1 atm;
  * the backend's `thermochem.standard_state_correction`, for the Settings text only. */
 export function standardStateCorrection(temperature: number): number {
+  // As the backend: at or below 0 K the logarithm has no value.
+  if (!(temperature > 0) || !Number.isFinite(temperature)) throw new RangeError('The temperature must be above zero')
   const R = 8.31446261815323
   const joulesPerHartree = 4.184 * 627.5094740631 * 1000
   return (R * temperature * Math.log(((R * temperature) / 101325) * 1000)) / joulesPerHartree
@@ -2870,6 +2895,8 @@ export function energyTypeName(
  * backend's `concentrations.correction`, for the node panel's text only. */
 export function concentrationCorrection(temperature: number, value: Concentration): number {
   const molarity = value.kind === '1 M' ? 1 : (value.molarity ?? 1)
+  // The backend stores only molarities above zero (`concentrations.clean`); ln(0) has no value.
+  if (!(molarity > 0) || !Number.isFinite(molarity)) throw new RangeError('The concentration must be above zero')
   const joulesPerHartree = 4.184 * 627.5094740631 * 1000
   return standardStateCorrection(temperature) + (8.31446261815323 * temperature * Math.log(molarity)) / joulesPerHartree
 }

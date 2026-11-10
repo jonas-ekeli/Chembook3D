@@ -13,6 +13,7 @@ import {
   type Node,
   type RemoteServer,
   type Settings,
+  displayUnit,
 } from '../api'
 import { ImportDialog } from './ImportDialog'
 import { Modal } from './Modal'
@@ -159,8 +160,7 @@ function IrcChart({
   settings: Settings | null
   onPick: (index: number) => void
 }) {
-  const unit = settings?.energy_unit ?? 'kcal/mol'
-  const factor = settings?.energy_factors[unit] ?? 627.5094740631
+  const { unit, factor } = displayUnit(settings)
   const known = points.filter((p) => p.relative !== null)
   if (known.length < 2) return <p className="muted small">The path has too few points with an energy to draw.</p>
   const width = 640
@@ -375,7 +375,7 @@ export function IrcWindow({
     return () => clearTimeout(timer)
   }, [copied])
 
-  const unit = settings?.energy_unit ?? 'kcal/mol'
+  const { unit, factor } = displayUnit(settings)
   const delta = (value: number | null | undefined) => (value === null || value === undefined ? 'n/a' : formatDelta(value, settings))
   const side = (d: IrcDirection): IrcSide | undefined => irc?.sides.find((s) => s.direction === d)
   const partsOf = (d: IrcDirection, part: 'path' | 'end') =>
@@ -453,7 +453,7 @@ export function IrcWindow({
         target={node}
         nodes={nodes}
         energyUnit={unit}
-        energyFactor={settings?.energy_factors[unit] ?? 627.5094740631}
+        energyFactor={factor}
         queued={0}
         linked={linked}
         onClose={() => setImporting(null)}
