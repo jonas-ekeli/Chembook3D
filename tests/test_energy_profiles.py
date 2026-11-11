@@ -186,15 +186,26 @@ def test_a_deleted_node_drops_its_pathways(open_client, example):  # noqa: F811
     patch(open_client, f"/energy-profiles/{profile['id']}", body)
     open_client.delete(f"/api/nodes/{gone}")
     found = get(open_client, "/energy-profiles")[0]
-    assert found["paths"] == [
-        {
-            "ids": [ids["T-pre"], ids["A1-S1"]],
-            "branch_id": example.branches["A"],
-            "shown": True,
-            "shifts": [],
-            "colour": None,
-        }
-    ]
+    kept = {
+        "ids": [ids["T-pre"], ids["A1-S1"]],
+        "branch_id": example.branches["A"],
+        "shown": True,
+        "shifts": [],
+        "colour": None,
+    }
+    assert found["paths"] == [kept]
+    # D221 (T-EN-53): the pathway that lost its node comes along as stored, apart from the
+    # pathways, so the drawer can list it; saved back with them, it stays until it is removed.
+    lost = {**kept, "ids": [ids["T-pre"], gone], "branch_id": None}
+    assert found["lost"] == [lost]
+    saved = patch(
+        open_client, f"/energy-profiles/{profile['id']}", {"paths": [kept, *found["lost"]]}
+    )
+    assert saved["paths"] == [kept] and saved["lost"] == [lost]
+    copy = post(open_client, f"/energy-profiles/{profile['id']}/duplicate", status=200)
+    assert copy["lost"] == [lost]
+    removed = patch(open_client, f"/energy-profiles/{profile['id']}", {"paths": [kept]})
+    assert removed["paths"] == [kept] and removed["lost"] == []
 
 
 def test_the_view_names_the_open_profile(open_client):

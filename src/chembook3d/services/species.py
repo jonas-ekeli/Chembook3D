@@ -15,6 +15,9 @@
 - W-BALANCE: when both ends and every attached species have coordinates, the atoms and the
   charge before an edge (source + joining species) must equal those after it (target +
   leaving species).
+- W-COMPARE (D221, `mismatch`): a pathway point whose atoms or charge, with its balance, are
+  not the profile reference's has no relative energy: a pathway of another system, or an
+  edge that lacks a free species.
 - A species' G and G_qh are at its own concentration when it has one (D160,
   `concentrations`), else at the investigation's standard state. W-STDSTATE notes species
   joining or leaving at the 1 atm standard state while the level has a solvation model.
@@ -318,6 +321,37 @@ def _composition(session: Session, record_id: str) -> tuple[Counter[str], int | 
     if end is None or not end.geometry:
         return None
     return Counter(row[0] for row in end.geometry), end.charge
+
+
+def mismatch(session: Session, record_id: str, balance: Balance, reference_id: str) -> str | None:
+    """D221, W-COMPARE: how a pathway point, with the free species its balance adds or takes,
+    differs in atoms or charge from the reference: "C2H4 more, charge 1 against 0". None when
+    they agree, and when the point, the reference or one of the species has no coordinates
+    to compare. A relative energy across such a difference means nothing."""
+    point, reference = _composition(session, record_id), _composition(session, reference_id)
+    if point is None or reference is None:
+        return None
+    atoms: dict[str, int] = dict(point[0])
+    charge = point[1]
+    for species_id, count in balance.items():
+        species = _composition(session, species_id)
+        if species is None:
+            return None
+        for element, n in species[0].items():
+            atoms[element] = atoms.get(element, 0) + n * count
+        charge = None if charge is None or species[1] is None else charge + species[1] * count
+    difference = Counter(atoms)
+    difference.subtract(reference[0])
+    more = Counter({e: n for e, n in difference.items() if n > 0})
+    fewer = Counter({e: -n for e, n in difference.items() if n < 0})
+    problems = []
+    if more:
+        problems.append(f"{xyz.formula_of(more)} more")
+    if fewer:
+        problems.append(f"{xyz.formula_of(fewer)} fewer")
+    if charge is not None and reference[1] is not None and charge != reference[1]:
+        problems.append(f"charge {charge} against {reference[1]}")
+    return ", ".join(problems) or None
 
 
 def balance_warnings(session: Session, transition: Transition) -> list[Finding]:

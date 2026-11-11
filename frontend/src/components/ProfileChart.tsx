@@ -526,7 +526,11 @@ export function ProfileChart({
             if (point.relative === null) {
               return (
                 <text key={i} x={cx} y={margin.top + 10 * s} fontSize={nameSize} textAnchor="middle" fill={paint.faint}>
-                  <title>{point.message ?? point.species_message ?? 'no value'}</title>
+                  <title>
+                    {point.mismatch
+                      ? `Not the reference's atoms or charge: ${point.mismatch} (W-COMPARE)`
+                      : (point.message ?? point.species_message ?? 'no value')}
+                  </title>
                   {point.label}: n/a
                 </text>
               )

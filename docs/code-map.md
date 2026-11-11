@@ -170,6 +170,7 @@ Routes for all of these are in `api/pathway.py`.
 
 - A `Node` with `kind == "species"` is a substrate or fragment kept off the canvas. `TransitionSpecies` lists those that join or leave on a transition.
 - `services/species.py` holds the rules: attach, kind changes, the balance added along a pathway, W-BALANCE. `pathways.profiles` and the energy view use it.
+- D221, W-COMPARE: `species.mismatch` says how a pathway point's atoms or charge, with its balance, differ from the reference's. `pathways.prepare` keeps it per point (`Prepared.mismatches`); `pathways.profiles` then gives the point `mismatch` and no `relative`, and the note `_compare_note`; the table's Check column and a turnover's message repeat it. `ProfileChart` shows it as the "n/a" label's tooltip.
 - `balances_from` gives each node's balance along the route from the reference (D72), for node cards (the energy view's `relative`) and for pathways that miss the reference.
 
 ## Resume overview (D191)
@@ -239,6 +240,7 @@ Routes for all of these are in `api/pathway.py`.
   - D194 `shifts`: a step moved whole columns later along the axis with every step after it (`ProfileChart`'s `shifts` prop).
   - D195 `colour`: picked on the pathway's swatch (`components/PathwayColour.tsx`). It wins over the branch's colour and the style's set (`profileStyle.pathwayColours(..., chosen)`, `ProfileChart`'s `chosen` prop).
 - D205: the profile's own `reference_id` (migration 0031): the drawer's "Reference node", apart from the cards' reference in `App`. `onPathsChange` hands it to the read-only copy as `profile_reference_id`.
+- D221, the pathways list's safety net, all in `EnergyDrawer.tsx`: `remove`/`restore` and the `notice` line (Undo for the last pathway removed; "already in this profile" from `addPath`, which compares the ids with `pathsRef`). Pathways that lost a node come from the API as `lost` (`energy_profiles.split_paths`), ride at the end of `paths`, are drawn as `.lost-path` cards and saved back with the rest.
 
 ### Profile chart and style (D106–D111, D181)
 

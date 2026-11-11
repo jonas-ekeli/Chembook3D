@@ -502,3 +502,123 @@ test('energy drawer: each profile keeps its own reference', async ({ page }) => 
   await expect(picker.locator('option:checked')).toHaveText('Profile 2')
   await expect(reference).toHaveValue(await idOf('B-S1'))
 })
+
+/** Resolves when the open profile has been saved once more (the drawer saves every change). */
+function profileSaved(page: Page) {
+  return page.waitForResponse(
+    (response) => response.request().method() === 'PATCH' && new URL(response.url()).pathname.startsWith('/api/energy-profiles/'),
+  )
+}
+
+// T-UI-91, D221: a pathway removed by a slip comes back with Undo; a pathway already in the
+// profile is not added again; a pathway that lost a node stays listed, not drawn, until removed.
+test('energy drawer: Undo for a removed pathway, no pathway twice, a lost node is not a lost pathway', async ({ page }) => {
+  await openDemo(page)
+  await page.getByRole('button', { name: 'Profile and table' }).click()
+  let drawer = page.getByLabel('Energy drawer')
+  const add = drawer.getByLabel('Add branch pathway')
+  await add.selectOption({ label: 'A' })
+  await add.selectOption({ label: 'B' })
+  const b = drawer.getByRole('group', { name: 'Pathway B' })
+  await expect(b).toContainText('T-S0 → B-S1 → B-S2 → B-S3')
+  const names = drawer.locator('.pathway .pathway-head strong')
+  const notice = drawer.locator('.pathway-notice')
+  await expect(notice).toHaveCount(0)
+
+  // The same pathway again: said, not added; a hidden one is shown instead.
+  await add.selectOption({ label: 'B' })
+  await expect(notice).toHaveText('“B” is already in this profile.')
+  await expect(names).toHaveText(['A', 'B'])
+  await b.getByRole('checkbox', { name: 'Show B on the figure' }).uncheck()
+  await add.selectOption({ label: 'B' })
+  await expect(b.getByRole('checkbox', { name: 'Show B on the figure' })).toBeChecked()
+  await expect(names).toHaveText(['A', 'B'])
+
+  // Removed, then put back where it was.
+  await drawer.getByRole('button', { name: 'Remove pathway A' }).click()
+  await expect(notice).toHaveText('Removed “A”. Undo')
+  await expect(names).toHaveText(['B'])
+  let saved = profileSaved(page)
+  await notice.getByRole('button', { name: 'Undo' }).click()
+  await expect(names).toHaveText(['A', 'B'])
+  await expect(notice).toHaveCount(0)
+  await saved
+
+  // A pathway through a node that is then deleted.
+  const canvas = await (await page.request.get('/api/canvas')).json()
+  const start = canvas.nodes.find((n: { label: string }) => n.label === 'T-S0').id
+  const made = await page.request.post('/api/nodes', { data: { label: 'Gone', pos_x: 0, pos_y: 660 } })
+  expect(made.ok()).toBe(true)
+  const gone = (await made.json()).id
+  expect((await page.request.post('/api/transitions', { data: { source_id: start, target_id: gone } })).ok()).toBe(true)
+  await page.reload()
+  drawer = page.getByLabel('Energy drawer')
+  await expect(drawer.locator('.pathway .pathway-head strong')).toHaveText(['A', 'B'])
+  await page.getByRole('group', { name: 'Node T-S0', exact: true }).click()
+  await drawer.getByRole('button', { name: 'Start at selected node', exact: true }).click()
+  const third = drawer.getByRole('group', { name: 'Pathway T-S0 → T-S0' })
+  saved = profileSaved(page)
+  await third.getByRole('group', { name: 'Continue with' }).getByRole('button', { name: 'Gone' }).click()
+  await expect(drawer.getByRole('group', { name: 'Pathway T-S0 → Gone' })).toBeVisible()
+  await saved
+  expect((await page.request.delete(`/api/nodes/${gone}`)).ok()).toBe(true)
+  await page.reload()
+  drawer = page.getByLabel('Energy drawer')
+  const lost = drawer.getByRole('group', { name: 'Pathway that lost a node' })
+  await expect(lost).toContainText('Not drawn: a node on it was deleted')
+  await expect(lost).toContainText('What is left: T-S0')
+  await expect(drawer.locator('.pathway:not(.lost-path) .pathway-head strong')).toHaveText(['A', 'B'])
+  const legend = drawer.locator('.drawer-main').getByRole('img', { name: 'Energy profile' })
+  await expect(legend).toContainText('B-S3')
+  await expect(legend).not.toContainText('Gone')
+
+  // Kept with the profile: changing something else saves it along, and it is still there.
+  saved = profileSaved(page)
+  await drawer.getByRole('checkbox', { name: 'Show A on the figure' }).uncheck()
+  await saved
+  await page.reload()
+  drawer = page.getByLabel('Energy drawer')
+  await expect(drawer.getByRole('group', { name: 'Pathway that lost a node' })).toHaveCount(1)
+
+  // Removed for good, after one more Undo.
+  await drawer.getByRole('button', { name: 'Remove the pathway that lost a node' }).click()
+  await expect(drawer.getByRole('group', { name: 'Pathway that lost a node' })).toHaveCount(0)
+  await drawer.locator('.pathway-notice').getByRole('button', { name: 'Undo' }).click()
+  await expect(drawer.getByRole('group', { name: 'Pathway that lost a node' })).toHaveCount(1)
+  saved = profileSaved(page)
+  await drawer.getByRole('button', { name: 'Remove the pathway that lost a node' }).click()
+  await saved
+  await page.reload()
+  drawer = page.getByLabel('Energy drawer')
+  await expect(drawer.locator('.pathway .pathway-head strong')).toHaveText(['A', 'B'])
+  await expect(drawer.getByRole('group', { name: 'Pathway that lost a node' })).toHaveCount(0)
+})
+
+// T-UI-92, D221 (W-COMPARE): a point with other atoms than the profile's reference has no
+// relative energy; the note, the figure and the table say why. The demo's A-S2 is water among
+// ethylenes on purpose (scripts/make_demo.py).
+test('energy drawer: a point with other atoms than the reference is n/a, with the reason', async ({ page }) => {
+  await openDemo(page)
+  await page.getByRole('button', { name: 'Profile and table' }).click()
+  const drawer = page.getByLabel('Energy drawer')
+  await drawer.getByLabel('Add branch pathway').selectOption({ label: 'A' })
+  const a = drawer.getByRole('group', { name: 'Pathway A' })
+  await a.getByRole('group', { name: 'Continue with' }).getByRole('button', { name: 'A-S2' }).click()
+  await expect(a).toContainText('T-S0 → A-S1 → A-S2 → A-S3')
+
+  const notes = drawer.getByRole('list', { name: 'Energy notes' })
+  await expect(notes).toContainText('W-COMPARE')
+  await expect(notes).toContainText('No relative energy against the reference “T-S0” for A-S2 (O more, C2H2 fewer)')
+  const chart = drawer.locator('.drawer-main').getByRole('img', { name: 'Energy profile' })
+  const missing = chart.locator('text', { hasText: 'A-S2: n/a' })
+  await expect(missing.locator('title')).toHaveText("Not the reference's atoms or charge: O more, C2H2 fewer (W-COMPARE)")
+  // The points before and after it have the reference's atoms and keep their values.
+  await expect(chart).toContainText('-3.20')
+  await expect(chart).toContainText('-8.50')
+
+  await drawer.getByRole('button', { name: 'Table', exact: true }).click()
+  const row = drawer.getByRole('row', { name: /A-S2/ })
+  await expect(row).toContainText('n/a')
+  await expect(row.locator('td.check')).toContainText("Not the reference's atoms or charge: O more, C2H2 fewer")
+  await expect(drawer.getByRole('row', { name: /A-S3/ })).toContainText('−8.50')
+})

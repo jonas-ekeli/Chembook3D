@@ -119,10 +119,12 @@ class Cycle:
     def __init__(self, client, energies: dict[str, float] | None = None):
         self.client = client
         kcal = {"A": 0.0, "TS1": 20.0, "B": 5.0, "TS2": 15.0, **(energies or {})}
-        atoms = ("Ru", "C", "C", "H", "H")
+        # A is the catalyst alone; the others hold the substrate, so the atoms balance (D221).
+        held = ("Ru", "C", "C", "H", "H")
         self.ids: dict[str, str] = {}
         for name in ("A", "TS1", "B", "TS2"):
             role = "transition_state" if name.startswith("TS") else "minimum"
+            atoms = ("Ru", "C", "H") if name == "A" else held
             self.ids[name] = node(client, label=name, role=role, charge=0, xyz=xyz(*atoms))["id"]
         for name in ("substrate", "product"):
             self.ids[name] = node(client, label=name, kind="species", xyz=xyz("C", "H"))["id"]
@@ -222,7 +224,7 @@ def test_cycle_closing_at_a_later_node_leaves_out_what_comes_before(open_client)
     # T-TOF-10, A13: the cycle runs from the node the pathway returns to; earlier points are
     # left out.
     cycle = Cycle(open_client)
-    pre = node(open_client, label="Precatalyst", role="minimum", xyz=xyz("Ru", "C"))["id"]
+    pre = node(open_client, label="Precatalyst", role="minimum", xyz=xyz("Ru", "C", "H"))["id"]
     edge(open_client, pre, cycle.ids["A"])
     add_energies(open_client, pre, -120.0)
     created = turnover(open_client, [pre, *cycle.path(*CYCLE)])
@@ -335,10 +337,24 @@ def test_turnovers_are_in_the_history_and_notice_deleted_nodes(open_client):
     assert get(open_client, "/turnovers") == []
 
 
+def test_a_cycle_that_does_not_balance_has_no_tof(open_client):
+    # D221 (W-COMPARE): without the substrate on A → TS1 the points after it are not A's atoms;
+    # no span from energies that cannot be compared, and the result says what differs.
+    cycle = Cycle(open_client)
+    created = turnover(open_client, cycle.path(*CYCLE))
+    assert result(open_client, created["id"])["status"] == "ok"
+    joins = f"/transitions/{cycle.edges[('A', 'TS1')]}/species/{cycle.ids['substrate']}"
+    delete(open_client, joins)
+    found = result(open_client, created["id"])
+    assert found["status"] == "n/a" and found["tof"] is None
+    assert "“TS1” (not the atoms or charge of the cycle's first node: CH more)" in found["message"]
+
+
 def test_group_counts_through_its_representative(open_client):
     # T-TOF-09, T3, EN-7: a TS group is one point, valued by the representative the user picks.
     cycle = Cycle(open_client)
-    other = node(open_client, label="TS1b", role="transition_state", xyz=xyz("Ru", "C"))["id"]
+    atoms = ("Ru", "C", "C", "H", "H")
+    other = node(open_client, label="TS1b", role="transition_state", xyz=xyz(*atoms))["id"]
     add_energies(open_client, other, Cycle.E0 - 10.0 + 22 / KCAL)
     group = post(
         open_client,

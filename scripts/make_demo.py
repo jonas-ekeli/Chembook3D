@@ -10,7 +10,8 @@ Below those, a small mechanism shows the phase 3 structure: four reaction steps,
 branch split into rotamers A and B, their transitions, and one direct connection ("no TS").
 Each mechanism node has an optimization and a frequency record at one made-up level, so the
 energy view, profiles and the table (phase 4) have values to show. The geometries and the
-energies are placeholders, not results.
+energies are placeholders, not results; branch A's transition state is another molecule than
+its neighbours on purpose, so the checks on atoms have something to flag.
 """
 
 import sys
@@ -35,6 +36,20 @@ H 0.000000 0.922800 1.237800
 H 0.000000 -0.922800 1.237800
 H 0.000000 0.922800 -1.237800
 H 0.000000 -0.922800 -1.237800
+"""
+
+
+# Branch B's transition state: ethylene twisted by 90°, so every node of branch B has the same
+# atoms and its profile has a value at every point (D221). Branch A's stays water: another
+# molecule on purpose, to show W-BALANCE on its arrows and W-COMPARE on its profile.
+TWISTED = """6
+twisted ethylene
+C 0.000000 0.000000 0.667500
+C 0.000000 0.000000 -0.667500
+H 0.000000 0.922800 1.237800
+H 0.000000 -0.922800 1.237800
+H 0.922800 0.000000 -1.237800
+H -0.922800 0.000000 -1.237800
 """
 
 
@@ -130,7 +145,7 @@ def _mechanism(session) -> None:
                     "pos_x": 240.0 * column,
                     "pos_y": 220.0 + 220.0 * row,
                 },
-                ETHYLENE if not ts else WATER,
+                ETHYLENE if not ts else TWISTED if branch.name == "B" else WATER,
             )
             _energies(session, node)
             # Planned on purpose, so the overview and the dashed outline have edges to show.
