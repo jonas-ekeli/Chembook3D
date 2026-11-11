@@ -66,9 +66,9 @@ test('save the 3D orientation for the structure card, keep it after a reload, th
 test('the hydrogens setting hides hydrogens on the structure cards', async ({ page }) => {
   await openDemo(page)
   await page.getByRole('button', { name: 'Structure' }).click()
-  // T-S0 is ethylene (C2H4); A-S2 is a transition state drawn as water (H2O).
+  // T-S0 is ethylene (C2H4); "water guess" is water (H2O).
   const ethylene = canvasNode(page, 'T-S0')
-  const water = canvasNode(page, 'A-S2')
+  const water = canvasNode(page, 'water guess')
   await expect.poll(async () => (await atomPositions(ethylene)).length).toBe(6)
   await expect.poll(async () => (await atomPositions(water)).length).toBe(3)
   try {

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { openDemo } from './helpers.ts'
+import { DEMO_MISMATCH_TEMPLATE, openDemo } from './helpers.ts'
 
 // T-UI-53, D176 (UI6): one pill per arrow. ΔX into a transition state reads "ΔG‡" on an amber
 // pill, other edges "ΔG"; the warning is a "!" badge and "no TS" a tag inside the pill; the
@@ -11,7 +11,8 @@ type Canvas = {
 }
 
 test('arrow labels: barriers as ΔG‡, warning and "no TS" inside one pill, status as its outline', async ({ page }) => {
-  await openDemo(page)
+  // The demo whose TS A-S2 is another molecule, so the arrow out of it does not balance.
+  await openDemo(page, DEMO_MISMATCH_TEMPLATE)
   const canvas: Canvas = await (await page.request.get('/api/canvas')).json()
   const id = (label: string) => canvas.nodes.find((n) => n.label === label)!.id
   const edge = (a: string, b: string) =>

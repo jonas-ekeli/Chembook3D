@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
-import { openDemo } from './helpers.ts'
+import { DEMO_MISMATCH_TEMPLATE, openDemo } from './helpers.ts'
 
 // T-UI-58, D181 (UI9): the energy drawer's head is one compact row (Pathways with an icon,
 // Profile | Table, the zoom as one group, Style…, one Export menu); on screen the profile's text
@@ -517,11 +517,13 @@ test('energy drawer: Undo for a removed pathway, no pathway twice, a lost node i
   await page.getByRole('button', { name: 'Profile and table' }).click()
   let drawer = page.getByLabel('Energy drawer')
   const add = drawer.getByLabel('Add branch pathway')
+  const names = drawer.locator('.pathway .pathway-head strong')
   await add.selectOption({ label: 'A' })
+  // A pathway is listed when the server has laid it out, so A must be in before B is asked for.
+  await expect(names).toHaveText(['A'])
   await add.selectOption({ label: 'B' })
   const b = drawer.getByRole('group', { name: 'Pathway B' })
   await expect(b).toContainText('T-S0 → B-S1 → B-S2 → B-S3')
-  const names = drawer.locator('.pathway .pathway-head strong')
   const notice = drawer.locator('.pathway-notice')
   await expect(notice).toHaveCount(0)
 
@@ -595,10 +597,10 @@ test('energy drawer: Undo for a removed pathway, no pathway twice, a lost node i
 })
 
 // T-UI-92, D221 (W-COMPARE): a point with other atoms than the profile's reference has no
-// relative energy; the note, the figure and the table say why. The demo's A-S2 is water among
-// ethylenes on purpose (scripts/make_demo.py).
+// relative energy; the note, the figure and the table say why. In the demo made with --mismatch,
+// A-S2 is water among ethylenes (scripts/make_demo.py).
 test('energy drawer: a point with other atoms than the reference is n/a, with the reason', async ({ page }) => {
-  await openDemo(page)
+  await openDemo(page, DEMO_MISMATCH_TEMPLATE)
   await page.getByRole('button', { name: 'Profile and table' }).click()
   const drawer = page.getByLabel('Energy drawer')
   await drawer.getByLabel('Add branch pathway').selectOption({ label: 'A' })

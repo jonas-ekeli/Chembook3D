@@ -11,6 +11,10 @@ export const E2E_DIR = process.env.E2E_DIR!
  * it: openDemo opens a copy. */
 export const DEMO_TEMPLATE = join(E2E_DIR, 'demo-template')
 
+/** The same demo with branch A's transition state as water, another molecule than its neighbours
+ * (make_demo.py --mismatch): for the tests of what the app says when atoms do not match. */
+export const DEMO_MISMATCH_TEMPLATE = join(E2E_DIR, 'demo-mismatch-template')
+
 // Present only while an app has the investigation open (P22, investigation.py's LOCK_NAME and
 // OWNER_NAME); a copy must not carry them.
 const NOT_COPIED = new Set(['.chembook3d.lock', '.chembook3d.owner'])
@@ -19,16 +23,17 @@ const copies = new WeakMap<object, string>()
 
 /**
  * The running test's own copy of the demo, made the first time the test asks for it. Later calls
- * in the same test (also from its hooks) give the same folder, so a test can open it again.
+ * in the same test (also from its hooks) give the same folder, so a test can open it again;
+ * `template` counts only in the first.
  */
-export function demoFolder(): string {
+export function demoFolder(template: string = DEMO_TEMPLATE): string {
   const info = test.info()
   let folder = copies.get(info)
   if (folder === undefined) {
     const parent = join(E2E_DIR, 'demo-copies')
     mkdirSync(parent, { recursive: true })
     folder = join(mkdtempSync(join(parent, 'test-')), 'demo')
-    cpSync(DEMO_TEMPLATE, folder, { recursive: true, filter: (source) => !NOT_COPIED.has(basename(source)) })
+    cpSync(template, folder, { recursive: true, filter: (source) => !NOT_COPIED.has(basename(source)) })
     copies.set(info, folder)
   }
   return folder
@@ -69,8 +74,8 @@ export async function openFolder(page: Page, folder: string) {
  * Opens the test's own copy of the demo (demoFolder) in kcal/mol and waits until its canvas and
  * energies are drawn. Returns the folder.
  */
-export async function openDemo(page: Page): Promise<string> {
-  const folder = demoFolder()
+export async function openDemo(page: Page, template: string = DEMO_TEMPLATE): Promise<string> {
+  const folder = demoFolder(template)
   // The demo's values in the tests are in kcal/mol, the default unit; app settings are shared by
   // all the tests, and one may have left another unit set.
   await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
