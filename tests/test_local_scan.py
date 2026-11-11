@@ -76,6 +76,33 @@ def test_relaxed_scan_is_imported_as_a_scan_node(open_client):
 
 
 @pytest.mark.usefixtures("stub_tools")
+def test_a_scan_without_a_start_begins_where_the_structure_is(open_client):
+    """T-LOC-28 (D222): a coordinate with no start takes its value in the node's structure, as
+    the dialog's empty "from" field does; one with no atoms to measure is refused as before."""
+    node = open_client.post("/api/nodes", json={"label": "w", "xyz": WATER}).json()
+    rows = [line.split() for line in WATER.strip().splitlines()[2:]]
+    now = np.linalg.norm(np.array(rows[0][1:4], float) - np.array(rows[1][1:4], float))
+    scan = {"coordinates": [{"kind": "distance", "atoms": [0, 1], "end": 1.3}], "points": 2}
+    job = open_client.post(
+        "/api/local/jobs", json={"node_id": node["id"], "method": "stub", "scan": scan}
+    )
+    assert job.status_code == 200, job.text
+    assert job.json()["scan"]["coordinates"][0]["start"] == pytest.approx(now)
+    wait_for(open_client, job.json()["id"], finished, timeout=120)
+
+    same = {"coordinates": [{"kind": "distance", "atoms": [0, 1], "end": float(now)}], "points": 2}
+    refused = open_client.post(
+        "/api/local/jobs", json={"node_id": node["id"], "method": "stub", "scan": same}
+    )
+    assert refused.status_code == 422 and "start and end differ" in refused.json()["detail"]
+    off = {"coordinates": [{"kind": "distance", "atoms": [0, 9], "end": 1.3}], "points": 2}
+    refused = open_client.post(
+        "/api/local/jobs", json={"node_id": node["id"], "method": "stub", "scan": off}
+    )
+    assert refused.status_code == 422 and "numbered 1 to 3" in refused.json()["detail"]
+
+
+@pytest.mark.usefixtures("stub_tools")
 @pytest.mark.parametrize(
     ("scan", "extra", "words"),
     [

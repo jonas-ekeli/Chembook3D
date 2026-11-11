@@ -318,6 +318,12 @@ Claude wants to delete something, dissolve a group or remove coordinates, the ap
 and does nothing unless you click **Confirm**. When you say "this node", Claude asks the app what
 you have selected.
 
+Claude can also start a calculation on this computer once the tools are installed (see
+[Calculations on this computer](#calculations-on-this-computer)), for example "refine this node
+with GFN2-xTB" or "scan this bond from here to 3 Å". It tells you which method it will use and
+how long it should take, asks first when that is over an hour, and the result is imported onto
+the node as when you start it yourself. Claude cannot install the tools.
+
 ### Calculations in the cloud
 
 Claude can hand an xTB or CREST calculation to a

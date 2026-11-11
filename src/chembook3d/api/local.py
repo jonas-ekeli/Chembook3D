@@ -1,12 +1,14 @@
 """Calculations on this computer (D213, FR-LOC): the tools (`local_tools.py`) and the jobs
 (`local_jobs.py`). Installing and changing the tools are left out of Claude's tools (the
-settings section does them); starting, listing, cancelling and importing jobs are offered.
+settings section does them); reading their state (D222) and starting, listing, cancelling and
+importing jobs are offered.
 
 Every write is refused from a web page of another origin, as for cloud jobs (`api/jobs.py`).
 """
 
 from typing import Any, Literal
 
+import numpy as np
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -14,6 +16,7 @@ from chembook3d import local_jobs, local_tools
 from chembook3d.api.jobs import _local_page_only
 from chembook3d.api.routes import DbSession, _investigation
 from chembook3d.models import Node
+from chembook3d.services import builder
 from chembook3d.services import nodes as node_service
 from chembook3d.services.records import get
 
@@ -122,7 +125,11 @@ class ConstraintsIn(BaseModel):
 class ScanCoordinateIn(BaseModel):
     kind: Literal["distance", "angle", "dihedral"]
     atoms: list[int] = Field(description="2, 3 or 4 atoms, counted from 0")
-    start: float = Field(description="Å for a distance, degrees for an angle or dihedral")
+    start: float | None = Field(
+        None,
+        description="Å for a distance, degrees for an angle or dihedral; left out: the value in "
+        "the node's structure now (D222)",
+    )
     end: float
     points: int | None = Field(None, description="grid only: this coordinate's points")
 
@@ -149,9 +156,12 @@ class RefineIn(BaseModel):
     node_id: str
     method: str = Field(
         "gfn2",
-        description="gfn2: GFN2-xTB (tblite), seconds to minutes; b97-3c: B97-3c (Psi4), the "
-        "whole molecule at DFT quality, hours for 70 atoms; r2scan-3c: r2SCAN-3c (Psi4), "
-        "a little better than B97-3c at about 1.4 times its cost",
+        description="gfn2: GFN2-xTB (tblite), seconds to minutes; gxtb: g-xTB (D216, only when "
+        "the user installed it), closer to DFT than GFN2-xTB at a few times its cost; b97-3c: "
+        "B97-3c (Psi4), the whole molecule at DFT quality, hours for 70 atoms; r2scan-3c: "
+        "r2SCAN-3c (Psi4), a little better than B97-3c at about 1.4 times its cost; oniom: "
+        "r2SCAN-3c on a core, GFN2-xTB on the rest (D214). get_local_tools lists the methods "
+        "this computer offers",
     )
     charge: int | None = Field(None, description="Default: the node's charge, else 0")
     multiplicity: int | None = Field(None, ge=1, description="Default: the node's, else 1")
@@ -201,6 +211,21 @@ def _check_atoms(constraints: ConstraintsIn | None, count: int) -> dict[str, Any
         raise HTTPException(422, f"Atoms are counted from 0 to {count - 1}")
     if not atoms:
         return None
+    return out
+
+
+def _scan(scan: ScanIn | None, atoms: list[Any]) -> dict[str, Any] | None:
+    """The scan as `local_jobs.check_scan` takes it. D222: a coordinate without a start begins
+    at its value in the node's structure, as the dialog's empty "from" field does."""
+    if scan is None:
+        return None
+    out = scan.model_dump()
+    coords = np.array([[a.x, a.y, a.z] for a in atoms])
+    for coordinate in out["coordinates"]:
+        picks = coordinate["atoms"]
+        measurable = 2 <= len(picks) <= 4 and all(0 <= a < len(atoms) for a in picks)
+        if coordinate["start"] is None and measurable:
+            coordinate["start"] = builder.measure(coords, picks)
     return out
 
 
@@ -263,7 +288,8 @@ def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[s
     _local_page_only(request)
     folder = _investigation(request).folder
     node = get(session, Node, body.node_id, "Node")
-    count = len(node_service.atoms_of(node))
+    atoms = node_service.atoms_of(node)
+    count = len(atoms)
     try:
         return local_jobs.create_job(
             folder,
@@ -277,7 +303,7 @@ def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[s
             body.transition,
             _check_core(body.reacting, count, "Reacting"),
             body.frequencies,
-            body.scan.model_dump() if body.scan else None,
+            _scan(body.scan, atoms),
         )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc

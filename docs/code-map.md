@@ -556,7 +556,7 @@ Routes for all of these are in `api/pathway.py`.
 
 ### Routes, frontend and tests
 
-- Routes in `api/local.py`: `/api/local/tools` not offered to Claude; jobs are MCP tools `*_local_*`; `POST /api/local/core` is `check_local_core`, which also gives `mode_atoms` from `local_jobs.mode_atoms`.
+- Routes in `api/local.py`: `GET /api/local/tools` is the MCP read tool `get_local_tools` (D222; installing and `PUT` stay the page's own); jobs are MCP tools `*_local_*` (`_scan` fills a scanned coordinate's missing start from the node's structure, D222); `POST /api/local/core` is `check_local_core`, which also gives `mode_atoms` from `local_jobs.mode_atoms`.
 - `localToolsSection.tsx` (the Settings section) and `components/LocalTools.tsx`.
 - `components/RefineDialog.tsx` (node menu and the panel's ⋯ menu): the ONIOM core editor with its 3D view in `components/RefineCore.tsx`; constraints read by `readConstraints`, and D165's earlier ones by `heldBefore` in `localJobs.ts`.
 - `components/LocalJobsDialog.tsx` (canvas toolbar, palette; Show mode animates the final TS check's mode, D217).
@@ -669,6 +669,7 @@ Routes for all of these are in `api/pathway.py`.
 - `mcp_server.py` is `chembook3d mcp` (stdio, the official `mcp` SDK's low-level server). It turns tool calls into requests to the running app at 127.0.0.1 with the header `X-Chembook-Client: claude`.
 - `mcp_tools.py` lists the tools (read, write, confirm) and builds their input schemas from the app's own OpenAPI description, so a new route needs a tool or an entry in `tests/test_mcp.py`'s NOT_OFFERED.
 - The full list of MCP tools is `mcp_tools.TOOLS`, and of confirm actions `mcp_tools.CONFIRM_DESCRIPTIONS` (run by `api/live.py`'s `ACTIONS`).
+- What Claude is told: `mcp_server.INSTRUCTIONS` (every client) and `claude_panel.NOTEBOOK_GUIDE` (the panel's CLAUDE.md). Keep both in step with the tools: D222 brought them up to the local jobs of D213; `mcp_tools.IMPORT_HELP` describes the import options.
 - `api/live.py` holds the app side:
   - `ChangeTracker` counts every successful change by client and sets `history.SOURCE` to "claude" for Claude's requests.
   - `GET /api/live` is the long poll open tabs wait on (`frontend/src/live.ts` reloads on a change made elsewhere).

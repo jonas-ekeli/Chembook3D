@@ -385,6 +385,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-MCP-11 | Claude can measure distances, angles, dihedrals and vector angles across nodes and groups in one call, with each row's geometry level and convergence, per-column statistics, numbering by a reference node or SMARTS, and filters by level, convergence and value. | D151, A96 | after 5 |
 | FR-MCP-12 | Claude can list, read the result of, create and change conformer equilibria, with the next step's TSs; deleting one asks the user first. | D171, D173, D91 | after 5 |
 | FR-MCP-13 | Claude sees which canvas each node and group is on, lists sub-investigations, makes one from given nodes, groups and boxes, moves things in and out and renames one or sets its face; dissolving or deleting one asks the user first. New nodes take a canvas. | D193, D91 | after 5 |
+| FR-MCP-14 | Claude's instructions (the MCP server's and the panel's guide) send geometry refinements, TS searches, frequencies and relaxed scans to the local job tools and only what this computer does not run to a cloud job. Claude can read whether the local tools and g-xTB are installed, the cores and memory, the methods offered and a time estimate per method for an atom count; it cannot install them or change the cores and memory. | D222, D213, A152 | after 5 |
 
 **AC:** with the app open, Claude Code renames a node: the canvas shows the new name at once and the history marks it "claude". Asked to delete it, Claude waits; Refuse in the app keeps the node, Confirm deletes it.
 
