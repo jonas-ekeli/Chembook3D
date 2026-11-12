@@ -178,7 +178,13 @@ def jobs_dir(folder: Path) -> Path:
 def job_dir(folder: Path, job_id: str) -> Path:
     if not _JOB_ID.match(job_id):
         raise JobNotFound(f"No local job {job_id!r}")
-    path = jobs_dir(folder) / job_id
+    # The id's form already keeps the job inside the jobs folder. The path itself is checked as
+    # well, in the form code scanning follows, now that Claude's tools name jobs too (D224).
+    root = os.path.normpath(jobs_dir(folder))
+    inside = os.path.normpath(os.path.join(root, job_id))
+    if not inside.startswith(root + os.sep):
+        raise JobNotFound(f"No local job {job_id!r}")
+    path = Path(inside)
     if not (path / JOB_JSON).is_file():
         raise JobNotFound(f"No local job {job_id!r}")
     return path
