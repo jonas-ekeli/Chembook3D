@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote, urlsplit
 
+import anyio.from_thread
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -30,9 +31,11 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from chembook3d.api.identity import check_investigation_identity
 from chembook3d.api.routes import DbSession
+from chembook3d.autonomy import Autonomy
 from chembook3d.models import (
     AlignmentSet,
     Branch,
+    Calculation,
     ConformerEquilibrium,
     GroupNode,
     Node,
@@ -102,6 +105,7 @@ class Confirmation:
     result: Any = None
     error: str | None = None
     finished: float | None = None
+    unasked: bool = False  # D223: Claude's own record, deleted without asking while it works alone
 
 
 @dataclass
@@ -114,6 +118,7 @@ class LiveState:
     confirm_version: int = 0
     confirmations: dict[str, Confirmation] = field(default_factory=dict)
     selection: dict[str, Any] | None = None
+    autonomy: Autonomy = field(default_factory=Autonomy)  # D223: Claude working on its own
 
     def changed(self, client: str) -> None:
         with self.lock:
@@ -201,9 +206,11 @@ class ChangeTracker:
             await send(message)
 
         token = history.SOURCE.set(AGENT if client == AGENT else "manual")
+        made = history.MADE.set(self.live.autonomy)  # D223: what Claude made, for its deletes
         try:
             await self.app(scope, receive, watched if counts else send)
         finally:
+            history.MADE.reset(made)
             history.SOURCE.reset(token)
         if counts and status.get("code", 500) < 400:
             self.live.changed(client)
@@ -221,6 +228,7 @@ class ConfirmationOut(BaseModel):
     seconds_left: float
     result: Any = None
     error: str | None = None
+    unasked: bool = False
 
 
 class LiveOut(BaseModel):
@@ -241,6 +249,7 @@ def _confirmation_out(c: Confirmation) -> ConfirmationOut:
         seconds_left=max(0.0, round(c.expires - time.monotonic(), 1)),
         result=c.result,
         error=c.error,
+        unasked=c.unasked,
     )
 
 
@@ -383,6 +392,9 @@ class Action:
     path: str  # with {param} placeholders, each a record id
     describe: Callable[[Session, dict[str, Any]], str]
     body: Callable[[dict[str, Any]], dict[str, Any] | None] = lambda _params: None
+    # D223: whether everything the change removes is Claude's own (made by it, and changed by
+    # nobody else since); None: it always asks
+    own: Callable[[Session, dict[str, Any], Autonomy], bool] | None = None
 
     @property
     def params(self) -> list[str]:
@@ -560,49 +572,135 @@ def _describe_named(model: type, what: str, param: str) -> Callable[[Session, di
     return describe
 
 
+# ---------- D223: what Claude made itself ----------
+
+
+def _own_nodes(session: Session, made: Autonomy, node_ids: list[str], *more: str) -> bool:
+    """The nodes with all that goes when they are deleted: their calculations, notes, the edges
+    touching them and the edges a free species is on."""
+    ids = [*node_ids, *more]
+    if node_ids:
+        ids += session.scalars(select(Calculation.id).where(Calculation.node_id.in_(node_ids)))
+        ids += session.scalars(select(NodeNote.id).where(NodeNote.node_id.in_(node_ids)))
+        ids += [t.id for t in transition_service.touching(session, node_ids)]
+        for node_id in node_ids:
+            ids += [u.transition_id for u in species_service.usage(session, node_id)]
+    return made.owns(*ids)
+
+
+def _own_node(session: Session, params: dict[str, Any], made: Autonomy) -> bool:
+    return _own_nodes(session, made, [params["node_id"]])
+
+
+def _own_group(session: Session, params: dict[str, Any], made: Autonomy) -> bool:
+    preview = group_service.delete_preview(session, params["group_id"])
+    edges = [t.id for t in preview["all_transitions"]]
+    return _own_nodes(
+        session, made, [n.id for n in preview["members"]], preview["group"].id, *edges
+    )
+
+
+def _own_dissolve(session: Session, params: dict[str, Any], made: Autonomy) -> bool:
+    preview = group_service.delete_preview(session, params["group_id"])
+    return made.owns(preview["group"].id, *(t.id for t in preview["group_transitions"]))
+
+
+def _own_sub(session: Session, params: dict[str, Any], made: Autonomy) -> bool:
+    found = sub_service.delete_preview(session, params["sub_investigation_id"])
+    inside = found.contents
+    others = [found.sub.id, *(g.id for g in inside.groups), *(s.id for s in inside.subs)]
+    others += [t.id for t in found.transitions]
+    return _own_nodes(session, made, [n.id for n in inside.nodes], *others)
+
+
+def _own_undo(session: Session, params: dict[str, Any], made: Autonomy) -> bool:
+    plan = import_undo.preview_import(session, int(params["entry_id"]))
+    ids = [c.id for c in plan.records.calculations] + [n.id for n in plan.deleted]
+    ids += [n.id for n, _field in [*plan.restored, *plan.kept]] + [n.id for n, _a, _r in plan.tags]
+    if plan.group is not None:
+        ids.append(plan.group.id)
+    return made.owns(*ids)
+
+
+def _own_step(session: Session, params: dict[str, Any], made: Autonomy) -> bool:
+    """The step, and the nodes that would be left with no step."""
+    nodes = session.scalars(select(Node.id).where(Node.step_id == params["step_id"]))
+    return made.owns(params["step_id"], *nodes)
+
+
+def _own_branch(session: Session, params: dict[str, Any], made: Autonomy) -> bool:
+    """The branch, and the nodes that would be left with no branch."""
+    members = branch_service.members(session, params["branch_id"])
+    return made.owns(params["branch_id"], *(n.id for n in members))
+
+
+def _own(param: str) -> Callable[[Session, dict[str, Any], Autonomy], bool]:
+    """A record that takes nothing else with it."""
+    return lambda _session, params, made: made.owns(params[param])
+
+
 ACTIONS: dict[str, Action] = {
-    "delete_node": Action("DELETE", "/api/nodes/{node_id}", _describe_node),
-    "delete_group": Action("DELETE", "/api/groups/{group_id}", _describe_group),
+    "delete_node": Action("DELETE", "/api/nodes/{node_id}", _describe_node, own=_own_node),
+    "delete_group": Action("DELETE", "/api/groups/{group_id}", _describe_group, own=_own_group),
     "dissolve_group": Action(
         "POST",
         "/api/groups/{group_id}/dissolve",
         _describe_dissolve,
         lambda p: {"restore_branches": bool(p.get("restore_branches", False))},
+        own=_own_dissolve,
     ),
     "delete_sub_investigation": Action(
-        "DELETE", "/api/sub-investigations/{sub_investigation_id}", _describe_sub
+        "DELETE", "/api/sub-investigations/{sub_investigation_id}", _describe_sub, own=_own_sub
     ),
     "dissolve_sub_investigation": Action(
-        "POST", "/api/sub-investigations/{sub_investigation_id}/dissolve", _describe_sub_dissolve
+        "POST",
+        "/api/sub-investigations/{sub_investigation_id}/dissolve",
+        _describe_sub_dissolve,
+        own=_own("sub_investigation_id"),
     ),
-    "delete_step": Action("DELETE", "/api/steps/{step_id}", _describe_step),
-    "delete_branch": Action("DELETE", "/api/branches/{branch_id}", _describe_branch),
-    "delete_transition": Action("DELETE", "/api/transitions/{transition_id}", _describe_transition),
+    "delete_step": Action("DELETE", "/api/steps/{step_id}", _describe_step, own=_own_step),
+    "delete_branch": Action(
+        "DELETE", "/api/branches/{branch_id}", _describe_branch, own=_own_branch
+    ),
+    "delete_transition": Action(
+        "DELETE",
+        "/api/transitions/{transition_id}",
+        _describe_transition,
+        own=_own("transition_id"),
+    ),
     "remove_coordinates": Action(
-        "PUT", "/api/nodes/{node_id}/geometry", _describe_coordinates, lambda _p: {"xyz": ""}
+        "PUT",
+        "/api/nodes/{node_id}/geometry",
+        _describe_coordinates,
+        lambda _p: {"xyz": ""},
+        own=_own("node_id"),
     ),
-    "delete_note": Action("DELETE", "/api/notes/{note_id}", _describe_note),
+    "delete_note": Action("DELETE", "/api/notes/{note_id}", _describe_note, own=_own("note_id")),
     "delete_selectivity": Action(
         "DELETE",
         "/api/selectivities/{selectivity_id}",
         _describe_named(Selectivity, "Selectivity", "selectivity_id"),
+        own=_own("selectivity_id"),
     ),
     "delete_turnover": Action(
         "DELETE",
         "/api/turnovers/{turnover_id}",
         _describe_named(Turnover, "Turnover", "turnover_id"),
+        own=_own("turnover_id"),
     ),
     "delete_conformer_equilibrium": Action(
         "DELETE",
         "/api/equilibria/{equilibrium_id}",
         _describe_named(ConformerEquilibrium, "Conformer equilibrium", "equilibrium_id"),
+        own=_own("equilibrium_id"),
     ),
     "delete_steric_profile": Action(
         "DELETE",
         "/api/steric-profiles/{profile_id}",
         _describe_named(StericProfile, "Steric profile", "profile_id"),
+        own=_own("profile_id"),
     ),
-    "undo_import": Action("POST", "/api/history/{entry_id}/undo", _describe_undo),
+    "undo_import": Action("POST", "/api/history/{entry_id}/undo", _describe_undo, own=_own_undo),
     "delete_alignment_set": Action(
         "DELETE",
         "/api/alignment-sets/{set_id}",
@@ -621,7 +719,8 @@ class ConfirmationIn(BaseModel):
 @router.post("/confirmations", response_model=ConfirmationOut, status_code=201)
 def ask(body: ConfirmationIn, request: Request, session: DbSession):
     """Claude asks to delete something (D91). Nothing changes until the user confirms in the
-    app; the answer says what the dialog shows."""
+    app; the answer says what the dialog shows. D223: while Claude works on its own, what it
+    made itself (and nobody else changed since) goes at once, without the dialog."""
     action = ACTIONS.get(body.action)
     if action is None:
         raise HTTPException(422, f"'{body.action}' is not a change that can be asked for")
@@ -641,10 +740,45 @@ def ask(body: ConfirmationIn, request: Request, session: DbSession):
         expires=time.monotonic() + timeout,
     )
     state = live_state(request)
+    made = state.autonomy
+    unasked = (
+        request.headers.get(CLIENT_HEADER) == AGENT
+        and made.on_for(_folder(request))
+        and action.own is not None
+        and action.own(session, body.params, made)
+    )
     with state.lock:
         state.confirmations[confirmation.id] = confirmation
-        state.confirm_version += 1
+        if unasked:
+            confirmation.unasked = True
+            confirmation.status = "running"  # never shown in the page's dialog
+        else:
+            state.confirm_version += 1
+    if unasked:
+        session.close()  # the delete below is a request of its own; hold no read open over it
+        anyio.from_thread.run(_run, request.app, state, confirmation)
     return _confirmation_out(confirmation)
+
+
+async def _run(app: ASGIApp, state: LiveState, found: Confirmation) -> None:
+    """Make the app's own request for a confirmed (or, D223, unasked) change, as Claude."""
+    action = ACTIONS[found.action]
+    path = action.path.format(**{k: quote(found.params[k], safe="") for k in action.params})
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+        response = await client.request(
+            action.method, path, json=action.body(found.params), headers={CLIENT_HEADER: AGENT}
+        )
+    with state.lock:
+        if response.is_success:
+            found.result = response.json() if response.content else None
+            state._finish(found, "done")
+        else:
+            try:
+                found.error = str(response.json().get("detail"))
+            except ValueError:
+                found.error = response.text or f"HTTP {response.status_code}"
+            state._finish(found, "failed")
 
 
 def _confirmation(request: Request, confirmation_id: str) -> Confirmation:
@@ -693,21 +827,5 @@ async def answer(request: Request, confirmation_id: str, body: AnswerIn):
             state._finish(found, "refused")
             return _confirmation_out(found)
         found.status = "running"
-    action = ACTIONS[found.action]
-    path = action.path.format(**{k: quote(found.params[k], safe="") for k in action.params})
-    transport = httpx.ASGITransport(app=request.app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as app:
-        response = await app.request(
-            action.method, path, json=action.body(found.params), headers={CLIENT_HEADER: AGENT}
-        )
-    with state.lock:
-        if response.is_success:
-            found.result = response.json() if response.content else None
-            state._finish(found, "done")
-        else:
-            try:
-                found.error = str(response.json().get("detail"))
-            except ValueError:
-                found.error = response.text or f"HTTP {response.status_code}"
-            state._finish(found, "failed")
+    await _run(request.app, state, found)
     return _confirmation_out(found)

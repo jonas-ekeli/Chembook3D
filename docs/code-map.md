@@ -688,6 +688,12 @@ Routes for all of these are in `api/pathway.py`.
 - `api/claude.py` hands out one-time tokens and serves the terminal WebSocket, refusing anything not local (bind address, client, Host, Origin).
 - `components/ClaudePanel.tsx` is the xterm.js panel, the Claude tab of the side panel (`SidePanel.tsx`) docked right in `.app-body`, kept mounted while hidden.
 - Tests use `tests/fake_claude.py` through `CHEMBOOK3D_CLAUDE`.
+- "Work on its own" (D223, A153): `autonomy.py` holds the switch for the open investigation in memory (`LiveState.autonomy`), the copy of the database it makes when turned on, and the ledger of what Claude made, filled by `services.history.record` through `history.MADE` (set by `api.live.ChangeTracker`).
+  - `GET/PUT /api/claude/autonomy` in `api/claude.py`: the page only; a PUT stops every Claude terminal, since permissions are written at the start of a session.
+  - `claude_panel.prepare(..., alone)` then allows `allowed_alone(cloud)` and adds `AUTONOMY_GUIDE` to the CLAUDE.md.
+  - `api/live.py`: each `Action` has `own`, which says whether Claude made all that the action would remove; `ask` then runs it at once (`unasked`).
+  - `api/local.py` passes the job limit to `local_jobs.create_job` for Claude's requests; a job's `started_by` in `job.json` makes its imported result Claude's.
+  - The panel's tick box, warning (`AutonomyDialog`, shown on the page through a portal) and bar are in `components/ClaudePanel.tsx`; `util.limitText` mirrors `autonomy.limit_text`.
 
 ## Claude's structure tools (D144, A89)
 

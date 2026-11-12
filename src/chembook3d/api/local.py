@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from chembook3d import local_jobs, local_tools
 from chembook3d.api.jobs import _local_page_only
+from chembook3d.api.live import AGENT, CLIENT_HEADER
 from chembook3d.api.routes import DbSession, _investigation
 from chembook3d.models import Node
 from chembook3d.services import builder
@@ -281,6 +282,15 @@ def check_core(body: CoreIn, request: Request, session: DbSession) -> dict[str, 
     }
 
 
+def _claude_limit(request: Request, folder: Any) -> int | None:
+    """D223: the longest job Claude may start while it works on its own; None for the user's
+    own jobs, and for Claude's while it asks first."""
+    autonomy = request.app.state.live.autonomy
+    if request.headers.get(CLIENT_HEADER) == AGENT and autonomy.on_for(folder):
+        return autonomy.job_limit
+    return None
+
+
 @router.post("/jobs")
 def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[str, Any]:
     """Start a geometry refinement of a node on this computer; the result is imported onto the
@@ -304,6 +314,7 @@ def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[s
             _check_core(body.reacting, count, "Reacting"),
             body.frequencies,
             _scan(body.scan, atoms),
+            _claude_limit(request, folder),
         )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc

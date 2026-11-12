@@ -23,10 +23,10 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.datastructures import Headers
 
-from chembook3d import claude_panel, cloud_jobs
+from chembook3d import autonomy, claude_panel, cloud_jobs
 from chembook3d.api.routes import _investigation
 
 router = APIRouter(prefix="/api/claude")
@@ -47,6 +47,7 @@ class _Launch:
     folder: Path
     name: str
     app_url: str
+    alone: claude_panel.Alone | None = None  # D223: Claude works on its own in this session
 
 
 @dataclass
@@ -163,8 +164,76 @@ def new_session(body: LaunchIn, request: Request) -> LaunchOut:
         folder=investigation.folder,
         name=investigation.name,
         app_url=f"http://127.0.0.1:{port}",
+        alone=_alone(request, investigation.folder),
     )
     return LaunchOut(token=token)
+
+
+# ---------- Claude working on its own (D223) ----------
+
+
+def _alone(request: Request, folder: Path) -> claude_panel.Alone | None:
+    state: autonomy.Autonomy = request.app.state.live.autonomy
+    if not state.on_for(folder):
+        return None
+    return claude_panel.Alone(limit=autonomy.limit_text(state.job_limit), cloud=state.cloud)
+
+
+class AutonomyOut(BaseModel):
+    on: bool  # for the investigation open in the app
+    job_limit: int  # seconds: the longest local job Claude may start on its own
+    job_limits: list[int]  # what the dialog offers
+    cloud: bool  # Claude may also start cloud sessions without asking
+    since: str | None = None
+    backup: str | None = None  # the copy of the database made when it was turned on
+
+
+class AutonomyIn(BaseModel):
+    on: bool
+    job_limit: int = Field(autonomy.DEFAULT_JOB_LIMIT, ge=60, le=14 * 24 * 3600)
+    cloud: bool = False
+
+
+def _autonomy_out(request: Request) -> AutonomyOut:
+    state: autonomy.Autonomy = request.app.state.live.autonomy
+    investigation = getattr(request.app.state, "investigation", None)
+    on = investigation is not None and state.on_for(investigation.folder)
+    return AutonomyOut(
+        on=on,
+        job_limit=state.job_limit if on else autonomy.DEFAULT_JOB_LIMIT,
+        job_limits=list(autonomy.JOB_LIMITS),
+        cloud=state.cloud if on else False,
+        since=state.since if on else None,
+        backup=state.backup if on else None,
+    )
+
+
+@router.get("/autonomy")
+def autonomy_status(request: Request) -> AutonomyOut:
+    """Whether Claude works on its own in the open investigation, and within what."""
+    return _autonomy_out(request)
+
+
+@router.put("/autonomy")
+def set_autonomy(body: AutonomyIn, request: Request) -> AutonomyOut:
+    """The switch "Work on its own", from the app's own page only: Claude has no
+    way to turn it on (the MCP server sends no origin). Turning it on copies the database to
+    backups/ first. Either way every running panel terminal is stopped, since its permissions
+    were written when it started; the page starts Claude again and continues the conversation.
+    """
+    refusal = _refusal(request.scope, request.headers)
+    if refusal is not None:
+        raise HTTPException(403, refusal)
+    if not request.headers.get("origin"):
+        raise HTTPException(403, "Only the app's own page can change how Claude works")
+    investigation = _investigation(request)
+    state: autonomy.Autonomy = request.app.state.live.autonomy
+    if body.on:
+        state.turn_on(investigation.folder, body.job_limit, body.cloud)
+    else:
+        state.turn_off()
+    _panel(request.app).close_all()
+    return _autonomy_out(request)
 
 
 def _size(value: str | None, default: int) -> int:
@@ -200,7 +269,7 @@ async def terminal(websocket: WebSocket) -> None:
         loop.call_soon_threadsafe(queue.put_nowait, text)
 
     try:
-        work = claude_panel.prepare(launch.folder, launch.name, launch.app_url)
+        work = claude_panel.prepare(launch.folder, launch.name, launch.app_url, launch.alone)
         process = claude_panel.Terminal(
             claude_panel.command(executable, launch.resume),
             work,

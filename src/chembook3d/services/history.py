@@ -11,6 +11,9 @@ from chembook3d.models import Calculation, HistoryEntry
 # Who makes the current request's changes: "manual" for the user, "claude" when Claude makes
 # them through `chembook3d mcp` (D91). Set per request by api.live.ChangeTracker.
 SOURCE: ContextVar[str] = ContextVar("history_source", default="manual")
+# D223: the running app's ledger of what Claude made (`autonomy.Autonomy`), told of every entry
+# with who asked for it, whatever the entry's own source says (an import by Claude is "import").
+MADE: ContextVar[Any] = ContextVar("history_made", default=None)
 
 
 def record(
@@ -23,6 +26,9 @@ def record(
     new: Any = None,
     source: str = "manual",
 ) -> None:
+    ledger = MADE.get()
+    if ledger is not None:
+        ledger.note(SOURCE.get(), record_type, record_id, action, old, new)
     if source == "manual":
         source = SOURCE.get()
     session.add(

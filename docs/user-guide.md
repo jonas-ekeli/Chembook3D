@@ -333,6 +333,38 @@ with GFN2-xTB" or "scan this bond from here to 3 Å". It tells you which method 
 how long it should take, asks first when that is over an hour, and the result is imported onto
 the node as when you start it yourself. Claude cannot install the tools.
 
+### Let Claude work on its own
+
+Normally Claude Code asks in its terminal before each change, and the app asks before each
+delete. To let Claude build part of an investigation, or a whole one, without stopping, tick
+**Work on its own** at the top of the Claude panel. A warning says what that means; choose the
+longest calculation Claude may start on this computer (1 hour unless you change it) and whether
+it may also start cloud sessions, then click **Turn on**. If Claude was running it starts again
+in the same conversation, because its permissions are set when it starts.
+
+While it is on, a bar in the panel says so, and Claude:
+
+- creates and changes nodes, edges, steps, branches, groups, notes and analyses, imports files
+  and starts calculations on this computer without asking;
+- makes the choices the app otherwise leaves to you, such as which pathway to follow or which
+  conformer represents a group, and writes each one into the notes of that record as a line
+  starting "Claude chose:" with its reason;
+- deletes without asking only what it made itself and you have not changed since. Deleting
+  anything else still waits for your **Confirm**;
+- is refused a local job whose estimate is over the limit you chose, and without the cloud tick
+  box still asks before it starts a cloud session;
+- changes nothing in how it works with a server: new files only where you turned on **Let
+  Claude write new files here**, and never an edit, a delete or a command there.
+
+Claude can be wrong, so check what it built before you rely on it. Every change is marked
+"claude" in the history, and turning the switch on saves a copy of the investigation's database
+in its `backups` folder (`investigation.sqlite.claude-<time>.bak`).
+
+**Stop and turn off**, or clearing the tick box, stops Claude and brings the asking back. Jobs
+it started keep running; cancel them under **Local jobs**. The switch is for the open
+investigation only and is off again when the app restarts. Creating and opening investigations,
+Sync, installing the local tools and shutting the app down stay yours either way.
+
 ### Calculations in the cloud
 
 Claude can hand an xTB or CREST calculation to a

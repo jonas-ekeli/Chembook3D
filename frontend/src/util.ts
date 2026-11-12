@@ -126,3 +126,11 @@ export function scientific(value: number | null): string {
     .join('')
   return `${mantissa} × 10${power}`
 }
+
+/** D223: a job limit in words, as the backend's `autonomy.limit_text`. */
+export function limitText(seconds: number): string {
+  if (seconds < 3600) return `${Math.round(seconds / 60)} minutes`
+  const hours = seconds / 3600
+  if (hours === 1) return '1 hour'
+  return hours >= 48 && hours % 24 === 0 ? `${hours / 24} days` : `${hours} hours`
+}

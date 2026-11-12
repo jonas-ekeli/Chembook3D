@@ -4461,6 +4461,27 @@ table.selectivity-table {
   color: var(--text);
   border-bottom: 1px solid var(--border);
 }
+/* D223: the bar shown while Claude works on its own */
+.claude-alone {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border-bottom: 1px solid var(--warn-border);
+  font-size: 13px;
+}
+.claude-alone span {
+  flex: 1;
+}
+.claude-alone button {
+  flex-shrink: 0;
+}
+.claude-head .check {
+  font-size: 13px;
+  white-space: nowrap;
+}
 .claude-intro {
   padding: 1rem;
   background: var(--panel);

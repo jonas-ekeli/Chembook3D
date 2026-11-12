@@ -2131,6 +2131,20 @@ export type ClaudeStatus = {
   install: { command: string; docs: string }
 }
 
+/** D223: "Work on its own" for the open investigation. */
+export type ClaudeAutonomy = {
+  on: boolean
+  /** Seconds: the longest local job Claude may start on its own. */
+  job_limit: number
+  /** What the dialog offers. */
+  job_limits: number[]
+  /** Claude may also start cloud sessions without asking. */
+  cloud: boolean
+  since: string | null
+  /** The copy of the database made when it was turned on (in backups/). */
+  backup: string | null
+}
+
 /** D91: this tab's name in the backend's change counter, so it reloads only for changes made
  * elsewhere (by Claude, or in another tab). */
 export const CLIENT_ID = `tab-${Math.random().toString(36).slice(2, 10)}`
@@ -2460,6 +2474,10 @@ export const api = {
     request<{ token: string }>('POST', `/claude/launches/${encodeURIComponent(jobId)}/view`),
   /** A one-time token for the panel's terminal WebSocket (D92). */
   claudeSession: (resume: boolean) => request<{ token: string }>('POST', '/claude/sessions', { resume }),
+  claudeAutonomy: () => request<ClaudeAutonomy>('GET', '/claude/autonomy'),
+  /** D223: the switch; every running Claude terminal is stopped, as its permissions are from its start. */
+  setClaudeAutonomy: (body: { on: boolean; job_limit?: number; cloud?: boolean }) =>
+    request<ClaudeAutonomy>('PUT', '/claude/autonomy', body),
   /** A long poll: answers when something changed elsewhere, the requests changed, or after `wait` s. */
   live: (since: number | null, confirmVersion: number | null, wait: number, signal?: AbortSignal) => {
     const query = new URLSearchParams({ client: CLIENT_ID, wait: String(wait) })
