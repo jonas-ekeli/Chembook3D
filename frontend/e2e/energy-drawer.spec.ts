@@ -432,7 +432,14 @@ test('energy drawer: a pathway takes the colour picked on its swatch', async ({ 
     '#d55e00',
   )
 
-  // Kept with the profile, and in the saved figure.
+  // Kept with the profile, and in the saved figure. The drawer saves after it has drawn the
+  // colour, and a reload would drop a save still on its way, so wait until it is stored.
+  await expect
+    .poll(async () =>
+      ((await (await page.request.get('/api/energy-profiles')).json()) as { paths: { colour?: string | null }[] }[])
+        .flatMap((p) => p.paths.map((path) => path.colour)),
+    )
+    .toContain('#d55e00')
   await page.reload()
   await expect(line).toHaveAttribute('stroke', '#d55e00')
   expect(await savedSvg(page)).toContain('#d55e00')
