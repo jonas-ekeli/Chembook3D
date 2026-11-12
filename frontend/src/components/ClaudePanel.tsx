@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type ClaudeStatus, type LaunchQuestion as Question } from '../api'
+import { createPortal } from 'react-dom'
+import { api, type ClaudeAutonomy, type ClaudeStatus, type LaunchQuestion as Question } from '../api'
 import { browserKey, openXterm, socketUrl, type Xterm } from '../terminal'
 import { LaunchQuestion } from './LaunchQuestion'
-import { errorText } from '../util'
+import { Modal } from './Modal'
+import { errorText, limitText } from '../util'
 
 // D92: the Claude tab of the side panel (SidePanel.tsx), a terminal running the official
 // Claude Code CLI on this computer (src/chembook3d/claude_panel.py). It stays mounted while
@@ -19,6 +21,63 @@ type Session = Xterm & {
   socket: WebSocket | null
   /** Claude Code ended or was stopped; a closing connection is then expected. */
   ended: boolean
+}
+
+/** D223: the warning shown before Claude may work on its own, with what it may start. */
+function AutonomyDialog({
+  autonomy,
+  onCancel,
+  onTurnOn,
+}: {
+  autonomy: ClaudeAutonomy
+  onCancel: () => void
+  onTurnOn: (jobLimit: number, cloud: boolean) => void
+}) {
+  const [limit, setLimit] = useState(autonomy.job_limit)
+  const [cloud, setCloud] = useState(false)
+  return (
+    <Modal
+      title="Let Claude work on its own?"
+      onClose={onCancel}
+      actions={
+        <>
+          <button onClick={onCancel}>Cancel</button>
+          <button className="danger" onClick={() => onTurnOn(limit, cloud)}>
+            Turn on
+          </button>
+        </>
+      }
+    >
+      <p>
+        While this is on, Claude changes this investigation without asking you first. It creates and changes nodes,
+        edges, steps, branches, groups and analyses, imports files, and starts calculations on this computer. It also
+        makes choices the app otherwise leaves to you, such as which pathway to follow or which conformer represents a
+        group, and notes each one as “Claude chose”.
+      </p>
+      <p>
+        <strong>Claude can be wrong.</strong> Check its work before you rely on it: every change is marked “claude” in
+        the history, and a copy of the investigation is saved now, in its backups folder.
+      </p>
+      <p className="muted">
+        Still asked or switched off: deleting anything Claude did not make itself, everything on a server beyond new
+        files where you allowed them, and shell, file and web tools. It turns off when the app restarts.
+      </p>
+      <label>
+        Longest local job Claude may start{' '}
+        <select value={limit} onChange={(event) => setLimit(Number(event.target.value))}>
+          {autonomy.job_limits.map((seconds) => (
+            <option key={seconds} value={seconds}>
+              {limitText(seconds)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={cloud} onChange={(event) => setCloud(event.target.checked)} /> Also start
+        cloud sessions (uses your Claude usage)
+      </label>
+    </Modal>
+  )
 }
 
 /** How often the panel looks for a cloud job's launch that waits for an answer (ms). */
@@ -39,6 +98,8 @@ export function ClaudePanel({
   const host = useRef<HTMLDivElement>(null)
   const session = useRef<Session | null>(null)
   const [question, setQuestion] = useState<Question | null>(null)
+  const [autonomy, setAutonomy] = useState<ClaudeAutonomy | null>(null)
+  const [asking, setAsking] = useState(false)
   const attention = useRef(onAttention)
   useEffect(() => {
     attention.current = onAttention
@@ -78,6 +139,23 @@ export function ClaudePanel({
   useEffect(() => {
     if (status === null) void load()
   }, [status])
+
+  // D223: whether Claude works on its own here; read again when the panel is shown, since
+  // another tab may have changed it.
+  const usable = status?.enabled === true && status.available && status.notebook_tools
+  useEffect(() => {
+    if (!usable || !open) return
+    let stopped = false
+    api.claudeAutonomy().then(
+      (next) => {
+        if (!stopped) setAutonomy(next)
+      },
+      () => undefined,
+    )
+    return () => {
+      stopped = true
+    }
+  }, [usable, open])
 
   // Stop Claude Code when the panel goes away (another investigation, or closing it).
   useEffect(
@@ -171,6 +249,27 @@ export function ClaudePanel({
     setPhase({ kind: 'ended', message: 'Claude Code was stopped.' })
   }
 
+  // D223: the app stops every Claude terminal when the switch changes, because a session's
+  // permissions are written when it starts. Turning it on starts Claude again in the same
+  // conversation; turning it off leaves it stopped, which is what Stop is for.
+  const switchAutonomy = async (on: boolean, jobLimit?: number, cloud?: boolean) => {
+    const current = session.current
+    const wasRunning = phase.kind === 'running' || phase.kind === 'starting'
+    if (current) current.ended = true
+    setAsking(false)
+    try {
+      setAutonomy(await api.setClaudeAutonomy({ on, job_limit: jobLimit, cloud }))
+    } catch (err) {
+      if (current) current.ended = false
+      setPhase({ kind: 'ended', message: errorText(err) })
+      return
+    }
+    if (!wasRunning) return
+    current?.socket?.close()
+    if (on) void start(true)
+    else setPhase({ kind: 'ended', message: 'Claude was stopped. It asks before each change again.' })
+  }
+
   // A picture on the clipboard pastes no text; Claude Code reads it from the clipboard
   // itself when it gets Ctrl+V.
   const onPaste = (event: React.ClipboardEvent) => {
@@ -201,8 +300,43 @@ export function ClaudePanel({
           {phase.kind === 'running' ? 'Claude Code is running' : phase.kind === 'starting' ? 'Starting…' : ''}
         </span>
         <span className="spacer" />
+        {usable && autonomy && (
+          <label
+            className="check"
+            title="Claude then changes this investigation without asking first. A warning says what that means before it is turned on."
+          >
+            <input
+              type="checkbox"
+              checked={autonomy.on}
+              onChange={(event) => (event.target.checked ? setAsking(true) : void switchAutonomy(false))}
+            />{' '}
+            Work on its own
+          </label>
+        )}
         {running && <button onClick={stop}>Stop</button>}
       </div>
+      {autonomy?.on && (
+        <div className="claude-alone" role="status" aria-label="Working on its own">
+          <span>
+            <strong>Claude is working on its own.</strong> It changes this investigation without asking, and starts
+            local jobs of up to {limitText(autonomy.job_limit)}
+            {autonomy.cloud ? ' and cloud sessions' : ''}. Jobs it started keep running when you stop it; cancel them
+            in Local jobs.
+          </span>
+          <button onClick={() => void switchAutonomy(false)}>Stop and turn off</button>
+        </div>
+      )}
+      {asking &&
+        autonomy &&
+        // On the page, not in the panel, whose text is the terminal's.
+        createPortal(
+          <AutonomyDialog
+            autonomy={autonomy}
+            onCancel={() => setAsking(false)}
+            onTurnOn={(jobLimit, cloud) => void switchAutonomy(true, jobLimit, cloud)}
+          />,
+          document.body,
+        )}
       {question && <LaunchQuestion key={question.job_id} question={question} onDone={() => setQuestion(null)} />}
       {phase.kind === 'idle' && (
         <div className="claude-intro">
@@ -236,7 +370,8 @@ export function ClaudePanel({
             <>
               <p>
                 Claude Code runs here with your own Claude sign-in. It works on the investigation open in this
-                window, asks before it changes anything, and cannot use a shell, edit files or browse the web.
+                window, {autonomy?.on ? 'changes it without asking while it works on its own' : 'asks before it changes anything'},
+                and cannot use a shell, edit files or browse the web.
               </p>
               {!status.notebook_tools && (
                 <p className="muted">

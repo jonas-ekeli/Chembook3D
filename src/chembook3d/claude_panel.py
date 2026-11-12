@@ -19,6 +19,7 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from chembook3d.settings import config_dir
@@ -150,6 +151,53 @@ and cloud work themselves.
 """
 
 
+# D223: added to the guide while "Work on its own" is on for the investigation.
+AUTONOMY_GUIDE = """
+# You are working on your own (D223)
+
+The person turned on "Work on its own" in the Claude panel for this investigation and accepted its
+warning. Until they turn it off, this section comes before the rules above wherever those say
+to ask, to show the person something first, or to wait for them to agree.
+
+- Do not stop to ask for permission or guidance. Decide and carry on. Stop only when the task
+  is done, when the app refuses something you cannot work around, or when you need something
+  only the person has (a file path, a login, tools that are not installed).
+- Choices the notebook otherwise leaves to the person (X5): which pathway, a branch's lineage,
+  a group's representative, which conformers to keep. You may make them, from energies when
+  that is the sound basis, always at one level of theory. Write each one into the notes of the
+  record it concerns as a line starting "Claude chose:" with the reason, so the person can
+  find and change it. Never overwrite a choice the person made.
+- Calculations on this computer: start them yourself. The app refuses a job of yours whose
+  estimate is over {limit}: use a faster method (GFN2-xTB, g-xTB, ONIOM with a smaller core)
+  or leave it and say so at the end. Do not start a second job that only repeats a running one.
+- Cloud sessions: {cloud}
+- Deleting: what you made yourself, and the person has not changed since, goes without asking.
+  Anything else still waits for the person's Confirm in the app's window. Do not wait around
+  for it: if a delete is refused or not answered, leave the record, set its status to rejected
+  or superseded where that fits, and go on.
+- Servers such as Saga: nothing changes. New files only where the person turned on "Let
+  Claude write new files here"; never edit, replace or delete a file there, never run anything
+  there, and give delete commands only as text for the person to run.
+- Build so the person can check you: clear names, every node in a step and a branch, edges
+  with their free species, notes that say where a structure or number came from. A local or
+  cloud result is a starting point: say what it is (method, converged or not), never more.
+- Finish with a summary: what you built, every "Claude chose" decision, what failed or was
+  refused, and what is left for the person.
+"""
+CLOUD_ALLOWED = (
+    "you may start them yourself (`create_cloud_job`, then `start_cloud_job`) for what this "
+    "computer does not run. They use the person's Claude usage, so start only what the task "
+    "needs."
+)
+CLOUD_ASKS = (
+    "the person did not allow you to start them on your own, so `start_cloud_job` and "
+    "`message_cloud_job` still ask in this terminal. Prefer what runs on this computer, and "
+    "list in your summary what would need a cloud session."
+)
+# Tools that stay asked in the terminal while Claude works on its own without the cloud tick.
+CLOUD_TOOLS = frozenset({"start_cloud_job", "message_cloud_job"})
+
+
 def _home_bin() -> list[Path]:
     """Where the official installer puts `claude` when it is not on the PATH."""
     home = Path.home()
@@ -196,6 +244,23 @@ def notebook_server() -> tuple[dict, list[str]] | None:
     return server, read_only
 
 
+def allowed_alone(cloud: bool) -> list[str]:
+    """D223: the tools the panel allows without asking while Claude works on its own: all of
+    them (a delete is still decided by the app, `api/live.py`), but for starting and messaging
+    cloud sessions unless the person ticked that."""
+    from chembook3d import mcp_tools
+
+    return sorted(t.name for t in mcp_tools.TOOLS if cloud or t.name not in CLOUD_TOOLS)
+
+
+@dataclass(frozen=True)
+class Alone:
+    """D223: how Claude works on its own in a panel session (from `autonomy.Autonomy`)."""
+
+    limit: str  # the longest local job it may start, in words
+    cloud: bool  # it may start cloud sessions too
+
+
 def workspace(folder: Path) -> Path:
     """The working folder of the panel for one investigation, in the app's config folder, so
     `claude --continue` picks up that investigation's last conversation. Named after the
@@ -206,8 +271,9 @@ def workspace(folder: Path) -> Path:
     return config_dir() / "claude" / f"{slug}-{digest}"
 
 
-def prepare(folder: Path, name: str, app_url: str) -> Path:
-    """Write the panel's working folder for an investigation and return it."""
+def prepare(folder: Path, name: str, app_url: str, alone: Alone | None = None) -> Path:
+    """Write the panel's working folder for an investigation and return it. `alone` (D223):
+    Claude works on its own, so every tool is allowed and the guide says to decide and go on."""
     work = workspace(folder)
     work.mkdir(parents=True, exist_ok=True)
     servers: dict[str, dict] = {}
@@ -217,11 +283,17 @@ def prepare(folder: Path, name: str, app_url: str) -> Path:
         config, read_only = server
         config["args"] = [*config["args"], "--url", app_url]
         servers[SERVER_NAME] = config
-        allow = [f"mcp__{SERVER_NAME}__{tool}" for tool in read_only]
+        tools = allowed_alone(alone.cloud) if alone is not None else read_only
+        allow = [f"mcp__{SERVER_NAME}__{tool}" for tool in tools]
     settings = {"permissions": {"allow": allow, "deny": list(DENIED_TOOLS)}}
+    guide = NOTEBOOK_GUIDE.format(name=name.replace("\n", " "))
+    if alone is not None:
+        guide += AUTONOMY_GUIDE.format(
+            limit=alone.limit, cloud=CLOUD_ALLOWED if alone.cloud else CLOUD_ASKS
+        )
     _write(work / MCP_CONFIG_NAME, json.dumps({"mcpServers": servers}, indent=2) + "\n")
     _write(work / SETTINGS_NAME, json.dumps(settings, indent=2) + "\n")
-    _write(work / "CLAUDE.md", NOTEBOOK_GUIDE.format(name=name.replace("\n", " ")))
+    _write(work / "CLAUDE.md", guide)
     return work
 
 

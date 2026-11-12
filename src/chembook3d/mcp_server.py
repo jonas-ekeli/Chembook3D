@@ -238,6 +238,8 @@ class Bridge:
         if found["status"] == "done":
             result = found.get("result")
             text = f"The user confirmed; done: {summary}."
+            if found.get("unasked"):  # D223
+                text = f"Done without asking, as you made it yourself: {summary}."
             if result:
                 text += "\n" + json.dumps(result, ensure_ascii=False, indent=1)
             return _text(text)

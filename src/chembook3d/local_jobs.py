@@ -41,7 +41,7 @@ from chembook3d import local_tools
 from chembook3d.local_worker import CRITERIA, METHOD_LABELS, SCAN_POINTS, grid_cells
 from chembook3d.models import Node
 from chembook3d.parsers import local_result
-from chembook3d.services import imports, oniom
+from chembook3d.services import history, imports, oniom
 from chembook3d.services import nodes as node_service
 from chembook3d.services.records import RecordError
 
@@ -142,6 +142,14 @@ def estimate(method: str, atoms: int, cores: int, model: int | None = None) -> d
         "seconds": round(per_step * steps(atoms)),
         "measured": bool(measured),
     }
+
+
+def _duration(seconds: float) -> str:
+    if seconds < 90:
+        return f"{round(seconds)} s"
+    if seconds < 5400:
+        return f"{round(seconds / 60)} min"
+    return f"{seconds / 3600:.1f} h".replace(".0 h", " h")
 
 
 def calibrate(result: dict[str, Any], job: dict[str, Any]) -> None:
@@ -257,7 +265,10 @@ def create_job(
     reacting: list[int] | None = None,
     frequencies: bool | None = None,
     scan: dict[str, Any] | None = None,
+    limit: int | None = None,
 ) -> dict[str, Any]:
+    """Start a job. `limit` (seconds, D223) refuses one whose estimate is longer: the longest
+    job Claude may start while it works on its own."""
     if method not in methods():
         raise LocalJobError(f"Unknown method {method!r}; offered: {', '.join(methods())}")
     atoms = node_service.atoms_of(node)
@@ -287,6 +298,17 @@ def create_job(
         # D214: an ONIOM energy compares only with the same core, so its size is in the level.
         level = f"{level}, {len(found.atoms)}-atom core"
     resources = local_tools.resources()
+    if limit is not None:
+        model = len(layers["core"]) + len(layers["links"]) if layers else None
+        seconds = estimate(method, len(atoms), resources.cores, model)["seconds"]
+        seconds *= scan["points"] if scan else 1  # one optimization per point, at most
+        if seconds > limit:
+            raise LocalJobError(
+                f"This job is estimated at about {_duration(seconds)}, over the "
+                f"{_duration(limit)} the user allows for a job you start on your own. Use a "
+                "faster method or a smaller ONIOM core, or leave it and tell the user, who "
+                "can start it or raise the limit."
+            )
     with _records:
         default = f"{node.label} {METHODS.get(method, method)}" + (
             " TS" if transition else " scan" if scan else ""
@@ -310,6 +332,8 @@ def create_job(
             "constraints": constraints or None,
             "created": _now(),
         }
+        if history.SOURCE.get() != "manual":
+            job["started_by"] = history.SOURCE.get()  # D223: "claude"
         if layers:
             job["oniom"] = layers
         if method == "gxtb":
@@ -823,8 +847,19 @@ def _running(pid: int) -> bool:
 
 
 def import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
-    with _importing:
-        return _import_result(session, folder, job_id)
+    """Import a finished job's result. D223: whoever asks for the import (the page does, by
+    itself), what a job Claude started brings in is Claude's in the history, as the job was."""
+    by = history.SOURCE.get()
+    try:
+        by = read_job(folder, job_id).get("started_by") or by
+    except LocalJobError:
+        pass
+    token = history.SOURCE.set(by)
+    try:
+        with _importing:
+            return _import_result(session, folder, job_id)
+    finally:
+        history.SOURCE.reset(token)
 
 
 def _import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
