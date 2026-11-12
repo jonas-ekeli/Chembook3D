@@ -64,9 +64,16 @@ Rules:
   scans. get_local_tools says whether the tools are installed, which methods this computer
   offers and how long each would take for a structure; you cannot install them (the user does,
   in Settings, Local calculations). Jobs run one after another and go on when the app is
-  closed: get_local_job tells where one stands, and the app imports a finished result onto its
-  node by itself. Start only what the user asked for; say the estimate and ask first when it
-  is over an hour.
+  closed: get_local_job tells where one stands, get_local_job_steps gives every structure so
+  far with its energy and the optimizer's criteria (D224), and the app imports a finished
+  result onto its node by itself. Start only what the user asked for; say the estimate and
+  ask first when it is over an hour.
+- The steps of a calculation (D101, D224): get_calculation_steps lists every structure of an
+  imported optimization or scan with its energy and convergence, get_calculation_step gives
+  one as XYZ, and use_calculation_step is the app's "Use this structure" (in place on a scan
+  path node, else a new derived node). preview_scan_trim and trim_scan take points out of a
+  scan path or put them back (D117): say which and why first. make_irc_end_node makes the
+  optimized end point of a TS node's IRC a node of its own.
 - What this computer does not run goes to a Claude Code cloud session (D93): a CREST conformer
   search, an xTB path between two nodes (plan_scan_path), or any xTB job when the local tools
   are not installed. create_cloud_job (nodes as inputs, what to run and return), show the user
@@ -191,6 +198,8 @@ class Bridge:
         path = spec.path
         for name in _path_params(spec.path):
             value = args.pop(name, None)
+            if isinstance(value, int) and not isinstance(value, bool):
+                value = str(value)  # a frame's number (D224); every other one is an id
             if not isinstance(value, str) or not value:
                 return _text(f"'{name}' is required", error=True)
             path = path.replace("{" + name + "}", quote(value, safe=""))

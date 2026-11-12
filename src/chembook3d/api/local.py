@@ -6,6 +6,7 @@ importing jobs are offered.
 Every write is refused from a web page of another origin, as for cloud jobs (`api/jobs.py`).
 """
 
+from dataclasses import asdict
 from typing import Any, Literal
 
 import numpy as np
@@ -13,8 +14,10 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from chembook3d import local_jobs, local_tools
+from chembook3d.api.inspect import job_inspection
 from chembook3d.api.jobs import _local_page_only
 from chembook3d.api.live import AGENT, CLIENT_HEADER
+from chembook3d.api.pathway import StepStructureOut, step_structure
 from chembook3d.api.routes import DbSession, _investigation
 from chembook3d.models import Node
 from chembook3d.services import builder
@@ -337,6 +340,70 @@ def job_status(job_id: str, request: Request) -> dict[str, Any]:
         return local_jobs.job_status(_investigation(request).folder, job_id)
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc
+
+
+def _job_step(request: Request, job_id: str, step: int | None):
+    """The local job's steps as the Inspect window reads them (D220), and the one asked for:
+    `step` as numbered there, else the first with structures."""
+    found, status, _size = job_inspection(_investigation(request).folder, job_id)
+    if step is None:
+        chosen = next((s for s in found.steps if s.frames), None)
+    else:
+        chosen = next((s for s in found.steps if s.index == step), None)
+        if chosen is None:
+            raise HTTPException(422, f"The job has no step {step}")
+    return found, status, chosen
+
+
+@router.get("/jobs/{job_id}/steps")
+def job_steps(job_id: str, request: Request) -> dict[str, Any]:
+    """D224: how a local job is going, running or finished, as the Inspect window shows it
+    (D220) but without coordinates: per step of the job its type, how it ended, the last
+    energy, the frequencies once there are any, and every structure so far with its energy,
+    scan point, convergence and the optimizer's criteria."""
+    found, status, _chosen = _job_step(request, job_id, None)
+    return {
+        "job": status,
+        "program": found.program,
+        "warnings": found.warnings,
+        "steps": [
+            {
+                "index": s.index,
+                "job_type": s.job_type,
+                "method": s.method,
+                "termination": s.termination,
+                "energy": s.energy,
+                "optimization_converged": s.optimization_converged,
+                "frequencies": s.frequencies,
+                "imaginary": s.imaginary,
+                "scan": s.scan,
+                "points": s.points,
+                "grid": s.grid,
+                "frames": [
+                    {
+                        "frame": i,
+                        "energy": f.energy,
+                        "point": f.point,
+                        "converged": f.converged,
+                        "criteria": [asdict(c) for c in f.criteria],
+                    }
+                    for i, f in enumerate(s.frames)
+                ],
+            }
+            for s in found.steps
+        ],
+    }
+
+
+@router.get("/jobs/{job_id}/steps/{frame}", response_model=StepStructureOut)
+def job_step(job_id: str, frame: int, request: Request, step: int | None = None):
+    """D224: one structure of a local job so far as XYZ text, with its energy. `frame` is
+    0-based as `/steps` lists them and -1 is the last; `step` picks one of the job's steps
+    (left out: the first that has structures)."""
+    _found, status, chosen = _job_step(request, job_id, step)
+    if chosen is None or not chosen.frames:
+        raise HTTPException(422, "The job has written no structure yet")
+    return step_structure(chosen.frames, frame, str(status.get("node_label") or job_id))
 
 
 @router.post("/jobs/{job_id}/cancel")

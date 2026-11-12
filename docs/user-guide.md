@@ -331,7 +331,13 @@ Claude can also start a calculation on this computer once the tools are installe
 [Calculations on this computer](#calculations-on-this-computer)), for example "refine this node
 with GFN2-xTB" or "scan this bond from here to 3 Å". It tells you which method it will use and
 how long it should take, asks first when that is over an hour, and the result is imported onto
-the node as when you start it yourself. Claude cannot install the tools.
+the node as when you start it yourself. Claude cannot install the tools. While a job runs,
+Claude can read its steps so far, as **Inspect** shows them, to tell you whether it is
+converging.
+
+Claude also reads what the step movie shows: every structure of an imported optimization or
+scan with its energy. It can use one of them as **Use this structure** does, take points out
+of a scan path or put them back, and make the optimized end point of an IRC a node of its own.
 
 ### Let Claude work on its own
 

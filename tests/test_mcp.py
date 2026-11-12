@@ -36,6 +36,7 @@ READ_POSTS = {
     "/api/builder/check",
     "/api/measurements",
     "/api/local/core",
+    "/api/calculations/{calculation_id}/steps/trim-preview",
 }
 # Changes that delete nothing and are undone at once, so they do not ask (A38).
 UNASKED_DELETES = {
@@ -50,9 +51,6 @@ NOT_OFFERED = re.compile(
     r"|live|selection$|view-state|confirmations(/.*)?|nodes/[^/]+/delete-preview"
     r"|groups/[^/]+/delete-preview|sub-investigations/[^/]+/delete-preview|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|energies/table\.csv|history/[^/]+/undo|turnovers/[^/]+/table\.csv|custom-bases/[^/]+/file"
-    r"|calculations/[^/]+/steps"  # every structure of a job, for the movie (D101, A48)
-    r"|calculations/[^/]+/steps/[^/]+/use"  # "Use this structure" (D112, A58)
-    r"|calculations/[^/]+/steps/trim(-preview)?"  # removing a scan path's points (D117)
     r"|energy-profiles(/.*)?"  # D190: the drawer's saved profiles; Claude only reads them
     r"|scan-paths"  # D114: the Scan path dialog's Send starts a cloud session
     r"|claude(/.*)?"  # the Claude panel (D92): Claude never starts terminals
@@ -60,7 +58,8 @@ NOT_OFFERED = re.compile(
     r"|inspections(/.*)?"  # D123c: the Inspect window, the page's own like the server's
     r"|scan-editor(/.*)?"  # D135: the scan editor window, the page's own as Inspect
     r"|builder/(parts|drawing|describe|edit)"  # D139: the Edit structure window's, D144
-    r"|nodes/[^/]+/irc/(summary|files/[^/]+|[^/]+/node)"  # D131: the IRC window's own
+    # D131: the IRC window's own line; a file's parts are taken off with undo_import (D224)
+    r"|nodes/[^/]+/irc/(summary|files/[^/]+)"
     # D213: installing the local tools and setting their cores and memory (PUT) are the
     # settings' own; reading their state is get_local_tools (D222)
     r"|local/tools(/install|/gxtb)?"

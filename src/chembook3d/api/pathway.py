@@ -769,9 +769,12 @@ def calculation_modes(calculation_id: str, session: DbSession):
 
 
 @router.get("/calculations/{calculation_id}/steps", response_model=StepsOut)
-def calculation_steps(calculation_id: str, request: Request, session: DbSession):
+def calculation_steps(
+    calculation_id: str, request: Request, session: DbSession, geometry: bool = True
+):
     """D101: every structure of the calculation's step with its energy, read again from the
-    copied output file."""
+    copied output file. D224: without `geometry` the structures' coordinates are left out
+    (each frame keeps its energy, scan point and convergence)."""
     calculation = session.get(Calculation, calculation_id)
     if calculation is None:
         raise HTTPException(404, "Calculation not found")
@@ -779,20 +782,72 @@ def calculation_steps(calculation_id: str, request: Request, session: DbSession)
         steps = trajectory.read_steps(_investigation(request).folder, calculation)
     except trajectory.StepsUnavailable as exc:
         raise HTTPException(422, str(exc)) from exc
-    return _steps_out(calculation, steps)
+    return _steps_out(calculation, steps, geometry)
+
+
+class StepStructureOut(BaseModel):
+    """D224: one structure of a calculation or of a local job, as XYZ text."""
+
+    frame: int  # 0-based, as the steps list them
+    frames: int  # how many there are
+    xyz: str
+    energy: float | None  # hartree
+    point: int | None  # scan point, 1-based
+    converged: bool
+    stage: int | None = None
+    removed: bool = False
+
+
+def step_structure(frames: list[trajectory.Frame], frame: int, comment: str) -> StepStructureOut:
+    """The structure `frame` of `frames`; a negative number counts from the last (-1)."""
+    at = frame + len(frames) if frame < 0 else frame
+    if not 0 <= at < len(frames):
+        raise HTTPException(
+            422, f"There is no structure {frame}: the frames are numbered 0 to {len(frames) - 1}"
+        )
+    found = frames[at]
+    atoms = [xyz.Atom(e, float(x), float(y), float(z)) for e, x, y, z in found.rows]
+    return StepStructureOut(
+        frame=at,
+        frames=len(frames),
+        xyz=xyz.format_xyz(atoms, comment=f"{comment}, structure {at + 1} of {len(frames)}"),
+        energy=found.energy,
+        point=found.point,
+        converged=found.converged,
+        stage=found.stage,
+        removed=found.removed,
+    )
+
+
+@router.get("/calculations/{calculation_id}/steps/{frame}", response_model=StepStructureOut)
+def calculation_step(calculation_id: str, frame: int, request: Request, session: DbSession):
+    """D224: one structure of the calculation's steps as XYZ text, with its energy. `frame`
+    is 0-based as the steps list them; -1 is the last."""
+    calculation = session.get(Calculation, calculation_id)
+    if calculation is None:
+        raise HTTPException(404, "Calculation not found")
+    try:
+        steps = trajectory.read_steps(_investigation(request).folder, calculation)
+    except trajectory.StepsUnavailable as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return step_structure(steps.frames, frame, calculation.node.label)
 
 
 def _trim_out(trim: trajectory.Trim) -> TrimOut:
     return TrimOut(**asdict(trim))
 
 
-def _steps_out(calculation: Calculation, steps: trajectory.Steps) -> StepsOut:
+def _steps_out(
+    calculation: Calculation, steps: trajectory.Steps, geometry: bool = True
+) -> StepsOut:
     return StepsOut(
         scan=steps.scan,
         points=steps.points,
         frames=[
             StepFrameOut(
-                geometry=[[e, round(x, 6), round(y, 6), round(z, 6)] for e, x, y, z in f.rows],
+                geometry=[[e, round(x, 6), round(y, 6), round(z, 6)] for e, x, y, z in f.rows]
+                if geometry
+                else [],
                 energy=f.energy,
                 point=f.point,
                 converged=f.converged,
@@ -809,9 +864,16 @@ def _steps_out(calculation: Calculation, steps: trajectory.Steps) -> StepsOut:
 
 
 @router.post("/calculations/{calculation_id}/steps/trim", response_model=TrimResultOut)
-def trim_steps(calculation_id: str, body: TrimIn, request: Request, session: DbSession):
+def trim_steps(
+    calculation_id: str,
+    body: TrimIn,
+    request: Request,
+    session: DbSession,
+    geometry: bool = True,
+):
     """D117: takes points out of a scan path or puts them back; the node follows the top
-    when it showed the automatic one."""
+    when it showed the automatic one. D224: without `geometry` the answer's frames carry no
+    coordinates."""
     calculation = session.get(Calculation, calculation_id)
     if calculation is None:
         raise HTTPException(404, "Calculation not found")
@@ -821,7 +883,7 @@ def trim_steps(calculation_id: str, body: TrimIn, request: Request, session: DbS
     except trajectory.StepsUnavailable as exc:
         raise HTTPException(422, str(exc)) from exc
     return TrimResultOut(
-        steps=_steps_out(calculation, result.steps),
+        steps=_steps_out(calculation, result.steps, geometry),
         node=_node_out(session, calculation.node),
         moved=result.moved,
     )

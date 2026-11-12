@@ -77,9 +77,19 @@ refined, rather than a cloud job.
 2. Say which method and what it will take, then `start_local_refine`. Ask first when the
    estimate is over an hour. Jobs run one after another and go on when the app is closed.
 3. `get_local_job` tells where it stands (step, energy change, largest gradient, a TS
-   search's check, a scan's points). The app imports a finished result onto the node by
-   itself: a node with other calculations gets a derived node, a scan a node of its own. Say
-   what came out, including a result that did not converge.
+   search's check, a scan's points), and `get_local_job_steps` every structure so far with
+   its energy and the optimizer's criteria, as Inspect shows them (D220, D224): look there
+   before saying that a job is stuck or wandering. The app imports a finished result onto
+   the node by itself: a node with other calculations gets a derived node, a scan a node of
+   its own. Say what came out, including a result that did not converge.
+
+The steps of an imported calculation (D101, D224): `get_calculation_steps` lists every
+structure of an optimization or scan with its energy and convergence (the step movie's
+data), and `get_calculation_step` gives one as XYZ. `use_calculation_step` is the movie's
+"Use this structure". On a scan path, `preview_scan_trim` and `trim_scan` take points that
+are not on the path out, or put them back (D117); say which points and why first. For a TS
+node, `get_irc` says where each direction leads, and `make_irc_end_node` makes an optimized
+end point a node of its own.
 
 Calculations in the cloud (D93): what this computer does not run goes to a Claude Code cloud
 session on the person's account, through the investigation's private GitHub repository: a
