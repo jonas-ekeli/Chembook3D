@@ -503,11 +503,23 @@ test('energy drawer: each profile keeps its own reference', async ({ page }) => 
   await expect(reference).toHaveValue(await idOf('B-S1'))
 })
 
-/** Resolves when the open profile has been saved once more (the drawer saves every change). */
-function profileSaved(page: Page) {
-  return page.waitForResponse(
-    (response) => response.request().method() === 'PATCH' && new URL(response.url()).pathname.startsWith('/api/energy-profiles/'),
-  )
+type SavedPath = { ids: string[]; shown: boolean }
+
+/**
+ * Does `change` to the open profile and resolves when the save it causes has come back. The
+ * drawer saves every change, one save after the other, so a reload right after a change could
+ * come before its save, and a save seen after a change could be an earlier change's. With
+ * `holds`, only a save of pathways it accepts counts; without, the saves of the changes before
+ * must have come back, as they have when each was made through here.
+ */
+async function saving(page: Page, change: () => Promise<unknown>, holds: (paths: SavedPath[]) => boolean = () => true) {
+  const saved = page.waitForResponse((response) => {
+    const request = response.request()
+    if (request.method() !== 'PATCH' || !new URL(response.url()).pathname.startsWith('/api/energy-profiles/')) return false
+    return holds((request.postDataJSON() as { paths: SavedPath[] }).paths)
+  })
+  await change()
+  await saved
 }
 
 // T-UI-91, D221: a pathway removed by a slip comes back with Undo; a pathway already in the
@@ -531,20 +543,23 @@ test('energy drawer: Undo for a removed pathway, no pathway twice, a lost node i
   await add.selectOption({ label: 'B' })
   await expect(notice).toHaveText('“B” is already in this profile.')
   await expect(names).toHaveText(['A', 'B'])
-  await b.getByRole('checkbox', { name: 'Show B on the figure' }).uncheck()
-  await add.selectOption({ label: 'B' })
+  // The first save with a hidden pathway is this change's; the saves before it are in by then.
+  await saving(
+    page,
+    () => b.getByRole('checkbox', { name: 'Show B on the figure' }).uncheck(),
+    (paths) => paths.some((path) => !path.shown),
+  )
+  await saving(page, () => add.selectOption({ label: 'B' }))
   await expect(b.getByRole('checkbox', { name: 'Show B on the figure' })).toBeChecked()
   await expect(names).toHaveText(['A', 'B'])
 
   // Removed, then put back where it was.
-  await drawer.getByRole('button', { name: 'Remove pathway A' }).click()
+  await saving(page, () => drawer.getByRole('button', { name: 'Remove pathway A' }).click())
   await expect(notice).toHaveText('Removed “A”. Undo')
   await expect(names).toHaveText(['B'])
-  let saved = profileSaved(page)
-  await notice.getByRole('button', { name: 'Undo' }).click()
+  await saving(page, () => notice.getByRole('button', { name: 'Undo' }).click())
   await expect(names).toHaveText(['A', 'B'])
   await expect(notice).toHaveCount(0)
-  await saved
 
   // A pathway through a node that is then deleted.
   const canvas = await (await page.request.get('/api/canvas')).json()
@@ -557,12 +572,10 @@ test('energy drawer: Undo for a removed pathway, no pathway twice, a lost node i
   drawer = page.getByLabel('Energy drawer')
   await expect(drawer.locator('.pathway .pathway-head strong')).toHaveText(['A', 'B'])
   await page.getByRole('group', { name: 'Node T-S0', exact: true }).click()
-  await drawer.getByRole('button', { name: 'Start at selected node', exact: true }).click()
+  await saving(page, () => drawer.getByRole('button', { name: 'Start at selected node', exact: true }).click())
   const third = drawer.getByRole('group', { name: 'Pathway T-S0 → T-S0' })
-  saved = profileSaved(page)
-  await third.getByRole('group', { name: 'Continue with' }).getByRole('button', { name: 'Gone' }).click()
+  await saving(page, () => third.getByRole('group', { name: 'Continue with' }).getByRole('button', { name: 'Gone' }).click())
   await expect(drawer.getByRole('group', { name: 'Pathway T-S0 → Gone' })).toBeVisible()
-  await saved
   expect((await page.request.delete(`/api/nodes/${gone}`)).ok()).toBe(true)
   await page.reload()
   drawer = page.getByLabel('Energy drawer')
@@ -575,21 +588,17 @@ test('energy drawer: Undo for a removed pathway, no pathway twice, a lost node i
   await expect(legend).not.toContainText('Gone')
 
   // Kept with the profile: changing something else saves it along, and it is still there.
-  saved = profileSaved(page)
-  await drawer.getByRole('checkbox', { name: 'Show A on the figure' }).uncheck()
-  await saved
+  await saving(page, () => drawer.getByRole('checkbox', { name: 'Show A on the figure' }).uncheck())
   await page.reload()
   drawer = page.getByLabel('Energy drawer')
   await expect(drawer.getByRole('group', { name: 'Pathway that lost a node' })).toHaveCount(1)
 
   // Removed for good, after one more Undo.
-  await drawer.getByRole('button', { name: 'Remove the pathway that lost a node' }).click()
+  await saving(page, () => drawer.getByRole('button', { name: 'Remove the pathway that lost a node' }).click())
   await expect(drawer.getByRole('group', { name: 'Pathway that lost a node' })).toHaveCount(0)
-  await drawer.locator('.pathway-notice').getByRole('button', { name: 'Undo' }).click()
+  await saving(page, () => drawer.locator('.pathway-notice').getByRole('button', { name: 'Undo' }).click())
   await expect(drawer.getByRole('group', { name: 'Pathway that lost a node' })).toHaveCount(1)
-  saved = profileSaved(page)
-  await drawer.getByRole('button', { name: 'Remove the pathway that lost a node' }).click()
-  await saved
+  await saving(page, () => drawer.getByRole('button', { name: 'Remove the pathway that lost a node' }).click())
   await page.reload()
   drawer = page.getByLabel('Energy drawer')
   await expect(drawer.locator('.pathway .pathway-head strong')).toHaveText(['A', 'B'])
