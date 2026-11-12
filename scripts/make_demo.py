@@ -1,6 +1,7 @@
 """Create a small demo investigation for trying the app by hand and for the UI tests.
 
     uv run python scripts/make_demo.py <empty-or-new-folder>
+    uv run python scripts/make_demo.py <empty-or-new-folder> --mismatch
 
 One node gets a placeholder calculation record, so the derived-node rule (ID-5, D23) can be
 tried without importing a file: editing its coordinates creates a new node. Real calculations
@@ -11,6 +12,10 @@ branch split into rotamers A and B, their transitions, and one direct connection
 Each mechanism node has an optimization and a frequency record at one made-up level, so the
 energy view, profiles and the table (phase 4) have values to show. The geometries and the
 energies are placeholders, not results.
+
+With --mismatch, branch A's transition state is water, another molecule than its neighbours,
+so the checks on atoms (W-BALANCE, W-COMPARE, the conformer equilibrium) have something to
+flag. The UI tests of those checks open that one.
 """
 
 import sys
@@ -35,6 +40,20 @@ H 0.000000 0.922800 1.237800
 H 0.000000 -0.922800 1.237800
 H 0.000000 0.922800 -1.237800
 H 0.000000 -0.922800 -1.237800
+"""
+
+
+# The transition states: ethylene twisted by 90°, so every node of the mechanism has the same
+# atoms, its profiles have a value at every point (D221) and the two can be compared in a
+# selectivity. With --mismatch, branch A's is water instead.
+TWISTED = """6
+twisted ethylene
+C 0.000000 0.000000 0.667500
+C 0.000000 0.000000 -0.667500
+H 0.000000 0.922800 1.237800
+H 0.000000 -0.922800 1.237800
+H 0.922800 0.000000 -1.237800
+H -0.922800 0.000000 -1.237800
 """
 
 
@@ -96,7 +115,7 @@ def _energies(session, node) -> None:
         )
 
 
-def _mechanism(session) -> None:
+def _mechanism(session, mismatch: bool) -> None:
     names = ["alkylidene", "π-complex", "[2+2] TS", "metallacyclobutane"]
     step_ids = [steps.create(session, name).id for name in names]
     trunk = branches.create(session, {"name": "T"})
@@ -130,7 +149,7 @@ def _mechanism(session) -> None:
                     "pos_x": 240.0 * column,
                     "pos_y": 220.0 + 220.0 * row,
                 },
-                ETHYLENE if not ts else WATER,
+                ETHYLENE if not ts else WATER if mismatch and branch.name == "A" else TWISTED,
             )
             _energies(session, node)
             # Planned on purpose, so the overview and the dashed outline have edges to show.
@@ -147,7 +166,7 @@ def _mechanism(session) -> None:
             )
 
 
-def make_demo(folder: Path) -> None:
+def make_demo(folder: Path, mismatch: bool = False) -> None:
     investigation = create_investigation(folder, "Demo investigation")
     try:
         with investigation.sessions.begin() as session:
@@ -184,13 +203,14 @@ def make_demo(folder: Path) -> None:
                 )
             )
             nodes.create(session, {"label": "empty planned node", "pos_x": 480.0})
-            _mechanism(session)
+            _mechanism(session, mismatch)
     finally:
         investigation.close()
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    arguments = [a for a in sys.argv[1:] if a != "--mismatch"]
+    if len(arguments) != 1 or arguments[0].startswith("--"):
         sys.exit(__doc__)
-    make_demo(Path(sys.argv[1]))
-    print(f"Demo investigation created in {sys.argv[1]}")
+    make_demo(Path(arguments[0]), mismatch="--mismatch" in sys.argv[1:])
+    print(f"Demo investigation created in {arguments[0]}")

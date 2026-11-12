@@ -355,6 +355,9 @@ def result(
     for point in points:
         if point["relative"] is None:
             reason = point["message"] if point["value"] is None else point["species_message"]
+            if point["value"] is not None and point["mismatch"]:
+                # D221, W-COMPARE: not the atoms or the charge of the cycle's first node.
+                reason = f"not the atoms or charge of the cycle's first node: {point['mismatch']}"
             entry = f"“{point['label']}” ({reason or 'no value'})"
             if entry not in missing:
                 missing.append(entry)

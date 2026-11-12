@@ -271,16 +271,29 @@ def branch_pathway(session: Session, branch_id: str) -> Extended:
     through nodes on no branch (D67) while one transition leads in, then forward through its
     lineage while one leads on. Tracing back never enters the branch itself or goes from a
     later reaction step to an earlier one, so the edge that closes a catalytic cycle is not
-    mistaken for the way in (A13)."""
+    mistaken for the way in (A13). The first node is one no arrow from the branch comes in to,
+    directly or through its group; in a branch that closes a cycle every node has one, and
+    the pathway starts at its earliest reaction step (D221)."""
     branch = get(session, Branch, branch_id, "Branch")
     steps = {s.id: s.position for s in session.scalars(select(ReactionStep))}
     members = list(session.scalars(select(Node).where(Node.branch_id == branch.id)))
     member_ids = {m.id for m in members}
     if not members:
         raise RecordError("The branch has no nodes")
-    starts = [
-        m for m in members if not any(t.source_id in member_ids for t in _incoming(session, m.id))
-    ] or members
+    # D221: an arrow drawn to a member's group comes in to the member too, and one drawn from
+    # a group of the branch comes from the branch, so a member of a group in the middle of
+    # the branch is not taken for where the branch starts.
+    places = member_ids | {m.group_id for m in members if m.group_id}
+
+    def comes_in(member: Node) -> bool:
+        sides = _sides(session, member)
+        return any(
+            t.source_id in places and t.source_id not in sides
+            for side in sides
+            for t in _incoming(session, side)
+        )
+
+    starts = [m for m in members if not comes_in(m)] or members
     start = min(starts, key=lambda n: (steps.get(n.step_id or "", 10**6), n.seq))
 
     lineage = branch_service.ancestors(branch)
@@ -380,6 +393,8 @@ class Prepared:
     segments: list[list[Segment]]
     balances: list[list[species_service.Balance]]
     species: list[list[list[dict[str, Any]]]]
+    # D221: per point, how its atoms or charge differ from the reference's; None: comparable.
+    mismatches: list[list[str | None]]
     ends: dict[str, Endpoint]
     steps: dict[str, ReactionStep]
 
@@ -400,6 +415,13 @@ def prepare(session: Session, paths: list[list[str]], reference_id: str | None) 
         segments=segments,
         balances=balances,
         species=[[species_service.describe(session, b) for b in balance] for balance in balances],
+        mismatches=[
+            [
+                species_service.mismatch(session, record_id, held, reference_id)
+                for record_id, held in zip(path, balance, strict=True)
+            ]
+            for path, balance in zip(paths, balances, strict=True)
+        ],
         ends={record_id: transition_service.endpoint(session, record_id) for record_id in on_paths},
         steps={s.id: s for s in session.scalars(select(ReactionStep))},
     )
@@ -422,11 +444,18 @@ def profiles(
     reference = energies.value(prepared.reference_id, key, energy_type).value
     shown = []
     temperatures: set[float] = set()
-    for path, balance, species, segments in zip(
-        prepared.paths, prepared.balances, prepared.species, prepared.segments, strict=True
+    for path, balance, species, mismatches, segments in zip(
+        prepared.paths,
+        prepared.balances,
+        prepared.species,
+        prepared.mismatches,
+        prepared.segments,
+        strict=True,
     ):
         points = []
-        for record_id, held, described in zip(path, balance, species, strict=True):
+        for record_id, held, described, mismatch in zip(
+            path, balance, species, mismatches, strict=True
+        ):
             end = prepared.ends[record_id]
             point = _point(session, energies, end, key, energy_type, prepared.steps)
             value = point["value"]
@@ -435,9 +464,14 @@ def profiles(
             added, missing = species_service.energy(session, energies, held, key, energy_type)
             point["species"] = described
             point["species_message"] = missing
+            # D221: other atoms or another charge than the reference's: no relative energy.
+            point["mismatch"] = mismatch
             point["relative"] = (
                 value + added - reference
-                if value is not None and reference is not None and added is not None
+                if value is not None
+                and reference is not None
+                and added is not None
+                and mismatch is None
                 else None
             )
             points.append(point)
@@ -476,6 +510,7 @@ def profiles(
                 key,
                 energy_type,
             ),
+            _compare_note(prepared, shown),
         )
         if note is not None
     ]
@@ -502,6 +537,32 @@ def profiles(
             }
         ),
         "profiles": shown,
+    }
+
+
+def _compare_note(prepared: Prepared, shown: list[dict[str, Any]]) -> dict[str, str] | None:
+    """D221, W-COMPARE: the points left without a relative energy because their atoms or charge
+    are not the reference's, by what differs; None when every point can be compared."""
+    by_difference: dict[str, list[str]] = {}
+    for profile in shown:
+        for point in profile["points"]:
+            if point["mismatch"] and point["label"] not in by_difference.setdefault(
+                point["mismatch"], []
+            ):
+                by_difference[point["mismatch"]].append(point["label"])
+    if not by_difference:
+        return None
+    parts = []
+    for difference, labels in by_difference.items():
+        names = ", ".join(labels[:3]) + (f" and {len(labels) - 3} more" if len(labels) > 3 else "")
+        parts.append(f"{names} ({difference})")
+    reference = _label(prepared.ends[prepared.reference_id])
+    return {
+        "code": "W-COMPARE",
+        "message": f"No relative energy against the reference “{reference}” for "
+        + "; ".join(parts)
+        + ": the atoms or the charge differ. Check that the arrows on the way carry their "
+        "free species, or give a pathway of another system a profile of its own.",
     }
 
 
@@ -635,7 +696,17 @@ def table(
                 thermo_text(thermo),
                 species_service.text(point["species"]),
                 relative_text(point["relative"], unit),
-                point["check"]["message"] if point["check"] else "",
+                "; ".join(
+                    text
+                    for text in (
+                        point["check"]["message"] if point["check"] else "",
+                        # D221, W-COMPARE
+                        f"Not the reference's atoms or charge: {point['mismatch']}"
+                        if point["mismatch"]
+                        else "",
+                    )
+                    if text
+                ),
             ]
             if energies.bsse:
                 bsse = (

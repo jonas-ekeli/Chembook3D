@@ -737,7 +737,8 @@ class EnergyProfile(Base):
     name: Mapped[str] = mapped_column(String(200), unique=True)
     # Each pathway as {"ids": node and group ids in order, "branch_id": the branch it was
     # added for or None, "shown": drawn on the figure}. A pathway through a deleted node
-    # is dropped when the profile is read (services/energy_profiles.py).
+    # is left out when the profile is read and handed over as `lost` (D221,
+    # services/energy_profiles.py).
     paths: Mapped[list[Any]] = mapped_column(default=list)
     # D205: the node or group every pathway of the profile is relative to, apart from the
     # node cards' reference; None (or one no longer on its pathways): the first node shown.

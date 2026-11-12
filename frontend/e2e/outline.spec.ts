@@ -34,7 +34,7 @@ test('outline: node rows on one line, section counts that fold and stay folded',
   const ts = row('A-S2')
   await expect(ts.locator('.ts-mark')).toHaveText('TS')
   await expect(row('A-S1').locator('.ts-mark')).toHaveCount(0)
-  await expect(ts.locator('.node-formula')).toHaveText('H2O')
+  await expect(ts.locator('.node-formula')).toHaveText('C2H4')
   const bar = await ts.locator('.branch-bar').evaluate((el) => getComputedStyle(el).backgroundColor)
   const swatch = await page.evaluate((c) => {
     const probe = document.createElement('span')

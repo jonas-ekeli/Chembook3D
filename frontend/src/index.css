@@ -3548,6 +3548,19 @@ table.overlay-legend td {
 .pathway.hidden-path .pathway-head strong {
   opacity: 0.6;
 }
+/* D221: a pathway through a deleted node: listed with what is left, never drawn. */
+.pathway.lost-path {
+  border-style: dashed;
+}
+.pathway.lost-path .pathway-head strong {
+  font-weight: 500;
+  font-size: 12px;
+}
+/* D221: what the list just did (a pathway removed, with Undo; one already there). */
+.pathway-notice {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 .pathway-add {
   display: flex;
   gap: 0.35rem;

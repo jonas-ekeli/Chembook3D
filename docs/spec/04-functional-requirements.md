@@ -165,6 +165,9 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-EN-20 | In a saved energy profile the user picks a pathway's step and moves it, with every step after it, whole columns later along the profile's axis, and back again; the steps before it stay put. Saved with the profile and drawn in the drawer, the saved images and the read-only copy (D194). |
 | FR-EN-21 | The user changes the colour of any pathway in a saved energy profile, with or without a branch, by clicking its swatch in the pathways list, and can go back to the branch's colour. Saved with the profile and drawn in the drawer, the saved images and the read-only copy (D195). |
 | FR-EN-22 | Each saved energy profile has its own reference node, chosen in the drawer and kept for all its pathways, apart from the node cards' reference; it stays when pathways are added or hidden and when profiles are switched (D205). |
+| FR-EN-23 | A branch's pathway starts at the branch's first node, also when the branch closes a cycle and holds groups: an arrow drawn to a group counts for its members (D221). |
+| FR-EN-24 | A point of a profile whose atoms or charge, with its free species, are not the reference's has no relative energy; the profile, the table and a turnover through it say which points and what differs (W-COMPARE, D221). |
+| FR-EN-25 | In a saved profile's pathways list, removing a pathway can be undone, a pathway already there is not added again, and a pathway that lost a node stays listed, not drawn, until the user removes it (D221). |
 
 **AC:**
 - Nodes X and Y have G at level L1, and Y also at L2. With L2 selected, the edge X→Y shows "n/a".

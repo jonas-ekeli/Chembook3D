@@ -31,6 +31,9 @@ class EnergyProfileOut(BaseModel):
     id: str
     name: str
     paths: list[ProfilePathOut]
+    # D221: its pathways through a node deleted since, as stored: listed by the drawer, never
+    # drawn, valued or exported.
+    lost: list[ProfilePathOut] = []
     # D205: the node or group all its pathways are relative to; None: the first node shown.
     reference_id: str | None = None
 
@@ -46,11 +49,12 @@ class EnergyProfileIn(BaseModel):
 
 
 def _out(session: DbSession, profile: EnergyProfile) -> EnergyProfileOut:
-    paths = profile_service.current_paths(session, profile.paths or [])
+    paths, lost = profile_service.split_paths(session, profile.paths or [])
     return EnergyProfileOut(
         id=profile.id,
         name=profile.name,
         paths=[ProfilePathOut(**p) for p in paths],
+        lost=[ProfilePathOut(**p) for p in lost],
         reference_id=profile_service.current_reference(profile, paths),
     )
 

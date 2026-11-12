@@ -825,6 +825,43 @@ def test_a_catalytic_cycle_closes_at_its_resting_state(open_client):
     assert [row[0] for row in table["rows"]] == names
 
 
+def test_a_cyclic_branch_with_a_group_starts_at_its_first_step(open_client):
+    # D221 (T-EN-51): in a branch that closes a cycle, the members of a group in its middle
+    # have no arrow of their own coming in (it is drawn to the group), yet the branch's pathway
+    # starts at the earliest reaction step, not at one of them.
+    client = open_client
+    steps = [post(client, "/steps", {"name": f"C{i}"})["id"] for i in range(4)]
+    cycle = post(client, "/branches", {"name": "Cycle"})["id"]
+    ids = {}
+    for name, step in (("Rest", 0), ("TS1a", 1), ("TS1b", 1), ("Int", 2), ("TS2", 3)):
+        role = "transition_state" if name.startswith("TS") else "minimum"
+        made = node(client, label=name, role=role, step_id=steps[step], branch_id=cycle)
+        ids[name] = made["id"]
+    group = post(
+        client,
+        "/groups/reconnect",
+        {"member_ids": [ids["TS1a"], ids["TS1b"]], "label": "TS1"},
+    )["id"]
+    edge(client, ids["Rest"], group)
+    edge(client, group, ids["Int"])
+    edge(client, ids["Int"], ids["TS2"])
+    edge(client, ids["TS2"], ids["Rest"])
+
+    found = get(client, f"/branches/{cycle}/pathway")
+    assert found["path"] == [ids["Rest"], group, ids["Int"], ids["TS2"], ids["Rest"]]
+    assert found["closed"] is True
+
+    # An open branch whose first node is in a group no arrow comes in to still starts there.
+    opened = post(client, "/branches", {"name": "Open"})["id"]
+    first = node(client, label="First", step_id=steps[0], branch_id=opened)["id"]
+    twin = node(client, label="Twin", step_id=steps[0], branch_id=opened)["id"]
+    after = node(client, label="After", step_id=steps[1], branch_id=opened)["id"]
+    start = post(client, "/groups/reconnect", {"member_ids": [first, twin], "label": "Start"})
+    edge(client, start["id"], after)
+    found = get(client, f"/branches/{opened}/pathway")
+    assert found["path"][0] == first and found["path"][-1] == after
+
+
 def test_a_branch_profile_includes_the_branchless_nodes_it_starts_and_ends_at(open_client):
     # T-EN-12, D67: IM1 is on no branch and splits into TS1-1 (branch 1) and TS1-2 (branch 2);
     # both branches end at a shared product P. Each branch's profile runs IM1 → … → P.

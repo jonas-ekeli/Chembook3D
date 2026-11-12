@@ -84,6 +84,15 @@ whether counterpoise-corrected values are used (**with BSSE**).
 3. The **Profile** tab draws it; the **Table** tab lists relative values, step barriers and the
    absolute energies behind them, with a Check column for the warnings.
 
+A point shows **n/a** when its atoms or charge are not those of the profile's reference, and the
+note **W-COMPARE** above the profile says what differs (for example "C2H4 more"). Usually an arrow
+on the way lacks a free species that joins or leaves there, or the pathway belongs to another
+system and needs a profile of its own.
+
+✕ removes a pathway from the profile; **Undo** under the list puts the last one removed back.
+A pathway that is already in the profile is not added twice. If a node on a pathway is deleted,
+the pathway stays in the list as **Not drawn** until you remove it.
+
 A drawer can keep several saved profiles, each with its own pathways and reference: **New**, and
 the profile menu's **Rename**, **Duplicate** and **Delete…**. **Style…** changes the profile's
 look, and **Export** writes **Profile as PNG**, **Profile as SVG** or **Table as CSV**.
