@@ -288,7 +288,9 @@ While you are logged in, the Claude panel can read the files
 in the directory the Saga terminal is in, and in the directories below it, without importing
 them: "did TS1 converge?", "why did the job in opt2 stop?", "how many imaginary frequencies has
 the last frequency job?". `cd` in the terminal to where the jobs are first; Claude cannot read
-above that directory, cannot log in, and never deletes or runs anything on Saga.
+above that directory, cannot log in, and never deletes or runs anything on Saga. When you ask
+it to import outputs from there, it copies them down and shows the import's plan, as **Import
+from here** does, with Saga and the file's path there as its origin.
 
 Tick **Let Claude write new files here** in the Saga tab and Claude may create new files
 (inputs, job scripts, xyz files, notes) in the terminal's directory and in new or existing
@@ -338,6 +340,12 @@ converging.
 Claude also reads what the step movie shows: every structure of an imported optimization or
 scan with its energy. It can use one of them as **Use this structure** does, take points out
 of a scan path or put them back, and make the optimized end point of an IRC a node of its own.
+
+Claude imports files as you do. Give it the path of an output or of a whole folder: for a
+folder it shows the same plan as **Import…**, **Folder**, with the files it would put together
+and the ones that need a choice from you, and imports when you agree. It can read an output
+first without importing it, to tell you whether the job converged. Listing the files in a
+folder is asked about in the terminal, since it shows names on your computer.
 
 ### Let Claude work on its own
 

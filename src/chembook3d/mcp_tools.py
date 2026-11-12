@@ -33,6 +33,7 @@ class ToolSpec:
     help: dict[str, str] = field(default_factory=dict)  # descriptions of its inputs
     allowed_in_app: bool = False  # D126: the user's go-ahead is a switch in the app's page
     defaults: dict[str, Any] = field(default_factory=dict)  # inputs the tool fills in when left out
+    asked: bool = False  # D225: a read tool the Claude panel still asks about (list_folder)
 
 
 ID_HELP = "Ids come from list or get tools (or get_selection); they are opaque strings."
@@ -663,6 +664,25 @@ TOOLS: list[ToolSpec] = [
         },
     ),
     T(
+        "import_server_files",
+        "write",
+        "POST",
+        "/api/server-files/{server_id}/import",
+        "Copy outputs from the server terminal's current directory (or below) and stage them "
+        "for import, as the app's own import from a server does (D225): nothing changes on the "
+        "server, and the files keep the server and their path there as their origin. One "
+        "path answers with an import plan (then preview_import, commit_import); several "
+        "paths of one directory answer with a folder import's plan (then "
+        "preview_folder_import, commit_folder_import). Nothing is imported until the commit. "
+        "Only when the user asked for these files to be imported.",
+        help={
+            "server_id": "Id of a logged-in server, from list_servers.",
+            "paths": "The outputs, relative to the terminal's current directory or full paths "
+            "under it; several must be in one directory.",
+            "node_id": "With one path: import onto this node (optional).",
+        },
+    ),
+    T(
         "write_server_file",
         "write",
         "POST",
@@ -988,6 +1008,102 @@ TOOLS: list[ToolSpec] = [
         "DELETE",
         "/api/imports/{token}",
         "Drop a staged import (nothing in the investigation changes).",
+    ),
+    T(
+        "list_folder",
+        "read",
+        "GET",
+        "/api/folders",
+        "The folders, and with `files` the files, in a folder on this computer: names, paths "
+        "and file sizes, never contents (D225). For finding the outputs in a folder the user "
+        "named before import_folder, import_file or summarize_file. Look only where the user "
+        "pointed you; do not browse the rest of the computer.",
+        help={
+            "path": "Full path of the folder (left out: the user's home folder).",
+            "files": "Also list the files (left out: folders only).",
+        },
+        asked=True,
+    ),
+    T(
+        "summarize_file",
+        "read",
+        "GET",
+        "/api/local-files/summary",
+        "A Gaussian, ORCA, xTB or CREST output (or an xyz file) on this computer read as the "
+        "app's Inspect window reads it, without importing it (D225): per job step the route, "
+        "method, basis, charge, multiplicity, termination, last SCF energy, whether the "
+        "optimization converged, frequencies with the imaginary ones, and every structure's "
+        "energy and convergence criteria. For a first look at a file the user named: did it "
+        "converge, why did it stop, is it worth importing. Any other kind of file is refused.",
+        help={"path": "Full path of the output."},
+    ),
+    T(
+        "get_file_structure",
+        "read",
+        "GET",
+        "/api/local-files/structure",
+        "One structure of an output or xyz file on this computer as XYZ text (by default the "
+        "last structure of the last step that has any). Nothing is imported.",
+        help={
+            "path": "Full path of the file.",
+            "step": "Job step number as summarize_file lists it (default: the last with "
+            "structures).",
+            "frame": "Structure number in the step, 1-based; negative counts from the end "
+            "(default -1, the last).",
+        },
+    ),
+    T(
+        "import_folder",
+        "write",
+        "POST",
+        "/api/batch-imports",
+        "Read every output in a folder on this computer that the user named and get the "
+        "proposed import of all of them at once (D97), as the app's Import, Folder does: one "
+        "row per file with what it is, the node it would go onto or make (files of one "
+        "structure are put together), duplicates and what blocks it. Nothing is imported "
+        "until commit_folder_import. Show the user the rows that need a choice.",
+        help={
+            "folder": "Full path of the folder.",
+            "recursive": "Also read the folders below it (default true).",
+        },
+    ),
+    T(
+        "preview_folder_import",
+        "write",
+        "POST",
+        "/api/batch-imports/{token}/preview",
+        "Recompute a folder import's plan with choices; nothing is imported.",
+        help={
+            "token": "The plan's token, from import_folder or import_server_files.",
+            "rows": "Choices per file, keyed by the row's `id` in the plan: {included: false "
+            "to leave it out, target: 'auto', 'new', 'node:<node id>' or 'file:<row id>' (the "
+            "node that file makes), duplicate_action: 'attach' or 'new' for a possible "
+            "duplicate, label: a new node's name, basis: this file's basis set if it names "
+            "none}.",
+            "basis_names": "Names for custom basis sets the plan asks about, by its key.",
+            "dispersion_names": "Names for custom dispersion corrections, by the plan's key.",
+            "missing_basis": "The basis set for every file that names none (D104).",
+            "origin_device": "The computer the files came from (left out: this one).",
+            "suffixes": "Endings of file names that mark a second job of the same structure "
+            "(such as _sp), which the user confirmed.",
+            "canvas_id": "A sub-investigation's id: new nodes go on its canvas (D193).",
+        },
+    ),
+    T(
+        "commit_folder_import",
+        "write",
+        "POST",
+        "/api/batch-imports/{token}/commit",
+        "Import a folder import's files with these choices (give the same as in the last "
+        "preview); answers with what each file became. undo_import undoes one file's import.",
+        help={"token": "The plan's token, from import_folder or import_server_files."},
+    ),
+    T(
+        "cancel_folder_import",
+        "write",
+        "DELETE",
+        "/api/batch-imports/{token}",
+        "Drop a folder import's staged files (nothing in the investigation changes).",
     ),
     # ---------- calculations in Claude Code cloud sessions (D93) ----------
     T(
@@ -1371,7 +1487,9 @@ BY_NAME = {t.name: t for t in TOOLS}
 READ_ONLY_TOOLS = frozenset(t.name for t in TOOLS if t.kind == "read")
 # What the Claude panel allows without asking (D92): the read tools, and those whose go-ahead the
 # user gives in the app's page (D126).
-PANEL_ALLOWED = READ_ONLY_TOOLS | frozenset(t.name for t in TOOLS if t.allowed_in_app)
+PANEL_ALLOWED = frozenset(
+    t.name for t in TOOLS if (t.kind == "read" and not t.asked) or t.allowed_in_app
+)
 
 
 # ---------- input schemas ----------

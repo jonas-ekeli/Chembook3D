@@ -39,8 +39,10 @@ from pydantic import BaseModel
 
 from chembook3d import xyz
 from chembook3d.api.remote import _check, _saved
+from chembook3d.api.routes import _investigation, _staging
+from chembook3d.parsers import orca
 from chembook3d.remote import client, keeper, servers
-from chembook3d.services import inspection
+from chembook3d.services import batch_import, imports, inspection
 
 router = APIRouter(prefix="/api/server-files")
 
@@ -539,7 +541,7 @@ def _structure_row(number: int, frame) -> dict:
     return row
 
 
-def _step_summary(step: inspection.Step) -> dict:
+def _step_summary(step: inspection.Step, reader: str = "get_server_structure") -> dict:
     frames = step.frames
     rows = [_structure_row(n, f) for n, f in enumerate(frames, 1)]
     left_out = 0
@@ -571,8 +573,7 @@ def _step_summary(step: inspection.Step) -> dict:
     }
     if left_out:
         summary["structures_left_out"] = (
-            f"structures 51-{50 + left_out} are left out of this list; "
-            "get_server_structure reads any of them"
+            f"structures 51-{50 + left_out} are left out of this list; {reader} reads any of them"
         )
     return summary
 
@@ -617,9 +618,17 @@ async def get_server_structure(
     step that has structures."""
     server = await _reader(request, server_id)
     meta, read = await _inspected(request, server, path)
+    shown = servers.origin_path(server, meta.path)
+    return PlainTextResponse(structure_text(read, shown, step, frame))
+
+
+def structure_text(read: inspection.Inspection, shown: str, step: int | None, frame: int) -> str:
+    """One structure of a file read as the Inspect window reads it, as XYZ text whose comment
+    says where it is from: `frame` from 1, or from the end when negative; `step` left out is
+    the last step that has structures."""
     with_frames = [s for s in read.steps if s.frames]
     if not with_frames:
-        raise HTTPException(422, f"{meta.path} holds no structures.")
+        raise HTTPException(422, f"{shown} holds no structures.")
     if step is None:
         chosen = with_frames[-1]
     else:
@@ -633,13 +642,115 @@ async def get_server_structure(
         raise HTTPException(422, f"Step {chosen.index} has {len(frames)} structures.")
     found = frames[number - 1]
     atoms = [xyz.Atom(e, x, y, z) for e, x, y, z in found.rows]
-    comment = f"{servers.origin_path(server, meta.path)} step {chosen.index} structure {number}"
-    comment += f" of {len(frames)}"
+    comment = f"{shown} step {chosen.index} structure {number} of {len(frames)}"
     if found.energy is not None:
         comment += f" E={found.energy:.8f}"
     if found.converged:
         comment += " converged"
-    return PlainTextResponse(xyz.format_xyz(atoms, comment=comment))
+    return xyz.format_xyz(atoms, comment=comment)
+
+
+# ---------- importing for Claude (D225) ----------
+
+
+class ServerImportIn(BaseModel):
+    # In the terminal's current directory or below. One file gives the import's plan
+    # (commit_import); several, of one directory, the folder import's (commit_folder_import).
+    paths: list[str]
+    node_id: str | None = None  # one file: import onto this node
+
+
+async def _gathered(
+    request: Request, server: servers.Server, paths: list[str]
+) -> tuple[Path, list[_Meta]]:
+    """The files copied into one new temporary folder, which the caller removes. Each is
+    read through the keeper's check of the directory (D124), as every file Claude reads."""
+    if not paths:
+        raise HTTPException(422, "Name at least one file.")
+    metas = [await _meta(server, path) for path in paths]
+    if len({posixpath.basename(m.path) for m in metas}) != len(metas) or (
+        len({posixpath.dirname(m.path) for m in metas}) != 1
+    ):
+        raise HTTPException(422, "Name files of one directory, each once.")
+    folder = Path(tempfile.mkdtemp(prefix="chembook3d-read-"))
+    try:
+        kept = copies(request.app)
+        for meta in metas:
+            copy = await kept.get(server, meta.path, meta.size, meta.modified)
+            shutil.copyfile(copy.local, folder / posixpath.basename(meta.path))
+        # D134: an ORCA IRC's points are in trajectories beside it; bring those there are.
+        directory = posixpath.dirname(metas[0].path)
+        for meta in metas:
+            local = folder / posixpath.basename(meta.path)
+            text = local.read_bytes()[: imports.SCAN_OUTPUT_SIZE].decode("utf-8", "replace")
+            if not orca.looks_like_orca(text):
+                continue
+            for name in orca.irc_trajectories(text):
+                if posixpath.basename(name) != name or (folder / name).exists():
+                    continue
+                try:
+                    beside = await _meta(server, posixpath.join(directory, name))
+                    copy = await kept.get(server, beside.path, beside.size, beside.modified)
+                except HTTPException:
+                    continue  # one that is not there stays missing; the import names it
+                shutil.copyfile(copy.local, folder / name)
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+    return folder, metas
+
+
+@router.post("/{server_id}/import")
+async def import_server_files(server_id: str, body: ServerImportIn, request: Request):
+    """D225: copy outputs from the terminal's current directory or below and stage them as
+    the app's own import from a server does (D122e), with the server as origin device and
+    `<server>:/path` as origin path. One file answers with the import's plan, several with
+    the folder import's. Nothing is written until the plan is committed, and nothing changes
+    on the server."""
+    server = await _reader(request, server_id)
+    investigation = _investigation(request)
+    folder, metas = await _gathered(request, server, body.paths)
+    directory = posixpath.dirname(metas[0].path)
+
+    def stage_and_plan():
+        try:
+            if len(metas) == 1:
+                name = posixpath.basename(metas[0].path)
+                staged = _staging(request).add(
+                    (folder / name).read_bytes(),
+                    name,
+                    servers.origin_path(server, metas[0].path),
+                    beside=folder,
+                    device=server.name,
+                )
+                options = imports.ImportOptions(target_node_id=body.node_id)
+                with investigation.sessions.begin() as session:
+                    return imports.plan(session, staged, options).as_dict()
+            batch = batch_import.scan(
+                _staging(request),
+                folder,
+                False,
+                investigation.folder,
+                origin=lambda name: servers.origin_path(server, posixpath.join(directory, name)),
+                shown=servers.origin_path(server, directory),
+                device=server.name,
+            )
+            session = investigation.sessions()
+            try:
+                options = batch_import.BatchOptions()
+                plan, _ = batch_import.run(
+                    session, investigation.folder, batch, options, dry_run=True
+                )
+                return plan.as_dict()
+            finally:
+                session.rollback()
+                session.close()
+        except (imports.ImportFailed, batch_import.BatchFailed) as exc:
+            raise HTTPException(422, str(exc)) from exc
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+    return await asyncio.to_thread(stage_and_plan)
 
 
 # ---------- writing new files (D126) ----------

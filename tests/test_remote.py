@@ -1112,6 +1112,76 @@ def test_claudes_tools_read_the_server_and_are_allowed_without_asking(at_work):
     anyio.run(run)
 
 
+# ---------- T-SSH-23 Claude imports outputs from the terminal's directory (D225) ----------
+
+
+def test_claude_imports_outputs_from_the_terminals_directory(at_work, saga):
+    claude = {"X-Chembook-Client": "claude"}
+    url = "/api/server-files/saga/import"
+    work = saga.root / WORK.lstrip("/")
+    before = {p.name: p.read_bytes() for p in work.iterdir() if p.is_file()}
+
+    # Several of one directory: the folder import's plan, with the server as the origin.
+    several = at_work.post(url, json={"paths": [TS, TS_SP, "job.gjf"]}, headers=claude)
+    assert several.status_code == 200, several.text
+    plan = several.json()
+    assert plan["folder"] == f"saga:{WORK}" and plan["origin_device"] == "Saga"
+    assert sorted(r["path"] for r in plan["rows"]) == sorted([TS, TS_SP])
+    assert at_work.get("/api/canvas").json()["nodes"] == []  # nothing imported yet
+    assert at_work.delete(f"/api/batch-imports/{plan['token']}").status_code == 204
+
+    # One file: the import's plan, committed as any import.
+    one = at_work.post(url, json={"paths": [f"{WORK}/{TS}"]}, headers=claude)
+    assert one.status_code == 200, one.text
+    plan = one.json()
+    assert plan["origin"] == {"device": "Saga", "path": f"saga:{WORK}/{TS}", "name": TS}
+    done = at_work.post(f"/api/imports/{plan['token']}/commit", json={}, headers=claude)
+    assert done.status_code == 200, done.text
+    calc = at_work.get(f"/api/nodes/{done.json()['node_id']}/calculations").json()[0]
+    source = calc["source_file"]
+    assert (source["origin_device"], source["origin_path"]) == ("Saga", f"saga:{WORK}/{TS}")
+
+    # Only the terminal's directory and below, files of one directory, and from this computer.
+    (work / "old" / "x.log").write_bytes((FIXTURES / TS).read_bytes())
+    for paths, status, why in (
+        (["/etc/hostname"], 409, "outside the terminal's current directory"),
+        (["missing.log"], 409, "Saga"),
+        ([TS, "old/x.log"], 422, "one directory"),
+        ([], 422, "at least one file"),
+        (["job.gjf"], 422, ""),
+    ):
+        refused = at_work.post(url, json={"paths": paths}, headers=claude)
+        assert refused.status_code == status and why in str(refused.json()["detail"]), paths
+    foreign = at_work.post(url, json={"paths": [TS]}, headers={"origin": "https://example.com"})
+    assert foreign.status_code == 403
+    # Nothing on the server changed.
+    (work / "old" / "x.log").unlink()
+    assert {p.name: p.read_bytes() for p in work.iterdir() if p.is_file()} == before
+
+    tool = BY_NAME["import_server_files"]
+    assert tool.kind == "write" and tool.name not in READ_ONLY_TOOLS  # it asks in the terminal
+
+
+def test_claudes_import_brings_an_orca_ircs_trajectories(at_work, saga):
+    work = saga.root / WORK.lstrip("/") / "irc"
+    work.mkdir()
+    for name in IRC_NAMES:
+        (work / name).write_bytes((ORCA_IRC / name).read_bytes())
+    text = (ORCA_IRC / "output.out").read_text(encoding="utf-8")
+    start = orca.parse(text).steps[0].geometries[0]
+    xyz = f"{len(start)}\n\n" + "\n".join(f"{a.element} {a.x} {a.y} {a.z}" for a in start)
+    body = {"label": "TS", "xyz": xyz, "role": "transition_state", "charge": 1, "multiplicity": 1}
+    ts = at_work.post("/api/nodes", json=body).json()["id"]
+    one = {"paths": ["irc/output.out"], "node_id": ts}
+    plan = at_work.post("/api/server-files/saga/import", json=one).json()
+    assert [t["node_id"] for t in plan["irc_targets"]] == [ts]
+    options = {"target_node_id": ts, "irc_part": "path"}
+    response = at_work.post(f"/api/imports/{plan['token']}/commit", json=options)
+    assert response.status_code == 200, response.text
+    found = at_work.get(f"/api/nodes/{ts}/irc").json()
+    assert {s["direction"]: s["points"] for s in found["sides"]} == {"forward": 49, "reverse": 73}
+
+
 # ---------- T-SSH-15..19 Claude writes new files once the user allows it (D126) ----------
 
 
@@ -1258,9 +1328,11 @@ def test_claudes_write_tool_needs_only_the_apps_go_ahead_and_nothing_deletes(at_
     spec = BY_NAME["write_server_file"]
     assert (spec.kind, spec.method, spec.allowed_in_app) == ("write", "POST", True)
     assert "write_server_file" in PANEL_ALLOWED and "write_server_file" not in READ_ONLY_TOOLS
-    # Nothing Claude has deletes, renames or runs anything on a server.
+    # Nothing Claude has deletes, renames or runs anything on a server: the one other tool
+    # that is not a GET copies files down to stage their import (D225) and writes nothing there.
     assert {t.name for t in TOOLS if "/server-files" in t.path and t.method != "GET"} == {
-        "write_server_file"
+        "write_server_file",
+        "import_server_files",
     }
 
     async def run():

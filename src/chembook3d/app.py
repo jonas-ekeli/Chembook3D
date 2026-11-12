@@ -33,6 +33,7 @@ from chembook3d.api.lifetime import router as lifetime_router
 from chembook3d.api.live import ChangeTracker, LiveState
 from chembook3d.api.live import router as live_router
 from chembook3d.api.local import router as local_router
+from chembook3d.api.local_files import router as local_files_router
 from chembook3d.api.measurements import router as measurement_router
 from chembook3d.api.notes import router as note_router
 from chembook3d.api.pathway import router as pathway_router
@@ -200,6 +201,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(scan_editor_router)  # D135
     app.include_router(builder_router)  # D139
     app.include_router(server_files_router)  # D124
+    app.include_router(local_files_router)  # D225
     app.include_router(job_router)
     app.include_router(scan_path_router)  # D114
     app.include_router(irc_router)  # D131
