@@ -91,6 +91,27 @@ FIELD_HELP = {
 }
 
 
+# The import options preview_import and commit_import share (D222: the IRC and scan path ones).
+IMPORT_HELP = {
+    "duplicate_action": "'attach' to the possible duplicate, or 'new'.",
+    "step": "Index of the job step to import when the file holds several.",
+    "target_node_id": "The node the file is imported onto; left out, a new node.",
+    "irc_part": "Import an IRC output onto its transition state node (target_node_id), as the "
+    "IRC window's Import IRC… does (D131): 'path' keeps the file's points as the node's IRC "
+    "path; 'end' imports an optimization or frequency job on an end point, with "
+    "irc_direction. Left out, the file is imported as an ordinary calculation.",
+    "irc_direction": "With irc_part 'end': 'forward' or 'reverse', the side of the path the "
+    "end point belongs to.",
+    "path_edge_id": "A scan imported as a new node: the transition (edge) the scan was run "
+    "for, so its chip shows on that edge (D121, D137).",
+    "on_edge_only": "With path_edge_id: true shows the scan only as the chip on its edge, with "
+    "no card on the canvas.",
+    "canvas_id": "A new node's canvas: a sub-investigation's id, or left out for the main one.",
+    "conformer_count": "CREST: how many of the lowest conformers to import.",
+    "conformers": "CREST: the conformers to import, by their number in the file from 1.",
+}
+
+
 T = ToolSpec
 
 TOOLS: list[ToolSpec] = [
@@ -867,10 +888,7 @@ TOOLS: list[ToolSpec] = [
         "/api/imports/{token}/preview",
         "Recompute a staged import's plan with options (target node, step, duplicate handling, "
         "custom basis and dispersion names, label, role, status, conformers).",
-        help={
-            "duplicate_action": "'attach' to the possible duplicate, or 'new'.",
-            "step": "Index of the job step to import when the file holds several.",
-        },
+        help=IMPORT_HELP,
     ),
     T(
         "commit_import",
@@ -879,10 +897,7 @@ TOOLS: list[ToolSpec] = [
         "/api/imports/{token}/commit",
         "Import a staged file with the options of the last preview; answers with the node and "
         "calculation ids created.",
-        help={
-            "duplicate_action": "'attach' to the possible duplicate, or 'new'.",
-            "step": "Index of the job step to import when the file holds several.",
-        },
+        help=IMPORT_HELP,
     ),
     T(
         "cancel_import",
@@ -970,6 +985,24 @@ TOOLS: list[ToolSpec] = [
     ),
     # ---------- calculations on this computer (D213) ----------
     T(
+        "get_local_tools",
+        "read",
+        "GET",
+        "/api/local/tools",
+        "What this computer can run (D222): whether the local tools are installed and current "
+        "(with their versions, and an install under way), whether the optional g-xTB is "
+        "installed, the cores and memory a job may use, and `methods`: the methods "
+        "start_local_refine takes here. With `atoms` (a structure's atom count) each method "
+        "carries a time estimate on this computer. Call it before the first local job of a "
+        "conversation: when the tools are not installed, tell the user to install them in "
+        "Settings, Local calculations (you cannot), or use a cloud job instead.",
+        help={
+            "atoms": "Atom count of the structure, for the time estimates.",
+            "model": "oniom only: atoms in the DFT core plus its link atoms, for its estimate "
+            "(check_local_core gives the estimate for a real core).",
+        },
+    ),
+    T(
         "list_local_jobs",
         "read",
         "GET",
@@ -994,9 +1027,11 @@ TOOLS: list[ToolSpec] = [
         "/api/local/jobs",
         "Refine a node's geometry on this computer (D213): a geometry optimization run by the "
         "tools the user installed in Settings (Local calculations), in a process of its own "
-        "that goes on when the app is closed. Methods: gfn2 (GFN2-xTB with tblite, minutes), "
-        "b97-3c and r2scan-3c (the whole molecule with Psi4, hours for a 70-atom complex: "
-        "say so and ask before starting one), oniom (D214: r2SCAN-3c on a core around the "
+        "that goes on when the app is closed. Methods (get_local_tools lists those this "
+        "computer offers, with time estimates): gfn2 (GFN2-xTB with tblite, minutes), gxtb "
+        "(g-xTB, D216: closer to DFT than GFN2-xTB at a few times its cost, only when the user "
+        "installed it), b97-3c and r2scan-3c (the whole molecule with Psi4, hours for a 70-atom "
+        "complex), oniom (D214: r2SCAN-3c on a core around the "
         "metal or chosen atoms, GFN2-xTB on the rest, H link atoms on the cut bonds; "
         "several times faster than r2scan-3c; check the core with check_local_core first and "
         "pass it as core). With transition true it searches for a transition state (D215) "
@@ -1006,14 +1041,16 @@ TOOLS: list[ToolSpec] = [
         "its own level and ends with frequencies at that level, imported as a frequency "
         "calculation (D217; frequencies true asks for them after a minimum too). With scan "
         "{coordinates: [{kind, atoms, start, end}], points} it runs a relaxed scan instead "
-        "(D218): every coordinate goes from start to end over the same points (concerted), each "
+        "(D218): every coordinate goes from start (left out: its value in the structure now) to "
+        "end over the same points (concerted), each "
         "point optimized from the one before, imported as a node of its own; with grid true and "
         "two coordinates each given points it runs every pair of their values (D219, gfn2 and "
         "gxtb only). Charge and "
         "multiplicity default to the node's. Optional constraints (atoms from 0) hold atoms "
         "frozen, or distances, angles and dihedrals at their current value or at a target. "
         "The app imports the result onto the node when it finishes. It uses the computer's "
-        "cores for minutes to hours, so only start one the user asked for.",
+        "cores for minutes to hours, so only start one the user asked for, and say the "
+        "estimate and ask first when it is over an hour.",
     ),
     T(
         "check_local_core",

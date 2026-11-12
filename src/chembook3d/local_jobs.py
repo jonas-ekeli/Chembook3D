@@ -418,6 +418,8 @@ def _check_scanned(
         raise LocalJobError(f"A scanned {kind} needs {SCAN_KINDS[kind]} different atoms")
     if not all(0 <= a < count for a in atoms):
         raise LocalJobError(f"Scan atoms are numbered 1 to {count}")
+    if scan.get("start") is None or scan.get("end") is None:
+        raise LocalJobError(f"A scanned {kind} needs the values it goes from and to")
     start, end = float(scan["start"]), float(scan["end"])
     if start == end:
         raise LocalJobError("A scan's start and end differ")

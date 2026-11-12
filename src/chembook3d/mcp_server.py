@@ -58,11 +58,25 @@ Rules:
   rather than recomputing them from raw energies.
 - Never choose pathways, branches, lineage or a group's representative from energies: ask the
   user (X5).
-- The app runs no calculation on this computer (X1). xTB and CREST calculations go to a Claude
-  Code cloud session (D93): create_cloud_job (nodes as inputs, what to run and return), show
-  the user the job and start it only when they agree (start_cloud_job, give them the session
-  link), get_cloud_job with `wait` until it is finished, fetch_cloud_job, then import the
-  outputs (import_file, commit_import) or set coordinates on the node the user names.
+- Calculations on this computer (D213, D222): start_local_refine optimizes a node's geometry
+  here with the tools the user installed (GFN2-xTB, g-xTB when installed, B97-3c, r2SCAN-3c,
+  ONIOM), and also runs transition state searches, frequencies after an xTB job and relaxed
+  scans. get_local_tools says whether the tools are installed, which methods this computer
+  offers and how long each would take for a structure; you cannot install them (the user does,
+  in Settings, Local calculations). Jobs run one after another and go on when the app is
+  closed: get_local_job tells where one stands, and the app imports a finished result onto its
+  node by itself. Start only what the user asked for; say the estimate and ask first when it
+  is over an hour.
+- What this computer does not run goes to a Claude Code cloud session (D93): a CREST conformer
+  search, an xTB path between two nodes (plan_scan_path), or any xTB job when the local tools
+  are not installed. create_cloud_job (nodes as inputs, what to run and return), show the user
+  the job and start it only when they agree (start_cloud_job, give them the session link),
+  get_cloud_job with `wait` until it is finished, fetch_cloud_job, then import the outputs
+  (import_file, commit_import) or set coordinates on the node the user names.
+- Analyses (D83, D86, D171, D81): selectivities, turnovers, conformer equilibria and steric
+  profiles are saved records you create from the nodes or pathway the user names and then read
+  the result of; overlay_structures and alignment sets compare structures. They show in the
+  app's Analyses view.
 - Building or changing a structure (D144): build_structure runs the app's structure editor
   tools as steps and changes nothing; check its answer (messages, warnings, metals,
   close_contacts), then save it with set_coordinates or create_node by its build_id (D148).

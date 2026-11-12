@@ -61,7 +61,9 @@ NOT_OFFERED = re.compile(
     r"|scan-editor(/.*)?"  # D135: the scan editor window, the page's own as Inspect
     r"|builder/(parts|drawing|describe|edit)"  # D139: the Edit structure window's, D144
     r"|nodes/[^/]+/irc/(summary|files/[^/]+|[^/]+/node)"  # D131: the IRC window's own
-    r"|local/tools(/install|/gxtb)?"  # D213: installing the local tools is the settings' own
+    # D213: installing the local tools and setting their cores and memory (PUT) are the
+    # settings' own; reading their state is get_local_tools (D222)
+    r"|local/tools(/install|/gxtb)?"
     r"|presence(/.*)?|shutdown)$"  # D107: tabs coming and going, and the Shut down button
 )
 
@@ -148,6 +150,41 @@ def test_tools_work_through_the_app(tmp_path):
 
         version = (await page.get("/api/live")).json()["version"]
         assert version >= 2  # the page's tabs are told to reload
+
+    anyio.run(run)
+
+
+def test_claude_is_told_what_this_computer_runs(tmp_path, monkeypatch):
+    """T-MCP-27 (D222): the instructions send a refinement to the local tools and only what
+    they do not run to a cloud job; get_local_tools says what is installed and how long each
+    method takes; the import options for IRC parts and scan paths are described."""
+    from chembook3d import claude_panel, mcp_server
+
+    for text in (mcp_server.INSTRUCTIONS, claude_panel.NOTEBOOK_GUIDE):
+        assert "start_local_refine" in text and "get_local_tools" in text
+        assert "CREST" in text and "create_cloud_job" in text
+        assert "runs no calculation" not in text and "nothing runs on this computer" not in text
+    claude_panel.NOTEBOOK_GUIDE.format(name="T")  # no stray braces
+
+    assert "get_local_tools" in READ_ONLY_TOOLS
+    refine = input_schema(BY_NAME["start_local_refine"])["properties"]
+    assert "gxtb" in refine["method"]["description"]
+    for name in ("preview_import", "commit_import"):
+        options = input_schema(BY_NAME[name])["properties"]
+        for key in ("irc_part", "irc_direction", "path_edge_id", "on_edge_only"):
+            assert options[key].get("description"), (name, key)
+
+    monkeypatch.setenv("CHEMBOOK3D_TOOLS_DIR", str(tmp_path / "tools"))
+
+    async def run():
+        bridge, page = _app_bridge()
+        await page.post("/api/investigations", json={"folder": str(tmp_path / "i"), "name": "T"})
+        tools = _json(await bridge.call("get_local_tools", {"atoms": 70}))
+        assert tools["installed"] is False and tools["cores"] >= 1
+        methods = {m["value"]: m for m in tools["methods"]}
+        assert methods["gfn2"]["estimate"]["seconds"] < methods["r2scan-3c"]["estimate"]["seconds"]
+        bare = _json(await bridge.call("get_local_tools", {}))
+        assert bare["methods"][0]["estimate"] is None
 
     anyio.run(run)
 
