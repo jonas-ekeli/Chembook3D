@@ -43,11 +43,12 @@ UNASKED_DELETES = {
     "/api/groups/{group_id}/members/{node_id}",
     "/api/transitions/{transition_id}/species/{species_id}",
     "/api/imports/{token}",
+    "/api/batch-imports/{token}",  # as cancel_import: only staged files are dropped
 }
 # Never offered to Claude (D91).
 NOT_OFFERED = re.compile(
-    r"^/api/(investigations?(/.*)?|sync(/.*)?|folders|settings|snapshot"
-    r"|source-files/[^/]+/(open|download)|imports|batch-imports(/.*)?|note-images(/.*)?|health"
+    r"^/api/(investigations?(/.*)?|sync(/.*)?|settings|snapshot"
+    r"|source-files/[^/]+/(open|download)|imports|note-images(/.*)?|health"
     r"|live|selection$|view-state|confirmations(/.*)?|nodes/[^/]+/delete-preview"
     r"|groups/[^/]+/delete-preview|sub-investigations/[^/]+/delete-preview|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|energies/table\.csv|history/[^/]+/undo|turnovers/[^/]+/table\.csv|custom-bases/[^/]+/file"
