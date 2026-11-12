@@ -19,8 +19,17 @@ import {
 } from '../api'
 import { Icon } from '../icons'
 import { figureOf } from '../profileFigure'
-import { pathwayColours, pathwayLabels, pathwayLegend, saveProfilePng, saveProfileSvg, styleOf } from '../profileStyle'
-import { closesCycle, csvTitle, downloadBlob, errorText } from '../util'
+import {
+  pathwayColours,
+  pathwayLabels,
+  pathwayLegend,
+  profilePngBlob,
+  profileSvgBlob,
+  saveProfilePng,
+  saveProfileSvg,
+  styleOf,
+} from '../profileStyle'
+import { closesCycle, csvTitle, downloadBlob, errorText, fileName } from '../util'
 import { EmptyState } from './EmptyState'
 import { EnergyNotes } from './EnergyNotes'
 import { EnergyTableView } from './EnergyTableView'
@@ -122,6 +131,7 @@ export function EnergyDrawer({
   saved,
   onViewChange,
   asked,
+  onFigure,
 }: {
   canvas: Canvas
   settings: Settings | null
@@ -147,6 +157,8 @@ export function EnergyDrawer({
   onViewChange?: (view: DrawerView) => void
   /** D184: "Start energy pathway here" from a right-click menu or the palette. */
   asked?: Request | null
+  /** D226: the profile figure that was asked for (`figure:svg`, `figure:png`), or why not. */
+  onFigure?: (figure: { name: string; blob: Blob } | { error: string }) => void
 }) {
   const [tab, setTab] = useState<'profile' | 'table'>(saved?.tab ?? 'profile')
   // D190: the saved profiles (null while loading), the one open and its pathways.
@@ -528,8 +540,11 @@ export function EnergyDrawer({
     )
   }
 
+  // D226: a figure Claude asked for is made once the profile's numbers are in.
+  const [figureAsked, setFigureAsked] = useState<'svg' | 'png' | null>(null)
   useRequest(asked, 'drawer', (action) => {
     if (action === 'start') startAtSelection()
+    else if (action === 'figure:svg' || action === 'figure:png') setFigureAsked(action === 'figure:svg' ? 'svg' : 'png')
   })
 
   const addBranch = (branchId: string) =>
@@ -656,6 +671,31 @@ export function EnergyDrawer({
     const svg = figure()
     if (svg) saveProfileSvg(svg)
   }
+
+  useEffect(() => {
+    if (!figureAsked || stored === null) return
+    const refusal = !drawn.length
+      ? 'The open profile shows no pathway, so there is nothing to draw'
+      : !request
+        ? 'There are no energies to draw yet'
+        : exportProfiles
+          ? null
+          : error // the profile could not be worked out
+    if (!refusal && !exportProfiles) return // still being worked out
+    // After this render: drawing the figure renders it off screen (figureOf).
+    const timer = setTimeout(() => {
+      setFigureAsked(null)
+      const svg = refusal ? null : figure()
+      if (!svg) return onFigure?.({ error: refusal || 'Could not draw the profile' })
+      const name = `${fileName(`energy-profile ${openProfile?.name ?? ''}`.trim(), 'energy-profile')}.${figureAsked}`
+      const made = figureAsked === 'svg' ? Promise.resolve(profileSvgBlob(svg)) : profilePngBlob(svg, style)
+      made.then(
+        (blob) => onFigure?.({ name, blob }),
+        (err: unknown) => onFigure?.({ error: errorText(err) }),
+      )
+    }, 0)
+    return () => clearTimeout(timer)
+  })
 
   const exportPng = () => {
     const svg = figure()

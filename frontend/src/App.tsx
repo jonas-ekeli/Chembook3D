@@ -91,6 +91,7 @@ import {
 import { cardEnergy, minus } from './cardEnergy'
 import { Icon, type IconName } from './icons'
 import { useLive } from './live'
+import { usePageCommands, type PageResult } from './pageCommands'
 import type { HydrogenMode } from './chem'
 import { nodeName, recordNames } from './names'
 import { HydrogenDisplay, StericColourSetting, type StericColours } from './display'
@@ -555,7 +556,7 @@ function App() {
 
   // D91: changes Claude (or another tab) makes show at once; Claude's deletes wait for an answer.
   // D159: the investigation's thermochemistry is in the settings, so they are read again too.
-  const claudeRequests = useLive(investigation === undefined ? undefined : investigation?.folder ?? null, async (folder) => {
+  const { requests: claudeRequests, commands: pageCommands } = useLive(investigation === undefined ? undefined : investigation?.folder ?? null, async (folder) => {
     // Shut down closes the investigation before it pushes and stops: stay in its dialog until
     // then, so the tab does not show the start page with its own Shut down button meanwhile.
     if (isShuttingDown()) return
@@ -839,7 +840,8 @@ function App() {
   }
 
   const savePositions = (positions: Record<string, { x: number; y: number }>) => {
-    // Shown at once; saved in the background. Positions are layout, not history.
+    // Shown at once; saved in the background. Positions are layout, not history. The answer is
+    // what went wrong with the save, if anything, for the one who waits for it (D226).
     setCanvas((current) => ({
       ...current,
       nodes: current.nodes.map((n) => (positions[n.id] ? { ...n, pos_x: positions[n.id].x, pos_y: positions[n.id].y } : n)),
@@ -848,7 +850,13 @@ function App() {
         positions[b.id] ? { ...b, pos_x: positions[b.id].x, pos_y: positions[b.id].y } : b,
       ),
     }))
-    api.savePositions(positions).catch((err: unknown) => setError(errorText(err)))
+    return api.savePositions(positions).then(
+      () => null,
+      (err: unknown) => {
+        setError(errorText(err))
+        return errorText(err)
+      },
+    )
   }
 
   // D199: the last Tidy's earlier positions, for its one-step Undo tidy, while its canvas is the
@@ -862,35 +870,73 @@ function App() {
   } | null>(null)
   const tidyUndo = tidied && tidied.folder === shownFolder && tidied.canvas === openCanvas ? tidied : null
   const saveSides = (sides: Record<string, TransitionSides>) => {
-    if (!Object.keys(sides).length) return
+    if (!Object.keys(sides).length) return Promise.resolve(null)
     // Shown at once, like positions; saved one transition at a time.
     setCanvas((current) => ({
       ...current,
       transitions: current.transitions.map((t) => (sides[t.id] ? { ...t, ...sides[t.id] } : t)),
     }))
-    Promise.all(Object.entries(sides).map(([id, s]) => api.updateTransition(id, s))).catch((err: unknown) => {
-      setError(errorText(err))
-      reload()
-    })
+    return Promise.all(Object.entries(sides).map(([id, s]) => api.updateTransition(id, s))).then(
+      () => null,
+      (err: unknown) => {
+        setError(errorText(err))
+        reload()
+        return errorText(err)
+      },
+    )
   }
+  // Claude is answered once the layout is saved, so what it reads next is what the page shows.
+  const saveLayout = async (positions: Positions, sides: Record<string, TransitionSides>) => {
+    const failed = (await Promise.all([savePositions(positions), saveSides(sides)])).find((error) => error !== null)
+    if (failed) throw new Error(failed)
+  }
+  // D226: what Claude asked the canvas for (a Tidy, an image) waits here for how it went.
+  const canvasAsked = useRef<{ done: (result: PageResult) => void; failed: (message: string) => void } | null>(null)
+  const askCanvas = (action: string) =>
+    new Promise<PageResult>((resolve, reject) => {
+      canvasAsked.current?.failed('Something else was asked of the canvas')
+      canvasAsked.current = { done: resolve, failed: (message) => reject(new Error(message)) }
+      ask('canvas', action)
+    })
+  const canvasImage = (name: string, url: string) => {
+    canvasAsked.current?.done({ name, url })
+    canvasAsked.current = null
+  }
+  // The same for the profile figure, made by the drawer.
+  const figureAsked = useRef<((figure: { name: string; blob: Blob } | { error: string }) => void) | null>(null)
   const tidy = (before: Positions, after: Positions, sides?: TidySides) => {
+    const waiting = canvasAsked.current
+    canvasAsked.current = null
     if (!Object.keys(after).length && !Object.keys(sides?.after ?? {}).length) {
       setNotice('Already tidy: nothing to move.')
+      waiting?.done({ moved: 0, note: 'Already tidy: nothing to move.' })
       return
     }
     setNotice(null)
-    savePositions(after)
-    saveSides(sides?.after ?? {})
+    const saved = saveLayout(after, sides?.after ?? {})
     setTidied({ folder: shownFolder, canvas: openCanvas, before, sides: sides?.before ?? {} })
+    const moved = { moved: Object.keys(after).length, arrows_turned: Object.keys(sides?.after ?? {}).length }
+    void saved.then(
+      () => waiting?.done(moved),
+      (err: unknown) => waiting?.failed(errorText(err)),
+    )
+  }
+  const canvasError = (message: string) => {
+    setError(message)
+    canvasAsked.current?.failed(message)
+    canvasAsked.current = null
   }
   const undoTidy = () => {
-    if (!tidyUndo) return
+    if (!tidyUndo) return Promise.resolve()
     // Records deleted since the tidy are left out.
     const known = new Set([...canvas.nodes, ...canvas.groups, ...subs].map((r) => r.id))
-    savePositions(Object.fromEntries(Object.entries(tidyUndo.before).filter(([id]) => known.has(id))))
     const edges = new Set(canvas.transitions.map((t) => t.id))
-    saveSides(Object.fromEntries(Object.entries(tidyUndo.sides).filter(([id]) => edges.has(id))))
+    const saved = saveLayout(
+      Object.fromEntries(Object.entries(tidyUndo.before).filter(([id]) => known.has(id))),
+      Object.fromEntries(Object.entries(tidyUndo.sides).filter(([id]) => edges.has(id))),
+    )
     setTidied(null)
+    return saved
   }
   // D207: the springs layout (ELK), loaded when first used, with the arrow room from the
   // settings (D209).
@@ -1424,6 +1470,173 @@ function App() {
       return base.includes(id) ? base.filter((x) => x !== id) : [...base, id]
     })
 
+  // D226: what Claude asks this page to do, with the code its own buttons and menus use. The
+  // answer goes back to Claude; a refusal says why in words it can act on.
+  usePageCommands(pageCommands, async (action, params, commandId): Promise<PageResult> => {
+    const named = (id: string) =>
+      canvas.nodes.find((n) => n.id === id)?.label ??
+      canvas.groups.find((g) => g.id === id)?.label ??
+      subs.find((b) => b.id === id)?.label ??
+      ''
+    // The canvas is not drawn in History and Analyses: go there, and let it measure its cards.
+    const toCanvas = async () => {
+      if (view === 'canvas') return
+      setView('canvas')
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+    if (action === 'tidy') {
+      await toCanvas()
+      return askCanvas(`tidy-all:${String(params.mode ?? 'columns')}`)
+    }
+    if (action === 'canvas_image') {
+      await toCanvas()
+      const { name, url } = (await askCanvas(`image:${String(params.what)}:${String(params.format)}`)) as {
+        name: string
+        url: string
+      }
+      return api.savePageFile(commandId, name, await (await fetch(url)).blob())
+    }
+    if (action === 'profile_image') {
+      const profile = params.profile_id as string | undefined
+      if (profile !== undefined && !(await api.energyProfiles()).some((p) => p.id === profile))
+        throw new Error('No saved energy profile has this id')
+      await toCanvas()
+      if (profile !== undefined && profile !== drawerView?.profile_id) {
+        // D190: the drawer starts anew on that profile; the figure waits for its numbers.
+        setDrawerView((current) => ({ tab: current?.tab ?? 'profile', profile_id: profile }))
+        setDrawerKey((k) => k + 1)
+      }
+      const figure = await new Promise<{ name: string; blob: Blob } | { error: string }>((resolve) => {
+        figureAsked.current?.({ error: 'Another figure was asked for' })
+        figureAsked.current = resolve
+        ask('drawer', `figure:${String(params.format)}`)
+      })
+      if ('error' in figure) throw new Error(figure.error)
+      return api.savePageFile(commandId, figure.name, figure.blob)
+    }
+    if (action === 'undo_tidy') {
+      if (!tidyUndo)
+        throw new Error('There is no Tidy to undo: a card was moved since, another canvas is open, or none was done')
+      await undoTidy()
+      return { undone: true }
+    }
+    if (action === 'groups') {
+      const open = params.open === true
+      const ids = (params.ids as string[] | undefined) ?? []
+      const unknown = ids.filter((id) => !canvas.groups.some((g) => g.id === id) && !subs.some((b) => b.id === id))
+      if (unknown.length) throw new Error(`No group or sub-investigation has the id ${unknown.join(', ')}`)
+      if (!ids.length) {
+        setGroupsOpen(open)
+        return { [open ? 'expanded' : 'collapsed']: shownGroups.map((g) => g.label || 'Group') }
+      }
+      setExpanded((current) => {
+        const next = new Set(current)
+        for (const id of ids) {
+          if (open) next.add(id)
+          else next.delete(id)
+        }
+        return next
+      })
+      return { [open ? 'expanded' : 'collapsed']: ids.map(named) }
+    }
+    if (action === 'show') {
+      const id = params.id as string | null | undefined
+      await toCanvas()
+      if (!id) {
+        ask('canvas', 'fit-all')
+        return { shown: 'the whole canvas' }
+      }
+      if (canvas.nodes.some((n) => n.id === id) || canvas.species.some((n) => n.id === id)) {
+        selectNode(id, true)
+        return { shown: named(id) || canvas.species.find((n) => n.id === id)?.label || 'node', kind: 'node' }
+      }
+      const group = canvas.groups.some((g) => g.id === id)
+      if (group || subs.some((b) => b.id === id)) {
+        choose({ kind: group ? 'group' : 'sub', id })
+        reveal(id)
+        focusOn(id)
+        return { shown: named(id), kind: group ? 'group' : 'sub-investigation' }
+      }
+      if (canvas.transitions.some((t) => t.id === id)) {
+        choose({ kind: 'edge', id })
+        const on = transitionCanvas(canvas, id)
+        if (!visibleCanvases(subs, openCanvas, expanded).has(on)) setCanvasId(on)
+        return { shown: 'edge', kind: 'edge' }
+      }
+      const branch = canvas.branches.find((b) => b.id === id)
+      if (branch) {
+        choose({ kind: 'branch', id })
+        return { shown: branch.name, kind: 'branch' }
+      }
+      throw new Error('No node, group, sub-investigation, edge or branch has this id')
+    }
+    if (action === 'canvas') {
+      const id = (params.sub_id as string | null | undefined) ?? null
+      if (id !== null && !subs.some((b) => b.id === id)) throw new Error('No sub-investigation has this id')
+      setView('canvas')
+      choose(null)
+      setCanvasId(id)
+      return { canvas: id === null ? 'the main canvas' : named(id) || 'Sub-investigation' }
+    }
+    if (action === 'view') {
+      const set: PageResult = {}
+      const level =
+        params.level === undefined ? levelOption : (energyOptions?.levels.find((l) => l.key === params.level) ?? null)
+      if (params.level !== undefined && !level) {
+        const known = (energyOptions?.levels ?? []).map((l) => l.key).join(', ')
+        throw new Error(`No level has this key. The levels with energies: ${known || 'none yet'}`)
+      }
+      const type = params.energy_type as EnergyType | undefined
+      if (type !== undefined && !level?.types.includes(type))
+        throw new Error(`This level has no ${type}. It has: ${level?.types.join(', ') || 'no energies'}`)
+      const reference = params.reference_id as string | undefined
+      if (reference !== undefined && !canvas.nodes.some((n) => n.id === reference) && !canvas.groups.some((g) => g.id === reference))
+        throw new Error('No node or group has the id given as the reference')
+      const profile = params.profile_id as string | undefined
+      if (profile !== undefined && !(await api.energyProfiles()).some((p) => p.id === profile))
+        throw new Error('No saved energy profile has this id')
+      if (params.mode !== undefined) {
+        chooseMode(params.mode as ViewMode)
+        set.mode = params.mode
+      }
+      if (params.level !== undefined && level) {
+        setEnergyLevel(level.key)
+        set.level = level.key
+      }
+      if (type !== undefined) {
+        setEnergyType(type)
+        set.energy_type = type
+      }
+      if (reference !== undefined) {
+        setReferenceId(reference)
+        set.reference = named(reference)
+      }
+      if (params.edge_energies !== undefined) {
+        setEdgeEnergies(params.edge_energies === true)
+        set.edge_energies = params.edge_energies === true
+      }
+      const tab = params.drawer_tab as 'profile' | 'table' | undefined
+      if (profile !== undefined || tab !== undefined) {
+        // D190: the drawer starts anew on that profile or tab, open below the canvas.
+        setDrawerView((current) => ({
+          tab: tab ?? current?.tab ?? 'profile',
+          profile_id: profile ?? current?.profile_id ?? null,
+        }))
+        setDrawerKey((k) => k + 1)
+        if (tab !== undefined) set.drawer_tab = tab
+        if (profile !== undefined) set.profile_id = profile
+      }
+      if (params.drawer !== undefined || profile !== undefined || tab !== undefined) {
+        const open = params.drawer !== false
+        setDrawerOpen(open)
+        if (open) setView('canvas')
+        set.drawer = open
+      }
+      return { set }
+    }
+    throw new Error(`This version of the page cannot do '${action}'`)
+  })
+
   // The canvas is memoised: what it is handed keeps its identity, so a render of the app for
   // something else (a notice, the inspector's splitter dragged) does not draw every card and
   // arrow again. Each calls the latest handler, with this render's records.
@@ -1454,6 +1667,12 @@ function App() {
     ),
     dragged: useStable(dragged),
     tidy: useStable(tidy),
+    error: useStable(canvasError),
+    image: useStable(canvasImage),
+    figure: useStable((figure: { name: string; blob: Blob } | { error: string }) => {
+      figureAsked.current?.(figure)
+      figureAsked.current = null
+    }),
     undoTidy: useStable(undoTidy),
     setGroupsOpen: useStable(setGroupsOpen),
   }
@@ -2640,7 +2859,8 @@ function App() {
                   onUndoTidy={tidyUndo ? canvasHandlers.undoTidy : undefined}
                   groupsToOpen={shownGroups.length ? groupsToOpen : undefined}
                   onGroupsOpen={canvasHandlers.setGroupsOpen}
-                  onError={setError}
+                  onError={canvasHandlers.error}
+                  onImage={canvasHandlers.image}
                   onOpenNote={openNote}
                   onLayoutNote={layoutNote}
                   tools={canvasTools}
@@ -2683,6 +2903,7 @@ function App() {
                 key={drawerKey}
                 saved={drawerView ?? undefined}
                 onViewChange={setDrawerView}
+                onFigure={canvasHandlers.figure}
                 onTurnover={newTurnover}
                 onSelectNode={(id) => (canvas.groups.some((g) => g.id === id) ? selectGroup(id) : selectNode(id, true))}
                 onSettings={setSettings}

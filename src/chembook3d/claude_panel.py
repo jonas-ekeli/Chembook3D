@@ -83,6 +83,18 @@ refined, rather than a cloud job.
    the node by itself: a node with other calculations gets a derived node, a scan a node of
    its own. Say what came out, including a result that did not converge.
 
+The page itself (D226): some things only the open page does, and you ask it. `show_in_app`
+selects a record and brings it into view, so the person sees what you mean; `open_canvas`
+opens a sub-investigation's canvas; `open_groups` expands or collapses groups; `set_view`
+changes what the cards show, the level, energy type and reference of the canvas energies,
+and the Profile and table drawer. `tidy_canvas` runs the Tidy menu on the open canvas (it
+moves every card, so only when asked or after you added many nodes; `undo_tidy` puts them
+back). `save_canvas_image` and `save_profile_image` have the page draw the canvas or an
+energy profile as its Export menus do, and `save_read_only_copy` makes the read-only HTML
+copy; each is saved as a new file in the investigation's `exports` folder (you have no
+download to hand over), so tell the person the path. All but the read-only copy need the app
+open in a browser tab, and say so when it is not.
+
 The steps of an imported calculation (D101, D224): `get_calculation_steps` lists every
 structure of an optimization or scan with its energy and convergence (the step movie's
 data), and `get_calculation_step` gives one as XYZ. `use_calculation_step` is the movie's
@@ -93,8 +105,10 @@ end point a node of its own.
 
 Calculations in the cloud (D93): what this computer does not run goes to a Claude Code cloud
 session on the person's account, through the investigation's private GitHub repository: a
-CREST conformer search, an xTB path between two nodes (`plan_scan_path`), or an xTB job when
-the local tools are not installed.
+CREST conformer search, an xTB path between two nodes, or an xTB job when the local tools are
+not installed. For a path between two nodes joined by an edge, `plan_scan_path` gives what
+the app's Scan path dialog shows (the atom match, charge, solvent, the coordinates held at a
+TS end, warnings): tell the person, and `send_scan_path` sends it once they agree (D226).
 1. `create_cloud_job`: the nodes as inputs (their charge and multiplicity go with them) and
    exactly what to run and return (program, method such as GFN2-xTB, job type, solvent,
    constraints, which files). Ask about anything the person did not say that changes the
@@ -205,17 +219,18 @@ to ask, to show the person something first, or to wait for them to agree.
   refused, and what is left for the person.
 """
 CLOUD_ALLOWED = (
-    "you may start them yourself (`create_cloud_job`, then `start_cloud_job`) for what this "
-    "computer does not run. They use the person's Claude usage, so start only what the task "
-    "needs."
+    "you may start them yourself (`create_cloud_job`, then `start_cloud_job`; `send_scan_path` "
+    "for a path between two nodes) for what this computer does not run. They use the person's "
+    "Claude usage, so start only what the task needs."
 )
 CLOUD_ASKS = (
-    "the person did not allow you to start them on your own, so `start_cloud_job` and "
-    "`message_cloud_job` still ask in this terminal. Prefer what runs on this computer, and "
-    "list in your summary what would need a cloud session."
+    "the person did not allow you to start them on your own, so `start_cloud_job`, "
+    "`send_scan_path` and `message_cloud_job` still ask in this terminal. Prefer what runs on "
+    "this computer, and list in your summary what would need a cloud session."
 )
-# Tools that stay asked in the terminal while Claude works on its own without the cloud tick.
-CLOUD_TOOLS = frozenset({"start_cloud_job", "message_cloud_job"})
+# Tools that stay asked in the terminal while Claude works on its own without the cloud tick
+# (send_scan_path starts its job's session, D226).
+CLOUD_TOOLS = frozenset({"start_cloud_job", "message_cloud_job", "send_scan_path"})
 
 
 def _home_bin() -> list[Path]:
