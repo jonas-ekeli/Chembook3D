@@ -1753,6 +1753,9 @@ export type EnergyProfile = {
   id: string
   name: string
   paths: ProfilePath[]
+  /** D221: its pathways through a node deleted since, as stored; listed in the drawer, never
+   * drawn. Absent from profiles read before D221. */
+  lost?: ProfilePath[]
   /** D205: the node or group all its pathways are relative to; null: the first node shown. */
   reference_id?: string | null
 }
@@ -1770,6 +1773,9 @@ export type ProfilePoint = EnergyValue & {
   /** D69: free species added (count > 0) or subtracted (count < 0) to balance this point. */
   species: SpeciesCount[]
   species_message: string | null
+  /** D221, W-COMPARE: how its atoms or charge, with its free species, differ from the
+   * reference's ("C2H4 more"); `relative` is then null. Absent from copies made before D221. */
+  mismatch?: string | null
   /** D181: a TS point's ΔX‡ of its step in hartree (D177), and the index of the point on the
    * pathway it is measured from; absent from copies made before D181. */
   step_barrier?: number | null

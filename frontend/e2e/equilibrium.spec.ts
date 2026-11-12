@@ -1,12 +1,13 @@
 import { expect, test } from '@playwright/test'
-import { openDemo, canvasNode } from './helpers.ts'
+import { DEMO_MISMATCH_TEMPLATE, openDemo, canvasNode } from './helpers.ts'
 
 // T-UI-49, FR-EQ-01…06, D171: a conformer equilibrium from two minima selected on the canvas,
 // a count, members added from a branch, the history, and deleting it. T-UI-50, FR-EQ-07, D173:
 // a TS of the next step.
 
 test('conformer equilibrium from two minima', async ({ page }) => {
-  await openDemo(page)
+  // The demo whose TS A-S2 is water, another molecule than the conformers.
+  await openDemo(page, DEMO_MISMATCH_TEMPLATE)
   // The demo's A-S1 and A-S3 lie 5.30 kcal/mol apart, joined only by a direct edge (no TS).
   await canvasNode(page, 'A-S1').click()
   await canvasNode(page, 'A-S3').click({ modifiers: ['Control'] })
@@ -29,14 +30,14 @@ test('conformer equilibrium from two minima', async ({ page }) => {
   await count.press('Tab')
   await expect(populations.getByRole('row', { name: /A-S1/ })).toContainText('0.0261 %')
 
-  // Members from branch A bring its TS, whose placeholder structure is another molecule.
+  // Members from branch A bring its TS, which is another molecule in this demo.
   await editor.getByLabel('Add members').selectOption({ label: 'A' })
   await expect(editor.getByRole('table', { name: 'Members' })).toContainText('A-S2')
   await expect(result).toContainText('must have the same atoms')
   await editor.getByRole('button', { name: 'Remove A-S2' }).click()
   await expect(populations.getByRole('row', { name: /A-S1/ })).toContainText('0.0261 %')
 
-  // D173: the demo's TSs are placeholder water, so the next step's TS is named and left out.
+  // D173: A-S2 is water here, so the next step's TS is named and left out.
   await editor.getByLabel('Add next step TSs').selectOption({ label: 'A-S2' })
   const next = result.getByRole('region', { name: 'Next step' })
   await expect(next.getByRole('table', { name: 'Next step TSs' })).toContainText('A-S2')

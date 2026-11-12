@@ -16,6 +16,7 @@ from tests import gaussian_text as g
 from tests.test_energies import import_file, level_key, view
 from tests.test_import import calculations, upload
 from tests.test_pathway import edge, get, post
+from tests.test_species import put
 
 LEVEL = "Gaussian B3LYP/6-31G(D)"
 ONIOM_LEVEL = "Gaussian ONIOM(B3LYP/6-31G(D):UFF)"
@@ -131,12 +132,17 @@ def test_opening_an_older_notebook_reads_the_counterpoise_total_again(open_clien
 
 def association(client) -> tuple[str, str, str]:
     """A water monomer and the water dimer (opt freq), a Counterpoise=2 single point on the
-    dimer, and an edge from monomer to dimer; returns (monomer, dimer, level key)."""
-    monomer = import_file(client, "water.log", g.opt_freq(g.WATER, g.WATER, -76.40))["node_id"]
+    dimer, and an edge from monomer to dimer on which the second water joins as a free species,
+    so the atoms balance (D221); returns (monomer, dimer, level key)."""
+    water = g.opt_freq(g.WATER, g.WATER, -76.40)
+    monomer = import_file(client, "water.log", water)["node_id"]
     dimer = g.opt_freq(g.WATER_DIMER, g.WATER_DIMER, g.DIMER_ENERGY)
     complex_id = import_file(client, "dimer.log", dimer)["node_id"]
     import_file(client, "cp.log", g.counterpoise_sp(), complex_id)
-    edge(client, monomer, complex_id)
+    partner = post(client, "/nodes", {"label": "water", "kind": "species"}, status=201)["id"]
+    import_file(client, "partner.log", water, partner)
+    joins = {"species_id": partner, "direction": "joins", "count": 1}
+    put(client, f"/transitions/{edge(client, monomer, complex_id)['id']}/species", joins)
     return monomer, complex_id, level_key(client, LEVEL)
 
 

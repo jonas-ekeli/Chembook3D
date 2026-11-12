@@ -19,6 +19,10 @@ artifacts and publishes nothing.
   view is restored, Shut down from an investigation in one click, and 3D viewers that release
   their page listeners.
 - Arrows to sub-investigation stubs meet each end on the facing sides (D212).
+- Energy profiles (D221): a branch that closes a cycle and holds groups starts its pathway at its
+  first step; a point with other atoms or another charge than the reference shows n/a with the
+  reason (W-COMPARE) instead of a value far off the axis; a removed pathway can be put back, a
+  pathway is added once, and one that lost a node stays listed.
 - Documentation: a restructured code map, an architecture map, a user guide covering the core of
   the app, and README screenshots in dark mode.
 - CI: parallel pytest, time limits and pinned actions; then dependency audits, CodeQL, a

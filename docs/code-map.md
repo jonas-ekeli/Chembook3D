@@ -170,6 +170,7 @@ Routes for all of these are in `api/pathway.py`.
 
 - A `Node` with `kind == "species"` is a substrate or fragment kept off the canvas. `TransitionSpecies` lists those that join or leave on a transition.
 - `services/species.py` holds the rules: attach, kind changes, the balance added along a pathway, W-BALANCE. `pathways.profiles` and the energy view use it.
+- D221, W-COMPARE: `species.mismatch` says how a pathway point's atoms or charge, with its balance, differ from the reference's. `pathways.prepare` keeps it per point (`Prepared.mismatches`); `pathways.profiles` then gives the point `mismatch` and no `relative`, and the note `_compare_note`; the table's Check column and a turnover's message repeat it. `ProfileChart` shows it as the "n/a" label's tooltip.
 - `balances_from` gives each node's balance along the route from the reference (D72), for node cards (the energy view's `relative`) and for pathways that miss the reference.
 
 ## Resume overview (D191)
@@ -239,6 +240,7 @@ Routes for all of these are in `api/pathway.py`.
   - D194 `shifts`: a step moved whole columns later along the axis with every step after it (`ProfileChart`'s `shifts` prop).
   - D195 `colour`: picked on the pathway's swatch (`components/PathwayColour.tsx`). It wins over the branch's colour and the style's set (`profileStyle.pathwayColours(..., chosen)`, `ProfileChart`'s `chosen` prop).
 - D205: the profile's own `reference_id` (migration 0031): the drawer's "Reference node", apart from the cards' reference in `App`. `onPathsChange` hands it to the read-only copy as `profile_reference_id`.
+- D221, the pathways list's safety net, all in `EnergyDrawer.tsx`: `remove`/`restore` and the `notice` line (Undo for the last pathway removed; "already in this profile" from `addPath`, which compares the ids with `pathsRef`). Pathways that lost a node come from the API as `lost` (`energy_profiles.split_paths`), ride at the end of `paths`, are drawn as `.lost-path` cards and saved back with the rest.
 
 ### Profile chart and style (D106–D111, D181)
 
@@ -730,7 +732,7 @@ Routes for all of these are in `api/pathway.py`.
 
 ## Scripts
 
-- `scripts/make_demo.py`: builds a small demo investigation (used by the UI tests too).
+- `scripts/make_demo.py`: builds a small demo investigation (used by the UI tests too). `--mismatch` gives branch A's transition state other atoms than its neighbours, for the tests of the checks on atoms.
 - `scripts/make_showcase_demo.py` builds the showcase demo (D170) from published ioChem-BD CML files, downloaded into a cache and checked against `scripts/showcase_manifest.json`. It drives the app's own HTTP API through a TestClient, so it shows what a user's clicks would do (tests in `tests/test_showcase_demo.py`).
 - `scripts/build_frontend.py` runs `npm ci` and `npm run build` the same way on Windows, Linux and WSL, and refuses a Windows Node.js found through the PATH under WSL.
 - `scripts/check_wheel.py`: the release build's check that a wheel carries `chembook3d/static/` and `chembook3d/static-snapshot/snapshot.html`.
@@ -750,7 +752,7 @@ Routes for all of these are in `api/pathway.py`.
 
 - `frontend/e2e/`: Playwright UI tests against the real backend, one spec per feature (for example `e2e/refetch.spec.ts`, `e2e/local-jobs.spec.ts`, `frontend/e2e/equilibrium.spec.ts`).
   - `playwright.config.ts` starts the backend (:8766) and the fake SSH server (:8767) and runs one test at a time (`workers: 1`: the backend has one open investigation). Everything goes to a fresh temporary folder (`E2E_DIR`), app settings included.
-  - `e2e/global-setup.ts` builds the demo once into `E2E_DIR/demo-template` (`scripts/make_demo.py`) and writes the synthetic Gaussian files.
+  - `e2e/global-setup.ts` builds the demo once into `E2E_DIR/demo-template` (`scripts/make_demo.py`), once more with `--mismatch` into `E2E_DIR/demo-mismatch-template` (`openDemo(page, DEMO_MISMATCH_TEMPLATE)`), and writes the synthetic Gaussian files.
   - `e2e/helpers.ts` holds what the specs share. `openDemo` opens the test's own copy of the demo (`demoFolder`: copied from the template on first use, without the lock and owner files, under `E2E_DIR/demo-copies/`), so a test may change the demo freely and needs no clean-up; the same test opening it again gets the same copy. Also `browseTo` and `openFolder` (the folder dialog, waiting for the listing), `newInvestigation`, `startPage`, `investigationCommand`, `canvasNode`, `pressInView` and `bringIntoView` (fit the canvas before clicking, see #188), `dragBy`, `deferred` and `pageSettled`.
   - No fixed waits: hold an answer back with `deferred` and a route, wait for the response (`page.waitForResponse`, then `response.finished()`) or the request that follows it, and use `pageSettled` before asserting that something did not happen. App settings are shared by all tests: a test that changes one puts it back in a `finally`.
 - `frontend/tests/`: Node unit tests (`npm run test:unit`, Node 24+), such as `frontend/tests/api-identity.test.mjs`.

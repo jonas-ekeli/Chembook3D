@@ -362,3 +362,60 @@ def test_overview_does_not_count_species_as_loose_nodes(open_client, cycle):
     found = get(open_client, "/overview")
     loose = next(b for b in found["branches"] if b["id"] is None)
     assert loose["node_count"] == 4
+
+
+# ---------- D221, W-COMPARE: points that cannot be compared with the reference ----------
+
+
+def test_a_point_with_other_atoms_than_the_reference_has_no_relative_energy(open_client, cycle):
+    # T-EN-52: balanced by its free species, every point has the reference's atoms and a value.
+    client = open_client
+    cycle.energies()
+    path = cycle.path("A", "B", "TS", "C")
+    found = profile(client, [path], cycle.ids["A"])
+    assert [p["mismatch"] for p in found["profiles"][0]["points"]] == [None] * 4
+    assert all(p["relative"] is not None for p in found["profiles"][0]["points"])
+    assert [n["code"] for n in found["notes"]] == []
+
+    # Without the propene on A → B, everything after it has C3H6 more than the reference: no
+    # relative energy (it would be off by the propene's whole energy), and a note says why.
+    delete(client, f"/transitions/{cycle.edges[('A', 'B')]}/species/{cycle.ids['propene']}")
+    found = profile(client, [path], cycle.ids["A"])
+    points = found["profiles"][0]["points"]
+    assert [p["mismatch"] for p in points] == [None, "C3H6 more", "C3H6 more", "C3H6 more"]
+    assert [p["relative"] is None for p in points] == [False, True, True, True]
+    (note,) = found["notes"]
+    assert note["code"] == "W-COMPARE"
+    assert "the reference “A” for B, TS, C (C3H6 more)" in note["message"]
+    body = {"paths": [path], "reference_id": cycle.ids["A"], "level": svp(client), "type": "E"}
+    table = post(client, "/energies/table", {**body, "unit": "kcal/mol"}, status=200)
+    relative, check = table["columns"].index("ΔE (kcal/mol)"), table["columns"].index("Check")
+    assert [row[relative] for row in table["rows"]] == ["0.00", "n/a", "n/a", "n/a"]
+    assert table["rows"][1][check] == "Not the reference's atoms or charge: C3H6 more"
+    assert table["rows"][0][check] == "" and table["notes"] == found["notes"]
+
+    # Against a reference after the gap, it is the points before it that differ.
+    found = profile(client, [path], cycle.ids["B"])
+    assert [p["mismatch"] for p in found["profiles"][0]["points"]] == [
+        "C3H6 fewer",
+        None,
+        None,
+        None,
+    ]
+
+    # A pathway of another system beside it, another charge, and a node without coordinates
+    # (nothing to compare, so it keeps its value).
+    cycle.attach(("A", "B"), "propene", "joins")
+    other = node(client, label="Os", charge=0, xyz=xyz("Os", "C", "H", "H"))["id"]
+    cation = node(client, label="A+", charge=1, xyz=xyz(*RU_CH2))["id"]
+    bare = node(client, label="Bare")["id"]
+    for record, energy in ((other, -90.0), (cation, -99.8), (bare, -100.1)):
+        add_energies(client, record, energy)
+    edge(client, other, cation)
+    edge(client, cation, bare)
+    found = profile(client, [path, [other, cation, bare]], cycle.ids["A"])
+    first, second = (p["points"] for p in found["profiles"])
+    assert all(p["mismatch"] is None and p["relative"] is not None for p in first)
+    assert [p["mismatch"] for p in second] == ["Os more, Ru fewer", "charge 1 against 0", None]
+    assert [p["relative"] is None for p in second] == [True, True, False]
+    assert "Os (Os more, Ru fewer); A+ (charge 1 against 0)" in found["notes"][0]["message"]

@@ -45,16 +45,17 @@ type Path = {
   colour: string | null
 }
 
-/** D190: a saved profile's pathways in the drawer's form; the choices are asked for (D189). */
+/** D190: a saved profile's pathways in the drawer's form; the choices are asked for (D189).
+ * D221: those that lost a node come last; they are listed, not drawn, and saved as they are. */
 const pathsOf = (profile: EnergyProfile | undefined): Path[] =>
-  profile?.paths.map((p) => ({
+  [...(profile?.paths ?? []), ...(profile?.lost ?? [])].map((p) => ({
     ids: p.ids,
     choices: [],
     branchId: p.branch_id,
     shown: p.shown,
     shifts: p.shifts ?? [],
     colour: p.colour ?? null,
-  })) ?? []
+  }))
 /** D190: what is saved of the pathways; never the choices. */
 const storedOf = (paths: Path[]): ProfilePath[] =>
   paths.map((p) => ({ ids: p.ids, branch_id: p.branchId, shown: p.shown, shifts: p.shifts, colour: p.colour }))
@@ -158,6 +159,11 @@ export function EnergyDrawer({
   const [deleting, setDeleting] = useState(false)
   // D194: the step each pathway's Move buttons act on, by the pathway's place in `paths`.
   const [moving, setMoving] = useState<Record<number, number>>({})
+  // D221: what the list last did on its own account: a pathway removed (which Undo puts back
+  // where it was) or one not added because the profile has it already.
+  const [notice, setNotice] = useState<{ text: string; undo?: { path: Path; at: number } } | null>(null)
+  // The pathways as last drawn, for a pathway found after a render to be compared with.
+  const pathsRef = useRef<Path[]>([])
   // What the open profile last saved, so a change is saved once and loading saves nothing.
   const lastSaved = useRef<string | null>(null)
   // The open profile for callbacks that finish after a render, such as a pathway being found.
@@ -265,12 +271,18 @@ export function EnergyDrawer({
     return found
   }
 
-  // Records can be deleted elsewhere; drop pathways that lost a node.
+  // Records can be deleted elsewhere; a pathway that lost a node is set apart (`lost`, D221).
   // Each pathway with its place in `paths`, its colour and its name; D190: only the ticked
   // ones are drawn, valued and exported, and a pathway keeps its colour whether shown or not.
-  const listed = paths
-    .map((path, at) => ({ path, at, ...pathwayLegend(canvas, branches, labels, path.ids, path.branchId, at) }))
-    .filter(({ path }) => path.ids.every((id) => labels.has(id)))
+  pathsRef.current = paths
+  const named = paths.map((path, at) => ({
+    path,
+    at,
+    ...pathwayLegend(canvas, branches, labels, path.ids, path.branchId, at),
+  }))
+  const listed = named.filter(({ path }) => path.ids.every((id) => labels.has(id)))
+  // D221: a pathway through a node deleted since: listed with what is left of it, never drawn.
+  const lost = named.filter(({ path }) => !path.ids.every((id) => labels.has(id)))
   const drawn = listed.filter(({ path }) => path.shown)
   const livePaths = drawn.map(({ path }) => path)
   const colours = drawn.map(({ colour }) => colour)
@@ -389,6 +401,16 @@ export function EnergyDrawer({
   const replace = (index: number, next: Path | null) =>
     setPaths((current) => (next ? current.map((p, i) => (i === index ? next : p)) : current.filter((_, i) => i !== index)))
 
+  /** D221: take a pathway out of the profile; Undo puts it back where it was. */
+  const remove = (index: number, path: Path, text: string) => {
+    setNotice({ text, undo: { path, at: index } })
+    replace(index, null)
+  }
+  const restore = (undo: { path: Path; at: number }) => {
+    setPaths((current) => [...current.slice(0, undo.at), undo.path, ...current.slice(undo.at)])
+    setNotice(null)
+  }
+
   const extend = (index: number, path: Path, ids: string[]) =>
     api.extendPathway(ids, path.branchId).then(
       (found) => replace(index, { ...path, ids: found.path, choices: found.choices }),
@@ -426,6 +448,7 @@ export function EnergyDrawer({
     setProfileRef(ref)
     setMoving({})
     setRenaming(null)
+    setNotice(null)
   }
 
   // D190: every change to the open profile's pathways (and its reference, D205) is saved at
@@ -437,7 +460,8 @@ export function EnergyDrawer({
     const body = JSON.parse(storedKey) as { paths: ProfilePath[]; reference_id: string | null }
     // The kept copy takes the change at once, not when the save comes back: a profile opened
     // again before then must open as it was left, not as it was last saved.
-    setStored((current) => current?.map((p) => (p.id === openId ? { ...p, ...body } : p)) ?? null)
+    // D221: its pathways that lost a node are among `body.paths` from now on.
+    setStored((current) => current?.map((p) => (p.id === openId ? { ...p, ...body, lost: [] } : p)) ?? null)
     saving.current = saving.current
       .then(() => inInvestigation(() => api.updateEnergyProfile(openId, body)))
       .then(
@@ -472,9 +496,25 @@ export function EnergyDrawer({
    * when none is open, and two pathways added at once share the one profile made for them. */
   const addPath = (path: Path) => {
     if (!openRef.current && !creating.current) void newProfile().catch(() => undefined)
+    // A profile being made is empty, and `pathsRef` still holds the one open before it.
+    const made = creating.current !== null
     const ready = creating.current ?? Promise.resolve()
     ready.then(
-      () => setPaths((current) => [...current, path]),
+      () => {
+        // D221: the same nodes in the same order would be drawn on top of the pathway already
+        // there; that one is shown instead, and the list says so.
+        const key = JSON.stringify(path.ids)
+        const same = made ? -1 : pathsRef.current.findIndex((p) => JSON.stringify(p.ids) === key)
+        if (same < 0) {
+          setNotice(null)
+          return setPaths((current) => [...current, path])
+        }
+        const { name } = pathwayLegend(canvas, branches, labels, path.ids, pathsRef.current[same].branchId, same)
+        setNotice({ text: `“${name}” is already in this profile.` })
+        setPaths((current) =>
+          current.map((p) => (JSON.stringify(p.ids) === key && !p.shown ? { ...p, shown: true } : p)),
+        )
+      },
       (err: unknown) => setError(errorText(err)),
     )
   }
@@ -812,7 +852,12 @@ export function EnergyDrawer({
                   >
                     Sterics
                   </button>
-                  <button className="small" onClick={() => replace(index, null)} aria-label={`Remove pathway ${name}`}>
+                  <button
+                    className="small"
+                    onClick={() => remove(index, path, `Removed “${name}”.`)}
+                    aria-label={`Remove pathway ${name}`}
+                    title="Remove this pathway from the profile; Undo below the list puts it back (D221)"
+                  >
                     ✕
                   </button>
                 </div>
@@ -921,6 +966,40 @@ export function EnergyDrawer({
                 )}
               </div>
             ))}
+            {lost.map(({ path, at: index }) => {
+              const left = path.ids.filter((id) => labels.has(id))
+              const gone = path.ids.length - left.length
+              const name = left.map((id) => labels.get(id)).join(' → ') || 'no node left'
+              return (
+                <div key={index} className="pathway lost-path" role="group" aria-label="Pathway that lost a node">
+                  <div className="pathway-head">
+                    <strong>Not drawn: {gone === 1 ? 'a node' : `${gone} nodes`} on it {gone === 1 ? 'was' : 'were'} deleted</strong>
+                    <button
+                      className="small"
+                      onClick={() => remove(index, path, 'Removed the pathway that lost a node.')}
+                      aria-label="Remove the pathway that lost a node"
+                      title="Remove what is left of this pathway from the profile"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <p className="pathway-nodes muted">What is left: {name}</p>
+                </div>
+              )
+            })}
+            {notice && (
+              <p className="pathway-notice small" role="status">
+                {notice.text}
+                {notice.undo && (
+                  <>
+                    {' '}
+                    <button className="link" onClick={() => notice.undo && restore(notice.undo)}>
+                      Undo
+                    </button>
+                  </>
+                )}
+              </p>
+            )}
             <div className="pathway-add">
               <button className="small" onClick={startAtSelection} disabled={!selectedId}>
                 Start at selected node

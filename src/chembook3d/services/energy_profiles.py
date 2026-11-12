@@ -11,8 +11,9 @@ for them (D189).
 
 Like alignment sets and steric profiles, profiles are layout-like data: saved in the
 investigation but not in the history, and saving one is not a change other tabs reload for
-(the drawer saves on every step). A pathway through a node deleted since is dropped when the
-profiles are read, as the remembered view drops it (D105)."""
+(the drawer saves on every step). A pathway through a node deleted since is left out of the
+pathways when the profiles are read, as the remembered view drops it (D105); it comes with them
+as `lost` (D221), so the drawer lists it, not drawn, until the user removes it."""
 
 import re
 from typing import Any
@@ -99,19 +100,29 @@ def clean_paths(value: Any) -> list[dict[str, Any]]:
     return paths
 
 
-def current_paths(session: Session, paths: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """`paths` without those through a deleted node; a deleted branch is forgotten."""
+def split_paths(
+    session: Session, paths: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """`paths` as (those whose nodes all exist, those through a deleted node); a deleted
+    branch is forgotten. D221: the second are kept as stored, so the drawer can list them."""
     nodes = set(session.scalars(select(Node.id).where(Node.kind == NodeKind.NODE)))
     on_canvas = nodes | set(session.scalars(select(GroupNode.id)))
     branches = set(session.scalars(select(Branch.id)))
-    kept = []
+    kept: list[dict[str, Any]] = []
+    lost: list[dict[str, Any]] = []
     for path in paths:
-        if not all(i in on_canvas for i in path["ids"]):
-            continue
         branch_id = path["branch_id"] if path["branch_id"] in branches else None
         # Stored before D194: no step moved; before D195: the branch's colour.
-        kept.append({"shifts": [], "colour": None, **path, "branch_id": branch_id})
-    return kept
+        whole = all(i in on_canvas for i in path["ids"])
+        (kept if whole else lost).append(
+            {"shifts": [], "colour": None, **path, "branch_id": branch_id}
+        )
+    return kept, lost
+
+
+def current_paths(session: Session, paths: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`paths` without those through a deleted node; a deleted branch is forgotten."""
+    return split_paths(session, paths)[0]
 
 
 def _on(paths: list[dict[str, Any]]) -> set[str]:

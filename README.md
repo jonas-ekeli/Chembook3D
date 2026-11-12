@@ -234,7 +234,7 @@ the profile (⚠), the energy table's Check column, its CSV export and every ana
 | W-NOFREQ · W-QH · W-PARSE | No frequency job at the geometry level, G_qh cannot be computed, or a value could not be read from the file. |
 | W-TEMP · W-PRESSURE · W-STDSTATE | Values at different temperatures, a printed G at a pressure other than 1 atm, or gas-phase free species joining a solvated system at 1 atm. |
 | W-SCALE · W-G-MODEL | Frequency scale factors, or the programs' free-energy models (RRHO, qRRHO, mRRHO), differ between nodes at one level. |
-| W-GEOM · W-DUP · W-BALANCE | A calculation's geometry does not match its node, two nodes may be duplicates, or atoms or charge do not balance across a transition. |
+| W-GEOM · W-DUP · W-BALANCE · W-COMPARE | A calculation's geometry does not match its node, two nodes may be duplicates, atoms or charge do not balance across a transition, or a profile point has other atoms or another charge than the reference and gets no relative energy. |
 
 **Nothing is entered by hand.** Energies come only from files, and are never used to choose
 nodes or pathways for you. Rejected, failed and superseded nodes, and duplicate transition states,
