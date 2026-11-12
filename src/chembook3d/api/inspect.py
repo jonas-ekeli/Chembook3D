@@ -190,9 +190,10 @@ async def _fetch(item: _Open) -> None:
     item.copy = folder
 
 
-def _read_job(item: _Open) -> InspectionOut:
+def job_inspection(folder: Path, job_id: str) -> tuple[inspection.Inspection, dict, int]:
+    """D220: a local job's steps so far (or its result), with its status and the bytes read."""
     try:
-        data, status, size = local_jobs.inspect_data(item.folder, item.job_id)
+        data, status, size = local_jobs.inspect_data(folder, job_id)
         parsed = local_result.parse_data(data)
     except local_jobs.JobNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
@@ -203,6 +204,11 @@ def _read_job(item: _Open) -> InspectionOut:
     for step in found.steps:
         if step.scan and planned:  # a running scan's points: all it will have, not those so far
             step.points = max(step.points, int(planned))
+    return found, status, size
+
+
+def _read_job(item: _Open) -> InspectionOut:
+    found, status, size = job_inspection(item.folder, item.job_id)
     return InspectionOut(
         id=item.id,
         name=f"{status.get('node_label')} · {status.get('level')}",

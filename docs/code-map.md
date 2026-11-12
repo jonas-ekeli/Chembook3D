@@ -671,6 +671,7 @@ Routes for all of these are in `api/pathway.py`.
 - `mcp_server.py` is `chembook3d mcp` (stdio, the official `mcp` SDK's low-level server). It turns tool calls into requests to the running app at 127.0.0.1 with the header `X-Chembook-Client: claude`.
 - `mcp_tools.py` lists the tools (read, write, confirm) and builds their input schemas from the app's own OpenAPI description, so a new route needs a tool or an entry in `tests/test_mcp.py`'s NOT_OFFERED.
 - The full list of MCP tools is `mcp_tools.TOOLS`, and of confirm actions `mcp_tools.CONFIRM_DESCRIPTIONS` (run by `api/live.py`'s `ACTIONS`).
+- Steps of calculations for Claude (D224): `get_calculation_steps` and `trim_scan` call the page's routes in `api/pathway.py` with `geometry=false`; `GET /api/calculations/{id}/steps/{frame}` (`pathway.step_structure`) gives one structure as XYZ; `GET /api/local/jobs/{id}/steps` and `/steps/{frame}` in `api/local.py` read a job through `api/inspect.job_inspection`, as the Inspect window does (D220). A frame number is the one integer path parameter the MCP bridge passes (`mcp_server.Bridge.call`).
 - What Claude is told: `mcp_server.INSTRUCTIONS` (every client) and `claude_panel.NOTEBOOK_GUIDE` (the panel's CLAUDE.md). Keep both in step with the tools: D222 brought them up to the local jobs of D213; `mcp_tools.IMPORT_HELP` describes the import options.
 - `api/live.py` holds the app side:
   - `ChangeTracker` counts every successful change by client and sets `history.SOURCE` to "claude" for Claude's requests.

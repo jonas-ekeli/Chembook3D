@@ -205,6 +205,76 @@ TOOLS: list[ToolSpec] = [
         "A frequency calculation's normal modes: frequencies (imaginary first in `order`) and "
         "displacements per atom. Large for big molecules.",
     ),
+    T(
+        "get_calculation_steps",
+        "read",
+        "GET",
+        "/api/calculations/{calculation_id}/steps",
+        "Every structure of an optimization or scan (D101), read again from its output file, "
+        "as the step movie shows them: per frame its energy (hartree), scan point, whether "
+        "the optimizer converged on it and the optimizer's criteria. Use it to see how an "
+        "optimization went or where a scan's top is. A scan path (D112) also gives `trim`: "
+        "the points taken out, the top the node takes, cuts and suggested spikes (D117). "
+        "Frames are numbered from 0 in the list's order; get one frame's coordinates with "
+        "get_calculation_step.",
+        help={
+            "geometry": "Also give every frame's coordinates (large; left out unless asked). "
+            "For one structure use get_calculation_step."
+        },
+        defaults={"geometry": False},
+    ),
+    T(
+        "get_calculation_step",
+        "read",
+        "GET",
+        "/api/calculations/{calculation_id}/steps/{frame}",
+        "One structure of a calculation's steps as XYZ text, with its energy and scan point, "
+        "for check_structure, build_structure or a new node.",
+        help={"frame": "The frame's number in get_calculation_steps, from 0; -1 is the last."},
+    ),
+    T(
+        "use_calculation_step",
+        "write",
+        "POST",
+        "/api/calculations/{calculation_id}/steps/{frame}/use",
+        '"Use this structure" of the step movie (D112): the structure `frame` becomes a '
+        "node's geometry. On a scan path node (get_calculation_steps says in_place) the node "
+        "and its scan take that point's geometry and energy in place; on any other node a "
+        "new derived node is made beside it, with no calculations (`derived` true), since a "
+        "node with calculations keeps its geometry (ID-4, ID-5). Say which frame and why "
+        "before using one that is not the top of a scan.",
+        help={"frame": "The frame's number in get_calculation_steps, from 0."},
+    ),
+    T(
+        "preview_scan_trim",
+        "read",
+        "POST",
+        "/api/calculations/{calculation_id}/steps/trim-preview",
+        "A scan path as it would be with points taken out or put back (D117), changing "
+        "nothing: the points removed, the frame that becomes the top, the barrier over the "
+        "first kept point, the gaps a removal leaves with the structural jump across each, "
+        "and whether the first or last point would be gone.",
+        help={
+            "remove": "Scan points to take out, numbered from 1 as `point` in the frames.",
+            "restore": "Scan points to put back.",
+        },
+    ),
+    T(
+        "trim_scan",
+        "write",
+        "POST",
+        "/api/calculations/{calculation_id}/steps/trim",
+        "Take points out of a scan path, or put them back (D117): for points that are not on "
+        "the path, such as a spike where the structure jumped. The file is untouched and a "
+        "point can always be restored. A node showing the automatic top moves with it "
+        "(`moved`). Run preview_scan_trim first and tell the user which points and why.",
+        help={
+            "remove": "Scan points to take out, numbered from 1 as `point` in the frames.",
+            "restore": "Scan points to put back.",
+            "geometry": "Also give every frame's coordinates in the answer (large).",
+        },
+        defaults={"geometry": False},
+    ),
     T("list_levels", "read", "GET", "/api/levels", "The levels of theory in the investigation."),
     T(
         "list_custom_names",
@@ -486,6 +556,19 @@ TOOLS: list[ToolSpec] = [
         "nodes an optimized end point is the same structure as, and the end points' E, G and "
         "G_qh relative to the TS. Use it to answer whether a TS connects two intermediates.",
         help={"structures": "Also give every point's coordinates (large; usually not needed)."},
+    ),
+    T(
+        "make_irc_end_node",
+        "write",
+        "POST",
+        "/api/nodes/{node_id}/irc/{direction}/node",
+        "Make the optimized end point of one direction of a TS node's IRC a node of its own "
+        "(Q38): its optimization's file, and the frequency job's, are imported again as a new "
+        "node beside the TS, an ordinary import that undo_import undoes. Needs an end-point "
+        "optimization in that direction (get_irc lists them). Use it when get_irc says the "
+        "end leads 'elsewhere' or to no node yet; it draws no edge, so connect the new node "
+        "yourself where that is what the IRC shows.",
+        help={"direction": "'forward' or 'reverse', the program's labels as get_irc gives them."},
     ),
     T(
         "plan_scan_path",
@@ -1019,6 +1102,32 @@ TOOLS: list[ToolSpec] = [
         "GET",
         "/api/local/jobs/{job_id}",
         "Where one local job stands, as in list_local_jobs.",
+    ),
+    T(
+        "get_local_job_steps",
+        "read",
+        "GET",
+        "/api/local/jobs/{job_id}/steps",
+        "How a local job is going, while it runs or after (D220, what Inspect shows): per "
+        "step of the job its type, how it ended, the last energy and the frequencies once "
+        "there are any, and every structure written so far with its energy (hartree), scan "
+        "point, convergence and the optimizer's criteria, without coordinates. Use it to "
+        "see whether an optimization is converging, wandering or stuck before deciding to "
+        "wait or cancel; get a structure with get_local_job_step.",
+    ),
+    T(
+        "get_local_job_step",
+        "read",
+        "GET",
+        "/api/local/jobs/{job_id}/steps/{frame}",
+        "One structure of a local job so far as XYZ text, with its energy: -1 is the latest. "
+        "A running job's structure is not a result: do not save it as a node's geometry "
+        "unless the user asks for that.",
+        help={
+            "frame": "The frame's number in get_local_job_steps, from 0; -1 is the last.",
+            "step": "The job's step, as numbered in get_local_job_steps; left out, the "
+            "first that has structures.",
+        },
     ),
     T(
         "start_local_refine",
