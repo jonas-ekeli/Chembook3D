@@ -331,6 +331,33 @@ def test_recent_list_keeps_name_time_and_counts(tmp_path, client):
     assert client.get("/api/settings").json()["recent_info"][a]["nodes"] == 3
 
 
+def test_recent_list_marks_missing_folders_and_forgets_on_request(tmp_path, client):
+    # D229: a folder that no longer holds an investigation is marked, and any folder can be
+    # taken off the list without touching its files.
+    a, b, c = (str((tmp_path / x).resolve()) for x in "abc")
+    for folder in (a, b, c):
+        client.post("/api/investigations", json={"folder": folder, "name": folder[-1]})
+    client.post("/api/investigations/close")
+    assert client.get("/api/settings").json()["recent_missing"] == []
+
+    shutil.rmtree(a)
+    (tmp_path / "b" / inv.DB_NAME).unlink()  # the folder is there, its investigation is not
+    found = client.get("/api/settings").json()
+    assert found["recent"][:3] == [c, b, a]
+    assert found["recent_missing"] == [b, a]
+
+    after = client.delete("/api/settings/recent", params={"folder": c}).json()
+    assert after["recent"][:2] == [b, a]
+    assert c not in after["recent_info"]
+    assert (tmp_path / "c" / inv.DB_NAME).is_file()
+    after = client.delete("/api/settings/recent", params={"folder": a}).json()
+    assert after["recent"][:1] == [b]
+    assert after["recent_missing"] == [b]
+    # A folder not on the list changes nothing.
+    unknown = client.delete("/api/settings/recent", params={"folder": "/x/none"}).json()
+    assert unknown["recent"] == [b]
+
+
 def test_recent_list_from_before_its_details(config_dir, client):
     # D182: a settings file with only the folders keeps working, and bad details are dropped.
     config_dir.mkdir(parents=True, exist_ok=True)

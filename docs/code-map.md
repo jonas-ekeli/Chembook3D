@@ -197,7 +197,7 @@ Routes for all of these are in `api/pathway.py`.
   - Moving or resizing a note patches `canvas.notes` in place.
 - The app bar (D180): the investigation's commands in the `Menu` of `components/MoreMenu.tsx` on its name, the view tabs, the sync chip `SyncDialogs.SyncChip`.
 - The canvas toolbar under it: Fit and Export are drawn into it by `Canvas.tsx` through a portal (its `tools` prop).
-- `components/StartPage.tsx` (D182): the start page with the ways in, the recent investigations, and the Scan editor and Shut down set apart. `components/EmptyState.tsx` (D182): what an empty view says, with buttons to start.
+- `components/StartPage.tsx` (D182): the start page with the ways in, the recent investigations, and the Scan editor and Shut down set apart. D229: rows whose folder has no investigation (`recent_missing` from `GET /api/settings`, `settings.missing_recent`) show "Not found"; each row's × calls `DELETE /api/settings/recent` (`settings.forget_recent`). `components/EmptyState.tsx` (D182): what an empty view says, with buttons to start.
 
 ### Menus and command palette (D184)
 

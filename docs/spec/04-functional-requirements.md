@@ -7,7 +7,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | ID | Requirement | Trace | Phase |
 |---|---|---|---|
 | FR-INV-01 | The app creates an investigation as one folder containing its database and a `files/` directory for copied source files. | D21, WF-01 | 1 |
-| FR-INV-02 | The app opens an investigation by folder, and keeps a list of recently opened ones. | WF-01 | 1 |
+| FR-INV-02 | The app opens an investigation by folder, and keeps a list of recently opened ones; a folder that no longer holds an investigation is marked, and any entry can be removed from the list without touching its folder (D229). | WF-01 | 1 |
 | FR-INV-03 | An investigation folder copied or unzipped to another machine (Windows ↔ Linux) opens with all records and files intact. | D10, D21 | 1 |
 
 **AC:** create an investigation, add a node and import a file, zip the folder, unzip it on the other OS and open it: all nodes, calculations, files and history are present, and no absolute paths are needed.
