@@ -288,6 +288,9 @@ export function StructureEditor({
                 aria-label="Picked atoms"
                 placeholder="click atoms, or type e.g. 1 2 3"
                 value={typed}
+                // A tool that is running sets this field when it answers, so nothing typed
+                // meanwhile is lost to it.
+                disabled={busy}
                 onChange={(event) => setTyped(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key !== 'Enter') return
