@@ -57,7 +57,7 @@ def test_a_tab_does_what_claude_asks_and_answers(tmp_path):
         a = _json(await bridge.call("create_node", {"label": "A"}))
 
         nobody = await bridge.call("tidy_canvas", {})
-        assert nobody.isError and "No page of the app is open" in nobody.content[0].text
+        assert nobody.is_error and "No page of the app is open" in nobody.content[0].text
 
         assert (await _poll(page))["commands"] == []
         answers = {}
@@ -91,7 +91,7 @@ def test_a_tab_does_what_claude_asks_and_answers(tmp_path):
         await ask("view", "set_view", {"level": "nope"}, {"error": "No level has this key."})
         assert answers["view asked"]["params"] == {"level": "nope"}  # only what was given
         assert (
-            answers["view"].isError and "No level has this key" in answers["view"].content[0].text
+            answers["view"].is_error and "No level has this key" in answers["view"].content[0].text
         )
 
         await ask("show", "show_in_app", {"id": a["id"]}, {"result": {"shown": "A"}})
@@ -101,7 +101,7 @@ def test_a_tab_does_what_claude_asks_and_answers(tmp_path):
             "params": {"id": a["id"]},
         }
         nothing = await bridge.call("set_view", {})
-        assert nothing.isError and "at least one" in nothing.content[0].text
+        assert nothing.is_error and "at least one" in nothing.content[0].text
 
     anyio.run(run)
 
@@ -116,7 +116,7 @@ def test_a_command_no_tab_takes_is_given_up(tmp_path, monkeypatch):
         await page.post("/api/investigations", json={"folder": str(tmp_path / "i"), "name": "T"})
         await _poll(page)
         late = await bridge.call("undo_tidy", {})
-        assert late.isError and "did not answer in time" in late.content[0].text
+        assert late.is_error and "did not answer in time" in late.content[0].text
         assert (await _poll(page))["commands"] == []
 
     anyio.run(run)
@@ -198,9 +198,9 @@ def test_an_image_the_page_drew_is_saved_in_exports_and_never_over_a_file(tmp_pa
         assert _json(answers[2]) == {"file": "exports/.._.._evil.png"}
         assert not (tmp_path / "evil.png").exists()
         await ask("script.exe", PNG)
-        assert answers[3].isError and "An export is one of" in answers[3].content[0].text
+        assert answers[3].is_error and "An export is one of" in answers[3].content[0].text
         await ask("empty.svg", b"")
-        assert answers[4].isError and "empty" in answers[4].content[0].text
+        assert answers[4].is_error and "empty" in answers[4].content[0].text
         assert "exports/" in sync.IGNORED
 
     anyio.run(run)
@@ -225,7 +225,7 @@ def test_claude_saves_the_read_only_copy(tmp_path, monkeypatch):
         await bridge.call("create_transition", {"source_id": a["id"], "target_id": b["id"]})
         monkeypatch.setattr(snapshot_api, "template_path", lambda: None)
         unbuilt = await bridge.call("save_read_only_copy", {})
-        assert unbuilt.isError and "has not been built" in unbuilt.content[0].text
+        assert unbuilt.is_error and "has not been built" in unbuilt.content[0].text
         monkeypatch.setattr(snapshot_api, "template_path", lambda: template)
 
         saved = _json(await bridge.call("save_read_only_copy", {}))
@@ -257,6 +257,6 @@ def test_claude_saves_the_read_only_copy(tmp_path, monkeypatch):
         assert seen["paths"] == [[a["id"], b["id"]]]  # the ticked pathway only
         assert again["file"] == saved["file"].replace(".html", " 2.html")
         missing = await bridge.call("save_read_only_copy", {"profile_id": "nope"})
-        assert missing.isError and "404" in missing.content[0].text
+        assert missing.is_error and "404" in missing.content[0].text
 
     anyio.run(run)

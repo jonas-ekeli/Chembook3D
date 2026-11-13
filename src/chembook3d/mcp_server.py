@@ -167,7 +167,7 @@ def _detail(response: httpx.Response) -> str:
 
 
 def _text(text: str, error: bool = False) -> types.CallToolResult:
-    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], isError=error)
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=error)
 
 
 class Bridge:
@@ -292,30 +292,33 @@ def _path_params(path: str) -> list[str]:
 
 
 def build_server(bridge: Bridge) -> Server:
-    server: Server = Server("chembook3d", version=__version__, instructions=INSTRUCTIONS)
     tools = [
         types.Tool(
             name=spec.name,
             description=description(spec),
-            inputSchema=input_schema(spec),
+            input_schema=input_schema(spec),
             annotations=types.ToolAnnotations(
-                readOnlyHint=spec.kind == "read",
-                destructiveHint=spec.kind == "confirm",
-                openWorldHint=False,
+                read_only_hint=spec.kind == "read",
+                destructive_hint=spec.kind == "confirm",
+                open_world_hint=False,
             ),
         )
         for spec in TOOLS
     ]
 
-    @server.list_tools()
-    async def list_tools() -> list[types.Tool]:
-        return tools
+    async def list_tools(ctx: Any, params: Any) -> types.ListToolsResult:
+        return types.ListToolsResult(tools=tools)
 
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict[str, Any]) -> types.CallToolResult:
-        return await bridge.call(name, arguments)
+    async def call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
+        return await bridge.call(params.name, params.arguments or {})
 
-    return server
+    return Server(
+        "chembook3d",
+        version=__version__,
+        instructions=INSTRUCTIONS,
+        on_list_tools=list_tools,
+        on_call_tool=call_tool,
+    )
 
 
 async def serve(url: str, confirm_timeout: float) -> None:
