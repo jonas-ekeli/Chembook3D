@@ -1693,6 +1693,7 @@ function App() {
         onClone={() => setCloning('address')}
         onScanEditor={() => openScanEditor([])}
         onOpenFolder={openFolder}
+        onForget={(folder) => api.forgetRecent(folder).then(setSettings, (err: unknown) => setError(errorText(err)))}
         notices={<LaunchNotices />}
       >
         {dialogs}

@@ -1,6 +1,7 @@
 // D182 (UI10): the start page. The three ways in as cards, the recently opened investigations by
 // name with their folder, when they were last opened and their size, and the Scan editor and Shut
-// down set apart at the bottom.
+// down set apart at the bottom. D229: a folder that no longer holds an investigation is marked
+// as not found, and any row can be taken off the list (its folder is never touched).
 
 import type { ReactNode } from 'react'
 import type { RecentInfo, Settings } from '../api'
@@ -64,12 +65,16 @@ function RecentRow({
   folder,
   info,
   repeated,
+  missing,
   onOpen,
+  onForget,
 }: {
   folder: string
   info: RecentInfo | undefined
   repeated: boolean
+  missing: boolean
   onOpen: () => void
+  onForget: () => void
 }) {
   const name = info?.name || folderName(folder)
   const counts = [
@@ -77,8 +82,12 @@ function RecentRow({
     info?.branches != null && count(info.branches, 'branch', 'branches'),
   ].filter(Boolean)
   return (
-    <li>
-      <button className="recent-row" onClick={onOpen} title={folder}>
+    <li className={missing ? 'missing' : undefined}>
+      <button
+        className="recent-row"
+        onClick={onOpen}
+        title={missing ? `${folder}\nNo investigation was found in this folder` : folder}
+      >
         <span className="recent-icon">
           <Icon name="flask" />
         </span>
@@ -91,13 +100,27 @@ function RecentRow({
           <span className="recent-folder">{folder}</span>
         </span>
         <span className="recent-when">
+          {missing && (
+            <span className="recent-missing">
+              <Icon name="warn" />
+              Not found
+            </span>
+          )}
           {info?.opened && (
             <time dateTime={info.opened} title={new Date(info.opened).toLocaleString()}>
               {relativeTime(info.opened)}
             </time>
           )}
-          {counts.length > 0 && <span>{counts.join(' · ')}</span>}
+          {!missing && counts.length > 0 && <span>{counts.join(' · ')}</span>}
         </span>
+      </button>
+      <button
+        className="quiet recent-forget"
+        aria-label={`Remove ${name} from the list`}
+        title="Remove from this list (the folder and its files are not touched)"
+        onClick={onForget}
+      >
+        <Icon name="x" />
       </button>
     </li>
   )
@@ -111,6 +134,7 @@ export function StartPage({
   onClone,
   onScanEditor,
   onOpenFolder,
+  onForget,
   notices,
   children,
 }: {
@@ -121,6 +145,8 @@ export function StartPage({
   onClone: () => void
   onScanEditor: () => void
   onOpenFolder: (folder: string) => void
+  /** D229: take a folder off the recent list. */
+  onForget: (folder: string) => void
   /** The launcher's notices, under the cards. */
   notices: ReactNode
   /** The dialogs the cards open. */
@@ -166,7 +192,9 @@ export function StartPage({
                 folder={folder}
                 info={settings?.recent_info[folder]}
                 repeated={names.filter((n) => n === names[index]).length > 1}
+                missing={settings?.recent_missing?.includes(folder) ?? false}
                 onOpen={() => onOpenFolder(folder)}
+                onForget={() => onForget(folder)}
               />
             ))}
           </ul>

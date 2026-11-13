@@ -289,6 +289,29 @@ def refresh_recent(
     save(settings)
 
 
+def forget_recent(path: str) -> None:
+    """D229: take a folder off the recent list, by its path exactly as the list holds it; the
+    folder itself is never touched."""
+    settings = load()
+    settings.recent = [p for p in settings.recent if p != path]
+    settings.recent_info = clean_recent_info(settings.recent_info, settings.recent)
+    save(settings)
+
+
+def missing_recent(recent: list[str], db_name: str) -> list[str]:
+    """D229: the recent folders that no longer hold an investigation (the folder or its
+    database is gone), found by looking for the file only, never by opening it."""
+    missing = []
+    for path in recent:
+        try:
+            found = (Path(path) / db_name).is_file()
+        except OSError:
+            found = False
+        if not found:
+            missing.append(path)
+    return missing
+
+
 def remember_import_folder(folder: Path) -> None:
     settings = load()
     settings.last_import_folder = str(folder)

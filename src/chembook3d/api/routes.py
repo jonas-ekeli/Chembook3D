@@ -418,6 +418,8 @@ class SettingsOut(BaseModel):
     energy_factors: dict[str, float]
     recent: list[str]
     recent_info: dict[str, RecentInfoOut]
+    # D229: the folders in `recent` that no longer hold an investigation
+    recent_missing: list[str] = []
     last_device: str
     last_import_folder: str
     geometry_tolerance: float
@@ -1109,6 +1111,7 @@ def get_settings(request: Request):
         energy_factors=units.HARTREE_IN,
         recent=s.recent,
         recent_info=s.recent_info,
+        recent_missing=app_settings.missing_recent(s.recent, DB_NAME),
         last_device=s.last_device,
         last_import_folder=app_settings.import_folder(s),
         geometry_tolerance=s.geometry_tolerance,
@@ -1129,6 +1132,13 @@ def get_settings(request: Request):
         profile_presets=app_settings.PROFILE_PRESETS,
         solvents=[{"name": x["name"], "molarity": x["molarity"]} for x in concentrations.SOLVENTS],
     )
+
+
+@router.delete("/settings/recent", response_model=SettingsOut)
+def forget_recent(folder: str, request: Request):
+    """D229: take a folder off the start page's recent list; its files stay as they are."""
+    app_settings.forget_recent(folder)
+    return get_settings(request)
 
 
 @router.put("/settings", response_model=SettingsOut)

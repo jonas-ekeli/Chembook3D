@@ -1145,6 +1145,8 @@ export type Settings = {
   /** D182: name, last opened (UTC) and counts of each recent folder, by its path in `recent`, as
    * of its last open or close; a field is missing for a folder an older version opened. */
   recent_info: Record<string, RecentInfo>
+  /** D229: the folders in `recent` that no longer hold an investigation. */
+  recent_missing: string[]
   last_device: string
   /** D78: the folder a file was last picked from in the import dialog ("" when none or gone). */
   last_import_folder: string
@@ -2590,6 +2592,9 @@ export const api = {
     request<Overview>('GET', since ? `/overview?since=${encodeURIComponent(since)}` : '/overview'),
 
   settings: () => request<Settings>('GET', '/settings'),
+  /** D229: take a folder off the start page's recent list; its files are not touched. */
+  forgetRecent: (folder: string) =>
+    request<Settings>('DELETE', `/settings/recent?folder=${encodeURIComponent(folder)}`),
   saveSettings: (
     fields: Partial<
       Pick<

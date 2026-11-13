@@ -1,3 +1,4 @@
+import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { E2E_DIR, startPage } from './helpers.ts'
@@ -74,4 +75,37 @@ test('the start page names recent investigations, and empty views offer a first 
   await empty.getByRole('button', { name: 'Add the first node' }).click()
   await expect(inspector.getByRole('heading', { name: 'Untitled node' })).toBeVisible()
   await expect(empty).toHaveCount(0)
+})
+
+// D229, T-UI-99: a recent folder that no longer holds an investigation is marked, and any row can
+// be taken off the list without touching its folder.
+test('the start page marks recent folders that are gone, and removes rows on request', async ({ page }) => {
+  const stamp = Date.now()
+  const gone = join(E2E_DIR, `gone-${stamp}`)
+  const kept = join(E2E_DIR, `kept-${stamp}`)
+  for (const [folder, name] of [
+    [gone, `Gone ${stamp}`],
+    [kept, `Kept ${stamp}`],
+  ])
+    expect((await page.request.post('/api/investigations', { data: { folder, name } })).ok()).toBeTruthy()
+  await page.request.post('/api/investigations/close')
+  rmSync(gone, { recursive: true, force: true })
+  await startPage(page)
+
+  const recent = page.getByRole('list', { name: 'Recently opened' })
+  const goneRow = recent.getByRole('listitem').filter({ hasText: `Gone ${stamp}` })
+  const keptRow = recent.getByRole('listitem').filter({ hasText: `Kept ${stamp}` })
+  await expect(goneRow).toContainText('Not found')
+  await expect(goneRow).not.toContainText('nodes')
+  await expect(keptRow).not.toContainText('Not found')
+  await expect(keptRow).toContainText('0 nodes · 0 branches')
+
+  await goneRow.getByRole('button', { name: `Remove Gone ${stamp} from the list` }).click()
+  await expect(goneRow).toHaveCount(0)
+  await keptRow.getByRole('button', { name: `Remove Kept ${stamp} from the list` }).click()
+  await expect(keptRow).toHaveCount(0)
+  // Only the list changed: the folder is still there, and both stay off the saved list.
+  expect(existsSync(join(kept, 'investigation.sqlite'))).toBeTruthy()
+  const settings = await (await page.request.get('/api/settings')).json()
+  expect(settings.recent.filter((f: string) => f.includes(String(stamp)))).toEqual([])
 })

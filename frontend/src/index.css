@@ -479,8 +479,40 @@ button.start-action.primary-card {
   background: var(--panel);
   overflow: hidden;
 }
+.recent li {
+  display: flex;
+  align-items: center;
+}
 .recent li + li {
   border-top: 1px solid var(--divider);
+}
+/* D229: take a row off the list; shown plainly on the row under the pointer or in focus */
+button.recent-forget {
+  flex: none;
+  width: var(--ctl-h);
+  padding: 0;
+  margin-right: 8px;
+  color: var(--muted);
+  opacity: 0.5;
+}
+.recent li:hover button.recent-forget,
+button.recent-forget:focus-visible {
+  opacity: 1;
+}
+/* D229: a folder that no longer holds an investigation */
+.recent li.missing .recent-name,
+.recent li.missing .recent-icon {
+  color: var(--text-faint);
+}
+.recent-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--warn);
+}
+.recent-missing .ic {
+  width: 13px;
+  height: 13px;
 }
 button.recent-row {
   display: grid;
@@ -488,7 +520,8 @@ button.recent-row {
   gap: 12px;
   align-items: center;
   justify-content: stretch;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 12px 14px;
   border: none;
   border-radius: 0;
@@ -496,7 +529,8 @@ button.recent-row {
   text-align: left;
   font-weight: 400;
 }
-button.recent-row:hover:not(:disabled) {
+/* The whole row lights up, its remove button included (D229) */
+.recent li:hover {
   background: var(--hover);
 }
 .recent-icon {

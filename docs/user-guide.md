@@ -19,7 +19,9 @@ README's [How energies are computed](../README.md#how-energies-are-computed).
 
 ## Find your way around
 
-The start screen creates or opens an investigation folder. Inside an investigation:
+The start screen creates or opens an investigation folder, and lists the ones opened recently.
+A folder that was moved or deleted shows **Not found**; the **×** at the end of any row takes it off
+the list (the folder and its files are not touched). Inside an investigation:
 
 - the **outline** on the left lists reaction steps, branches, groups and nodes, with **Add node**
   and **Import…** at its top;
