@@ -168,8 +168,12 @@ def test_runs_claude_in_the_investigation_folder(local, fake_claude, config_dir,
         "chembook3d-settings.json",
     ]
     settings = json.loads((work / "chembook3d-settings.json").read_text("utf-8"))
-    for tool in ("Bash", "PowerShell", "Edit", "Write", "WebFetch", "WebSearch"):
+    for tool in ("Bash", "PowerShell", "Edit", "Write", "NotebookEdit"):
         assert tool in settings["permissions"]["deny"]
+    # D230: the web is open for the literature; a search is not asked about, a page is.
+    assert "WebSearch" in settings["permissions"]["allow"]
+    assert "WebFetch" not in settings["permissions"]["allow"]
+    assert not {"WebSearch", "WebFetch"} & set(settings["permissions"]["deny"])
     assert "Metathesis" in (work / "CLAUDE.md").read_text("utf-8")
     assert not local.app.state.claude_panel.terminals
 
@@ -228,13 +232,15 @@ def test_notebook_tools_when_the_server_exists(monkeypatch, tmp_path):
     config = json.loads((work / "chembook3d-mcp.json").read_text("utf-8"))
     assert config["mcpServers"]["chembook3d"]["args"][-2:] == ["--url", "http://127.0.0.1:8765"]
     settings = json.loads((work / "chembook3d-settings.json").read_text("utf-8"))
-    assert settings["permissions"]["allow"] == ["mcp__chembook3d__get_node"]
+    assert settings["permissions"]["allow"] == ["mcp__chembook3d__get_node", "WebSearch"]
 
 
 def test_without_notebook_tools(monkeypatch, tmp_path):
     monkeypatch.setattr(claude_panel, "notebook_server", lambda: None)
     work = claude_panel.prepare(tmp_path / "inv", "Test", "http://127.0.0.1:8765")
     assert json.loads((work / "chembook3d-mcp.json").read_text("utf-8")) == {"mcpServers": {}}
+    settings = json.loads((work / "chembook3d-settings.json").read_text("utf-8"))
+    assert settings["permissions"]["allow"] == ["WebSearch"]  # D230: the web needs no server
 
 
 def test_workspace_differs_per_folder(tmp_path):

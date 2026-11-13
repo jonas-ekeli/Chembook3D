@@ -52,7 +52,8 @@ function AutonomyDialog({
         While this is on, Claude changes this investigation without asking you first. It creates and changes nodes,
         edges, steps, branches, groups and analyses, imports files, and starts calculations on this computer. It also
         makes choices the app otherwise leaves to you, such as which pathway to follow or which conformer represents a
-        group, and notes each one as “Claude chose”.
+        group, and notes each one as “Claude chose”. It also opens web pages without asking, and a page can mislead
+        it.
       </p>
       <p>
         <strong>Claude can be wrong.</strong> Check its work before you rely on it: every change is marked “claude” in
@@ -60,7 +61,7 @@ function AutonomyDialog({
       </p>
       <p className="muted">
         Still asked or switched off: deleting anything Claude did not make itself, everything on a server beyond new
-        files where you allowed them, and shell, file and web tools. It turns off when the app restarts.
+        files where you allowed them, and shell and file tools. It turns off when the app restarts.
       </p>
       <label>
         Longest local job Claude may start{' '}
@@ -371,7 +372,7 @@ export function ClaudePanel({
               <p>
                 Claude Code runs here with your own Claude sign-in. It works on the investigation open in this
                 window, {autonomy?.on ? 'changes it without asking while it works on its own' : 'asks before it changes anything'},
-                and cannot use a shell, edit files or browse the web.
+                and cannot use a shell or edit files. It can search the web for the literature.
               </p>
               {!status.notebook_tools && (
                 <p className="muted">
