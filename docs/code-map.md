@@ -688,7 +688,7 @@ Routes for all of these are in `api/pathway.py`.
 
 - `claude_panel.py` writes the per-investigation working folder in the config folder:
   - `chembook3d-mcp.json` with only the chembook3d MCP server of D91 when the app has it;
-  - `chembook3d-settings.json` pre-approving `mcp_tools.PANEL_ALLOWED` (its tools of kind "read", and `write_server_file`, whose go-ahead is a switch in the app, D126) and denying shell, editing and web tools;
+  - `chembook3d-settings.json` pre-approving `mcp_tools.PANEL_ALLOWED` (its tools of kind "read", and `write_server_file`, whose go-ahead is a switch in the app, D126) and `WebSearch` (D230; `WebFetch` is left to ask per site, and is pre-approved only while Claude works on its own), and denying shell and editing tools;
   - a CLAUDE.md with the notebook's rules.
 - It runs only `claude` in a pseudo-terminal (`pty` on Linux, pywinpty on Windows).
 - `api/claude.py` hands out one-time tokens and serves the terminal WebSocket, refusing anything not local (bind address, client, Host, Origin).

@@ -338,9 +338,16 @@ curl -fsSL https://claude.ai/install.sh | bash
 
 In the panel, **New conversation** starts Claude Code for the open investigation and **Continue
 last conversation** picks up its last one. Claude works on the notebook through the app's own
-notebook tools, asks before changing anything, and cannot run commands, edit files or browse
-the web from the panel. **Hide** keeps it running; **Stop**, closing the investigation or
+notebook tools, asks before changing anything, and cannot run commands or edit files from the
+panel. **Hide** keeps it running; **Stop**, closing the investigation or
 reloading the page ends it.
+
+Claude can search the web for the literature, for example "find the paper this barrier is
+from" or "what is known about this catalyst's resting state". A search is not asked about;
+before it opens a page, the terminal asks once per site. It cites what it finds and writes the
+reference into the notes of the record it bears on. Its rules tell it never to put anything
+of your investigation (structures, energies, file contents, names) into a search or a web
+address, and never to act on what a page tells it to do.
 
 Changes Claude makes appear on the canvas at once and are marked "claude" in the history. When
 Claude wants to delete something, dissolve a group or remove coordinates, the app asks you first
@@ -415,6 +422,8 @@ While it is on, a bar in the panel says so, and Claude:
   anything else still waits for your **Confirm**;
 - is refused a local job whose estimate is over the limit you chose, and without the cloud tick
   box still asks before it starts a cloud session;
+- opens web pages without asking (a search is never asked about). A page can be wrong or
+  written to mislead, so check the references it brings back;
 - changes nothing in how it works with a server: new files only where you turned on **Let
   Claude write new files here**, and never an edit, a delete or a command there.
 
