@@ -15,13 +15,19 @@ from pydantic import BaseModel, Field
 from chembook3d import cloud_jobs
 from chembook3d.api.routes import DbSession, _investigation
 from chembook3d.models import Node
+from chembook3d.services import history, scan_path
 from chembook3d.services import nodes as node_service
-from chembook3d.services import scan_path
 from chembook3d.services.records import get
 
 router = APIRouter(prefix="/api/jobs")
 
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def started_by() -> str | None:
+    """Who starts a cloud session in this request: "claude" for Claude's tools, else None."""
+    source = history.SOURCE.get()
+    return None if source == "manual" else source
 
 
 def launcher(request: Request) -> cloud_jobs.Launcher:
@@ -144,7 +150,7 @@ def start_job(job_id: str, request: Request) -> dict[str, Any]:
     _local_page_only(request)
     folder = _investigation(request).folder
     try:
-        return cloud_jobs.start_job(folder, job_id, launcher(request))
+        return cloud_jobs.start_job(folder, job_id, launcher(request), started_by=started_by())
     except cloud_jobs.CloudJobError as exc:
         raise _refused(exc) from exc
 

@@ -1,6 +1,7 @@
 """Command-line entry point: `chembook3d` starts the local server and opens the browser;
 `chembook3d mcp` runs the MCP server through which Claude works in it (D91);
-`chembook3d shortcut` creates the shortcut that starts it without a terminal (D107)."""
+`chembook3d shortcut` creates the shortcut that starts it without a terminal (D107);
+`chembook3d claude-stop` is the Claude panel's Stop hook while Claude works on its own (D231)."""
 
 import argparse
 import platform
@@ -47,6 +48,11 @@ def main(argv: list[str] | None = None) -> None:
         from chembook3d.mcp_server import main as mcp_main
 
         mcp_main(argv[1:])
+        return
+    if argv[:1] == ["claude-stop"]:  # D231: the panel's Stop hook while Claude works alone
+        from chembook3d.keep_going import hook_main
+
+        hook_main(argv[1:])
         return
     if argv[:1] == ["shortcut"]:  # D107: the one-click launcher's shortcut
         from chembook3d.shortcut import main as shortcut_main

@@ -422,6 +422,11 @@ While it is on, a bar in the panel says so, and Claude:
   anything else still waits for your **Confirm**;
 - is refused a local job whose estimate is over the limit you chose, and without the cloud tick
   box still asks before it starts a cloud session;
+- keeps going until what you asked for is done. When it is about to stop while a calculation
+  it started still runs, the app holds it until the calculation ends (looking again at least
+  every 45 minutes) and then wakes it with the result, so it goes on with the rest. When it
+  stops with nothing running, the app asks it once whether anything you asked for is still
+  open;
 - opens web pages without asking (a search is never asked about). A page can be wrong or
   written to mislead, so check the references it brings back;
 - changes nothing in how it works with a server: new files only where you turned on **Let

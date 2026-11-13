@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from chembook3d import cloud_jobs, xyz
-from chembook3d.api.jobs import _local_page_only, launcher
+from chembook3d.api.jobs import _local_page_only, launcher, started_by
 from chembook3d.api.pathway import AtomMatchOut, atom_match_out
 from chembook3d.api.routes import DbSession, _investigation
 from chembook3d.services import atom_matching, scan_path, scan_species
@@ -239,7 +239,7 @@ def send(body: JobIn, request: Request, session: DbSession) -> dict[str, Any]:
     start_error = None
     if body.start:
         try:
-            cloud_jobs.start_job(folder, record["id"], launcher(request))
+            cloud_jobs.start_job(folder, record["id"], launcher(request), started_by=started_by())
         except cloud_jobs.CloudJobError as exc:
             start_error = str(exc)
     job = cloud_jobs.job_status(folder, record["id"], launcher(request), fetch=False)

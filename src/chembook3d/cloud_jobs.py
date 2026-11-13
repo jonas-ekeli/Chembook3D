@@ -616,8 +616,15 @@ class Launcher:
                 run.terminal.close()
 
 
-def start_job(folder: Path, job_id: str, launcher: Launcher, wait: float = LAUNCH_WAIT) -> dict:
-    """Push the job and start a cloud session on it with the user's own Claude Code."""
+def start_job(
+    folder: Path,
+    job_id: str,
+    launcher: Launcher,
+    wait: float = LAUNCH_WAIT,
+    started_by: str | None = None,
+) -> dict:
+    """Push the job and start a cloud session on it with the user's own Claude Code.
+    `started_by`: "claude" when Claude started it, for its stop check (D231)."""
     folder = Path(folder)
     executable = claude_panel.find_claude()
     if executable is None:
@@ -662,7 +669,7 @@ def start_job(folder: Path, job_id: str, launcher: Launcher, wait: float = LAUNC
                 )
             _update(folder, job_id, launch_error=f"{why}: {said[-1500:]}\n\n{advice}")
 
-    _update(folder, job_id, launch_error=None)
+    _update(folder, job_id, launch_error=None, started_by=started_by)
     name = str(read_job(folder, job_id).get("name") or job_id)
     run = launcher.launch(folder, job_id, executable, on_session, on_end, name=name)
     _wait_for_launch(run, wait)

@@ -146,6 +146,8 @@ class LiveState:
     commands: dict[str, PageCommand] = field(default_factory=dict)  # D226
     listeners: dict[str, float] = field(default_factory=dict)  # tab: when it last polled
     profiles_version: int = 0  # D227: counts Claude's changes to the saved energy profiles
+    claude_requests: int = 0  # D231: requests Claude's notebook tools made, for its stop check
+    stop_checks: dict[str, int] = field(default_factory=dict)  # session: claude_requests then
 
     def profiles_changed(self) -> None:
         """Claude changed a saved energy profile: the tabs' polls answer, as for a confirmation."""
@@ -270,6 +272,9 @@ class ChangeTracker:
             and scope["method"] not in ("GET", "HEAD", "OPTIONS")
             and PROFILES.match(path) is not None
         )
+        if client == AGENT and path.startswith("/api/"):
+            with self.live.lock:
+                self.live.claude_requests += 1  # D231: Claude did something since it stopped
         status: dict[str, int] = {}
 
         async def watched(message: Message) -> None:
