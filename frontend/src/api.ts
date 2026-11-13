@@ -2255,6 +2255,8 @@ export type Live = {
   confirm_version: number
   confirmations: ClaudeRequest[]
   commands: PageCommand[]
+  /** D227: counts Claude's changes to the saved energy profiles. */
+  profiles_version?: number
   investigation: string | null
 }
 

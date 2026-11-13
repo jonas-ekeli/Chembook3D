@@ -37,6 +37,7 @@ READ_POSTS = {
     "/api/measurements",
     "/api/local/core",
     "/api/calculations/{calculation_id}/steps/trim-preview",
+    "/api/steric-profiles/{profile_id}/difference",
 }
 # Changes that delete nothing and are undone at once, so they do not ask (A38).
 UNASKED_DELETES = {
@@ -50,9 +51,8 @@ NOT_OFFERED = re.compile(
     r"^/api/(investigations?(/.*)?|sync(/.*)?|settings|snapshot"
     r"|source-files/[^/]+/(open|download)|imports|note-images(/.*)?|health"
     r"|live|selection$|view-state|confirmations(/.*)?|nodes/[^/]+/delete-preview"
-    r"|groups/[^/]+/delete-preview|sub-investigations/[^/]+/delete-preview|steric-profiles/[^/]+/(difference|table\.csv)"
+    r"|groups/[^/]+/delete-preview|sub-investigations/[^/]+/delete-preview|steric-profiles/[^/]+/table\.csv"
     r"|energies/table\.csv|history/[^/]+/undo|turnovers/[^/]+/table\.csv|custom-bases/[^/]+/file"
-    r"|energy-profiles(/.*)?"  # D190: the drawer's saved profiles; Claude only reads them
     r"|page/commands/[^/]+/(claim|report|file)"  # D226: the tab's own side of what Claude asks it
     r"|claude(/.*)?"  # the Claude panel (D92): Claude never starts terminals
     r"|remote(/.*)?"  # D122: logging in to a server is for the app's own page only

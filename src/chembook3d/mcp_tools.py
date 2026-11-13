@@ -57,6 +57,7 @@ FIELD_HELP = {
     "turnover_id": "Id of a saved turnover.",
     "equilibrium_id": "Id of a saved conformer equilibrium.",
     "profile_id": "Id of a steric profile.",
+    "energy_profile_id": "Id of a saved energy profile (list_energy_profiles).",
     "set_id": "Id of an alignment set.",
     "source_id": "Id of the edge's start: a node or a group.",
     "target_id": "Id of the edge's end: a node or a group.",
@@ -459,6 +460,24 @@ TOOLS: list[ToolSpec] = [
         "why a result is out of date.",
     ),
     T(
+        "get_steric_difference",
+        "read",
+        "POST",
+        "/api/steric-profiles/{profile_id}/difference",
+        "The steric map of one node minus that of another in the same steric profile (the "
+        "height of the ligand surface over the xy-plane, Å), as a summary: the grid points "
+        "both cover, the mean difference over them and over each quadrant (NE is x > 0, y > 0), "
+        "and where the first is most above (`highest`) and most below (`lowest`) the second. "
+        "Both nodes need z-axis and xz-plane atoms in the profile.",
+        help={
+            "first_id": "Node id: the map the other is taken from.",
+            "second_id": "Node id: the map taken away.",
+            "grid": "True also returns the whole grid (x positions and z rows, thousands of "
+            "values); usually leave false.",
+        },
+        defaults={"grid": False},
+    ),
+    T(
         "list_energy_profiles",
         "read",
         "GET",
@@ -468,8 +487,10 @@ TOOLS: list[ToolSpec] = [
         "moved later along the axis by whole columns with every step after them, D194, and "
         "`colour`: the user's choice or null for the branch's, D195) with its own "
         "`reference_id`, which every pathway in it is relative to (D205; null: the first node "
-        "shown; not the node cards' reference). Value them with get_energy_profile, passing "
-        "that reference_id; they are made and changed in the page only.",
+        "shown; not the node cards' reference). `lost` are its pathways through a node deleted "
+        "since: never drawn, the user's to remove. Value them with get_energy_profile, passing "
+        "that reference_id; make and change them with create_energy_profile and "
+        "update_energy_profile.",
     ),
     T(
         "list_alignment_sets",
@@ -1573,6 +1594,77 @@ TOOLS: list[ToolSpec] = [
     ),
 ]
 
+# D227: the saved energy profiles, the thermochemistry
+PROFILE_PATHS_HELP = (
+    "Each {ids: node and group ids in order, each joined to the next by a transition "
+    "(build them with follow_pathway or get_branch_pathway), branch_id: the branch it was "
+    "followed in or null, shown: drawn on the figure (default true), shifts: optional [{at: a "
+    "step's index, by: whole columns later}], colour: optional '#rrggbb' or null for the "
+    "branch's}."
+)
+PROFILE_REFERENCE_HELP = (
+    "A node or group on one of its pathways that all of them are relative to (D205); null: "
+    "the first node shown."
+)
+TOOLS += [
+    T(
+        "create_energy_profile",
+        "write",
+        "POST",
+        "/api/energy-profiles",
+        "Save a new energy profile (D190): a named figure of pathways the energy drawer opens. "
+        "Without a name it is the first free 'Profile N'. Which pathways go in it is the "
+        "user's choice of what to compare: never pick a fork by energy. Open it for the user "
+        "with set_view (profile_id); save its figure with save_profile_image.",
+        help={
+            "name": "The profile's name; no two profiles share one.",
+            "paths": PROFILE_PATHS_HELP,
+            "reference_id": PROFILE_REFERENCE_HELP,
+        },
+    ),
+    T(
+        "update_energy_profile",
+        "write",
+        "PATCH",
+        "/api/energy-profiles/{energy_profile_id}",
+        "Change a saved energy profile; only the fields given change. `paths` replaces all its "
+        "pathways, so read them with list_energy_profiles first and give back the ones that "
+        "stay (its `lost` pathways stay whatever is given). The open drawer shows the change "
+        "at once.",
+        help={
+            "name": "The profile's name; no two profiles share one.",
+            "paths": PROFILE_PATHS_HELP,
+            "reference_id": PROFILE_REFERENCE_HELP,
+        },
+    ),
+    T(
+        "duplicate_energy_profile",
+        "write",
+        "POST",
+        "/api/energy-profiles/{energy_profile_id}/duplicate",
+        "A copy of a saved energy profile, named '<name> (copy)': change the copy to try "
+        "something without touching the user's own.",
+    ),
+    T(
+        "set_thermochemistry",
+        "write",
+        "PUT",
+        "/api/thermochemistry",
+        "Change the investigation's thermochemistry (D159): the temperature (K) and the "
+        "frequency cutoff (cm⁻¹) of the quasi-harmonic G_qh, and the standard state of G and "
+        "G_qh. Every G and G_qh in the investigation, and all that is worked out from them, "
+        "changes with it; each value changed is one entry in the history. Only the values "
+        "given change; get_energy_options shows the current ones. This is a choice of method: "
+        "change it only when the user asked for these values.",
+        help={
+            "qh_temperature": "Kelvin, above zero.",
+            "qh_cutoff": "cm⁻¹, zero or more: frequencies below it are raised to it for the "
+            "entropy (Truhlar).",
+            "standard_state": "'1 atm' or '1 M'.",
+        },
+    ),
+]
+
 # ---------- deleting: the app asks the user (D91) ----------
 
 CONFIRM_DESCRIPTIONS = {
@@ -1599,6 +1691,8 @@ CONFIRM_DESCRIPTIONS = {
     "delete_turnover": "Delete a saved turnover.",
     "delete_conformer_equilibrium": "Delete a saved conformer equilibrium.",
     "delete_steric_profile": "Delete a steric profile with its results.",
+    "delete_energy_profile": "Delete a saved energy profile (the nodes on its pathways stay). "
+    "The user is always asked, also for one you made.",
     "delete_alignment_set": "Delete an alignment set.",
 }
 

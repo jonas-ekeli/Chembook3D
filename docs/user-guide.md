@@ -365,6 +365,18 @@ For a path between two connected nodes, Claude can do what the **Scan path** dia
 tells you what the dialog would show (the atom match, charge, solvent, what is held at a TS
 end, any warning) and sends the job to a cloud session when you agree.
 
+Claude can also build energy profiles for you. It saves a profile from the pathways you name,
+adds or takes out pathways, renames it, sets its reference, or makes a copy to try something
+on; an open **Profile and table** drawer shows the change at once. A pathway must follow
+existing transitions, as in the drawer. Deleting a profile always asks you in the app, and
+pathways listed as **Not drawn** stay yours to remove.
+
+On request Claude changes the investigation's thermochemistry (the G_qh temperature and
+cutoff, and the standard state, as in **Settings**). Every G changes with it and each change
+is in **History**, so it does this only when you ask for specific values. It can also compare
+two nodes' steric maps in numbers: the mean height difference overall and per quadrant, and
+where the two differ most.
+
 ### Let Claude work on its own
 
 Normally Claude Code asks in its terminal before each change, and the app asks before each
