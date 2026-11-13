@@ -179,7 +179,7 @@ def test_the_tools_through_the_mcp_server(tmp_path):
         refused = await bridge.call(
             "build_structure", {"node_id": made["id"], "steps": [{"tool": "delete"}]}
         )
-        assert refused.isError and "Step 1 (delete)" in refused.content[0].text
+        assert refused.is_error and "Step 1 (delete)" in refused.content[0].text
         checked = _json(await bridge.call("check_structure", {"build_id": answer["build_id"]}))
         assert checked["atom_count"] == 6
         node = _json(await bridge.call("get_node", {"node_id": made["id"]}))
@@ -296,7 +296,7 @@ def test_short_node_list_through_the_mcp_server(tmp_path):
         )
         assert saved["node"]["formula"] == "CH4O"
         refused = await bridge.call("set_coordinates", {"node_id": made["id"], "xyz": ""})
-        assert refused.isError and "remove_coordinates" in refused.content[0].text
+        assert refused.is_error and "remove_coordinates" in refused.content[0].text
 
     anyio.run(run)
 

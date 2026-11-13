@@ -74,7 +74,7 @@ def test_claude_saves_profiles_of_real_pathways_and_the_tabs_hear(tmp_path):
             ([{"ids": [a, b], "branch_id": "nothing"}], "No branch has the id nothing"),
         ):
             refused = await bridge.call("create_energy_profile", {"paths": paths})
-            assert refused.isError and why in refused.content[0].text, refused.content[0].text
+            assert refused.is_error and why in refused.content[0].text, refused.content[0].text
         assert await heard() == 1  # a refusal is no change
         assert len(_json(await bridge.call("list_energy_profiles", {}))) == 1
 
@@ -185,7 +185,7 @@ def test_claude_sets_the_investigations_thermochemistry(tmp_path):
             ({"standard_state": "2 M"}, "Unknown standard state"),
         ):
             refused = await bridge.call("set_thermochemistry", arguments)
-            assert refused.isError and why in refused.content[0].text, refused.content[0].text
+            assert refused.is_error and why in refused.content[0].text, refused.content[0].text
 
     anyio.run(run)
 

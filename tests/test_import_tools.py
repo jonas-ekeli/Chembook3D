@@ -116,8 +116,8 @@ def test_claude_lists_and_imports_a_folder(tmp_path):
 
         other = _json(await bridge.call("import_folder", {"folder": str(folder)}))
         dropped = await bridge.call("cancel_folder_import", {"token": other["token"]})
-        assert not dropped.isError
+        assert not dropped.is_error
         gone = await bridge.call("preview_folder_import", {"token": other["token"]})
-        assert gone.isError and "expired" in gone.content[0].text
+        assert gone.is_error and "expired" in gone.content[0].text
 
     anyio.run(run)

@@ -120,7 +120,7 @@ def _app_bridge(**kwargs) -> tuple[Bridge, httpx.AsyncClient]:
 def _json(result):
     import json
 
-    assert not result.isError, result.content[0].text
+    assert not result.is_error, result.content[0].text
     return json.loads(result.content[0].text)
 
 
@@ -128,7 +128,7 @@ def test_tools_work_through_the_app(tmp_path):
     async def run():
         bridge, page = _app_bridge()
         closed = await bridge.call("list_nodes", {})
-        assert closed.isError and "No investigation is open" in closed.content[0].text
+        assert closed.is_error and "No investigation is open" in closed.content[0].text
         await page.post("/api/investigations", json={"folder": str(tmp_path / "i"), "name": "T"})
 
         made = _json(await bridge.call("create_node", {"label": "INT1", "xyz": WATER}))
@@ -138,9 +138,9 @@ def test_tools_work_through_the_app(tmp_path):
         xyz = await bridge.call("get_node_xyz", {"node_id": made["id"]})
         assert xyz.content[0].text.startswith("3\n")
         empty = await bridge.call("set_coordinates", {"node_id": made["id"], "xyz": " "})
-        assert empty.isError and "remove_coordinates" in empty.content[0].text
+        assert empty.is_error and "remove_coordinates" in empty.content[0].text
         refused = await bridge.call("update_node", {"node_id": made["id"], "role": "nonsense"})
-        assert refused.isError and "The app refused (422)" in refused.content[0].text
+        assert refused.is_error and "The app refused (422)" in refused.content[0].text
 
         history = _json(await bridge.call("get_history", {"record_id": made["id"]}))
         assert {e["source"] for e in history} == {"claude"}
@@ -227,7 +227,7 @@ def test_an_unanswered_delete_changes_nothing(tmp_path):
         await page.post("/api/investigations", json={"folder": str(tmp_path / "i"), "name": "T"})
         made = _json(await bridge.call("create_node", {"label": "A"}))
         result = await bridge.call("delete_node", {"node_id": made["id"]})
-        assert result.isError and "No answer in the app" in result.content[0].text
+        assert result.is_error and "No answer in the app" in result.content[0].text
         assert (await page.get(f"/api/nodes/{made['id']}")).status_code == 200
 
     anyio.run(run)
@@ -239,7 +239,7 @@ def test_the_app_not_running_is_said_plainly():
             s.bind(("127.0.0.1", 0))
             port = s.getsockname()[1]
         result = await Bridge(f"http://127.0.0.1:{port}").call("get_overview", {})
-        assert result.isError and "not running" in result.content[0].text
+        assert result.is_error and "not running" in result.content[0].text
 
     anyio.run(run)
 
@@ -247,13 +247,11 @@ def test_the_app_not_running_is_said_plainly():
 def test_the_server_lists_its_tools_with_hints():
     async def run():
         server = build_server(Bridge())
-        from mcp import types
-
-        handler = server.request_handlers[types.ListToolsRequest]
-        listed = (await handler(None)).root.tools
+        handler = server.get_request_handler("tools/list").handler
+        listed = (await handler(None, None)).tools
         hints = {t.name: t.annotations for t in listed}
-        assert hints["get_node"].readOnlyHint and not hints["get_node"].destructiveHint
-        assert hints["delete_node"].destructiveHint
+        assert hints["get_node"].read_only_hint and not hints["get_node"].destructive_hint
+        assert hints["delete_node"].destructive_hint
         assert server.instructions and "levelId~geometryLevelId" in server.instructions
 
     anyio.run(run)
@@ -295,7 +293,7 @@ def test_claude_talks_to_the_running_app_over_stdio(running_app):
     async def run():
         async with stdio_client(parameters) as (read, write), ClientSession(read, write) as client:
             started = await client.initialize()
-            assert started.serverInfo.name == "chembook3d"
+            assert started.server_info.name == "chembook3d"
             assert "X5" in (started.instructions or "")
             tools = {t.name for t in (await client.list_tools()).tools}
             assert {"get_selection", "create_node", "delete_node", "import_file"} <= tools
@@ -303,9 +301,9 @@ def test_claude_talks_to_the_running_app_over_stdio(running_app):
             result = await client.call_tool("get_investigation", {})
             assert '"name": "Demo"' in result.content[0].text
             created = await client.call_tool("create_node", {"label": "from Claude"})
-            assert not created.isError
+            assert not created.is_error
             invalid = await client.call_tool("create_node", {"charge": "two"})
-            assert invalid.isError
+            assert invalid.is_error
 
     anyio.run(run)
     nodes = httpx.get(f"{running_app}/api/nodes").json()

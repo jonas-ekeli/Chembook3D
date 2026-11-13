@@ -414,7 +414,7 @@ def test_claudes_tools(tmp_path):
         unanswered = await bridge.call(
             "delete_conformer_equilibrium", {"equilibrium_id": made["id"]}
         )
-        assert unanswered.isError and "No answer in the app" in unanswered.content[0].text
+        assert unanswered.is_error and "No answer in the app" in unanswered.content[0].text
         assert len((await page.get("/api/equilibria")).json()) == 1
 
     anyio.run(run)

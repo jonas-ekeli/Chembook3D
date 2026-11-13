@@ -1097,7 +1097,7 @@ def test_claudes_tools_read_the_server_and_are_allowed_without_asking(at_work):
         async with http:
             bridge = Bridge(APP, http=http)
             servers = await bridge.call("list_servers", {})
-            assert not servers.isError and f'"cwd": "{WORK}"' in servers.content[0].text
+            assert not servers.is_error and f'"cwd": "{WORK}"' in servers.content[0].text
             tail = await bridge.call(
                 "read_server_file", {"server_id": "saga", "path": "job.gjf", "tail": 1}
             )
@@ -1105,7 +1105,7 @@ def test_claudes_tools_read_the_server_and_are_allowed_without_asking(at_work):
             xyz = await bridge.call("get_server_structure", {"server_id": "saga", "path": TS})
             assert xyz.content[0].text.splitlines()[1].startswith(f"saga:{WORK}/{TS} step 2")
             away = await bridge.call("list_server_files", {"server_id": "saga", "path": ".."})
-            assert away.isError and "outside the terminal's current directory" in (
+            assert away.is_error and "outside the terminal's current directory" in (
                 away.content[0].text
             )
 
@@ -1342,12 +1342,12 @@ def test_claudes_write_tool_needs_only_the_apps_go_ahead_and_nothing_deletes(at_
             off = await bridge.call(
                 "write_server_file", {"server_id": "saga", "path": "a.gjf", "text": "x\n"}
             )
-            assert off.isError and "Let Claude write new files here" in off.content[0].text
+            assert off.is_error and "Let Claude write new files here" in off.content[0].text
             assert _allow(at_work).status_code == 200
             done = await bridge.call(
                 "write_server_file", {"server_id": "saga", "path": "a.gjf", "text": "x\n"}
             )
-            assert not done.isError and f"saga:{WORK}/a.gjf" in done.content[0].text
+            assert not done.is_error and f"saga:{WORK}/a.gjf" in done.content[0].text
 
     anyio.run(run)
     assert (saga.root / WORK.lstrip("/") / "a.gjf").read_text(encoding="utf-8") == "x\n"
