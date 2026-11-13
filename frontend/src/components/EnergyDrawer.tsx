@@ -9,6 +9,7 @@ import {
   type EnergyType,
   type Node,
   type EnergyProfile,
+  type PathAlternative,
   type PathChoice,
   type PathShift,
   type ProfilePath,
@@ -35,7 +36,8 @@ import { EnergyNotes } from './EnergyNotes'
 import { EnergyTableView } from './EnergyTableView'
 import { GModelBadge } from './GModelBadge'
 import { Modal } from './Modal'
-import { Menu } from './MoreMenu'
+import { ContextMenu, type MenuHeading } from './ContextMenu'
+import { Menu, type MenuItem } from './MoreMenu'
 import { ProfileChart, SCREEN_TEXT } from './ProfileChart'
 import { ProfileStyleDialog } from './ProfileStyleDialog'
 import { PathwayColour } from './PathwayColour'
@@ -44,9 +46,12 @@ import { useRequest, type Request } from '../commands'
 import { placeText } from '../subCanvas'
 
 
+type Choice = Omit<PathChoice, 'transition_id'>
 type Path = {
   ids: string[]
-  choices: Omit<PathChoice, 'transition_id'>[]
+  /** The ways on from the last node, and (D228) the ways in to the first. */
+  choices: Choice[]
+  before: Choice[]
   branchId: string | null
   shown: boolean
   shifts: PathShift[]
@@ -60,6 +65,7 @@ const pathsOf = (profile: EnergyProfile | undefined): Path[] =>
   [...(profile?.paths ?? []), ...(profile?.lost ?? [])].map((p) => ({
     ids: p.ids,
     choices: [],
+    before: [],
     branchId: p.branch_id,
     shown: p.shown,
     shifts: p.shifts ?? [],
@@ -169,8 +175,19 @@ export function EnergyDrawer({
   const [profileRef, setProfileRef] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
-  // D194: the step each pathway's Move buttons act on, by the pathway's place in `paths`.
-  const [moving, setMoving] = useState<Record<number, number>>({})
+  // D194, D228: the step whose Move buttons are out, by its pathway's place in `paths` and its
+  // own place on the pathway; they open from the step's menu.
+  const [moving, setMoving] = useState<{ index: number; at: number } | null>(null)
+  // D228: the menu of one step of a pathway, below its name. `key` is the pathway's nodes and
+  // the step when it opened; `swaps` is what the step can be swapped for, once it is known.
+  const [stepMenu, setStepMenu] = useState<{
+    x: number
+    y: number
+    index: number
+    at: number
+    key: string
+    swaps: PathAlternative[] | null
+  } | null>(null)
   // D221: what the list last did on its own account: a pathway removed (which Undo puts back
   // where it was) or one not added because the profile has it already.
   const [notice, setNotice] = useState<{ text: string; undo?: { path: Path; at: number } } | null>(null)
@@ -392,11 +409,14 @@ export function EnergyDrawer({
       api.extendPathway(ids, branchId, false).then(
         (found) => {
           if (!current) return
-          const choices = JSON.stringify(found.choices)
+          const before = found.before ?? []
+          const ways = JSON.stringify([found.choices, before])
           setPaths((now) =>
             now.map((p) =>
-              p.branchId === branchId && JSON.stringify(p.ids) === JSON.stringify(ids) && JSON.stringify(p.choices) !== choices
-                ? { ...p, choices: found.choices }
+              p.branchId === branchId &&
+              JSON.stringify(p.ids) === JSON.stringify(ids) &&
+              JSON.stringify([p.choices, p.before]) !== ways
+                ? { ...p, choices: found.choices, before }
                 : p,
             ),
           )
@@ -416,18 +436,51 @@ export function EnergyDrawer({
   /** D221: take a pathway out of the profile; Undo puts it back where it was. */
   const remove = (index: number, path: Path, text: string) => {
     setNotice({ text, undo: { path, at: index } })
+    setMoving(null)
     replace(index, null)
   }
   const restore = (undo: { path: Path; at: number }) => {
     setPaths((current) => [...current.slice(0, undo.at), undo.path, ...current.slice(undo.at)])
+    setMoving(null)
     setNotice(null)
   }
 
-  const extend = (index: number, path: Path, ids: string[]) =>
-    api.extendPathway(ids, path.branchId).then(
-      (found) => replace(index, { ...path, ids: found.path, choices: found.choices }),
+  /** Go on to `ids`; with `follow`, as far as one arrow leads on (D189). A step taken against
+   * its arrow is one step: the walk only ever follows arrows (D228). */
+  const extend = (index: number, path: Path, ids: string[], follow = true) =>
+    api.extendPathway(ids, path.branchId, follow).then(
+      (found) => replace(index, { ...path, ids: found.path, choices: found.choices, before: found.before ?? [] }),
       (err: unknown) => setError(errorText(err)),
     )
+
+  /** D228: put `id` before the first node; with `follow`, as far back as one arrow leads in.
+   * The steps already there keep their moves along the axis (D194), counted from the new start. */
+  const extendBack = (index: number, path: Path, id: string, follow = true) =>
+    api.extendPathway([id, ...path.ids], path.branchId, follow, true).then(
+      (found) => {
+        const added = found.path.length - path.ids.length
+        setMoving(null)
+        replace(index, {
+          ...path,
+          ids: found.path,
+          choices: found.choices,
+          before: found.before ?? [],
+          shifts: path.shifts.map((shift) => ({ ...shift, at: shift.at + added })),
+        })
+      },
+      (err: unknown) => setError(errorText(err)),
+    )
+
+  /** D228: open the menu of the step at `at` of a pathway, below its name in the list, and ask
+   * what it can be swapped for. */
+  const openStep = (element: HTMLElement, index: number, at: number, path: Path) => {
+    const box = element.getBoundingClientRect()
+    const key = JSON.stringify([path.ids, at])
+    setStepMenu({ x: box.left, y: box.bottom + 2, index, at, key, swaps: null })
+    const known = (swaps: PathAlternative[]) =>
+      setStepMenu((menu) => (menu && menu.index === index && menu.key === key ? { ...menu, swaps } : menu))
+    api.pathwayAlternatives(path.ids, at).then(known, () => known([]))
+  }
 
   // D190: the saved profiles, read once each time the drawer opens; the remembered one opens,
   // else the first. Before the view is restored (no `saved`) none opens: this drawer is about
@@ -458,7 +511,8 @@ export function EnergyDrawer({
     setOpenId(profile?.id ?? null)
     setPaths(next)
     setProfileRef(ref)
-    setMoving({})
+    setMoving(null)
+    setStepMenu(null)
     setRenaming(null)
     setNotice(null)
   }
@@ -535,7 +589,15 @@ export function EnergyDrawer({
     if (!selectedId) return
     api.extendPathway([selectedId]).then(
       (found) =>
-        addPath({ ids: found.path, choices: found.choices, branchId: null, shown: true, shifts: [], colour: null }),
+        addPath({
+          ids: found.path,
+          choices: found.choices,
+          before: found.before ?? [],
+          branchId: null,
+          shown: true,
+          shifts: [],
+          colour: null,
+        }),
       (err: unknown) => setError(errorText(err)),
     )
   }
@@ -549,7 +611,16 @@ export function EnergyDrawer({
 
   const addBranch = (branchId: string) =>
     api.branchPathway(branchId).then(
-      (found) => addPath({ ids: found.path, choices: found.choices, branchId, shown: true, shifts: [], colour: null }),
+      (found) =>
+        addPath({
+          ids: found.path,
+          choices: found.choices,
+          before: found.before ?? [],
+          branchId,
+          shown: true,
+          shifts: [],
+          colour: null,
+        }),
       (err: unknown) => setError(errorText(err)),
     )
 
@@ -608,6 +679,170 @@ export function EnergyDrawer({
   const shownTable = shownResult?.table ?? null
   const exportProfiles = fresh ? shownProfiles : null
   const exportTable = fresh ? shownTable : null
+
+  /** What says which choice this is: a group, or the group a node is in (D108). */
+  const kindOf = (choice: { kind?: string; group_label?: string | null }) =>
+    choice.kind === 'group' ? 'group' : choice.group_label ? `in ${choice.group_label}` : undefined
+
+  /** The ways on ("Continue with") or in ("Start before", D228) along the arrows, one button
+   * each. Those against an arrow are in the menu of the first and the last step instead. */
+  const choiceRow = (label: string, choices: Choice[], take: (choice: Choice) => void) => {
+    const along = choices.filter((choice) => !choice.against)
+    if (!along.length) return null
+    return (
+      <div className="choices" role="group" aria-label={label}>
+        <span className="muted small">{label}:</span>
+        {along.map((choice) => (
+          <button
+            key={choice.node_id}
+            className="small"
+            onClick={() => take(choice)}
+            title={
+              choice.kind === 'group'
+                ? 'The group, valued by its representative; a member is taken by swapping the step afterwards'
+                : choice.group_label
+                  ? `${choice.label}, a member of ${choice.group_label}`
+                  : undefined
+            }
+          >
+            {choice.label}
+            {choice.kind === 'group' && <span className="muted"> (group)</span>}
+            {choice.group_label && <span className="muted"> in {choice.group_label}</span>}
+            {/* D193: where it is, when inside a sub-investigation */}
+            {placeText(canvas, choice.node_id) && <span className="muted"> {placeText(canvas, choice.node_id)}</span>}
+          </button>
+        ))}
+      </div>
+    )
+  }
+
+  /** D228: the menu of one step of a pathway; null once the pathway has changed under it. */
+  const stepContent = (): { label: string; heading: MenuHeading; items: MenuItem[] } | null => {
+    if (!stepMenu) return null
+    const entry = listed.find(({ at }) => at === stepMenu.index)
+    if (!entry || JSON.stringify([entry.path.ids, stepMenu.at]) !== stepMenu.key) return null
+    const { path, name } = entry
+    const { index, at, swaps } = stepMenu
+    const last = path.ids.length - 1
+    const cycle = closesCycle(path.ids)
+    const by = path.shifts.find((shift) => shift.at === at)?.by ?? 0
+    const label = labels.get(path.ids[at]) ?? ''
+    const change = (next: Partial<Path>) => {
+      setMoving(null)
+      replace(index, { ...path, choices: [], before: [], ...next })
+    }
+    const against = (choices: Choice[], take: (choice: Choice) => void): MenuItem[] =>
+      choices
+        .filter((choice) => choice.against)
+        .map((choice) => ({ label: choice.label, aside: kindOf(choice), onSelect: () => take(choice) }))
+    const before = at === 0 ? against(path.before, (choice) => extendBack(index, path, choice.node_id, false)) : []
+    const after =
+      at === last ? against(path.choices, (choice) => extend(index, path, [...path.ids, choice.node_id], false)) : []
+    // The step's own group is said in the heading; only another group is named beside a swap.
+    const group = canvas.groups.find((g) => g.id === path.ids[at] || g.member_ids.includes(path.ids[at]))
+    const own = group ? labels.get(group.id) : undefined
+    const items: MenuItem[] = [
+      {
+        label: 'Swap for',
+        onSelect: () => undefined,
+        items: swaps?.length
+          ? swaps.map((swap) => ({
+              label: swap.label,
+              aside: swap.kind === 'node' && swap.group_label === own ? undefined : kindOf(swap),
+              onSelect: () => change({ ids: swap.path }),
+            }))
+          : undefined,
+        disabled: !swaps?.length,
+        aside: swaps === null ? '…' : undefined,
+        title:
+          swaps === null
+            ? 'Looking for what fits here'
+            : swaps.length
+              ? 'Another conformer, the group, or any node the arrows join to the steps before and after'
+              : 'Nothing else is joined to the steps before and after this one',
+      },
+      {
+        label: 'Branch off here',
+        disabled: at === last,
+        title:
+          at === last
+            ? 'This is the last step: take a way on first, then branch off here to take another'
+            : 'A new pathway with the steps up to this one, to go another way on from here',
+        onSelect: () =>
+          addPath({
+            ids: path.ids.slice(0, at + 1),
+            choices: [],
+            before: [],
+            branchId: null,
+            shown: true,
+            shifts: path.shifts.filter((shift) => shift.at <= at),
+            colour: null,
+          }),
+      },
+      {
+        label: cycle ? 'Start the cycle here' : 'Start the pathway here',
+        separated: true,
+        disabled: at === 0 || (cycle && at === last),
+        title: cycle
+          ? 'The same cycle, drawn from this step round to it again'
+          : 'Drop the steps before this one',
+        onSelect: () =>
+          cycle
+            ? change({ ids: [...path.ids.slice(at, last), ...path.ids.slice(0, at), path.ids[at]], shifts: [] })
+            : change({
+                ids: path.ids.slice(at),
+                shifts: path.shifts
+                  .filter((shift) => shift.at > at)
+                  .map((shift) => ({ ...shift, at: shift.at - at })),
+              }),
+      },
+      {
+        label: 'End the pathway here',
+        disabled: at === last,
+        title: 'Drop the steps after this one; every way on from here is offered again',
+        onSelect: () =>
+          change({ ids: path.ids.slice(0, at + 1), shifts: path.shifts.filter((shift) => shift.at <= at) }),
+      },
+      ...(before.length
+        ? [
+            {
+              label: 'Start before, against an arrow',
+              onSelect: () => undefined,
+              items: before,
+              title: 'A node this one has an arrow to: the pathway follows that arrow backwards',
+            },
+          ]
+        : []),
+      ...(after.length
+        ? [
+            {
+              label: 'Continue, against an arrow',
+              onSelect: () => undefined,
+              items: after,
+              title: 'A node with an arrow to this one: the pathway follows that arrow backwards',
+            },
+          ]
+        : []),
+      {
+        label: 'Move along the axis',
+        separated: true,
+        aside: by ? `+${by}` : undefined,
+        title: 'Move this step, and every step after it, later along the axis of the figure (D194)',
+        onSelect: () => setMoving({ index, at }),
+      },
+      ...(path.shifts.length
+        ? [
+            {
+              label: 'Put every step back',
+              title: 'Put every step of this pathway back where the pathway places it',
+              onSelect: () => replace(index, { ...path, shifts: [] }),
+            },
+          ]
+        : []),
+    ]
+    const where = group && group.id !== path.ids[at] ? `, in ${own}` : ''
+    return { label: `Step ${label}`, heading: { title: label, detail: `step ${at + 1} of ${name}${where}` }, items }
+  }
 
   // D190: which saved profile the drawer shows, and its New, Rename, Duplicate and Delete.
   const profilePicker = (
@@ -901,6 +1136,7 @@ export function EnergyDrawer({
                     ✕
                   </button>
                 </div>
+                {choiceRow('Start before', path.before, (choice) => extendBack(index, path, choice.node_id))}
                 <p className="pathway-nodes">
                   {path.ids.map((id, i) => (
                     <span key={i}>
@@ -910,7 +1146,19 @@ export function EnergyDrawer({
                           {`+${path.shifts.find((shift) => shift.at === i)?.by} `}
                         </span>
                       )}
-                      <button className="link" onClick={() => onSelectNode(id)}>
+                      <button
+                        className="link"
+                        aria-haspopup="menu"
+                        title="Select it on the canvas and open this step's menu: swap, branch off, start or end here, move"
+                        onClick={(event) => {
+                          onSelectNode(id)
+                          openStep(event.currentTarget, index, i, path)
+                        }}
+                        onContextMenu={(event) => {
+                          event.preventDefault()
+                          openStep(event.currentTarget, index, i, path)
+                        }}
+                      >
                         {labels.get(id)}
                       </button>
                       {i === path.ids.length - 1 && closesCycle(path.ids) && (
@@ -923,30 +1171,20 @@ export function EnergyDrawer({
                   ))}
                 </p>
                 {closesCycle(path.ids) && <p className="muted small">Cycle closed.</p>}
-                {path.ids.length > 0 &&
+                {moving?.index === index &&
+                  moving.at < path.ids.length &&
                   (() => {
                     // D194: one step, and with it every step after it, moved along the axis.
-                    const at = Math.min(moving[index] ?? 0, path.ids.length - 1)
+                    // D228: the buttons come out from the step's menu and go with Done.
+                    const at = moving.at
                     const by = path.shifts.find((shift) => shift.at === at)?.by ?? 0
                     const move = (delta: number) => replace(index, { ...path, shifts: shifted(path.shifts, at, delta) })
                     return (
                       <div className="pathway-move" role="group" aria-label={`Move ${name} along the axis`}>
-                        <span className="muted small">Move</span>
-                        <select
-                          aria-label="Step to move"
-                          value={at}
-                          onChange={(event) => setMoving((m) => ({ ...m, [index]: Number(event.target.value) }))}
-                          title="This step and every step after it move; the steps before stay put"
-                        >
-                          {path.ids.map((id, i) => {
-                            const moved = path.shifts.find((shift) => shift.at === i)?.by
-                            return (
-                              <option key={i} value={i}>
-                                {`${i + 1}. ${labels.get(id)}${moved ? ` (+${moved})` : ''}`}
-                              </option>
-                            )
-                          })}
-                        </select>
+                        <span className="muted small" title="This step and every step after it move; the steps before stay put">
+                          Move {labels.get(path.ids[at])}
+                          {by ? ` (+${by})` : ''} and the steps after it
+                        </span>
                         <button
                           className="small"
                           disabled={by === 0}
@@ -974,35 +1212,14 @@ export function EnergyDrawer({
                             Reset
                           </button>
                         )}
+                        <button className="small quiet" onClick={() => setMoving(null)} title="Put the Move buttons away">
+                          Done
+                        </button>
                       </div>
                     )
                   })()}
-                {path.choices.length > 0 && (
-                  <div className="choices" role="group" aria-label="Continue with">
-                    <span className="muted small">Continue with:</span>
-                    {path.choices.map((choice) => (
-                      <button
-                        key={choice.node_id}
-                        className="small"
-                        onClick={() => extend(index, path, [...path.ids, choice.node_id])}
-                        title={
-                          choice.kind === 'group'
-                            ? 'The group, valued by its representative'
-                            : choice.group_label
-                              ? `${choice.label}, a member of ${choice.group_label}`
-                              : undefined
-                        }
-                      >
-                        {choice.label}
-                        {choice.kind === 'group' && <span className="muted"> (group)</span>}
-                        {choice.group_label && <span className="muted"> in {choice.group_label}</span>}
-                        {/* D193: where it is, when inside a sub-investigation */}
-                        {placeText(canvas, choice.node_id) && (
-                          <span className="muted"> {placeText(canvas, choice.node_id)}</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
+                {choiceRow('Continue with', path.choices, (choice) =>
+                  extend(index, path, [...path.ids, choice.node_id]),
                 )}
               </div>
             ))}
@@ -1193,6 +1410,9 @@ export function EnergyDrawer({
           onSave={(profile_style) => api.saveSettings({ profile_style }).then((next) => onSettings?.(next))}
           onClose={() => setStyling(false)}
         />
+      )}
+      {stepMenu && (
+        <ContextMenu x={stepMenu.x} y={stepMenu.y} content={stepContent} onClose={() => setStepMenu(null)} />
       )}
       {sterics && (
         <CompareStericsDialog

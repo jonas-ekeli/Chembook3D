@@ -23,6 +23,10 @@ artifacts and publishes nothing.
   first step; a point with other atoms or another charge than the reference shows n/a with the
   reason (W-COMPARE) instead of a value far off the axis; a removed pathway can be put back, a
   pathway is added once, and one that lost a node stays listed.
+- Editing a pathway (D228): an arrow into a group takes the group and the pathway goes on; each
+  step has a menu to swap it for another conformer or node, branch off a second pathway, start
+  or end the pathway there, and move it along the axis; a pathway grows at its start too
+  ("Start before"), and can follow an arrow backwards.
 - Documentation: a restructured code map, an architecture map, a user guide covering the core of
   the app, and README screenshots in dark mode.
 - CI: parallel pytest, time limits and pinned actions; then dependency audits, CodeQL, a

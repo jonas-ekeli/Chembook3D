@@ -1734,8 +1734,19 @@ export type PathChoice = {
   /** D108: a node or a group; a node's group, when it is in one. */
   kind?: 'node' | 'group'
   group_label?: string | null
+  /** D228: its transition is drawn the other way; the pathway would follow it backwards. */
+  against?: boolean
 }
-export type Pathway = { path: string[]; choices: PathChoice[]; closed: boolean }
+/** `choices`: the ways on from the last node; D228 `before`: the ways in to the first. */
+export type Pathway = { path: string[]; choices: PathChoice[]; closed: boolean; before?: PathChoice[] }
+/** D228: what one step of a pathway can be swapped for, with the pathway the swap gives. */
+export type PathAlternative = {
+  node_id: string
+  label: string
+  kind: 'node' | 'group'
+  group_label?: string | null
+  path: string[]
+}
 
 /** D190: a pathway of a saved energy profile; `shown` draws it on the figure. */
 /** D194: the step at index `at` of a pathway, and every step after it, moved `by` columns later. */
@@ -2714,8 +2725,11 @@ export const api = {
         (bsse ? '&bsse=true' : ''),
     ),
   /** D189: `follow` false lists the ways on from the last id without walking. */
-  extendPathway: (path: string[], branchId?: string | null, follow = true) =>
-    request<Pathway>('POST', '/pathways/extend', { path, branch_id: branchId ?? null, follow }),
+  /** D228: `back` grows the pathway at its start, along the transitions that lead in. */
+  extendPathway: (path: string[], branchId?: string | null, follow = true, back = false) =>
+    request<Pathway>('POST', '/pathways/extend', { path, branch_id: branchId ?? null, follow, back }),
+  pathwayAlternatives: (path: string[], at: number) =>
+    request<PathAlternative[]>('POST', '/pathways/alternatives', { path, at }),
   branchPathway: (branchId: string) => request<Pathway>('GET', `/branches/${branchId}/pathway`),
   profiles: (body: ProfileRequest) => request<Profiles>('POST', '/energies/profile', body),
   energyTable: (body: ProfileRequest) => request<EnergyTable>('POST', '/energies/table', body),

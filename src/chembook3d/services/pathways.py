@@ -5,9 +5,12 @@
   nodes per step, and energies are never used to choose a node or an edge (INV-2, EN-10).
 - Extending a pathway follows an outgoing transition only while there is exactly one to
   follow. At a fork (two TS candidates, a split) it stops and lists the choices for the user.
+  At its start it grows the same way along the transitions that lead in (D228). A transition
+  drawn the other way is offered at either end, marked `against`, and never walked by itself.
 - A group's transitions count for each of its members, and its members' transitions for the
   group, so a pathway carries on across an edge drawn to or from a group as well as one drawn
-  node to node (D108). An edge into a group offers the group and each of its members.
+  node to node (D108). An edge into a group leads to the group, valued by its representative;
+  a member is taken by swapping the step (`alternatives`, D228).
 - A pathway visits each node once, except that it may end at a node it has already visited,
   closing a catalytic cycle (A13). The cycle is closed once; a further turnover would only
   repeat the same calculations.
@@ -172,31 +175,38 @@ def _shared(end: Endpoint) -> bool:
     return not transition_service.branches_of(end)
 
 
-def _onward(session: Session, end: Endpoint, members: bool) -> list[tuple[Transition, Endpoint]]:
-    """D108: where a pathway at `end` can go next, each with the transition it follows, in
-    the order the transitions were drawn. Transitions of the group a node is in and of a
-    group's members count too. From a group, an edge from one of its members to a member of
-    another group leads to that group, so collapsed groups read as one path (D66). An edge
-    into a group leads to the group and, with `members`, to each of its members."""
+def _ways(session: Session, end: Endpoint, forward: bool) -> list[tuple[Transition, Endpoint]]:
+    """D108: where a pathway at `end` can go next (`forward`), or where it can come from, each
+    with the transition it follows, in the order the transitions were drawn. Transitions of
+    the group a node is in and of a group's members count too. An edge drawn to or from a
+    group leads to the group itself (D228). Between two groups, an edge from a member of one
+    to a member of the other joins the groups, so collapsed groups read as one path (D66)."""
     sides = _sides(session, end)
+    column = (
+        (Transition.source_node_id, Transition.source_group_id)
+        if forward
+        else (Transition.target_node_id, Transition.target_group_id)
+    )
+    query = select(Transition).where(or_(column[0].in_(sides), column[1].in_(sides)))
     found: dict[str, tuple[Transition, Endpoint]] = {}
-    for t in _leaving(session, sides):
-        target = transition_service.endpoint(session, t.target_id)
-        reached: list[Endpoint] = [target]
-        if isinstance(target, GroupNode):
-            if members:
-                reached += _members(session, target.id)
-        elif isinstance(end, GroupNode) and t.source_id != end.id and target.group_id:
-            reached = [session.get(GroupNode, target.group_id)]  # type: ignore[list-item]
-        for record in reached:
-            if record.id not in found and not _same_place(end, record):
-                found[record.id] = (t, record)
+    for t in session.scalars(query.order_by(Transition.seq)):
+        here, there = (t.source_id, t.target_id) if forward else (t.target_id, t.source_id)
+        if there in sides:
+            continue
+        other = transition_service.endpoint(session, there)
+        if isinstance(end, GroupNode) and here != end.id and isinstance(other, Node):
+            if other.group_id:
+                other = session.get(GroupNode, other.group_id)  # type: ignore[assignment]
+        if other.id not in found and not _same_place(end, other):
+            found[other.id] = (t, other)
     return list(found.values())
 
 
-def _choices(session: Session, onward: list[tuple[Transition, Endpoint]]) -> list[dict[str, Any]]:
+def _choices(
+    session: Session, ways: list[tuple[Transition, Endpoint]], against: bool = False
+) -> list[dict[str, Any]]:
     found = []
-    for t, target in onward:
+    for t, target in ways:
         group = (
             session.get(GroupNode, target.group_id)
             if isinstance(target, Node) and target.group_id
@@ -210,6 +220,7 @@ def _choices(session: Session, onward: list[tuple[Transition, Endpoint]]) -> lis
                 "status": target.status if isinstance(target, Node) else t.status,
                 "kind": "node" if isinstance(target, Node) else "group",
                 "group_label": _label(group) if group else None,
+                "against": against,
             }
         )
     return found
@@ -223,47 +234,161 @@ def closed(path: list[str]) -> bool:
 @dataclass
 class Extended:
     path: list[str]
-    choices: list[dict[str, Any]]
+    choices: list[dict[str, Any]]  # the ways on from the last node
     closed: bool
+    before: list[dict[str, Any]]  # the ways in to the first node (D228)
 
 
 def extend(
-    session: Session, ids: list[str], branch_id: str | None = None, follow: bool = True
+    session: Session,
+    ids: list[str],
+    branch_id: str | None = None,
+    follow: bool = True,
+    back: bool = False,
 ) -> Extended:
     """Follow outgoing transitions from the last node while exactly one leads on, directly or
     through a group (D108). With a branch, only edges into that branch's lineage (its
     ancestors and descendants) or into a node on no branch (D67) count, so an interconversion
-    into a sibling branch is not followed, and an edge into a group is followed into the group
-    itself, the reconnection point (D18); its members are offered where the pathway stops.
-    Without a branch an edge into a group is a choice between the group and its members.
-    Stops at an end, at a fork (listing the choices, which may include nodes already visited)
-    and when the pathway returns to a node it visited, closing a cycle (A13). A closed pathway
-    is complete. With `follow` off it walks no further and lists every way on from the last node,
-    even a single one, so a pathway cut back by the drawer's Undo step can go on (D189)."""
+    into a sibling branch is not followed. An edge into a group is followed into the group
+    itself (D18, D228). Stops at an end, at a fork (listing the choices, which may include
+    nodes already visited) and when the pathway returns to a node it visited, closing a cycle
+    (A13). A closed pathway is complete. With `follow` off it walks no further and lists every
+    way on from the last node, even a single one, so a pathway cut back by the drawer's Undo
+    step can go on (D189).
+
+    D228: with `back` it grows at its start instead, along the transitions that lead in to the
+    first node, while exactly one leads in from a node it has not visited. `before` lists the
+    ways in to the first node; a transition from a later reaction step is not one (it closes
+    a cycle, A13). Both lists end with the transitions drawn the other way, marked
+    `against`: a pathway may follow a transition in either direction (INV-2), but the walk
+    never takes one against its arrow by itself."""
     path = list(ids)
     resolve(session, path)
     if closed(path):
-        return Extended(path, [], True)
+        return Extended(path, [], True, [])
     related = None
     if branch_id is not None:
         branch = get(session, Branch, branch_id, "Branch")
         related = {branch.id} | branch_service.ancestors(branch) | _descendants(session, branch)
 
-    def _leads_into(end: Endpoint) -> bool:
-        return _in(end, related) or _shared(end)
+    def ways(at_end: bool, forward: bool) -> list[tuple[Transition, Endpoint]]:
+        end = transition_service.endpoint(session, path[-1] if at_end else path[0])
+        found = _ways(session, end, forward)
+        return [(t, e) for t, e in found if related is None or _in(e, related) or _shared(e)]
 
-    def onward(members: bool) -> list[tuple[Transition, Endpoint]]:
-        end = transition_service.endpoint(session, path[-1])
-        found = _onward(session, end, members)
-        return [(t, e) for t, e in found if related is None or _leads_into(e)]
+    def onward() -> list[tuple[Transition, Endpoint]]:
+        """The ways on along the arrows. The arrow the pathway just came along against its
+        direction leads back where it came from: not a way on."""
+        came = _joining(session, *_ends(session, path[-2:])) if len(path) > 1 else None
+        back_along = came.transition.id if came is not None and not came.forward else None
+        return [(t, e) for t, e in ways(True, True) if t.id != back_along]
 
-    while True:
-        options = onward(members=related is None)
-        if not follow or len(options) != 1:
-            return Extended(path, _choices(session, onward(members=True)), False)
-        path.append(options[0][1].id)
-        if closed(path):
-            return Extended(path, [], True)
+    def unvisited(found: list[tuple[Transition, Endpoint]]) -> list[tuple[Transition, Endpoint]]:
+        return [(t, e) for t, e in found if e.id not in path]
+
+    steps = {s.id: s.position for s in session.scalars(select(ReactionStep))}
+
+    def leading_in() -> list[tuple[Transition, Endpoint]]:
+        """The ways in to the first node along the arrows. As in a branch's pathway, an arrow
+        from a later reaction step is the one that closes a catalytic cycle, not a way in
+        (A13): the cycle is closed at the pathway's end."""
+        first = steps.get(transition_service.endpoint(session, path[0]).step_id or "")
+        found = []
+        for t, e in unvisited(ways(False, False)):
+            position = steps.get(e.step_id or "")
+            if first is None or position is None or position <= first:
+                found.append((t, e))
+        return found
+
+    def listed() -> Extended:
+        on = onward()
+        into = leading_in()
+        on_against: list[tuple[Transition, Endpoint]] = []
+        in_against: list[tuple[Transition, Endpoint]] = []
+        # A pathway of one node has no direction yet: what leads in is offered before it and
+        # what leads on after it, and neither a second time against its arrow.
+        if len(path) > 1:
+            offered = {e.id for _, e in on}
+            on_against = [(t, e) for t, e in unvisited(ways(True, False)) if e.id not in offered]
+            offered = {e.id for _, e in into}
+            in_against = [(t, e) for t, e in unvisited(ways(False, True)) if e.id not in offered]
+        return Extended(
+            path,
+            _choices(session, on) + _choices(session, on_against, against=True),
+            False,
+            _choices(session, into) + _choices(session, in_against, against=True),
+        )
+
+    while follow:
+        options = leading_in() if back else onward()
+        if len(options) != 1:
+            break
+        if back:
+            path.insert(0, options[0][1].id)
+        else:
+            path.append(options[0][1].id)
+            if closed(path):
+                return Extended(path, [], True, [])
+    return listed()
+
+
+def _ends(session: Session, ids: list[str]) -> list[Endpoint]:
+    return [transition_service.endpoint(session, record_id) for record_id in ids]
+
+
+def alternatives(session: Session, ids: list[str], at: int) -> list[dict[str, Any]]:
+    """D228: what the step at index `at` of a pathway can be swapped for: every node or group
+    that the transitions join to both its neighbours (to its one neighbour at an end) and
+    that is nowhere else on the pathway. The group the step is in and its fellow members come
+    first: the usual swap is one conformer for another, or for the group. Each carries the
+    `path` the swap gives; in a closed cycle the first and the last step are one node and
+    change together. Energies never choose (EN-10): the list is in the order things were made."""
+    resolve(session, ids)
+    if not 0 <= at < len(ids):
+        raise RecordError("The pathway has no such step")
+    cycle = closed(ids) and at in (0, len(ids) - 1)
+    places = {0, len(ids) - 1} if cycle else {at}
+    current = transition_service.endpoint(session, ids[at])
+
+    def relatives(end: Endpoint) -> list[Endpoint]:
+        """The end, the group it is in and that group's members, or a group's members."""
+        group_id = end.group_id if isinstance(end, Node) else end.id
+        if not group_id:
+            return [end]
+        return [session.get(GroupNode, group_id), *_members(session, group_id)]  # type: ignore[list-item]
+
+    pool: dict[str, Endpoint] = {e.id: e for e in relatives(current)}
+    for place in sorted(places):
+        for near in (place - 1, place + 1):
+            if not 0 <= near < len(ids) or near in places:
+                continue
+            neighbour = transition_service.endpoint(session, ids[near])
+            for forward in (True, False):
+                for _, other in _ways(session, neighbour, forward):
+                    for end in relatives(other):
+                        pool.setdefault(end.id, end)
+    found = []
+    for end in pool.values():
+        if end.id in ids:
+            continue
+        swapped = [end.id if i in places else record_id for i, record_id in enumerate(ids)]
+        try:
+            resolve(session, swapped)
+        except RecordError:
+            continue
+        group = (
+            session.get(GroupNode, end.group_id) if isinstance(end, Node) and end.group_id else None
+        )
+        found.append(
+            {
+                "node_id": end.id,
+                "label": _label(end),
+                "kind": "node" if isinstance(end, Node) else "group",
+                "group_label": _label(group) if group else None,
+                "path": swapped,
+            }
+        )
+    return found
 
 
 def branch_pathway(session: Session, branch_id: str) -> Extended:

@@ -80,7 +80,8 @@ whether counterpoise-corrected values are used (**with BSSE**).
 
 1. Right-click the first node of a pathway and choose **Start energy pathway here**.
 2. In the drawer, continue the pathway one step at a time (**Continue with**), or add a branch
-   pathway beside it. A pathway that comes back to its first state closes the cycle.
+   pathway beside it. A pathway that comes back to its first state closes the cycle. An arrow
+   into a group takes the group, valued by its representative.
 3. The **Profile** tab draws it; the **Table** tab lists relative values, step barriers and the
    absolute energies behind them, with a Check column for the warnings.
 
@@ -88,6 +89,21 @@ A point shows **n/a** when its atoms or charge are not those of the profile's re
 note **W-COMPARE** above the profile says what differs (for example "C2H4 more"). Usually an arrow
 on the way lacks a free species that joins or leaves there, or the pathway belongs to another
 system and needs a profile of its own.
+
+Click a step in a pathway's list to select it on the canvas and open its menu:
+
+- **Swap for** puts another node or group in its place: another conformer of its group, the
+  group itself, or any node the arrows join to the steps before and after it.
+- **Branch off here** adds a second pathway with the steps up to this one, so you can take
+  another way on without building the shared steps again.
+- **Start the pathway here** and **End the pathway here** drop the steps before or after it.
+  On a closed cycle, **Start the cycle here** draws the same cycle from another step.
+- **Move along the axis** brings out the ← and → buttons that move the step, and every step
+  after it, later in the figure; **Done** puts them away.
+
+**Start before** lists the nodes with an arrow in to the first node, so a pathway started in the
+middle can grow backwards. A pathway normally follows the arrows; the menus of the first and
+the last step also offer the arrows drawn the other way (**against an arrow**).
 
 ✕ removes a pathway from the profile; **Undo** under the list puts the last one removed back.
 A pathway that is already in the profile is not added twice. If a node on a pathway is deleted,

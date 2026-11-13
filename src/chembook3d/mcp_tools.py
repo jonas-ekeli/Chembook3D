@@ -334,12 +334,29 @@ TOOLS: list[ToolSpec] = [
         "/api/pathways/extend",
         "Follow outgoing transitions from the last id of `path` while exactly one leads on; "
         "stops at an end, at a fork (listing the choices) or when it returns to a visited node "
-        "(a closed cycle). Use it to build the `paths` of get_energy_profile. Never pick a "
-        "choice by energy: ask the user.",
+        "(a closed cycle). An edge into a group leads to the group; `before` lists the ways in "
+        "to the first id, and a choice marked `against` follows its transition backwards. Use "
+        "it to build the `paths` of get_energy_profile. Never pick a choice by energy: ask the "
+        "user.",
         help={
             "path": "Node and group ids so far, in order (at least one).",
             "branch_id": "Only follow edges within this branch's lineage (optional).",
             "follow": "False lists every way on from the last id without walking (default true).",
+            "back": "True grows the pathway at its start instead, along the transitions that "
+            "lead in to the first id (default false).",
+        },
+    ),
+    T(
+        "list_pathway_alternatives",
+        "read",
+        "POST",
+        "/api/pathways/alternatives",
+        "What the step at index `at` of `path` can be swapped for: the nodes and groups that "
+        "transitions join to both its neighbours, such as another conformer of its group or "
+        "the group itself. Each comes with the pathway the swap gives.",
+        help={
+            "path": "Node and group ids of the pathway, in order.",
+            "at": "Index of the step in `path`, from 0.",
         },
     ),
     T(

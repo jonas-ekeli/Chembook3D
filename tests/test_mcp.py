@@ -27,6 +27,7 @@ ORIGIN = {"Origin": "http://127.0.0.1:8765"}
 # Requests that compute without changing anything; read tools may use them.
 READ_POSTS = {
     "/api/pathways/extend",
+    "/api/pathways/alternatives",
     "/api/energies/profile",
     "/api/energies/table",
     "/api/overlay",

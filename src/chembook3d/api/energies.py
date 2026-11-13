@@ -136,6 +136,8 @@ class PathIn(BaseModel):
     branch_id: str | None = None
     # D189: off lists the ways on from the last id without walking (the drawer's Undo step).
     follow: bool = True
+    # D228: grow at the start instead, along the transitions that lead in to the first id.
+    back: bool = False
 
 
 class ChoiceOut(BaseModel):
@@ -145,18 +147,36 @@ class ChoiceOut(BaseModel):
     status: str
     kind: str = "node"  # "node" or "group"
     group_label: str | None = None  # the group a node is in (D108)
+    against: bool = False  # D228: its transition is drawn the other way
 
 
 class PathOut(BaseModel):
     path: list[str]
-    choices: list[ChoiceOut]
+    choices: list[ChoiceOut]  # the ways on from the last id
     closed: bool  # the last node closed a cycle (A13)
+    before: list[ChoiceOut] = []  # D228: the ways in to the first id
 
 
 def _path_out(found: pathways.Extended) -> PathOut:
     return PathOut(
-        path=found.path, choices=[ChoiceOut(**c) for c in found.choices], closed=found.closed
+        path=found.path,
+        choices=[ChoiceOut(**c) for c in found.choices],
+        closed=found.closed,
+        before=[ChoiceOut(**c) for c in found.before],
     )
+
+
+class StepIn(BaseModel):
+    path: list[str]
+    at: int  # the step's index in `path`
+
+
+class AlternativeOut(BaseModel):
+    node_id: str  # a node or a group
+    label: str
+    kind: str  # "node" or "group"
+    group_label: str | None = None
+    path: list[str]  # the pathway with the step swapped for it
 
 
 class ProfileIn(BaseModel):
@@ -332,7 +352,13 @@ def energy_view(
 
 @router.post("/pathways/extend", response_model=PathOut)
 def extend_pathway(body: PathIn, session: DbSession):
-    return _path_out(pathways.extend(session, body.path, body.branch_id, body.follow))
+    return _path_out(pathways.extend(session, body.path, body.branch_id, body.follow, body.back))
+
+
+@router.post("/pathways/alternatives", response_model=list[AlternativeOut])
+def pathway_alternatives(body: StepIn, session: DbSession):
+    """D228: what one step of a pathway can be swapped for."""
+    return pathways.alternatives(session, body.path, body.at)
 
 
 @router.get("/branches/{branch_id}/pathway", response_model=PathOut)
