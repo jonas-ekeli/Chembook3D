@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 from pydantic import BaseModel, Field
 from starlette.datastructures import Headers
 
-from chembook3d import autonomy, claude_panel, cloud_jobs
+from chembook3d import autonomy, claude_panel, cloud_jobs, keep_going, local_jobs
 from chembook3d.api.routes import _investigation
 
 router = APIRouter(prefix="/api/claude")
@@ -234,6 +234,78 @@ def set_autonomy(body: AutonomyIn, request: Request) -> AutonomyOut:
         state.turn_off()
     _panel(request.app).close_all()
     return _autonomy_out(request)
+
+
+# ---------- Claude keeps going on its own (D231) ----------
+
+
+class StopCheckIn(BaseModel):
+    session_id: str = Field("", max_length=200)
+    stop_hook_active: bool = False
+
+
+class StopCheckOut(BaseModel):
+    decision: str  # "stop": the turn ends; "block": Claude goes on, told `reason`
+    reason: str | None = None
+
+
+@router.post("/stop-check")
+async def stop_check(body: StopCheckIn, request: Request) -> StopCheckOut:
+    """Asked by the panel's Stop hook (`chembook3d claude-stop`, written only while Claude works
+    on its own) each time Claude is about to end its turn. While a job Claude started runs,
+    this waits with it (up to `keep_going.WAIT`) and then says what ended; with nothing running
+    it asks Claude once to check the request is done, and again only after it did more work.
+    Not an MCP tool: Claude Code itself calls it, from this computer."""
+    refusal = _refusal(request.scope, request.headers)
+    if refusal is not None:
+        raise HTTPException(403, refusal)
+    stop = StopCheckOut(decision="stop")
+    investigation = getattr(request.app.state, "investigation", None)
+    live = request.app.state.live
+    state: autonomy.Autonomy = live.autonomy
+    if investigation is None or not state.on_for(investigation.folder):
+        return stop
+    folder = investigation.folder
+    from chembook3d.api.jobs import launcher
+
+    cloud_launcher = launcher(request)
+
+    def local() -> list[dict]:
+        return local_jobs.list_jobs(folder)
+
+    def cloud() -> list[dict]:
+        records = [j for j in cloud_jobs.list_jobs(folder) if j.get("started_by") == "claude"]
+        return [
+            cloud_jobs.job_status(folder, j["id"], cloud_launcher, fetch=True)
+            for j in records
+            if j.get("state") != "draft" and not j.get("fetched")
+        ]
+
+    def still_on() -> bool:
+        current = getattr(request.app.state, "investigation", None)
+        return current is not None and current.folder == folder and state.on_for(folder)
+
+    running, done, waited = await keep_going.wait_for_jobs(
+        local,
+        cloud,
+        still_on,
+        gone=request.is_disconnected,
+        wait=keep_going.WAIT,
+        every=keep_going.LOCAL_EVERY,
+        cloud_every=keep_going.CLOUD_EVERY,
+    )
+    if not still_on():
+        return stop
+    if done:
+        return StopCheckOut(decision="block", reason=keep_going.finished_reason(done, running))
+    if running:
+        return StopCheckOut(decision="block", reason=keep_going.waiting_reason(running, waited))
+    with live.lock:
+        work = live.claude_requests
+        if live.stop_checks.get(body.session_id) == work:
+            return stop  # asked already, and Claude did nothing since: the turn ends
+        live.stop_checks[body.session_id] = work
+    return StopCheckOut(decision="block", reason=keep_going.GOAL_CHECK)
 
 
 def _size(value: str | None, default: int) -> int:

@@ -699,6 +699,7 @@ Routes for all of these are in `api/pathway.py`.
   - `claude_panel.prepare(..., alone)` then allows `allowed_alone(cloud)` and adds `AUTONOMY_GUIDE` to the CLAUDE.md.
   - `api/live.py`: each `Action` has `own`, which says whether Claude made all that the action would remove; `ask` then runs it at once (`unasked`).
   - `api/local.py` passes the job limit to `local_jobs.create_job` for Claude's requests; a job's `started_by` in `job.json` makes its imported result Claude's.
+  - D231: while it is on, `claude_panel.stop_hook` adds a Stop hook to the settings: `chembook3d claude-stop` (`keep_going.hook_main`) asks `POST /api/claude/stop-check` (`api/claude.py`), which waits in `keep_going.wait_for_jobs` while a job Claude started runs (local `started_by`, cloud `started_by` written by `cloud_jobs.start_job` from `api/jobs.started_by`) and otherwise asks the goal check once per stretch of work (`LiveState.claude_requests`, counted by `ChangeTracker`, and `stop_checks` per conversation).
   - The panel's tick box, warning (`AutonomyDialog`, shown on the page through a portal) and bar are in `components/ClaudePanel.tsx`; `util.limitText` mirrors `autonomy.limit_text`.
 
 ## Claude's structure tools (D144, A89)

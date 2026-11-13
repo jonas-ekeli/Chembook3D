@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from chembook3d import keep_going
 from chembook3d.settings import config_dir
 
 SERVER_NAME = "chembook3d"
@@ -249,6 +250,11 @@ to ask, to show the person something first, or to wait for them to agree.
 - Build so the person can check you: clear names, every node in a step and a branch, edges
   with their free species, notes that say where a structure or number came from. A local or
   cloud result is a starting point: say what it is (method, converged or not), never more.
+- Waiting on a job: when what is left needs a running job's result and nothing else can be
+  done meanwhile, say so in one line and end your turn. Do not poll in a loop. The app holds
+  the end of your turn while a job you started runs, and wakes you when it ends (it looks
+  again at least every {wait}). When you end a turn with nothing running, the app asks you
+  once whether the request is done; answer by going on, or by ending the turn again.
 - Finish with a summary: what you built, every "Claude chose" decision, what failed or was
   refused, and what is left for the person.
 """
@@ -355,16 +361,33 @@ def prepare(folder: Path, name: str, app_url: str, alone: Alone | None = None) -
         tools = allowed_alone(alone.cloud) if alone is not None else read_only
         allow = [f"mcp__{SERVER_NAME}__{tool}" for tool in tools]
     allow += [WEB_SEARCH, WEB_FETCH] if alone is not None else [WEB_SEARCH]
-    settings = {"permissions": {"allow": allow, "deny": list(DENIED_TOOLS)}}
+    settings: dict = {"permissions": {"allow": allow, "deny": list(DENIED_TOOLS)}}
+    if alone is not None:
+        settings["hooks"] = stop_hook(app_url)
     guide = NOTEBOOK_GUIDE.format(name=name.replace("\n", " "))
     if alone is not None:
         guide += AUTONOMY_GUIDE.format(
-            limit=alone.limit, cloud=CLOUD_ALLOWED if alone.cloud else CLOUD_ASKS
+            limit=alone.limit,
+            cloud=CLOUD_ALLOWED if alone.cloud else CLOUD_ASKS,
+            wait=f"{round(keep_going.WAIT / 60)} minutes",
         )
     _write(work / MCP_CONFIG_NAME, json.dumps({"mcpServers": servers}, indent=2) + "\n")
     _write(work / SETTINGS_NAME, json.dumps(settings, indent=2) + "\n")
     _write(work / "CLAUDE.md", guide)
     return work
+
+
+def stop_hook(app_url: str) -> dict:
+    """D231: while Claude works on its own, each end of its turn asks the app first (the app's
+    own Python runs `chembook3d claude-stop`, in exec form, so no shell is involved). The app
+    waits there while a job Claude started runs and wakes Claude when it ends."""
+    hook = {
+        "type": "command",
+        "command": sys.executable,
+        "args": ["-m", "chembook3d.cli", "claude-stop", "--url", app_url],
+        "timeout": keep_going.HOOK_TIMEOUT,
+    }
+    return {"Stop": [{"hooks": [hook]}]}
 
 
 def _write(path: Path, text: str) -> None:
