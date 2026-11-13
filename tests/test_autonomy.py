@@ -78,7 +78,7 @@ def test_the_panel_allows_every_tool_and_says_to_carry_on(tmp_path):
     assert "working on your own" not in guide
 
     allowed, guide = written(claude_panel.Alone(limit="1 hour", cloud=False))
-    assert allowed == names - {"start_cloud_job", "message_cloud_job"}
+    assert allowed == names - {"start_cloud_job", "message_cloud_job", "send_scan_path"}
     assert "You are working on your own" in guide and "over 1 hour" in guide
     assert "Claude chose:" in guide and "still ask in this terminal" in guide
     assert "never edit, replace or delete a file there" in guide

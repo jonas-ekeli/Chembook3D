@@ -75,11 +75,13 @@ Rules:
   scan path or put them back (D117): say which and why first. make_irc_end_node makes the
   optimized end point of a TS node's IRC a node of its own.
 - What this computer does not run goes to a Claude Code cloud session (D93): a CREST conformer
-  search, an xTB path between two nodes (plan_scan_path), or any xTB job when the local tools
-  are not installed. create_cloud_job (nodes as inputs, what to run and return), show the user
-  the job and start it only when they agree (start_cloud_job, give them the session link),
-  get_cloud_job with `wait` until it is finished, fetch_cloud_job, then import the outputs
-  (import_file, commit_import) or set coordinates on the node the user names.
+  search, an xTB path between two nodes, or any xTB job when the local tools are not
+  installed. A path between two nodes joined by an edge (D114, D226): plan_scan_path, tell the
+  user what it found, and send_scan_path once they agree. Anything else: create_cloud_job
+  (nodes as inputs, what to run and return), show the user the job and start it only when
+  they agree (start_cloud_job, give them the session link), get_cloud_job with `wait` until
+  it is finished, fetch_cloud_job, then import the outputs (import_file, commit_import) or
+  set coordinates on the node the user names.
 - Analyses (D83, D86, D171, D81): selectivities, turnovers, conformer equilibria and steric
   profiles are saved records you create from the nodes or pathway the user names and then read
   the result of; overlay_structures and alignment sets compare structures. They show in the
@@ -93,6 +95,13 @@ Rules:
   geometry level and convergence and a summary per column; use reference_node_id or SMARTS
   when the nodes number their atoms differently, rather than matching atoms yourself.
 - "This node", "these", "the selected": call get_selection first.
+- The app's page (D226): show_in_app selects a record and brings it into view, open_canvas
+  opens a sub-investigation's canvas, open_groups expands or collapses groups, set_view
+  changes the cards, the energy view and the Profile and table drawer, and tidy_canvas runs
+  the page's Tidy (undo_tidy puts the cards back). save_canvas_image and save_profile_image
+  save what the page's Export menus draw, and save_read_only_copy the read-only HTML copy, as
+  new files in the investigation's `exports` folder: tell the user the path. All but the
+  read-only copy need a browser tab with the app open.
 - Import only files at paths the user gave you: import_file, check the plan, then
   commit_import. A whole folder at once (D97, D225): import_folder gives one plan for all its
   outputs, preview_folder_import takes the choices and commit_folder_import imports; show the

@@ -113,18 +113,18 @@ function figureText(svg: SVGSVGElement): string {
   return new XMLSerializer().serializeToString(copy)
 }
 
-export function saveProfileSvg(svg: SVGSVGElement, name = 'energy-profile.svg') {
-  downloadBlob(new Blob([figureText(svg)], { type: 'image/svg+xml' }), name)
+/** The figure as an SVG file. */
+export function profileSvgBlob(svg: SVGSVGElement): Blob {
+  return new Blob([figureText(svg)], { type: 'image/svg+xml' })
 }
 
-/** The figure at the style's size times its PNG resolution, on white unless the background is
- * transparent (D106). */
-export function saveProfilePng(
-  svg: SVGSVGElement,
-  style: ProfileStyle,
-  onError: () => void,
-  name = 'energy-profile.png',
-) {
+export function saveProfileSvg(svg: SVGSVGElement, name = 'energy-profile.svg') {
+  downloadBlob(profileSvgBlob(svg), name)
+}
+
+/** The figure drawn at the style's size times its PNG resolution, on white unless the
+ * background is transparent (D106). */
+function drawPng(svg: SVGSVGElement, style: ProfileStyle, done: (drawn: HTMLCanvasElement) => void, onError: () => void) {
   const image = new Image()
   const scale = style.png_scale
   image.onload = () => {
@@ -137,8 +137,25 @@ export function saveProfilePng(
       context.fillRect(0, 0, canvasEl.width, canvasEl.height)
     }
     context.drawImage(image, 0, 0, canvasEl.width, canvasEl.height)
-    download(canvasEl.toDataURL('image/png'), name)
+    done(canvasEl)
   }
   image.onerror = onError
   image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(figureText(svg))}`
+}
+
+export function saveProfilePng(
+  svg: SVGSVGElement,
+  style: ProfileStyle,
+  onError: () => void,
+  name = 'energy-profile.png',
+) {
+  drawPng(svg, style, (drawn) => download(drawn.toDataURL('image/png'), name), onError)
+}
+
+/** The figure as a PNG file, as `saveProfilePng` saves it (D226: for Claude, saved by the app). */
+export function profilePngBlob(svg: SVGSVGElement, style: ProfileStyle): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const failed = () => reject(new Error('Could not draw the profile image'))
+    drawPng(svg, style, (drawn) => drawn.toBlob((blob) => (blob ? resolve(blob) : failed()), 'image/png'), failed)
+  })
 }

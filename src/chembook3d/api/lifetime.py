@@ -209,6 +209,9 @@ async def presence(request: Request, tab: str, wait: float = 0):
 def tab_closed(request: Request, tab: str):
     """The tab is being closed (or reloaded). A tab not known here changes nothing."""
     lifetime(request).closed(_tab(tab))
+    live = getattr(request.app.state, "live", None)
+    if live is not None:
+        live.gone(tab)  # D226: it can no longer be asked to do anything
 
 
 # ---------- shut down ----------

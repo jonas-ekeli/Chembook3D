@@ -2245,12 +2245,16 @@ export type ClaudeRequest = {
   error: string | null
 }
 
+/** D226: something Claude asks the open page to do, as the user would there. */
+export type PageCommand = { id: string; action: string; params: Record<string, unknown> }
+
 export type Live = {
   version: number
   /** Something was changed elsewhere since the version asked about. */
   changed: boolean
   confirm_version: number
   confirmations: ClaudeRequest[]
+  commands: PageCommand[]
   investigation: string | null
 }
 
@@ -2500,6 +2504,13 @@ export const api = {
   saveViewState: (state: ViewState) => request<void>('PUT', '/view-state', state),
   answerClaude: (id: string, confirm: boolean) =>
     request<ClaudeRequest>('POST', `/confirmations/${id}/answer`, { confirm }),
+  // D226: this tab takes what Claude asked the page to do, and says how it went.
+  claimPageCommand: (id: string) => request<void>('POST', `/page/commands/${id}/claim`),
+  reportPageCommand: (id: string, report: { result?: Record<string, unknown>; error?: string }) =>
+    request<void>('POST', `/page/commands/${id}/report`, report),
+  /** An image the page drew for the command, saved in the investigation's exports folder. */
+  savePageFile: (id: string, name: string, file: Blob) =>
+    request<{ file: string }>('POST', `/page/commands/${id}/file?name=${encodeURIComponent(name)}`, file),
 
   currentInvestigation: () => request<Investigation | null>('GET', '/investigation'),
   createInvestigation: (folder: string, name: string) =>

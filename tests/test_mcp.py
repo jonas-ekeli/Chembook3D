@@ -53,7 +53,7 @@ NOT_OFFERED = re.compile(
     r"|groups/[^/]+/delete-preview|sub-investigations/[^/]+/delete-preview|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|energies/table\.csv|history/[^/]+/undo|turnovers/[^/]+/table\.csv|custom-bases/[^/]+/file"
     r"|energy-profiles(/.*)?"  # D190: the drawer's saved profiles; Claude only reads them
-    r"|scan-paths"  # D114: the Scan path dialog's Send starts a cloud session
+    r"|page/commands/[^/]+/(claim|report|file)"  # D226: the tab's own side of what Claude asks it
     r"|claude(/.*)?"  # the Claude panel (D92): Claude never starts terminals
     r"|remote(/.*)?"  # D122: logging in to a server is for the app's own page only
     r"|inspections(/.*)?"  # D123c: the Inspect window, the page's own like the server's

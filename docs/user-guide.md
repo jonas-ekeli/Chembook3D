@@ -347,6 +347,24 @@ and the ones that need a choice from you, and imports when you agree. It can rea
 first without importing it, to tell you whether the job converged. Listing the files in a
 folder is asked about in the terminal, since it shows names on your computer.
 
+Claude can also work the page you have open. Ask it to "show me the highest barrier" and it
+selects the node and brings it into view; it can open a sub-investigation's canvas, expand or
+collapse groups, switch the cards between Compact, Energy and Structure, choose the level,
+energy type and reference, and open **Profile and table** on a saved profile. These change
+only what you see, so the terminal does not ask about them. It can run **Tidy** on the open
+canvas (it asks first; **Undo tidy** puts the cards back, or ask Claude to). All of this needs
+the app open in a browser tab.
+
+Claude cannot download a file to your browser, so what it exports is saved in the
+investigation folder, in `exports`: an image of the canvas, an energy profile as SVG or PNG
+(drawn exactly as the **Export** menus draw them) and the read-only copy. It tells you the
+file's path. A file there is never replaced (a second one of the same name gets a number),
+and the folder is left out of **Sync**.
+
+For a path between two connected nodes, Claude can do what the **Scan path** dialog does: it
+tells you what the dialog would show (the atom match, charge, solvent, what is held at a TS
+end, any warning) and sends the job to a cloud session when you agree.
+
 ### Let Claude work on its own
 
 Normally Claude Code asks in its terminal before each change, and the app asks before each

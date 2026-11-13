@@ -17,20 +17,20 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from chembook3d import __version__, units
+from chembook3d import __version__, exports, units
 from chembook3d.api import downloads
 from chembook3d.api import energies as energy_api
 from chembook3d.api import pathway as pathway_api
 from chembook3d.api.routes import DbSession, _calculation_out, _investigation
-from chembook3d.models import Calculation, CalculationType
+from chembook3d.models import Calculation, CalculationType, EnergyProfile
 from chembook3d.services import energy_profiles, pathways, species, thermo_settings, view_state
 from chembook3d.services import nodes as node_service
 from chembook3d.services import notes as note_service
 from chembook3d.services.energies import Energies, LevelKey
-from chembook3d.services.records import RecordError
+from chembook3d.services.records import RecordError, get
 
 router = APIRouter(prefix="/api")
 
@@ -298,9 +298,8 @@ def file_name(name: str, when: datetime) -> str:
     return f"{downloads.file_name(name, 'investigation')} read-only {when:%Y-%m-%d}.html"
 
 
-@router.post("/snapshot")
-def export_snapshot(body: SnapshotIn, request: Request, session: DbSession) -> Response:
-    """FR-SHARE-01: the open investigation as one self-contained, read-only HTML file."""
+def _copy(body: SnapshotIn, request: Request, session: Session) -> tuple[str, str]:
+    """The read-only copy as HTML, and its file name."""
     template = template_path()
     if template is None:
         raise HTTPException(
@@ -311,9 +310,49 @@ def export_snapshot(body: SnapshotIn, request: Request, session: DbSession) -> R
     data = snapshot_data(request, session, body)
     name = data["investigation"]["name"]
     html = render(template.read_text(encoding="utf-8"), data, f"{name} · Chembook3D (read-only)")
-    filename = file_name(name, datetime.now())
+    return html, file_name(name, datetime.now())
+
+
+@router.post("/snapshot")
+def export_snapshot(body: SnapshotIn, request: Request, session: DbSession) -> Response:
+    """FR-SHARE-01: the open investigation as one self-contained, read-only HTML file."""
+    html, filename = _copy(body, request, session)
     return Response(
         content=html.encode("utf-8"),
         media_type="text/html; charset=utf-8",
         headers={"Content-Disposition": downloads.attachment(filename)},
     )
+
+
+class SavedCopyIn(BaseModel):
+    profile_id: str | None = Field(
+        None,
+        description="The saved energy profile whose ticked pathways the copy's drawer shows; "
+        "none: one pathway per branch.",
+    )
+
+
+@router.post("/snapshot/save")
+def save_snapshot(body: SavedCopyIn, request: Request, session: DbSession) -> dict[str, str]:
+    """D226: the read-only copy as a new file in the investigation's `exports` folder, for
+    Claude, which has no download: in the view the investigation remembers (D105)."""
+    asked = SnapshotIn()
+    if body.profile_id is not None:
+        profile = get(session, EnergyProfile, body.profile_id, "Energy profile")
+        paths = energy_profiles.current_paths(session, profile.paths or [])
+        asked = SnapshotIn(
+            paths=[
+                PathIn(
+                    ids=p["ids"], branch_id=p["branch_id"], shifts=p["shifts"], colour=p["colour"]
+                )
+                for p in paths
+                if p.get("shown", True)
+            ],
+            profile_reference_id=energy_profiles.current_reference(profile, paths),
+        )
+    html, filename = _copy(asked, request, session)
+    folder = _investigation(request).folder
+    try:
+        return {"file": exports.save(folder, filename, html.encode("utf-8"))}
+    except exports.ExportError as exc:
+        raise HTTPException(422, str(exc)) from exc

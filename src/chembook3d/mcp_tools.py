@@ -4,13 +4,13 @@ in-process), so a tool always takes what its route takes.
 
 Tools come in three kinds: "read" (changes nothing), "write" (changes the investigation, like a
 click in the app) and "confirm" (deletes something: the app asks the user first, D91). A write
-tool whose go-ahead the user gives in the app itself (`allowed_in_app`, D126) needs no second
-question in the Claude panel.
-Not offered: opening, closing, creating or cloning investigations, sync, folder browsing,
-opening files with other programs, app settings and the read-only export. Calculation jobs for
-cloud sessions (D93) commit and push only their own job folder. Files on a logged-in SSH server
-are read in the terminal's current directory and below (D124), and new files written there once
-the user allows it in the app (D126); logging in, deleting and running are not offered.
+tool whose go-ahead the user gives in the app itself (`allowed_in_app`, D126), or that changes
+only what the page shows (D226), needs no second question in the Claude panel.
+Not offered: opening, closing, creating or cloning investigations, sync, opening files with
+other programs and app settings. Calculation jobs for cloud sessions (D93) commit and push only
+their own job folder. Files on a logged-in SSH server are read in the terminal's current
+directory and below (D124), and new files written there once the user allows it in the app
+(D126); logging in, deleting and running are not offered.
 Structures are built and changed with the Edit structure window's tools as steps (D144), and saved
 with set_coordinates.
 """
@@ -31,7 +31,8 @@ class ToolSpec:
     description: str
     exclude: tuple[str, ...] = ()  # body fields the tool does not offer
     help: dict[str, str] = field(default_factory=dict)  # descriptions of its inputs
-    allowed_in_app: bool = False  # D126: the user's go-ahead is a switch in the app's page
+    # D126: the user's go-ahead is a switch in the app's page; D226: or only the view changes
+    allowed_in_app: bool = False
     defaults: dict[str, Any] = field(default_factory=dict)  # inputs the tool fills in when left out
     asked: bool = False  # D225: a read tool the Claude panel still asks about (list_folder)
 
@@ -112,6 +113,8 @@ IMPORT_HELP = {
     "conformers": "CREST: the conformers to import, by their number in the file from 1.",
 }
 
+
+FIELD_HELP_LEVEL = "Composite level key 'levelId~geometryLevelId' from get_energy_options."
 
 T = ToolSpec
 
@@ -578,7 +581,31 @@ TOOLS: list[ToolSpec] = [
         "/api/scan-paths/plan",
         "Check a scan path between two nodes or groups joined by an edge (D114): the atom "
         "match, charge, multiplicity, solvent, and for a TS end the coordinates suggested to "
-        "hold. Changes nothing; the user sends the job from the app's Scan path dialog.",
+        "hold. Changes nothing; send_scan_path sends the job, as the app's Scan path dialog "
+        "does.",
+    ),
+    T(
+        "send_scan_path",
+        "write",
+        "POST",
+        "/api/scan-paths",
+        "Send the scan path between two nodes or groups joined by an edge, as the Send button "
+        "of the app's Scan path dialog does (D114, D226): writes the xTB path job and starts "
+        "its Claude Code cloud session (start false writes it as a draft only). Call "
+        "plan_scan_path first and show the user what it says: warnings, the atom match, the "
+        "charge, multiplicity and solvent, and the coordinates held at a TS end. Send only "
+        "when they agree. Answers with the job (follow it with get_cloud_job) and, when the "
+        "session could not start, `start_error`; the job is then a draft start_cloud_job can "
+        "start. Needs the investigation linked to GitHub.",
+        help={
+            "start_id": "The edge's start: a node, or a group standing for its representative.",
+            "end_id": "The edge's end: a node or a group.",
+            "held": "Coordinates held at a TS end, each {end: 'start' or 'end', atoms: "
+            "[1-based atom numbers]}; the dialog ticks the plan's ts_ends rows marked "
+            "suggested.",
+            "solvent": "ALPB solvent name from the plan's `solvents`, or null for gas phase; "
+            "the dialog starts from the plan's `solvent`.",
+        },
     ),
     # ---------- files on a logged-in server such as Saga: read (D124), new ones written (D126)
     T(
@@ -1104,6 +1131,107 @@ TOOLS: list[ToolSpec] = [
         "DELETE",
         "/api/batch-imports/{token}",
         "Drop a folder import's staged files (nothing in the investigation changes).",
+    ),
+    # ---------- the open page (D226): what only it can do, done by a tab the user has open ----
+    T(
+        "tidy_canvas",
+        "write",
+        "POST",
+        "/api/page/tidy",
+        "Tidy the canvas the app's page shows, as its Tidy menu does (D199, D207, D208): "
+        "'columns' puts each reaction step in a column, 'springs' lays the cards out afresh "
+        "with arrows of about one length and turns the arrow ends to face each other, "
+        "'settle' does that starting from where the cards are. It moves every card on the "
+        "open canvas (open another with open_canvas first), so do it when the user asks or "
+        "after you added many nodes; undo_tidy puts them back. Answers with how many cards "
+        "moved. Needs the app open in a browser tab.",
+    ),
+    T(
+        "undo_tidy",
+        "write",
+        "POST",
+        "/api/page/tidy/undo",
+        "Put the cards back where they were before the last Tidy, as the page's Undo tidy "
+        "does. Refused once a card was dragged or another canvas opened since.",
+    ),
+    T(
+        "open_groups",
+        "write",
+        "POST",
+        "/api/page/groups",
+        "Expand or collapse groups on the app's page (D210): every group on the canvas shown, "
+        "or the groups and sub-investigation boxes named in `ids`. Changes only what the page "
+        "shows.",
+        allowed_in_app=True,
+    ),
+    T(
+        "show_in_app",
+        "write",
+        "POST",
+        "/api/page/show",
+        "Select a node, group, sub-investigation, edge or branch on the app's page and bring "
+        "it into view, opening its canvas if needed, so the user sees what you are talking "
+        "about; with no id, fit the whole canvas in the window. Changes only what the page "
+        "shows.",
+        allowed_in_app=True,
+    ),
+    T(
+        "open_canvas",
+        "write",
+        "POST",
+        "/api/page/canvas",
+        "Open a sub-investigation's canvas on the app's page, or the main canvas when sub_id "
+        "is left out (D193). Changes only what the page shows.",
+        allowed_in_app=True,
+    ),
+    T(
+        "set_view",
+        "write",
+        "POST",
+        "/api/page/view",
+        "Change what the app's page shows, as the user would with its view controls: what the "
+        "cards show (mode), the level of theory, energy type and reference the canvas "
+        "energies use, energies on arrows, and the 'Profile and table' drawer (open or "
+        "closed, its tab, the saved energy profile open in it). Only what you give changes. "
+        "Nothing in the investigation changes; get_selection reads the view back.",
+        allowed_in_app=True,
+        help={"level": FIELD_HELP_LEVEL},
+    ),
+    T(
+        "save_canvas_image",
+        "write",
+        "POST",
+        "/api/page/canvas-image",
+        "Have the app's page draw its canvas as an image, as its Export menu does (the whole "
+        "open canvas or what the window shows, PNG or SVG, in the view the page shows), and "
+        "save it as a new file in the investigation's `exports` folder; answers with the "
+        "file's path there. Set the view first (set_view, open_groups, open_canvas). Needs "
+        "the app open in a browser tab.",
+    ),
+    T(
+        "save_profile_image",
+        "write",
+        "POST",
+        "/api/page/profile-image",
+        "Have the app's page draw an energy profile as its drawer's Export does (the ticked "
+        "pathways of a saved profile, in the profile style, at the level and energy type the "
+        "page shows; SVG or PNG) and save it as a new file in the investigation's `exports` "
+        "folder; answers with the file's path there. Without profile_id it draws the profile "
+        "open in the drawer. Needs the app open in a browser tab.",
+        help={"profile_id": "Id of a saved energy profile, from list_energy_profiles."},
+    ),
+    T(
+        "save_read_only_copy",
+        "write",
+        "POST",
+        "/api/snapshot/save",
+        "Save the read-only copy of the investigation (one self-contained HTML file to share, "
+        "D79) as a new file in the investigation's `exports` folder, in the view the "
+        "investigation remembers; answers with the file's path there. With profile_id its "
+        "drawer shows that saved profile's ticked pathways, otherwise one pathway per "
+        "branch. It holds every structure and energy, so tell the user where it is and let "
+        "them decide who gets it.",
+        help={"profile_id": "Id of a saved energy profile, from list_energy_profiles."},
     ),
     # ---------- calculations in Claude Code cloud sessions (D93) ----------
     T(

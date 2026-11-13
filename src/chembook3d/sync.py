@@ -39,7 +39,15 @@ from chembook3d.investigation import (
 # (NFR-DATA-03), so none of them is shared. Every file is stored byte for byte: Git for
 # Windows would otherwise change the line endings of copied output files (NFR-DATA-02).
 # D213: local jobs change every few seconds while they run; their results are imported
-IGNORED = [LOCK_NAME, OWNER_NAME, f"{DB_NAME}-journal", f"{BACKUP_DIR}/", "local-jobs/"]
+# D226: what Claude exports (images, read-only copies) is made again when wanted, not synced
+IGNORED = [
+    LOCK_NAME,
+    OWNER_NAME,
+    f"{DB_NAME}-journal",
+    f"{BACKUP_DIR}/",
+    "local-jobs/",
+    "exports/",
+]
 ATTRIBUTES = ["* -text", f"{DB_NAME} binary"]
 
 NETWORK_TIMEOUT = 300  # seconds; the first sign-in may wait for the browser

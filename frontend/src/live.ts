@@ -1,8 +1,9 @@
 // D91: the tab waits on the backend for changes made elsewhere (by Claude through
-// `chembook3d mcp`, or in another tab) and for Claude's requests to delete something.
+// `chembook3d mcp`, or in another tab), for Claude's requests to delete something, and (D226) for what Claude
+// asks the page itself to do.
 
 import { useEffect, useRef, useState } from 'react'
-import { api, type ClaudeRequest } from './api'
+import { api, type ClaudeRequest, type PageCommand } from './api'
 
 const WAIT = 25 // seconds per long poll; the backend answers at once when something happens
 
@@ -10,8 +11,9 @@ const WAIT = 25 // seconds per long poll; the backend answers at once when somet
 export function useLive(
   folder: string | null | undefined,
   onChanged: (folder: string | null) => void | Promise<void>,
-): ClaudeRequest[] {
+): { requests: ClaudeRequest[]; commands: PageCommand[] } {
   const [requests, setRequests] = useState<ClaudeRequest[]>([])
+  const [commands, setCommands] = useState<PageCommand[]>([])
   const changed = useRef(onChanged)
   useEffect(() => {
     changed.current = onChanged
@@ -33,6 +35,7 @@ export function useLive(
           since = live.version
           confirmVersion = live.confirm_version
           setRequests(identityChanged ? [] : live.confirmations)
+          setCommands(identityChanged ? [] : (live.commands ?? []))
         } catch {
           if (abort.signal.aborted) return
           // The backend restarting or briefly busy: try again shortly.
@@ -44,8 +47,9 @@ export function useLive(
     return () => {
       abort.abort()
       setRequests([])
+      setCommands([])
     }
   }, [folder])
 
-  return requests
+  return { requests, commands }
 }

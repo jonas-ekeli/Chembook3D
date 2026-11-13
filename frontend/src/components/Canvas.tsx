@@ -771,6 +771,7 @@ function CanvasView({
   onUndoTidy,
   groupsToOpen,
   onGroupsOpen,
+  onImage,
   springLayout,
 }: {
   data: CanvasData
@@ -824,6 +825,8 @@ function CanvasView({
    * no button when the open canvas shows no group. */
   groupsToOpen?: boolean
   onGroupsOpen?: (open: boolean) => void
+  /** D226: an image of the canvas that was asked for (`image:…`), as a data URL. */
+  onImage?: (name: string, url: string) => void
   /** D207: the springs layout (ELK), handed in by the app so the read-only copy, which has no
    * Tidy, does not carry it. */
   springLayout?: (boxes: TidyBox[], links: TidyLink[], inPlace: boolean) => Promise<Positions>
@@ -1552,24 +1555,16 @@ function CanvasView({
     onTidy(before, after, sides)
   }
 
-  useRequest(asked, 'canvas', (action) => {
-    // "tidy" (the selection, else everything) or "tidy-all", with ":mode" (step columns without).
-    const [what, layout] = action.split(':') as [string, TidyMode | undefined]
-    if (what === 'tidy' || what === 'tidy-all') void tidyUp(what === 'tidy-all', layout ?? 'columns')
-    else if (action.startsWith('fit:'))
-      void flow.fitView({ nodes: action.slice(4).split(',').map((id) => ({ id })), duration: 300, maxZoom: 1.5 })
-    else if (action === 'fit-all' || (action === 'fit' && !flow.getNodes().some((n) => n.selected))) void fitAll()
-    else if (action === 'fit') void fitSelection()
-  })
   const menuAt = (event: { clientX: number; clientY: number; preventDefault: () => void }, target: CanvasTarget) => {
     if (!onContextMenu) return
     event.preventDefault()
     onContextMenu(target, { x: event.clientX, y: event.clientY })
   }
 
-  const exportImage = async (what: 'viewport' | 'full', format: 'png' | 'svg') => {
+  /** The canvas drawn as an image (a data URL): what the window shows, or all of it. */
+  const imageUrl = async (what: 'viewport' | 'full', format: 'png' | 'svg'): Promise<string> => {
     const viewport = wrapper.current?.querySelector<HTMLElement>('.react-flow__viewport')
-    if (!viewport || !wrapper.current) return
+    if (!viewport || !wrapper.current) throw new Error('the canvas is not drawn')
     let width = wrapper.current.clientWidth
     let height = wrapper.current.clientHeight
     let transform = flow.getViewport()
@@ -1590,13 +1585,29 @@ function CanvasView({
         transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.zoom})`,
       },
     }
-    try {
-      const url = format === 'png' ? await toPng(viewport, options) : await toSvg(viewport, options)
-      download(url, `canvas-${what}.${format}`)
-    } catch (err) {
-      onError(`Could not export the image: ${String(err)}`)
-    }
+    return format === 'png' ? toPng(viewport, options) : toSvg(viewport, options)
   }
+  // The Export menu saves it as a download; D226: one Claude asked for goes to the app instead.
+  const exportImage = (what: 'viewport' | 'full', format: 'png' | 'svg', hand?: (name: string, url: string) => void) =>
+    imageUrl(what, format).then(
+      (url) => (hand ?? ((name, made) => download(made, name)))(`canvas-${what}.${format}`, url),
+      (err: unknown) => onError(`Could not export the image: ${String(err)}`),
+    )
+
+  useRequest(asked, 'canvas', (action) => {
+    // "tidy" (the selection, else everything) or "tidy-all", with ":mode" (step columns without).
+    const [what, layout] = action.split(':') as [string, TidyMode | undefined]
+    if (what === 'tidy' || what === 'tidy-all') void tidyUp(what === 'tidy-all', layout ?? 'columns')
+    // D226: "image:full:png", handed to the app rather than downloaded.
+    else if (what === 'image') {
+      const [, part, format] = action.split(':')
+      void exportImage(part === 'viewport' ? 'viewport' : 'full', format === 'svg' ? 'svg' : 'png', onImage)
+    }
+    else if (action.startsWith('fit:'))
+      void flow.fitView({ nodes: action.slice(4).split(',').map((id) => ({ id })), duration: 300, maxZoom: 1.5 })
+    else if (action === 'fit-all' || (action === 'fit' && !flow.getNodes().some((n) => n.selected))) void fitAll()
+    else if (action === 'fit') void fitSelection()
+  })
 
   // UI5 (D174): icon and short label, the full name in the tooltip. D180: in the app they sit in
   // the canvas toolbar above, drawn there through a portal so they keep this canvas's view.

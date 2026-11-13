@@ -68,7 +68,8 @@ LONGEST_WAIT = 30.0  # one long poll; the caller asks again
 QUIET = re.compile(
     r"^/api/("
     r"live|selection|view-state|confirmations(/.*)?"
-    r"|energies/(profile|table|table\.csv)|pathways/extend|overlay|snapshot|atom-match|measurements"
+    r"|page(/.*)?"  # D226: what Claude asks the open page to do; the page's own saves count
+    r"|energies/(profile|table|table\.csv)|pathways/extend|overlay|snapshot|snapshot/save|atom-match|measurements"
     r"|scan-paths|scan-paths/plan|calculations/[^/]+/steps/trim-preview"
     r"|steric-profiles/[^/]+/(difference|table\.csv)"
     r"|imports|imports/[^/]+|imports/[^/]+/preview"
@@ -109,6 +110,24 @@ class Confirmation:
 
 
 @dataclass
+class PageCommand:
+    """D226: something Claude asks the open page to do, as the user would there."""
+
+    id: str
+    action: str
+    params: dict[str, Any]
+    folder: str
+    expires: float
+    status: str = "pending"  # pending, running (a tab took it), done, failed, expired
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    finished: float | None = None
+
+
+LISTENING = 45.0  # seconds after its last poll a tab still counts as open (one poll: 30 s)
+
+
+@dataclass
 class LiveState:
     """Kept in memory by the running app; nothing here is saved in the investigation."""
 
@@ -119,6 +138,8 @@ class LiveState:
     confirmations: dict[str, Confirmation] = field(default_factory=dict)
     selection: dict[str, Any] | None = None
     autonomy: Autonomy = field(default_factory=Autonomy)  # D223: Claude working on its own
+    commands: dict[str, PageCommand] = field(default_factory=dict)  # D226
+    listeners: dict[str, float] = field(default_factory=dict)  # tab: when it last polled
 
     def changed(self, client: str) -> None:
         with self.lock:
@@ -148,6 +169,40 @@ class LiveState:
                 if c.finished is not None and now - c.finished > 600
             ]:
                 del self.confirmations[key]
+            for command in self.commands.values():
+                if command.finished is None and (
+                    now >= command.expires or command.folder != folder
+                ):
+                    command.status = "expired"
+                    command.finished = now
+                    self.confirm_version += 1
+            for key in [
+                k
+                for k, c in self.commands.items()
+                if c.finished is not None and now - c.finished > 600
+            ]:
+                del self.commands[key]
+
+    def heard(self, client: str) -> None:
+        """A tab polled: it is open, and can be asked to do something (D226)."""
+        if client and client != AGENT:
+            with self.lock:
+                self.listeners[client] = time.monotonic()
+
+    def gone(self, client: str) -> None:
+        with self.lock:
+            self.listeners.pop(client, None)
+
+    def listening(self) -> bool:
+        now = time.monotonic()
+        with self.lock:
+            for key in [k for k, at in self.listeners.items() if now - at > LISTENING]:
+                del self.listeners[key]
+            return bool(self.listeners)
+
+    def asked(self) -> list[PageCommand]:
+        with self.lock:
+            return [c for c in self.commands.values() if c.status == "pending"]
 
     def pending(self) -> list[Confirmation]:
         with self.lock:
@@ -231,11 +286,18 @@ class ConfirmationOut(BaseModel):
     unasked: bool = False
 
 
+class PageCommandOut(BaseModel):
+    id: str
+    action: str
+    params: dict[str, Any]
+
+
 class LiveOut(BaseModel):
     version: int
     changed: bool  # another client changed something after `since`
     confirm_version: int
     confirmations: list[ConfirmationOut]  # waiting for the user's answer, oldest first
+    commands: list[PageCommandOut] = Field(default_factory=list)  # D226: for a tab to take
     investigation: str | None
 
 
@@ -268,6 +330,7 @@ async def live(
     initial_folder = _folder(request)
     deadline = time.monotonic() + max(0.0, min(wait, LONGEST_WAIT))
     while True:
+        state.heard(client)
         state.settle(_folder(request))
         changed = since is not None and state.changed_by_others(since, client)
         if (
@@ -290,6 +353,7 @@ async def live(
         changed=changed,
         confirm_version=state.confirm_version,
         confirmations=[_confirmation_out(c) for c in state.pending()],
+        commands=[PageCommandOut(id=c.id, action=c.action, params=c.params) for c in state.asked()],
         investigation=_folder(request),
     )
 
