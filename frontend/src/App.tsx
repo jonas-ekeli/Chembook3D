@@ -571,6 +571,10 @@ function App() {
       reload()
       api.settings().then(setSettings, () => undefined)
     }
+  }, () => {
+    // D227: Claude made or changed a saved energy profile. The drawer reads them when it
+    // starts, so it starts anew: the profile open in it stays open, as it is saved now.
+    setDrawerKey((k) => k + 1)
   })
 
   // D115: a scan path that came back from its cloud session becomes a node by itself.

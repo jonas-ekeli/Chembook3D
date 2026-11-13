@@ -1,6 +1,7 @@
 // D91: the tab waits on the backend for changes made elsewhere (by Claude through
 // `chembook3d mcp`, or in another tab), for Claude's requests to delete something, and (D226) for what Claude
-// asks the page itself to do.
+// asks the page itself to do. D227: and for a saved energy profile Claude changed, which the open drawer
+// would not see.
 
 import { useEffect, useRef, useState } from 'react'
 import { api, type ClaudeRequest, type PageCommand } from './api'
@@ -11,19 +12,23 @@ const WAIT = 25 // seconds per long poll; the backend answers at once when somet
 export function useLive(
   folder: string | null | undefined,
   onChanged: (folder: string | null) => void | Promise<void>,
+  onProfiles?: () => void,
 ): { requests: ClaudeRequest[]; commands: PageCommand[] } {
   const [requests, setRequests] = useState<ClaudeRequest[]>([])
   const [commands, setCommands] = useState<PageCommand[]>([])
   const changed = useRef(onChanged)
+  const profiles = useRef(onProfiles)
   useEffect(() => {
     changed.current = onChanged
-  }, [onChanged])
+    profiles.current = onProfiles
+  }, [onChanged, onProfiles])
 
   useEffect(() => {
     if (folder === undefined) return
     const abort = new AbortController()
     let since: number | null = null
     let confirmVersion: number | null = null
+    let profilesVersion: number | null = null
     const run = async () => {
       while (!abort.signal.aborted) {
         try {
@@ -32,6 +37,9 @@ export function useLive(
           const identityChanged = live.investigation !== folder
           if (identityChanged || live.changed) await changed.current(live.investigation)
           if (abort.signal.aborted) return
+          const savedProfiles = live.profiles_version ?? 0
+          if (!identityChanged && profilesVersion !== null && savedProfiles !== profilesVersion) profiles.current?.()
+          profilesVersion = savedProfiles
           since = live.version
           confirmVersion = live.confirm_version
           setRequests(identityChanged ? [] : live.confirmations)

@@ -458,7 +458,40 @@ def difference(session: Session, profile_id: str, first_id: str, second_id: str)
                 "z-axis and xz-plane atoms"
             )
         grids.append(steric_map(profile, frame))
-    return map_out(profile, grids[0] - grids[1])
+    grid = grids[0] - grids[1]
+    return {**map_out(profile, grid), "summary": difference_summary(profile, grid)}
+
+
+def difference_summary(profile: StericProfile, grid: np.ndarray) -> dict[str, Any]:
+    """D227: a difference map in a few numbers, for a reader that cannot look at the picture:
+    how many grid points both structures cover, the mean difference over them and over each
+    quadrant of the xy-plane (NE is x > 0, y > 0; points on an axis are in none), and where
+    the first is most above and most below the second. Å throughout."""
+    xs = _grid(profile)
+    gx, gy = np.meshgrid(xs, xs)  # rows run along y, columns along x
+    both = ~np.isnan(grid)
+
+    def mean(where: np.ndarray) -> float | None:
+        return round(float(grid[where].mean()), 3) if where.any() else None
+
+    def point(index: int) -> dict[str, float]:
+        row, column = np.unravel_index(index, grid.shape)
+        return {
+            "x": round(float(xs[column]), 2),
+            "y": round(float(xs[row]), 2),
+            "difference": round(float(grid[row, column]), 3),
+        }
+
+    sides = {"NE": (gx > 0) & (gy > 0), "NW": (gx < 0) & (gy > 0)}
+    sides |= {"SW": (gx < 0) & (gy < 0), "SE": (gx > 0) & (gy < 0)}
+    covered = bool(both.any())
+    return {
+        "points": int(both.sum()),
+        "mean": mean(both),
+        "quadrants": {name: mean(both & side) for name, side in sides.items()},
+        "highest": point(int(np.nanargmax(grid))) if covered else None,
+        "lowest": point(int(np.nanargmin(grid))) if covered else None,
+    }
 
 
 # ---------- table (B5) ----------

@@ -65,6 +65,12 @@ class StericMapOut(BaseModel):
     limit: float  # the colour scale runs from -limit to +limit Å
 
 
+class StericDifferenceOut(StericMapOut):
+    # D227: points both cover, mean, quadrants (NE, NW, SW, SE), highest and lowest (x, y,
+    # difference), Å; see `sterics.difference_summary`.
+    summary: dict[str, Any]
+
+
 class StericComputedOut(BaseModel):
     node_id: str
     label: str
@@ -136,10 +142,14 @@ def compute_sterics(profile_id: str, body: StericComputeIn, session: DbSession):
     return steric_service.compute(session, profile_id, body.node_ids, body.maps)
 
 
-@router.post("/steric-profiles/{profile_id}/difference", response_model=StericMapOut)
-def steric_difference(profile_id: str, body: StericDifferenceIn, session: DbSession):
-    """B5: the first node's map minus the second's."""
-    return steric_service.difference(session, profile_id, body.first_id, body.second_id)
+@router.post("/steric-profiles/{profile_id}/difference", response_model=StericDifferenceOut)
+def steric_difference(
+    profile_id: str, body: StericDifferenceIn, session: DbSession, grid: bool = True
+):
+    """B5: the first node's map minus the second's. D227: with its summary; `grid` false leaves
+    the grid itself out (Claude's tool, which reads the summary)."""
+    found = steric_service.difference(session, profile_id, body.first_id, body.second_id)
+    return found if grid else {**found, "x": [], "z": []}
 
 
 @router.post("/steric-profiles/{profile_id}/table.csv")

@@ -100,20 +100,25 @@ def clean_paths(value: Any) -> list[dict[str, Any]]:
     return paths
 
 
+def on_canvas(session: Session) -> set[str]:
+    """The ids a pathway may hold: every node (not a free species) and every group."""
+    nodes = set(session.scalars(select(Node.id).where(Node.kind == NodeKind.NODE)))
+    return nodes | set(session.scalars(select(GroupNode.id)))
+
+
 def split_paths(
     session: Session, paths: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """`paths` as (those whose nodes all exist, those through a deleted node); a deleted
     branch is forgotten. D221: the second are kept as stored, so the drawer can list them."""
-    nodes = set(session.scalars(select(Node.id).where(Node.kind == NodeKind.NODE)))
-    on_canvas = nodes | set(session.scalars(select(GroupNode.id)))
+    known = on_canvas(session)
     branches = set(session.scalars(select(Branch.id)))
     kept: list[dict[str, Any]] = []
     lost: list[dict[str, Any]] = []
     for path in paths:
         branch_id = path["branch_id"] if path["branch_id"] in branches else None
         # Stored before D194: no step moved; before D195: the branch's colour.
-        whole = all(i in on_canvas for i in path["ids"])
+        whole = all(i in known for i in path["ids"])
         (kept if whole else lost).append(
             {"shifts": [], "colour": None, **path, "branch_id": branch_id}
         )

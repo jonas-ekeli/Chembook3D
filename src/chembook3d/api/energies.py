@@ -6,7 +6,7 @@ import csv
 import io
 from typing import Any
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from chembook3d import settings as app_settings
@@ -35,6 +35,18 @@ class EnergyOptionsOut(BaseModel):
     temperature: float
     cutoff: float
     standard_state: str  # D95: "1 atm", or "1 M" when G and G_qh include RT ln(V_m)
+
+
+class ThermochemistryIn(BaseModel):
+    qh_temperature: float | None = None  # K
+    qh_cutoff: float | None = None  # cm⁻¹
+    standard_state: str | None = None  # one of `settings.STANDARD_STATES`
+
+
+class ThermochemistryOut(BaseModel):
+    qh_temperature: float
+    qh_cutoff: float
+    standard_state: str
 
 
 class IssueOut(BaseModel):
@@ -186,6 +198,19 @@ def energy_options(session: DbSession):
         cutoff=energies.cutoff,
         standard_state=energies.standard_state,
     )
+
+
+@router.put("/thermochemistry", response_model=ThermochemistryOut)
+def set_thermochemistry(body: ThermochemistryIn, session: DbSession):
+    """D227: the investigation's thermochemistry (D159) alone, for Claude's tool: the values
+    given change, each one entry in the history; the app's defaults are never touched."""
+    changes = body.model_dump(exclude_none=True)
+    if not changes:
+        raise HTTPException(422, "Give at least one value to change")
+    try:
+        return ThermochemistryOut(**thermo_settings.update(session, changes))
+    except thermo_settings.Invalid as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 def view_values(

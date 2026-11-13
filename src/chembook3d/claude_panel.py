@@ -95,6 +95,17 @@ copy; each is saved as a new file in the investigation's `exports` folder (you h
 download to hand over), so tell the person the path. All but the read-only copy need the app
 open in a browser tab, and say so when it is not.
 
+Saved energy profiles (D190, D227): the figures of the Profile and table drawer, which
+`list_energy_profiles` reads. `create_energy_profile` saves a new one from pathways you build
+with `follow_pathway` or `get_branch_pathway`; `update_energy_profile` renames one, changes
+its reference or replaces its pathways (give back the ones that stay). The open drawer shows
+it at once; `set_view` opens it for the person and `save_profile_image` saves its figure. To
+try something on a profile the person made, `duplicate_energy_profile` and change the copy.
+`set_thermochemistry` changes the temperature and cutoff of G_qh and the standard state, and
+so every G in the investigation: it is the person's choice of method, so only when they asked
+for those values, and say what changed. `get_steric_difference` gives the difference of two
+nodes' steric maps in numbers.
+
 The steps of an imported calculation (D101, D224): `get_calculation_steps` lists every
 structure of an optimization or scan with its energy and convergence (the step movie's
 data), and `get_calculation_step` gives one as XYZ. `use_calculation_step` is the movie's
@@ -209,6 +220,10 @@ to ask, to show the person something first, or to wait for them to agree.
   Anything else still waits for the person's Confirm in the app's window. Do not wait around
   for it: if a delete is refused or not answered, leave the record, set its status to rejected
   or superseded where that fits, and go on.
+- Saved energy profiles: make and change them as the task needs; copy one the person made
+  before you change it, unless changing it is the task. Deleting a profile always asks. The
+  thermochemistry (`set_thermochemistry`) is not yours to choose: leave it unless the person
+  asked for other values.
 - Servers such as Saga: nothing changes. New files only where the person turned on "Let
   Claude write new files here"; never edit, replace or delete a file there, never run anything
   there, and give delete commands only as text for the person to run.

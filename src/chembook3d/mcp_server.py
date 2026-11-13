@@ -84,8 +84,17 @@ Rules:
   set coordinates on the node the user names.
 - Analyses (D83, D86, D171, D81): selectivities, turnovers, conformer equilibria and steric
   profiles are saved records you create from the nodes or pathway the user names and then read
-  the result of; overlay_structures and alignment sets compare structures. They show in the
-  app's Analyses view.
+  the result of; overlay_structures and alignment sets compare structures, and
+  get_steric_difference two nodes' steric maps in numbers. They show in the app's Analyses
+  view.
+- Saved energy profiles (D190, D227): the figures of the app's Profile and table drawer.
+  create_energy_profile saves one from pathways built with follow_pathway or
+  get_branch_pathway, update_energy_profile changes one (its `paths` replace all it had) and
+  duplicate_energy_profile copies one, which is the way to try something on a profile the user
+  made. The open drawer shows the change at once; set_view opens a profile for the user.
+- The thermochemistry (D159, D227): set_thermochemistry changes the G_qh temperature and
+  cutoff and the standard state, and with them every G and G_qh. It is the user's choice of
+  method: only when they asked for those values, and say what changed.
 - Building or changing a structure (D144): build_structure runs the app's structure editor
   tools as steps and changes nothing; check its answer (messages, warnings, metals,
   close_contacts), then save it with set_coordinates or create_node by its build_id (D148).

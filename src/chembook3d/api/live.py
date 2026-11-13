@@ -37,6 +37,7 @@ from chembook3d.models import (
     Branch,
     Calculation,
     ConformerEquilibrium,
+    EnergyProfile,
     GroupNode,
     Node,
     NodeNote,
@@ -79,11 +80,15 @@ QUIET = re.compile(
     r"|scan-editor(/.*)?"  # D135: scans put together without importing anything
     r"|builder(/.*)?"  # D139: the Edit structure window's tools, nothing stored
     r"|server-files(/.*)?"  # D124, D126: files on a server, not the notebook
-    r"|energy-profiles(/.*)?"  # D190: the drawer saves its profile on every step
+    r"|energy-profiles(/.*)?"  # D190: the drawer saves its profile on every step (see PROFILES)
     r"|jobs|jobs/(?![^/]+/import-path$).*"  # importing a scan path changes the notebook
     r"|local/(?!jobs/[^/]+/import$).*"  # D213: only importing a local result changes it
     r")$"
 )
+
+# D227: a saved energy profile Claude makes, changes or deletes. Quiet as the drawer's own saves
+# are, but an open drawer reads the saved profiles only when it starts, so the tabs are told.
+PROFILES = re.compile(r"^/api/energy-profiles(/.*)?$")
 
 # Identity discovery, explicit opening and computer-wide folder browsing must work from a
 # stale tab. Close/sync/settings stay guarded: their target depends on the active notebook.
@@ -140,6 +145,13 @@ class LiveState:
     autonomy: Autonomy = field(default_factory=Autonomy)  # D223: Claude working on its own
     commands: dict[str, PageCommand] = field(default_factory=dict)  # D226
     listeners: dict[str, float] = field(default_factory=dict)  # tab: when it last polled
+    profiles_version: int = 0  # D227: counts Claude's changes to the saved energy profiles
+
+    def profiles_changed(self) -> None:
+        """Claude changed a saved energy profile: the tabs' polls answer, as for a confirmation."""
+        with self.lock:
+            self.profiles_version += 1
+            self.confirm_version += 1
 
     def changed(self, client: str) -> None:
         with self.lock:
@@ -253,6 +265,11 @@ class ChangeTracker:
             and path.startswith("/api/")
             and not QUIET.match(path)
         )
+        profiles = (
+            client == AGENT
+            and scope["method"] not in ("GET", "HEAD", "OPTIONS")
+            and PROFILES.match(path) is not None
+        )
         status: dict[str, int] = {}
 
         async def watched(message: Message) -> None:
@@ -263,12 +280,14 @@ class ChangeTracker:
         token = history.SOURCE.set(AGENT if client == AGENT else "manual")
         made = history.MADE.set(self.live.autonomy)  # D223: what Claude made, for its deletes
         try:
-            await self.app(scope, receive, watched if counts else send)
+            await self.app(scope, receive, watched if counts or profiles else send)
         finally:
             history.MADE.reset(made)
             history.SOURCE.reset(token)
         if counts and status.get("code", 500) < 400:
             self.live.changed(client)
+        if profiles and status.get("code", 500) < 400:
+            self.live.profiles_changed()
 
 
 # ---------- changes ----------
@@ -298,6 +317,7 @@ class LiveOut(BaseModel):
     confirm_version: int
     confirmations: list[ConfirmationOut]  # waiting for the user's answer, oldest first
     commands: list[PageCommandOut] = Field(default_factory=list)  # D226: for a tab to take
+    profiles_version: int = 0  # D227: differs once Claude changed a saved energy profile
     investigation: str | None
 
 
@@ -354,6 +374,7 @@ async def live(
         confirm_version=state.confirm_version,
         confirmations=[_confirmation_out(c) for c in state.pending()],
         commands=[PageCommandOut(id=c.id, action=c.action, params=c.params) for c in state.asked()],
+        profiles_version=state.profiles_version,
         investigation=_folder(request),
     )
 
@@ -763,6 +784,13 @@ ACTIONS: dict[str, Action] = {
         "/api/steric-profiles/{profile_id}",
         _describe_named(StericProfile, "Steric profile", "profile_id"),
         own=_own("profile_id"),
+    ),
+    # D227: saved energy profiles are not in the history, so none is known to be Claude's own:
+    # deleting one always asks.
+    "delete_energy_profile": Action(
+        "DELETE",
+        "/api/energy-profiles/{energy_profile_id}",
+        _describe_named(EnergyProfile, "Energy profile", "energy_profile_id"),
     ),
     "undo_import": Action("POST", "/api/history/{entry_id}/undo", _describe_undo, own=_own_undo),
     "delete_alignment_set": Action(
