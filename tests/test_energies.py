@@ -1207,14 +1207,13 @@ def test_a_pathway_carries_on_through_edges_drawn_to_or_from_a_group(open_client
     def extend(*path: str) -> dict:
         return post(client, "/pathways/extend", {"path": [ids[p] for p in path]}, status=200)
 
-    # An edge into a group is a choice between the group and each of its members.
+    # D228: an edge into a group takes the group, and the pathway goes on from it.
     found = extend("X")
-    assert [label[i] for i in found["path"]] == ["X"]
-    assert [(c["label"], c["kind"], c["group_label"]) for c in found["choices"]] == [
-        ("G", "group", None),
-        ("g1", "node", "G"),
-        ("g2", "node", "G"),
-    ]
+    assert [label[i] for i in found["path"]] == ["X", "G", "TS", "Y"]
+    assert found["choices"] == [] and found["before"] == []
+    # Where it does not walk, the edge offers the group, not each of its members.
+    stopped = post(client, "/pathways/extend", {"path": [ids["X"]], "follow": False}, status=200)
+    assert [(c["label"], c["kind"]) for c in stopped["choices"]] == [("G", "group")]
     # A member carries on along its group's edges, and so does the group.
     assert [label[i] for i in extend("X", "g1")["path"]] == ["X", "g1", "TS", "Y"]
     assert [label[i] for i in extend("X", "G")["path"]] == ["X", "G", "TS", "Y"]
@@ -1237,6 +1236,125 @@ def test_a_pathway_carries_on_through_edges_drawn_to_or_from_a_group(open_client
             "/api/energies/profile", json={**body, "paths": [[ids[p] for p in path]]}
         )
         assert response.status_code == 422 and "INV-2" in response.json()["detail"], path
+
+
+def _labelled(client, names: tuple[str, ...]) -> tuple[dict[str, str], dict[str, str]]:
+    ids = {name: node(client, label=name)["id"] for name in names}
+    return ids, {v: k for k, v in ids.items()}
+
+
+def test_a_step_is_swapped_for_what_joins_both_its_neighbours(open_client):
+    # T-EN-54, D228: X → G {g1, g2} → Y, and X → N → Y beside it; the step G can be g1, g2
+    # or N, a member can be its group or its fellow, and nothing is offered twice.
+    client = open_client
+    ids, label = _labelled(client, ("X", "g1", "g2", "N", "Y", "Z"))
+    body = {"member_ids": [ids["g1"], ids["g2"]], "label": "G"}
+    ids["G"] = post(client, "/groups/reconnect", body)["id"]
+    label[ids["G"]] = "G"
+    for a, b in (("X", "G"), ("G", "Y"), ("X", "N"), ("N", "Y"), ("Y", "Z")):
+        edge(client, ids[a], ids[b])
+
+    def swaps(path: list[str], at: int) -> list[tuple[str, str | None, list[str]]]:
+        body = {"path": [ids[p] for p in path], "at": at}
+        found = post(client, "/pathways/alternatives", body, status=200)
+        return [(a["label"], a["group_label"], [label[i] for i in a["path"]]) for a in found]
+
+    assert swaps(["X", "G", "Y", "Z"], 1) == [
+        ("g1", "G", ["X", "g1", "Y", "Z"]),
+        ("g2", "G", ["X", "g2", "Y", "Z"]),
+        ("N", None, ["X", "N", "Y", "Z"]),
+    ]
+    assert swaps(["X", "g2", "Y"], 1) == [
+        ("G", None, ["X", "G", "Y"]),
+        ("g1", "G", ["X", "g1", "Y"]),
+        ("N", None, ["X", "N", "Y"]),
+    ]
+    # An end has one neighbour: the last step of X → N can be the group or a member.
+    assert [name for name, _, _ in swaps(["X", "N"], 1)] == ["G", "g1", "g2"]
+    # Nothing joins X and Z but Y, and a node already on the pathway is never offered.
+    assert swaps(["X", "N", "Y", "Z"], 2) == []
+    assert swaps(["X", "N", "Y", "Z"], 0) == []
+    # One node alone: its group and its fellow members.
+    assert [name for name, _, _ in swaps(["g1"], 0)] == ["G", "g2"]
+    response = client.post("/api/pathways/alternatives", json={"path": [ids["X"]], "at": 3})
+    assert response.status_code == 422
+
+
+def test_a_closed_cycle_swaps_its_first_and_last_step_together(open_client):
+    # T-EN-54, D228: A → B → C → A with A in a group {A, A2} that the arrows are drawn to.
+    client = open_client
+    ids, label = _labelled(client, ("A", "A2", "B", "C"))
+    body = {"member_ids": [ids["A"], ids["A2"]], "label": "G"}
+    ids["G"] = post(client, "/groups/reconnect", body)["id"]
+    label[ids["G"]] = "G"
+    for a, b in (("G", "B"), ("B", "C"), ("C", "G")):
+        edge(client, ids[a], ids[b])
+    cycle = [ids[p] for p in ("A", "B", "C", "A")]
+    found = post(client, "/pathways/alternatives", {"path": cycle, "at": 3}, status=200)
+    assert [[label[i] for i in a["path"]] for a in found] == [
+        ["G", "B", "C", "G"],
+        ["A2", "B", "C", "A2"],
+    ]
+
+
+def test_a_pathway_grows_at_its_start_and_against_an_arrow(open_client):
+    # T-EN-55, D228: P → A → B → C, with a second way in to B (Q → B) and out of A (A → R).
+    client = open_client
+    ids, label = _labelled(client, ("P", "A", "B", "C", "Q", "R"))
+    for a, b in (("P", "A"), ("A", "B"), ("B", "C"), ("Q", "B"), ("A", "R")):
+        edge(client, ids[a], ids[b])
+
+    def extend(path: list[str], **more) -> dict:
+        body = {"path": [ids[p] for p in path], **more}
+        return post(client, "/pathways/extend", body, status=200)
+
+    def named(choices: list[dict]) -> list[tuple[str, bool]]:
+        return [(c["label"], c["against"]) for c in choices]
+
+    # One node has no direction yet: what leads in before it, what leads on after it.
+    found = extend(["B"], follow=False)
+    assert named(found["before"]) == [("A", False), ("Q", False)]
+    assert named(found["choices"]) == [("C", False)]
+    # Walking on from B does not change its start; two arrows lead in, so the start is asked.
+    found = extend(["B"])
+    assert [label[i] for i in found["path"]] == ["B", "C"]
+    assert named(found["before"]) == [("A", False), ("Q", False)]
+    # The arrow into C from B is the pathway's own; nothing else leads on or in at C.
+    assert named(found["choices"]) == []
+    # Growing at the start walks back while one arrow leads in: A, then P.
+    found = extend(["A", "B", "C"], back=True)
+    assert [label[i] for i in found["path"]] == ["P", "A", "B", "C"]
+    assert found["before"] == [] and found["closed"] is False
+    # With a start and an end, the arrows drawn the other way are offered too, marked: R
+    # leaves the first node A, and Q leads in to the last node B.
+    found = extend(["A", "B"], follow=False)
+    assert named(found["before"]) == [("P", False), ("R", True)]
+    assert named(found["choices"]) == [("C", False), ("Q", True)]
+    # Taken against its arrow, Q → B does not lead back to B as a way on from Q.
+    found = extend(["A", "B", "Q"], follow=False)
+    assert named(found["choices"]) == []
+    # The walk itself never takes an arrow against its direction: from Q it goes to B and C.
+    assert [label[i] for i in extend(["Q"])["path"]] == ["Q", "B", "C"]
+    # A node already on the pathway is never offered before its start: C → A closes the
+    # cycle at the end, and is not a way in to A.
+    edge(client, ids["C"], ids["A"])
+    found = extend(["A", "B", "C"], follow=False)
+    assert named(found["before"]) == [("P", False), ("R", True)]
+    assert named(found["choices"]) == [("A", False)]
+    closed = extend(["A", "B", "C", "A"])
+    assert closed["closed"] is True and closed["choices"] == [] and closed["before"] == []
+    # A13: an arrow from a later reaction step closes a cycle; it is not a way in. Without
+    # steps C → A leads in to A like any arrow; with A first and C last it does not.
+    assert named(extend(["A", "B"], follow=False)["before"]) == [
+        ("P", False),
+        ("C", False),
+        ("R", True),
+    ]
+    steps = [post(client, "/steps", {"name": name})["id"] for name in ("first", "last")]
+    patch(client, f"/nodes/{ids['A']}", {"step_id": steps[0]})
+    patch(client, f"/nodes/{ids['C']}", {"step_id": steps[1]})
+    assert named(extend(["A", "B"], follow=False)["before"]) == [("P", False), ("R", True)]
+    assert [label[i] for i in extend(["A", "B"], back=True)["path"]] == ["P", "A", "B"]
 
 
 def test_a_group_whose_representative_is_a_ts_counts_as_a_ts(open_client):

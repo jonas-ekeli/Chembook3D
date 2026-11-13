@@ -230,7 +230,7 @@ Routes for all of these are in `api/pathway.py`.
 - `chem.ts`: xyz parsing, bonds, measurements, the card orientation (a quaternion matching 3Dmol's view rotation, D74) and which hydrogens to hide (D75).
 - `display.ts` shares the hydrogens setting with every viewer and card.
 
-### Energy drawer and saved profiles (D106, D189, D190, D194, D195, D205)
+### Energy drawer and saved profiles (D106, D189, D190, D194, D195, D205, D221, D228)
 
 - `EnergyDrawer.tsx`: the pathways, profile and energy table below the canvas (the table drawn by `components/EnergyTableView.tsx`, shared with the read-only copy).
 - Its height is dragged from the top edge, its list hideable, the profile zoomed; kept in localStorage (D106).
@@ -240,6 +240,7 @@ Routes for all of these are in `api/pathway.py`.
   - D194 `shifts`: a step moved whole columns later along the axis with every step after it (`ProfileChart`'s `shifts` prop).
   - D195 `colour`: picked on the pathway's swatch (`components/PathwayColour.tsx`). It wins over the branch's colour and the style's set (`profileStyle.pathwayColours(..., chosen)`, `ProfileChart`'s `chosen` prop).
 - D205: the profile's own `reference_id` (migration 0031): the drawer's "Reference node", apart from the cards' reference in `App`. `onPathsChange` hands it to the read-only copy as `profile_reference_id`.
+- D228, editing a pathway: `services/pathways.py` `extend` (an edge into a group leads to the group; `back` grows at the start; `before` beside `choices`, each with `against` for an arrow drawn the other way) and `alternatives` (what a step can be swapped for; route `POST /api/pathways/alternatives`, MCP `list_pathway_alternatives`). In `EnergyDrawer.tsx`: `openStep` and `stepContent` (a step's menu, a `ContextMenu` below its name), `choiceRow` ("Start before", "Continue with"), `extendBack`, and `moving` (the Move buttons, out only for the step chosen in the menu).
 - D221, the pathways list's safety net, all in `EnergyDrawer.tsx`: `remove`/`restore` and the `notice` line (Undo for the last pathway removed; "already in this profile" from `addPath`, which compares the ids with `pathsRef`). Pathways that lost a node come from the API as `lost` (`energy_profiles.split_paths`), ride at the end of `paths`, are drawn as `.lost-path` cards and saved back with the rest.
 
 ### Profile chart and style (D106–D111, D181)

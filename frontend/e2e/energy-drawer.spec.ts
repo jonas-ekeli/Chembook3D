@@ -367,17 +367,22 @@ test('energy drawer: a step moved along the axis takes the later steps with it',
   await expect(chart.locator('text', { hasText: /^B-S3/ })).toHaveCount(1)
   const before = { s0: await xOf(/^T-S0/), s1: await xOf(/^B-S1/), s2: await xOf(/^B-S2/), s3: await xOf(/^B-S3/) }
 
+  // D228: the Move buttons come out from the step's own menu, and are away until then.
   const move = b.getByRole('group', { name: 'Move B along the axis' })
-  const step = move.getByLabel('Step to move')
+  const steps = b.locator('.pathway-nodes button.link')
+  const menu = page.getByRole('menu', { name: 'Step B-S2' })
+  await expect(move).toHaveCount(0)
+  await steps.nth(2).click()
+  await menu.getByRole('menuitem', { name: 'Move along the axis' }).click()
+  await expect(move).toContainText('Move B-S2 and the steps after it')
   await expect(move.getByRole('button', { name: 'Move back' })).toBeDisabled()
-  await step.selectOption({ label: '3. B-S2' })
   await move.getByRole('button', { name: 'Move on' }).click()
   // The move is saved after it is drawn; the reload below must come after that save.
   const saved = page.waitForResponse(
     (r) => r.request().method() === 'PATCH' && r.url().includes('/energy-profiles/') && (r.request().postData() ?? '').includes('"by":2'),
   )
   await move.getByRole('button', { name: 'Move on' }).click()
-  await expect(step.locator('option:checked')).toHaveText('3. B-S2 (+2)')
+  await expect(move).toContainText('Move B-S2 (+2) and the steps after it')
   await expect(b.locator('.pathway-nodes')).toContainText('B-S1 → +2 B-S2')
   // The figure gains two columns, so every column is narrower.
   await expect.poll(() => xOf(/^B-S2/)).toBeGreaterThan(before.s2)
@@ -391,18 +396,25 @@ test('energy drawer: a step moved along the axis takes the later steps with it',
   // Saved with the profile and in the saved figure.
   expect((await saved).ok()).toBe(true)
   await page.reload()
-  await expect(b.getByRole('group', { name: 'Move B along the axis' }).locator('option', { hasText: '(+2)' })).toHaveCount(1)
+  await expect(b.locator('.pathway-nodes')).toContainText('B-S1 → +2 B-S2')
+  await expect(move).toHaveCount(0)
   const svg = await savedSvg(page)
   expect(svg).toContain('B-S2')
 
-  // Back one column, then every step back where the pathway puts it.
-  await step.selectOption({ label: '3. B-S2 (+2)' })
+  // Back one column, then every step back where the pathway puts it. A right-click opens the
+  // menu without selecting the step; it says how far the step is moved.
+  await steps.nth(2).click({ button: 'right' })
+  await expect(menu.getByRole('menuitem', { name: 'Move along the axis' })).toContainText('+2')
+  await expect(menu.getByRole('menuitem', { name: 'Put every step back' })).toBeVisible()
+  await menu.getByRole('menuitem', { name: 'Move along the axis' }).click()
   await move.getByRole('button', { name: 'Move back' }).click()
-  await expect(step.locator('option:checked')).toHaveText('3. B-S2 (+1)')
+  await expect(move).toContainText('Move B-S2 (+1) and the steps after it')
   await move.getByRole('button', { name: 'Reset' }).click()
-  await expect(step.locator('option:checked')).toHaveText('3. B-S2')
   await expect(move.getByRole('button', { name: 'Reset' })).toHaveCount(0)
+  await expect(b.locator('.pathway-nodes')).toHaveText('T-S0 → B-S1 → B-S2 → B-S3')
   await expect.poll(() => xOf(/^B-S2/)).toBeCloseTo(before.s2, 0)
+  await move.getByRole('button', { name: 'Done' }).click()
+  await expect(move).toHaveCount(0)
 })
 
 // T-UI-71, D195: a click on a pathway's swatch opens its colours; the colour picked is drawn,
@@ -639,4 +651,116 @@ test('energy drawer: a point with other atoms than the reference is n/a, with th
   await expect(row).toContainText('n/a')
   await expect(row.locator('td.check')).toContainText("Not the reference's atoms or charge: O more, C2H2 fewer")
   await expect(drawer.getByRole('row', { name: /A-S3/ })).toContainText('−8.50')
+})
+
+// T-UI-97, D228: a step's menu ends and starts the pathway there and branches off a second one;
+// "Start before" grows a pathway at its start.
+test('energy drawer: a step’s menu cuts and branches off a pathway, and Start before grows it', async ({ page }) => {
+  await openDemo(page)
+  await page.getByRole('button', { name: 'Profile and table' }).click()
+  const drawer = page.getByLabel('Energy drawer')
+  await drawer.getByLabel('Add branch pathway').selectOption({ label: 'A' })
+  const a = drawer.getByRole('group', { name: 'Pathway A' })
+  const nodes = a.locator('.pathway-nodes')
+  const steps = nodes.locator('button.link')
+  const onward = a.getByRole('group', { name: 'Continue with' })
+  const before = a.getByRole('group', { name: 'Start before' })
+  await expect(nodes).toHaveText('T-S0 → A-S1')
+  await onward.getByRole('button', { name: 'A-S2' }).click()
+  await expect(nodes).toHaveText('T-S0 → A-S1 → A-S2 → A-S3')
+
+  // The menu opens below the step, named for it; a click selects the step on the canvas too.
+  await steps.nth(1).click()
+  const menu = page.getByRole('menu', { name: 'Step A-S1' })
+  await expect(page.locator('.context-heading')).toHaveText('A-S1 · step 2 of A')
+  await expect(page.getByLabel('Node inspector').locator('.node-head')).toContainText('A-S1')
+  // Nothing but A-S1 joins T-S0 and A-S2.
+  await expect(menu.getByRole('menuitem', { name: 'Swap for' })).toBeDisabled()
+  await menu.getByRole('menuitem', { name: 'End the pathway here' }).click()
+  await expect(nodes).toHaveText('T-S0 → A-S1')
+  await expect(onward.getByRole('button')).toHaveText(['A-S2', 'A-S3'])
+  // No arrow leads in to T-S0, so there is nothing to start before.
+  await expect(before).toHaveCount(0)
+
+  await steps.nth(1).click({ button: 'right' })
+  await expect(menu.getByRole('menuitem', { name: 'End the pathway here' })).toBeDisabled()
+  await expect(menu.getByRole('menuitem', { name: 'Branch off here' })).toBeDisabled()
+  await menu.getByRole('menuitem', { name: 'Start the pathway here' }).click()
+  await expect(nodes).toHaveText('A-S1')
+  await expect(before.getByRole('button')).toHaveText(['T-S0'])
+  await before.getByRole('button', { name: 'T-S0' }).click()
+  await expect(nodes).toHaveText('T-S0 → A-S1')
+  await expect(before).toHaveCount(0)
+
+  // A second pathway that shares the first steps: branched off, then taken the other way.
+  await onward.getByRole('button', { name: 'A-S2' }).click()
+  await expect(nodes).toHaveText('T-S0 → A-S1 → A-S2 → A-S3')
+  await steps.nth(1).click({ button: 'right' })
+  await menu.getByRole('menuitem', { name: 'Branch off here' }).click()
+  const second = drawer.getByRole('group', { name: 'Pathway T-S0 → A-S1' })
+  await expect(second.locator('.pathway-nodes')).toHaveText('T-S0 → A-S1')
+  await second.getByRole('group', { name: 'Continue with' }).getByRole('button', { name: 'A-S3' }).click()
+  await expect(drawer.getByRole('group', { name: 'Pathway T-S0 → A-S3' }).locator('.pathway-nodes')).toHaveText(
+    'T-S0 → A-S1 → A-S3',
+  )
+  await expect(nodes).toHaveText('T-S0 → A-S1 → A-S2 → A-S3')
+})
+
+// T-UI-98, D228: an arrow into a group takes the group and the pathway goes on; the step is
+// swapped for a member and back; the last step's menu offers an arrow drawn the other way.
+test('energy drawer: a pathway goes through a group, and a step is swapped for a member', async ({ page }) => {
+  await openDemo(page)
+  const made: Record<string, string> = {}
+  for (const [i, label] of ['X98', 'g1-98', 'g2-98', 'Y98', 'W98'].entries()) {
+    const node = await page.request.post('/api/nodes', { data: { label, pos_x: 240 * i, pos_y: 900 } })
+    expect(node.ok()).toBe(true)
+    made[label] = (await node.json()).id
+  }
+  const grouped = await page.request.post('/api/groups/reconnect', {
+    data: { member_ids: [made['g1-98'], made['g2-98']], label: 'G98' },
+  })
+  expect(grouped.ok()).toBe(true)
+  made.G98 = (await grouped.json()).id
+  for (const [source, target] of [
+    ['X98', 'G98'],
+    ['G98', 'Y98'],
+    ['W98', 'Y98'],
+  ]) {
+    const edge = await page.request.post('/api/transitions', { data: { source_id: made[source], target_id: made[target] } })
+    expect(edge.ok()).toBe(true)
+  }
+  await page.reload()
+  await page.getByRole('button', { name: 'Profile and table' }).click()
+  const drawer = page.getByLabel('Energy drawer')
+  await page.getByRole('list', { name: 'Nodes' }).getByRole('button', { name: /^X98/ }).click()
+  await drawer.getByRole('button', { name: 'Start at selected node', exact: true }).click()
+
+  // Not stopped at the group: one arrow leads in to it and one on from it.
+  const nodes = drawer.locator('.pathway:not(.lost-path) .pathway-nodes')
+  const steps = nodes.locator('button.link')
+  await expect(nodes).toHaveText('X98 → G98 → Y98')
+
+  await steps.nth(1).click({ button: 'right' })
+  await page.getByRole('menu', { name: 'Step G98' }).getByRole('menuitem', { name: 'Swap for' }).click()
+  await expect(page.getByRole('menuitem', { name: 'g1-98', exact: true })).toBeVisible()
+  await page.getByRole('menuitem', { name: 'g2-98', exact: true }).click()
+  await expect(nodes).toHaveText('X98 → g2-98 → Y98')
+  await steps.nth(1).click({ button: 'right' })
+  await expect(page.locator('.context-heading')).toContainText('in G98')
+  await page.getByRole('menu', { name: 'Step g2-98' }).getByRole('menuitem', { name: 'Swap for' }).click()
+  await expect(page.getByRole('menuitem', { name: 'g1-98', exact: true })).toBeVisible()
+  await page.getByRole('menuitem', { name: 'G98', exact: true }).click()
+  await expect(nodes).toHaveText('X98 → G98 → Y98')
+
+  // W98 → Y98 is drawn into the last step: offered there, against its arrow, as one step.
+  await steps.nth(0).click({ button: 'right' })
+  const first = page.getByRole('menu', { name: 'Step X98' })
+  await expect(first.getByRole('menuitem', { name: 'Move along the axis' })).toBeVisible()
+  await expect(first.getByRole('menuitem', { name: 'Start before, against an arrow' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(first).toHaveCount(0)
+  await steps.nth(2).click({ button: 'right' })
+  await page.getByRole('menu', { name: 'Step Y98' }).getByRole('menuitem', { name: 'Continue, against an arrow' }).click()
+  await page.getByRole('menuitem', { name: 'W98', exact: true }).click()
+  await expect(nodes).toHaveText('X98 → G98 → Y98 → W98')
 })

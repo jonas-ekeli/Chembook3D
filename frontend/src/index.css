@@ -3501,10 +3501,10 @@ table.overlay-legend td {
   gap: 0.25rem;
   margin-bottom: 0.25rem;
 }
-.pathway-move select {
+.pathway-move > span {
   flex: 1;
   min-width: 0;
-  width: auto;
+  overflow-wrap: anywhere;
 }
 .pathway-move button {
   flex-shrink: 0;
