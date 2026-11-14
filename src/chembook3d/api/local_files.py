@@ -4,7 +4,8 @@ Inspect window reads from a file the user named, and one of its structures, as t
 (`api/server_files.py`, D124); nothing is staged, copied or written.
 
 Only files the parsers read are answered (Gaussian, ORCA, xTB and CREST outputs, xyz files);
-any other file is refused, so this is no way to read arbitrary files."""
+any other file is refused, so this is no way to read arbitrary files. PDFs (a paper or its
+supporting information) are read by `read_pdf` instead (D232, `services/pdfs.py`)."""
 
 import asyncio
 from pathlib import Path
@@ -15,7 +16,7 @@ from pydantic import BaseModel
 
 from chembook3d.api.jobs import _local_page_only
 from chembook3d.api.server_files import _size, _step_summary, _when, structure_text
-from chembook3d.services import inspection
+from chembook3d.services import inspection, pdfs
 
 router = APIRouter(prefix="/api/local-files")
 
@@ -27,6 +28,8 @@ def _read(path: str) -> tuple[Path, inspection.Inspection]:
         raise HTTPException(422, f"Cannot read {path}") from exc
     if not local.is_file():
         raise HTTPException(422, f"{local} is not a file")
+    if pdfs.is_pdf(local):
+        raise HTTPException(422, f"{local} is a PDF: read it with read_pdf (D232).")
     size = local.stat().st_size
     if size > inspection.MAX_SIZE:
         raise HTTPException(422, f"{local} is {_size(size)}, more than the Inspect window reads.")
@@ -74,3 +77,26 @@ async def get_file_structure(request: Request, path: str, step: int | None = Non
     _local_page_only(request)
     local, read = await asyncio.to_thread(_read, path)
     return PlainTextResponse(structure_text(read, str(local), step, frame))
+
+
+@router.get("/pdf")
+async def read_pdf(
+    request: Request,
+    path: str,
+    pages: str | None = None,
+    find: str | None = None,
+    images: bool = False,
+    region: str | None = None,
+) -> dict:
+    """A PDF on this computer (D232): the text of its pages, the pages a word or label is on
+    (`find`), and with `images` the pages named drawn as PNG pictures (`region`: a part of one
+    page, larger). Pages without a text layer are said to be so. Nothing is written."""
+    _local_page_only(request)
+    try:
+        local = Path(path).expanduser().resolve()
+    except OSError as exc:
+        raise HTTPException(422, f"Cannot read {path}") from exc
+    try:
+        return await asyncio.to_thread(pdfs.read, local, pages, find, images, region)
+    except pdfs.PdfFailed as exc:
+        raise HTTPException(422, str(exc)) from exc

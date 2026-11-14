@@ -366,6 +366,14 @@ Claude also reads what the step movie shows: every structure of an imported opti
 scan with its energy. It can use one of them as **Use this structure** does, take points out
 of a scan path or put them back, and make the optimized end point of an IRC a node of its own.
 
+Claude can read PDFs on your computer: a paper or its supporting information that you saved,
+or one it fetched from the web. Give it the path. It finds the pages a compound's label is on
+(for example "24a" in a 100-page SI), reads their text, and looks at pages as pictures to
+read structures, schemes and tables, zooming in on a part of a page. It tells you the file
+and page of what it takes, and says when a page is a scan with no text to read. Many
+publishers block automated downloads, so for those you save the PDF from your browser
+yourself and tell Claude where it is. Reading a PDF is not asked about in the terminal.
+
 Claude imports files as you do. Give it the path of an output or of a whole folder: for a
 folder it shows the same plan as **Import…**, **Folder**, with the files it would put together
 and the ones that need a choice from you, and imports when you agree. It can read an output

@@ -1099,7 +1099,8 @@ TOOLS: list[ToolSpec] = [
         "method, basis, charge, multiplicity, termination, last SCF energy, whether the "
         "optimization converged, frequencies with the imaginary ones, and every structure's "
         "energy and convergence criteria. For a first look at a file the user named: did it "
-        "converge, why did it stop, is it worth importing. Any other kind of file is refused.",
+        "converge, why did it stop, is it worth importing. Any other kind of file is refused; "
+        "a PDF is read with read_pdf.",
         help={"path": "Full path of the output."},
     ),
     T(
@@ -1115,6 +1116,28 @@ TOOLS: list[ToolSpec] = [
             "structures).",
             "frame": "Structure number in the step, 1-based; negative counts from the end "
             "(default -1, the last).",
+        },
+    ),
+    T(
+        "read_pdf",
+        "read",
+        "GET",
+        "/api/local-files/pdf",
+        "A PDF on this computer, such as a paper or its supporting information the user saved "
+        "or one your web fetch saved (D232). Gives the text page by page (the first 20 pages "
+        "when none are named) and says which pages have no text layer (a scan or a picture). "
+        "With `find` and no `pages`: only the pages a word or a compound's label is on, with "
+        "their lines, to go straight to them in a long SI. With `images`: the pages named (at "
+        "most 4) as pictures, for structures, schemes and tables; `region` draws a part of one "
+        "page larger. Nothing is written. Say the file and page of everything you take from it.",
+        help={
+            "path": "Full path of the PDF.",
+            "pages": "Pages from 1, as a PDF reader numbers them: '3', '2-5' or '1,4,7-9'.",
+            "find": "A word or label to look for, whole and in any case ('24a' finds 24a, not "
+            "124a).",
+            "images": "Also draw the pages named as PNG pictures (at most 4 pages).",
+            "region": "With images and one page: 'left,top,right,bottom' in fractions of the "
+            "page from its top left, e.g. '0,0.5,1,1' for the lower half, drawn larger.",
         },
     ),
     T(
