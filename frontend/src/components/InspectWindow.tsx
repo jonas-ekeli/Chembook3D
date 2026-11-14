@@ -39,6 +39,7 @@ const LAST = Number.MAX_SAFE_INTEGER
 
 function jobLabel(step: InspectStep): string {
   if (step.job_type === 'structures') return 'Structures'
+  if (step.job_type === 'crystal_molecule') return 'Molecule in the crystal' // D234
   const label = CALCULATION_TYPES[step.job_type] ?? step.job_type
   return step.scan ? `${label} (${step.scan} scan)` : label
 }

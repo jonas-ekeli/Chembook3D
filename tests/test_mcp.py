@@ -35,6 +35,7 @@ READ_POSTS = {
     "/api/scan-paths/plan",
     "/api/builder/run",
     "/api/builder/picture",  # D233: draws, stores nothing
+    "/api/crystals/read",  # D234: builds in memory, like build_structure
     "/api/builder/check",
     "/api/measurements",
     "/api/local/core",

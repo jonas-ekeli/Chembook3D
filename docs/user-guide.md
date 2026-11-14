@@ -378,6 +378,14 @@ A structure Claude reads from a drawing is its own reading, so it checks it: it 
 SMILES in 2D, compares the picture with the page, and draws what it built again before saving
 it. Ask it to show you the drawing too.
 
+Better than a drawing is a measured structure. Claude can search the free Crystallography
+Open Database (COD) by a paper's DOI or a compound's name, read an entry as its molecules
+(each made whole, with solvent and counter-ions listed apart), and make a node from the one
+you want, with the COD id in its notes. It needs no account. Many crystal structures are only
+in the CSD, which needs a licence: download the CIF from the CCDC's web page yourself and give
+Claude its path. **Inspect** opens a CIF too, one molecule per step. A crystal structure has no
+energy, its charge is not in the file, and its hydrogens may be missing.
+
 Claude imports files as you do. Give it the path of an output or of a whole folder: for a
 folder it shows the same plan as **Import…**, **Folder**, with the files it would put together
 and the ones that need a choice from you, and imports when you agree. It can read an output

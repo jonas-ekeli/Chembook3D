@@ -126,6 +126,11 @@ Rules:
   build_structure as XYZ text; numbers from a paper stay in notes, never as calculations.
   Check a structure read from a drawing with draw_structure (D233): draw your SMILES, compare
   it with the page, and draw the build again before saving it.
+- Crystal structures (D234): find_crystal_structures searches the open Crystallography Open
+  Database by a paper's DOI or words (by formula or elements only when the user asks);
+  get_crystal_structure reads an entry or a CIF on this computer as its molecules, each with a
+  build_id for create_node. Say the COD id or file and that it is an X-ray structure (no
+  energy, charge not given, hydrogens perhaps missing). The CSD needs a licence: not offered.
 - Files on a server such as Saga (D124): when the user is logged in in the app, list_servers,
   list_server_files, read_server_file, summarize_server_file and get_server_structure read
   the files in the server terminal's current directory and below, without importing them.
