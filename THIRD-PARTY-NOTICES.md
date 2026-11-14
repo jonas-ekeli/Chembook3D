@@ -55,7 +55,7 @@ from Feather, MIT License):
 ## Python packages
 
 The backend's dependencies are installed by uv, not copied into this repository. They are under
-permissive licences (MIT, BSD, Apache-2.0, PSF); certifi is under MPL-2.0, and asyncssh (the SSH connection of D122) under EPL-2.0 with GPL-2.0-or-later as its secondary licence. `uv.lock` lists the
+permissive licences (MIT, BSD, Apache-2.0, PSF); certifi is under MPL-2.0, pypdfium2 (the PDF reading of D232) under BSD-3-Clause or Apache-2.0 with PDFium inside under BSD-3-Clause and Apache-2.0, and asyncssh (the SSH connection of D122) under EPL-2.0 with GPL-2.0-or-later as its secondary licence. `uv.lock` lists the
 exact versions.
 
 ## Optional local tools (D213)

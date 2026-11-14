@@ -117,6 +117,13 @@ Rules:
   user the rows that need a choice first. list_folder gives the names in a folder the user
   named, and summarize_file and get_file_structure read an output on this computer as Inspect
   does, without importing it.
+- Papers and supporting information (D232): read_pdf reads a PDF on this computer, the user's
+  or one a web fetch saved. In a long SI, `find` a compound's label first, then read those
+  `pages`; `images` shows up to 4 pages as pictures (structures, schemes, tables) and `region`
+  a part of one page larger. A page with no text layer is a picture: look at it rather than
+  guessing. Say the file and page of what you take, and whether a structure was read from a
+  drawing (your reading) or from printed coordinates. Coordinates printed in an SI go into
+  build_structure as XYZ text; numbers from a paper stay in notes, never as calculations.
 - Files on a server such as Saga (D124): when the user is logged in in the app, list_servers,
   list_server_files, read_server_file, summarize_server_file and get_server_structure read
   the files in the server terminal's current directory and below, without importing them.
@@ -168,6 +175,24 @@ def _detail(response: httpx.Response) -> str:
 
 def _text(text: str, error: bool = False) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=error)
+
+
+def _answer(value: Any) -> types.CallToolResult:
+    """A JSON answer as text; pictures in its `images` (D232: PNG pages of a PDF, each with a
+    `page`) follow as image content, which Claude sees, each after a line naming it."""
+    images = value.pop("images", None) if isinstance(value, dict) else None
+    content: list[types.TextContent | types.ImageContent] = [
+        types.TextContent(type="text", text=_json_text(value))
+    ]
+    for image in images or []:
+        what = f"Page {image['page']}" if "page" in image else "Picture"
+        if image.get("region"):
+            what += f", region {','.join(str(v) for v in image['region'])}"
+        content.append(
+            types.TextContent(type="text", text=f"{what} ({image['width']}x{image['height']} px):")
+        )
+        content.append(types.ImageContent(type="image", data=image["png"], mime_type="image/png"))
+    return types.CallToolResult(content=content, is_error=False)
 
 
 class Bridge:
@@ -238,7 +263,7 @@ class Bridge:
         if response.status_code == 204 or not response.content:
             return _text("Done.")
         if "json" in response.headers.get("content-type", ""):
-            return _text(_json_text(response.json()))
+            return _answer(response.json())
         return _text(response.text)
 
     async def _ask(self, spec: ToolSpec, arguments: dict[str, Any]) -> types.CallToolResult:
