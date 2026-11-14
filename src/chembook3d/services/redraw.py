@@ -93,22 +93,32 @@ def _radicals(mol: Chem.Mol, metals: set[int]) -> None:
 
 def to_drawing(structure: Structure) -> str:
     """The structure as a 2D MOL file for Ketcher (V3000, which has dative bonds)."""
+    heavy = flat(structure)
+    metals = {a.GetIdx() + 1 for a in heavy.GetAtoms() if a.GetSymbol() not in minimize.TYPED}
+    return "\n".join(_no_valence(line, metals) for line in Chem.MolToV3KMolBlock(heavy).split("\n"))
+
+
+def flat(structure: Structure, numbered: bool = False) -> Chem.Mol:
+    """The structure in 2D as it is drawn: hydrogens left out, wedges from the 3D handedness.
+    `numbered` (D233) notes each atom's number in the structure, from 1."""
     if not structure.rows:
         raise BuildError("There is no structure to draw from")
     mol = _drawable(structure)
+    if numbered:
+        for atom in mol.GetAtoms():
+            atom.SetProp("atomNote", str(atom.GetIdx() + 1))
     try:
         Chem.AssignStereochemistryFrom3D(mol)
     except (ValueError, RuntimeError):
         pass  # drawn without wedges
     heavy = Chem.RemoveHs(mol, sanitize=False)
     heavy.UpdatePropertyCache(strict=False)
-    _layout(heavy)
+    layout(heavy)
     try:
         Chem.WedgeMolBonds(heavy, heavy.GetConformer())
     except (ValueError, RuntimeError):
         pass
-    metals = {a.GetIdx() + 1 for a in heavy.GetAtoms() if a.GetSymbol() not in minimize.TYPED}
-    return "\n".join(_no_valence(line, metals) for line in Chem.MolToV3KMolBlock(heavy).split("\n"))
+    return heavy
 
 
 def _crowding(mol: Chem.Mol) -> tuple[int, float]:
@@ -122,7 +132,7 @@ def _crowding(mol: Chem.Mol) -> tuple[int, float]:
     return int((d < 0.8).sum()) // 2, -float(d.min()) if len(d) > 1 else 0.0
 
 
-def _layout(mol: Chem.Mol) -> None:
+def layout(mol: Chem.Mol) -> None:
     """RDKit's own 2D layout or CoordGen's, whichever leaves fewer atoms on top of each other
     (round a metal one or the other often crowds)."""
     tries = []

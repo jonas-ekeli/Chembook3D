@@ -9,6 +9,8 @@ artifacts and publishes nothing.
 - Claude reads PDFs (D232): a paper or its supporting information on this computer, page by
   page, with the pages a compound's label is on and pages or parts of pages as pictures it can
   see; scanned pages are said to have no text.
+- Claude checks a structure read from a paper (D233): it draws a SMILES, a build or a node in 2D
+  as a picture, with its formula and each metal's bonded atoms.
 - Calculations on this computer (D213 to D220): a tools installer and a detached runner; refine
   with GFN2-xTB, optional g-xTB, B97-3c, r2SCAN-3c and an ONIOM core; transition state searches
   with frequencies; relaxed and 2D grid scans shown as an energy surface; a running job can be

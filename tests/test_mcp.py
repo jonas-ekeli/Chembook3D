@@ -34,6 +34,7 @@ READ_POSTS = {
     "/api/atom-match",
     "/api/scan-paths/plan",
     "/api/builder/run",
+    "/api/builder/picture",  # D233: draws, stores nothing
     "/api/builder/check",
     "/api/measurements",
     "/api/local/core",

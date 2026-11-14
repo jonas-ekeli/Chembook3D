@@ -374,6 +374,10 @@ and page of what it takes, and says when a page is a scan with no text to read. 
 publishers block automated downloads, so for those you save the PDF from your browser
 yourself and tell Claude where it is. Reading a PDF is not asked about in the terminal.
 
+A structure Claude reads from a drawing is its own reading, so it checks it: it draws its
+SMILES in 2D, compares the picture with the page, and draws what it built again before saving
+it. Ask it to show you the drawing too.
+
 Claude imports files as you do. Give it the path of an output or of a whole folder: for a
 folder it shows the same plan as **Import…**, **Folder**, with the files it would put together
 and the ones that need a choice from you, and imports when you agree. It can read an output
