@@ -561,7 +561,8 @@ export type IrcSummary = {
 /** A file on this computer or a server, or (D220) a local job of the investigation (`job`, its id;
  * `path` is then only a name to show while it is read). */
 export type InspectTarget = { path: string; server?: string | null; job?: string | null }
-/** One job step of an inspected file; `job_type` "structures" for an xyz file. */
+/** One job step of an inspected file; `job_type` "structures" for an xyz file,
+ * "crystal_molecule" for each molecule of a CIF (D234). */
 export type InspectStep = {
   index: number
   job_type: string

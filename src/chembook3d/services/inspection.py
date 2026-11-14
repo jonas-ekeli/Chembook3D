@@ -11,7 +11,8 @@ lines, a few more each time, and the window says how much was left out.
 
 Besides what the import reads, xyz files open too: one or many structures (`xtbopt.xyz`, a
 CREST ensemble), with the energy their comment lines carry, and xTB's optimization log
-`xtbopt.log`, whose cycles come with their energy change and gradient norm.
+`xtbopt.log`, whose cycles come with their energy change and gradient norm. A CIF (D234) opens
+as its molecules, one step each, from `crystals.read_cif`.
 """
 
 from dataclasses import dataclass, field
@@ -20,7 +21,7 @@ from pathlib import Path
 from chembook3d import xyz
 from chembook3d.parsers import crest, xtb
 from chembook3d.parsers.common import ParsedFile, ParsedStep
-from chembook3d.services import imports, trajectory
+from chembook3d.services import crystals, imports, trajectory
 
 # The largest file read (bytes): a long Gaussian optimization is tens of MB.
 MAX_SIZE = 200_000_000
@@ -220,8 +221,40 @@ def parse_text(
     return parsed, warnings
 
 
+def _crystal(text: str, name: str) -> Inspection:
+    """D234: each molecule of a CIF's first structure as a step of one structure."""
+    try:
+        found = crystals.read_cif(text, name)
+    except crystals.CrystalFailed as exc:
+        raise InspectFailed(str(exc)) from exc
+    crystal = found[0]
+    warnings = list(crystal.warnings)
+    if len(found) > 1:
+        warnings.append(f"The file holds {len(found)} structures; the first is shown.")
+    steps = []
+    for number, molecule in enumerate(crystal.molecules, start=1):
+        step = _step(
+            ParsedStep(
+                index=number,
+                geometries=[molecule.atoms],
+                geometry_energies=[None],
+                termination="normal",
+            )
+        )
+        step.job_type = "crystal_molecule"
+        step.route = (
+            f"{crystal.name}: molecule {number} of {len(crystal.molecules)}, "
+            f"{molecule.copies} in the cell ({crystal.space_group})"
+        )
+        steps.append(step)
+        warnings += [f"Molecule {number}: {w}" for w in molecule.warnings]
+    return Inspection(program="CIF", version=None, steps=steps, warnings=warnings)
+
+
 def read(text: str, name: str = "", folder: Path | None = None) -> Inspection:
     """`folder` is where the file is, for the xTB output beside an xTB log (D112, D123c)."""
+    if crystals.looks_like_cif(text):
+        return _crystal(text, name)
     try:
         parsed, warnings = parse_text(text, name, folder)
     except imports.ImportFailed as exc:

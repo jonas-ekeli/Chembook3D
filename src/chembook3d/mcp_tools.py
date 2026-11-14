@@ -1158,6 +1158,40 @@ TOOLS: list[ToolSpec] = [
         },
     ),
     T(
+        "find_crystal_structures",
+        "read",
+        "GET",
+        "/api/crystals/search",
+        "Search the Crystallography Open Database (COD), open and free, for crystal "
+        "structures (D234): by a paper's DOI (best: the structures of that paper), words such "
+        "as a compound's name or an author, a formula, or elements that must be present. "
+        "Gives each entry's COD id, formula, name, reference and space group. The search goes "
+        "to the COD: use DOIs and words from published papers; search by formula or elements "
+        "only when the user asks, since they can describe their unpublished work. The CSD is "
+        "not searched (it needs a licence).",
+        help={
+            "doi": "A paper's DOI, e.g. 10.1021/ja00000a000.",
+            "text": "Words in the entry: a compound's name, an author, a title word.",
+            "formula": "A formula, e.g. C31H38Cl2N2ORu (as the COD gives it, all atoms).",
+            "elements": "Elements that must be present, at most 8, e.g. ['Ru', 'Cl'].",
+            "year": "Year of publication.",
+        },
+    ),
+    T(
+        "get_crystal_structure",
+        "read",
+        "POST",
+        "/api/crystals/read",
+        "A crystal structure as its molecules (D234), from the COD by its id or from a CIF on "
+        "this computer: the space group, cell, reference and database codes the CIF gives, "
+        "and each distinct molecule (largest with a metal first; solvent and counter-ions "
+        "apart) made whole across the cell's edges, with its formula, how many copies the "
+        "cell holds, and a build_id. Of disordered parts, part 1 is kept. Save one with "
+        "create_node by its build_id and the source in its notes, or go on with "
+        "build_structure (add hydrogens when it says there are none). The charge is not in a "
+        "CIF: ask or work it out. No energy comes with it.",
+    ),
+    T(
         "import_folder",
         "write",
         "POST",
