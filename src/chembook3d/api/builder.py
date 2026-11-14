@@ -17,7 +17,7 @@ from chembook3d import xyz
 from chembook3d.api import builds
 from chembook3d.api.routes import _investigation
 from chembook3d.models import Node
-from chembook3d.services import builder, minimize, redraw, smiles
+from chembook3d.services import builder, minimize, pictures, redraw, smiles
 
 router = APIRouter(prefix="/api/builder")
 
@@ -874,6 +874,34 @@ def _edit_of(step: StepIn) -> EditIn:
         if step.ignore_bonds is None
         else [(i - 1, j - 1) for i, j in step.ignore_bonds],
     )
+
+
+class PictureIn(StartIn):
+    smiles: str | None = Field(
+        None, description="A SMILES to draw as written (instead of a build, node or XYZ text)"
+    )
+    numbers: bool = Field(
+        False,
+        description="Number the atoms from 1: in the SMILES's order, or as build_structure "
+        "counts the structure's atoms",
+    )
+    legend: str = Field("", max_length=200, description="A line under the picture")
+
+
+@router.post("/picture")
+def picture(body: PictureIn, request: Request) -> dict:
+    """D233: a SMILES, a build, a node's structure or XYZ text drawn in 2D as a PNG picture,
+    with what RDKit made of it (formula, charge, each metal's bonded atoms), so Claude checks
+    its reading of a paper's drawing by eye. Stores nothing."""
+    try:
+        if body.smiles is not None:
+            if any(v is not None for v in (body.build_id, body.node_id, body.xyz)):
+                raise HTTPException(422, "Give a SMILES or a structure, not both")
+            return pictures.from_smiles(body.smiles, body.numbers, body.legend)
+        structure, _charge, _multiplicity = _start(request, body)
+        return pictures.from_structure(structure, body.numbers, body.legend)
+    except builder.BuildError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post("/check", response_model=CheckOut)

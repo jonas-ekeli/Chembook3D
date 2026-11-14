@@ -124,6 +124,8 @@ Rules:
   guessing. Say the file and page of what you take, and whether a structure was read from a
   drawing (your reading) or from printed coordinates. Coordinates printed in an SI go into
   build_structure as XYZ text; numbers from a paper stay in notes, never as calculations.
+  Check a structure read from a drawing with draw_structure (D233): draw your SMILES, compare
+  it with the page, and draw the build again before saving it.
 - Files on a server such as Saga (D124): when the user is logged in in the app, list_servers,
   list_server_files, read_server_file, summarize_server_file and get_server_structure read
   the files in the server terminal's current directory and below, without importing them.

@@ -586,6 +586,23 @@ TOOLS: list[ToolSpec] = [
         "Changes nothing.",
     ),
     T(
+        "draw_structure",
+        "read",
+        "POST",
+        "/api/builder/picture",
+        "Draw a SMILES, a build_structure answer (build_id), a node's structure or XYZ text in "
+        "2D as a picture you see, with what RDKit made of it: formula, charge and each metal's "
+        "bonded atoms (D233). To check a structure you read from a paper's drawing (read_pdf "
+        "with images): draw your SMILES, put it beside the page and compare ring by ring and "
+        "substituent by substituent; draw the built structure again before saving it. A "
+        "structure from a build or node is drawn with bonds as Minimize finds them and no "
+        "hydrogens. Changes nothing.",
+        help={
+            "numbers": "Number the atoms from 1 (for a structure: as build_structure counts "
+            "them), to name atoms in the next steps.",
+        },
+    ),
+    T(
         "get_irc",
         "read",
         "GET",
