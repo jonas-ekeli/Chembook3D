@@ -25,23 +25,24 @@ def record(
     old: Any = None,
     new: Any = None,
     source: str = "manual",
-) -> None:
+) -> HistoryEntry:
+    """Add one entry; returned so a caller can point later entries at it (D235h)."""
     ledger = MADE.get()
     if ledger is not None:
         ledger.note(SOURCE.get(), record_type, record_id, action, old, new)
     if source == "manual":
         source = SOURCE.get()
-    session.add(
-        HistoryEntry(
-            record_type=record_type,
-            record_id=record_id,
-            action=action,
-            field=field,
-            old_value=old,
-            new_value=new,
-            source=source,
-        )
+    entry = HistoryEntry(
+        record_type=record_type,
+        record_id=record_id,
+        action=action,
+        field=field,
+        old_value=old,
+        new_value=new,
+        source=source,
     )
+    session.add(entry)
+    return entry
 
 
 def entries(session: Session, record_id: str | None = None, limit: int = 200) -> list[HistoryEntry]:

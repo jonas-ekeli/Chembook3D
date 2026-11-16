@@ -59,6 +59,8 @@ export type Investigation = {
   sync: SyncStatus | null
   /** D235: set when this investigation is a playground, a working copy of another. */
   playground?: PlaygroundInfo | null
+  /** D235h: a merged playground opens read-only. */
+  read_only?: boolean
 }
 
 /** D235: what the playground band shows. */
@@ -82,6 +84,53 @@ export type PlaygroundRow = {
   changed: number | null
   /** Made from another investigation (a folder copied in by hand). */
   foreign: boolean
+}
+
+/** D235h: one field of a change in a merge review, as the base, the playground and the original have it. */
+export type MergeField = {
+  field: string
+  base: unknown
+  playground: unknown
+  original: unknown
+  /** Changed on both sides to different values. */
+  conflict: boolean
+}
+
+/** D235h: one tick box of the merge review: a record the playground added, changed or removed. */
+export type MergeChange = {
+  id: string
+  record_type: string
+  record_id: string
+  kind: 'added' | 'changed' | 'removed' | 'conflict'
+  label: string
+  summary: string
+  fields: MergeField[]
+  /** Why it is a conflict; ticking it takes the playground's version. */
+  conflict: string | null
+  /** Ticked when the review opens. */
+  ticked: boolean
+  /** The changes it needs, brought with it. */
+  requires: string[]
+  /** Why it cannot be merged (a removal the original has added to since). */
+  blocked: string | null
+}
+
+export type MergeReview = {
+  playground: { name: string; folder: string; created_at: string | null }
+  original_name: string
+  /** The original's history entries since the playground was made. */
+  changed_since: number
+  sections: { key: string; title: string; changes: MergeChange[] }[]
+}
+
+export type MergeResult = {
+  counts: { added: number; changed: number; removed: number }
+  /** Changes brought because a ticked one needs them. */
+  brought: string[]
+  blockers: string[]
+  /** The original's backup, in its backups folder (after a merge). */
+  backup: string | null
+  history_id: number | null
 }
 
 /** D235g: what Discard's confirmation names. */
@@ -2586,6 +2635,16 @@ export const api = {
     request<Investigation & { notice: string | null }>('POST', '/playgrounds', { folder, name, force, upgrade, alone }),
   playgroundDiscardPreview: (folder: string) =>
     request<PlaygroundDiscardPreview>('GET', `/playgrounds/discard-preview?folder=${encodeURIComponent(folder)}`),
+  /** D235h: open the playground's original and review what merging would bring. */
+  startMerge: (folder: string, force = false, upgrade = false) =>
+    request<Investigation & { review: MergeReview }>('POST', '/playgrounds/merge/start', { folder, force, upgrade }),
+  mergeReview: (folder: string) =>
+    request<MergeReview>('GET', `/playgrounds/merge/review?folder=${encodeURIComponent(folder)}`),
+  /** The whole merge in a session that is rolled back: counts and blockers. */
+  previewMerge: (folder: string, ticked: string[]) =>
+    request<MergeResult>('POST', '/playgrounds/merge/preview', { folder, ticked }),
+  mergePlayground: (folder: string, ticked: string[]) =>
+    request<MergeResult>('POST', '/playgrounds/merge', { folder, ticked }),
   /** D235g: the playground's folder goes to the recycle bin; closed first when it is open. */
   discardPlayground: (folder: string) => request<void>('POST', '/playgrounds/discard', { folder }),
   /** Closing a linked investigation also pushes it; the answer is the sync state (D71). */

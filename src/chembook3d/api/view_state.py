@@ -4,9 +4,9 @@ nothing other tabs or Claude need to reload for."""
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Request
 
-from chembook3d.api.routes import DbSession
+from chembook3d.api.routes import DbSession, _investigation
 from chembook3d.services import view_state
 
 router = APIRouter(prefix="/api")
@@ -18,5 +18,9 @@ def read_view_state(session: DbSession) -> dict[str, Any]:
 
 
 @router.put("/view-state", status_code=204)
-def save_view_state(session: DbSession, body: Annotated[dict[str, Any], Body()]) -> None:
+def save_view_state(
+    request: Request, session: DbSession, body: Annotated[dict[str, Any], Body()]
+) -> None:
+    if _investigation(request).read_only:
+        return  # D235h: a merged playground keeps the view it was merged with
     view_state.save(session, body)

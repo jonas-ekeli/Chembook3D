@@ -99,17 +99,18 @@ class Autonomy:
             return all(r in self.made for r in record_ids)
 
 
-def backup_database(folder: Path) -> str | None:
+def backup_database(folder: Path, label: str = "claude") -> str | None:
     """A copy of the investigation's database in backups/, taken with SQLite's own backup so a
     change under way cannot leave it half written. The file's name, or None when there is no
-    database to copy."""
+    database to copy. `label` says what it was made for: "claude" when Work on its own is
+    turned on, "merge" before a playground is merged (D235h)."""
     source = folder / DB_NAME
     if not source.is_file():
         return None
     backups = folder / BACKUP_DIR
     backups.mkdir(exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    target = backups / f"{DB_NAME}.claude-{stamp}.bak"
+    target = backups / f"{DB_NAME}.{label}-{stamp}.bak"
     with sqlite3.connect(source) as live, sqlite3.connect(target) as copy:
         live.backup(copy)
     live.close()

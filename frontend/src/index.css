@@ -5672,6 +5672,69 @@ table.scan-path-held input.drive-value {
   background: var(--play-bg);
   border-bottom: 1px solid var(--play-border);
 }
+/* D235h: the merge review: one row per change, grouped under headings */
+h3.merge-section {
+  margin: 14px 0 4px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+ul.merge-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+li.merge-change {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+}
+li.merge-change + li.merge-change {
+  border-top: 1px solid var(--divider);
+}
+li.merge-change > input {
+  flex: none;
+  width: auto;
+  margin-top: 3px;
+}
+.merge-what {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.merge-kind {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--tag-bg);
+  color: var(--text-2);
+}
+li.merge-added .merge-kind {
+  background: var(--ok-bg);
+  color: var(--ok-text);
+}
+li.merge-removed .merge-kind {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+li.merge-conflict .merge-kind {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+.merge-reason {
+  font-size: 12px;
+  color: var(--warn-text);
+}
+.merge-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: none;
+  font-size: 12px;
+}
 .recent-forget-space {
   flex: none;
   width: var(--ctl-h);

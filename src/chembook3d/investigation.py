@@ -322,6 +322,9 @@ class Investigation:
     engine: Engine
     sessions: sessionmaker[Session]
     ownership: InvestigationOwnership
+    # D235h: a playground that was merged into its original opens read-only (Q64): the app
+    # refuses changes (api/live.py) and the database connections are query-only.
+    read_only: bool = False
 
     def __post_init__(self) -> None:
         # An investigation dropped without close() still closes its pooled SQLite
@@ -579,13 +582,37 @@ def open_investigation(
         _remove_orphaned_copies(folder, engine)
         sessions = _session_factory(engine, ownership)
         _run_repairs(folder, sessions)
+        read_only = _merged(sessions)
+        if read_only:
+            _query_only(engine)
         ownership.database_open = True
-        return Investigation(folder, engine, sessions, ownership)
+        return Investigation(folder, engine, sessions, ownership, read_only)
     except BaseException:
         if engine is not None:
             engine.dispose()  # Windows keeps a file open until its connections are closed
         ownership.release()
         raise
+
+
+def _merged(sessions: sessionmaker[Session]) -> bool:
+    """D235h: a playground merged into its original, which opens read-only."""
+    with sessions() as session:
+        info = session.get(InvestigationInfo, 1)
+        return info is not None and info.playground_merged_at is not None
+
+
+def _query_only(engine: Engine) -> None:
+    """Every connection of a read-only investigation refuses writes: a backstop behind the
+    app's own refusal (api/live.py). The connections made so far are closed, so each one
+    from now on has it."""
+
+    @event.listens_for(engine, "connect")
+    def _no_writes(dbapi_connection, _record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA query_only = ON")
+        cursor.close()
+
+    engine.dispose()
 
 
 def _run_repairs(folder: Path, sessions: sessionmaker[Session]) -> None:

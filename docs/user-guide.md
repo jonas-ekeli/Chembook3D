@@ -230,7 +230,25 @@ playground once it opens (a new conversation: Claude's conversations belong to e
 In a playground the switch makes no backup, since the original is the copy. Claude is told it
 works in a playground; only you can merge or discard one.
 
-Merging a playground back into its original comes in a later version.
+### Merge a playground into its original
+
+**Merge…**, in the band or in the playground's **⋯** menu on the start screen, opens the
+original (pulled from GitHub first when it is synced) and shows what the playground added,
+changed and removed since it was made, grouped by node, with a tick box each.
+
+- New and changed things are ticked; removals are not, so tick each one you want gone too.
+- A thing changed in both the playground and the original is a **conflict**: pick the
+  playground's or the original's version. Merge waits until every conflict has one.
+- Ticking something brings what it needs (an edge brings its nodes); unticking a node unticks
+  what needs it. The dialog says when it does either.
+- A removal you cannot tick says why, such as a note the original added to that node since.
+- **Preview** says what merging would add, change and remove, without changing anything.
+- **Merge** first saves a copy of the original in its `backups` folder, then writes the ticked
+  changes in one go. They appear in the original's history as they were made in the playground
+  (by you, Claude or an import), after one "merged from playground" entry.
+
+A playground merges once. Afterwards it still opens, read-only, so you can look at it; make a
+new playground from the original to go on.
 
 ## Sync investigations between computers
 
