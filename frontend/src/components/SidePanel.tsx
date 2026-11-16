@@ -96,6 +96,8 @@ export function SidePanel({
   onInspect,
   onScanEditor,
   onCwd,
+  playground,
+  onPlaygroundFirst,
 }: {
   /** The tab shown, or null when the panel is hidden. */
   tab: SideTab | null
@@ -110,6 +112,10 @@ export function SidePanel({
   onScanEditor: (targets: { server: string; path: string }[]) => void
   /** A server's terminal reported its directory. */
   onCwd: (server: string, path: string | null) => void
+  /** D235i: the open investigation is a playground. */
+  playground: boolean
+  /** D235i: "Make a playground first" on Claude's Work on its own warning. */
+  onPlaygroundFirst: (jobLimit: number, cloud: boolean) => Promise<void>
 }) {
   const [width, setWidth] = useState(560)
   const [picked, setPicked] = useState<string | null>(null)
@@ -197,7 +203,12 @@ export function SidePanel({
             Hide
           </button>
         </div>
-        <ClaudePanel open={tab === 'claude'} onAttention={() => onTab('claude')} />
+        <ClaudePanel
+          open={tab === 'claude'}
+          onAttention={() => onTab('claude')}
+          playground={playground}
+          onPlaygroundFirst={onPlaygroundFirst}
+        />
         {tab === HPC && remote?.enabled && (
           <div className="hpc-choice">
             <label className="field">

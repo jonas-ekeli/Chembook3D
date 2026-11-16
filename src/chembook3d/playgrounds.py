@@ -20,6 +20,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from send2trash import send2trash
+
 from chembook3d.investigation import (
     BACKUP_DIR,
     DB_NAME,
@@ -28,6 +30,7 @@ from chembook3d.investigation import (
     OWNER_NAME,
     Investigation,
     InvestigationError,
+    acquire_ownership,
 )
 from chembook3d.models import new_id, utcnow
 
@@ -36,6 +39,9 @@ BASE_DIR = "playground"
 BASE_NAME = "base.sqlite"
 BACK = "../.."  # from <original>/playgrounds/<name>/ to the original
 MAKING = ".making-"  # a playground being made; renamed to its name once whole
+# The UI tests' stand-in for the recycle bin: a folder discarded playgrounds are moved into, so a
+# test run never fills the recycle bin of the computer it runs on.
+TRASH_ENV = "CHEMBOOK3D_TRASH_DIR"
 NAME_LIMIT = 100
 
 # What a playground does not copy (D235, A165): Git and its files would push to the original's
@@ -72,6 +78,14 @@ class Made:
     folder: Path
     copied: int  # files copied because the disk could not hard-link them (A166)
     linked: int
+
+
+def next_name(original: Path) -> str:
+    """ "Playground 1", or the first number whose folder is not taken (A165)."""
+    n = 1
+    while (Path(original) / PLAYGROUNDS_DIR / folder_name(f"Playground {n}")).exists():
+        n += 1
+    return f"Playground {n}"
 
 
 def clean_name(name: str) -> str:
@@ -269,3 +283,75 @@ def rows(original: Path) -> list[dict[str, Any]]:
         )
     found.sort(key=lambda row: (row["created_at"] or datetime.min, row["name"]))
     return found
+
+
+def _playground_info(folder: Path) -> tuple[str, str] | None:
+    """(name, original's name) of the playground in `folder`, read without opening it; None when
+    the folder is not a playground in its original's playgrounds/ folder."""
+    folder = Path(folder)
+    got = _read(
+        folder / DB_NAME,
+        "SELECT playground_of, playground_name, playground_original FROM investigation_info "
+        "WHERE id = 1",
+    )
+    if not got or not got[0][0] or folder.parent.name != PLAYGROUNDS_DIR:
+        return None
+    original = original_folder(folder, got[0][2])
+    if original != folder.resolve().parent.parent:
+        return None
+    named = _read(original / DB_NAME, "SELECT name FROM investigation_info WHERE id = 1")
+    return got[0][1] or folder.name, named[0][0] if named else original.name
+
+
+def check(folder: Path) -> tuple[str, str]:
+    """(name, original's name) of a playground; refused for any other folder (D235g)."""
+    found = _playground_info(folder)
+    if found is None:
+        raise PlaygroundError(f"{folder} is not a playground")
+    return found
+
+
+def discard_preview(folder: Path) -> dict[str, Any]:
+    """What the Discard confirmation names (D235g): the playground, its original, its folder's
+    size, and how much discarding it frees (files hard-linked with the original's free nothing
+    while the original keeps them)."""
+    found = check(folder)
+    size = frees = files = 0
+    for root, _dirs, names in os.walk(folder):
+        for name in names:
+            try:
+                stat = (Path(root) / name).lstat()
+            except OSError:
+                continue
+            files += 1
+            size += stat.st_size
+            if stat.st_nlink <= 1:
+                frees += stat.st_size
+    return {
+        "folder": str(Path(folder).resolve()),
+        "name": found[0],
+        "original_name": found[1],
+        "files": files,
+        "size": size,
+        "frees": frees,
+    }
+
+
+def discard(folder: Path) -> None:
+    """Send a playground's folder to the recycle bin (D235g, Q68). Only a playground in its
+    original's playgrounds/ folder, and only while no app has it open; the original is not
+    touched. Where the recycle bin cannot take it, nothing is deleted (A168)."""
+    folder = Path(folder)
+    check(folder)
+    acquire_ownership(folder).release()  # refused while another app has it open
+    try:
+        stand_in = os.environ.get(TRASH_ENV)
+        if stand_in:
+            Path(stand_in).mkdir(parents=True, exist_ok=True)
+            os.replace(folder, Path(stand_in) / f"{folder.name}-{new_id()}")
+            return
+        send2trash(str(folder.resolve()))
+    except OSError as exc:
+        raise PlaygroundError(
+            f"The playground could not be moved to the recycle bin ({exc}); nothing was deleted"
+        ) from exc

@@ -68,6 +68,8 @@ export default defineConfig({
         CHEMBOOK3D_LOCAL_STUB: '1',
         CHEMBOOK3D_LOCAL_STUB_DELAY: '1',
         CHEMBOOK3D_TOOLS_DIR: join(process.env.E2E_DIR, 'tools'),
+        // D235g: Discard moves playgrounds here, not to this computer's recycle bin
+        CHEMBOOK3D_TRASH_DIR: join(process.env.E2E_DIR, 'trash'),
       },
     },
     // D122: a stand-in for Saga (tests/fake_ssh_server.py): password, then a one-time code.

@@ -1,10 +1,11 @@
 // D235: playgrounds, working copies of an investigation kept in its playgrounds/ folder. The
-// dialog that makes one from the start page, and the band under the app bar while one is open.
+// dialog that makes one from the start page, the band under the app bar while one is open, and
+// the confirmation that discards one.
 
-import { useState } from 'react'
-import type { PlaygroundInfo } from '../api'
+import { useEffect, useState } from 'react'
+import { api, type PlaygroundDiscardPreview, type PlaygroundInfo } from '../api'
 import { Icon } from '../icons'
-import { errorText, nextPlaygroundName, relativeTime } from '../util'
+import { byteSize, errorText, nextPlaygroundName, relativeTime } from '../util'
 import { Modal } from './Modal'
 
 export function NewPlaygroundDialog({
@@ -77,8 +78,89 @@ export function NewPlaygroundDialog({
   )
 }
 
+/** D235g: Discard…, sending a playground's folder to the recycle bin once its name, folder and size
+ * are shown. The original is not touched. */
+export function DiscardPlaygroundDialog({
+  folder,
+  onCancel,
+  onDiscarded,
+}: {
+  folder: string
+  onCancel: () => void
+  onDiscarded: (discarded: PlaygroundDiscardPreview) => void
+}) {
+  const [preview, setPreview] = useState<PlaygroundDiscardPreview | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let current = true
+    api.playgroundDiscardPreview(folder).then(
+      (found) => current && setPreview(found),
+      (err: unknown) => current && setError(errorText(err)),
+    )
+    return () => {
+      current = false
+    }
+  }, [folder])
+  const discard = () => {
+    if (!preview || busy) return
+    setBusy(true)
+    setError(null)
+    api.discardPlayground(folder).then(
+      () => onDiscarded(preview),
+      (err: unknown) => {
+        setBusy(false)
+        setError(errorText(err))
+      },
+    )
+  }
+  return (
+    <Modal
+      title={preview ? `Discard ${preview.name}?` : 'Discard playground?'}
+      onClose={onCancel}
+      actions={
+        <>
+          <button onClick={onCancel}>Cancel</button>
+          <button className="danger" disabled={!preview || busy} onClick={discard}>
+            {busy ? 'Discarding…' : 'Discard'}
+          </button>
+        </>
+      }
+    >
+      {preview ? (
+        <>
+          <p>
+            Its folder goes to the recycle bin, with everything done in it since it was made. Its original,{' '}
+            <strong>{preview.original_name}</strong>, is not changed.
+          </p>
+          <p className="muted small">
+            <code>{preview.folder}</code>
+            <br />
+            {preview.files} {preview.files === 1 ? 'file' : 'files'}, {byteSize(preview.size)}
+            {preview.frees < preview.size &&
+              `; ${byteSize(preview.frees)} freed, since the rest are the original's files under a second name`}
+            . You can restore it from the recycle bin.
+          </p>
+        </>
+      ) : (
+        !error && <p className="muted">Looking at the playground…</p>
+      )}
+      {error && <p role="alert">{error}</p>}
+    </Modal>
+  )
+}
+
 /** D235: says the open investigation is a playground, and of what. */
-export function PlaygroundBand({ playground, onOpenOriginal }: { playground: PlaygroundInfo; onOpenOriginal: () => void }) {
+export function PlaygroundBand({
+  playground,
+  onOpenOriginal,
+  onDiscard,
+}: {
+  playground: PlaygroundInfo
+  onOpenOriginal: () => void
+  /** D235g: Discard… (asks first). */
+  onDiscard: () => void
+}) {
   return (
     <div className="playground-band" role="note" aria-label="Playground">
       <Icon name="playground" />
@@ -108,6 +190,9 @@ export function PlaygroundBand({ playground, onOpenOriginal }: { playground: Pla
         onClick={onOpenOriginal}
       >
         Open original
+      </button>
+      <button className="quiet" title="Send this playground to the recycle bin (asks first)" onClick={onDiscard}>
+        Discard…
       </button>
     </div>
   )

@@ -150,6 +150,14 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
 }
 
 /** D235: "Playground 1", or the first number not taken by the investigation's playgrounds. */
+/** A file or folder size: "512 B", "84 kB", "3.2 MB", "1.25 GB". */
+export function byteSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(0)} kB`
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+}
+
 export function nextPlaygroundName(taken: string[]): string {
   for (let n = 1; ; n++) if (!taken.includes(`Playground ${n}`)) return `Playground ${n}`
 }

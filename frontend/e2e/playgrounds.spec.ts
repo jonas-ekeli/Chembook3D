@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { E2E_DIR, startPage } from './helpers.ts'
@@ -64,4 +65,71 @@ test('a playground is made from the start page and listed under its original', a
   await playground.click()
   await expect(band).toBeVisible()
   await expect(page.getByRole('group', { name: 'Node Only in the playground', exact: true })).toBeVisible()
+})
+
+// D235g, D235i, T-UI-101: "Make a playground first" on Claude's Work on its own warning opens a
+// playground with the switch on there; Discard… sends a playground to the recycle bin, from its
+// band (closing it) or from its row on the start page.
+
+test('Claude is given a playground first, and playgrounds are discarded', async ({ page }) => {
+  const stamp = Date.now()
+  const folder = join(E2E_DIR, `alone-${stamp}`)
+  const name = `Alone ${stamp}`
+  expect((await page.request.post('/api/investigations', { data: { folder, name } })).ok()).toBeTruthy()
+  await page.request.post('/api/nodes', { data: { label: 'INT1' } })
+  await page.goto('/')
+  await expect(page.locator('.investigation')).toHaveText(name)
+
+  await page.getByRole('button', { name: 'Claude', exact: true }).click()
+  const panel = page.getByRole('complementary', { name: 'Claude' })
+  await panel.getByRole('checkbox', { name: 'Work on its own' }).click()
+  const warning = page.getByRole('dialog', { name: 'Let Claude work on its own?' })
+  await expect(warning).toContainText('Or make a playground first')
+  await expect(warning).toContainText('a copy of the investigation is saved now')
+  await warning.getByLabel('Longest local job Claude may start').selectOption({ label: '10 minutes' })
+  await warning.getByRole('button', { name: 'Make a playground first' }).click()
+  await expect(warning).toHaveCount(0)
+
+  // The playground is open with the switch on there; the original's stays off, with no backup.
+  const band = page.getByRole('note', { name: 'Playground' })
+  await expect(band).toContainText(`Playground 1 is a playground of ${name}`)
+  await expect(panel.getByRole('checkbox', { name: 'Work on its own' })).toBeChecked()
+  await expect(panel.getByRole('status', { name: 'Working on its own' })).toContainText('local jobs of up to 10 minutes')
+  expect(existsSync(join(folder, 'backups'))).toBe(false)
+  // In the playground the warning offers no playground, and says none is needed.
+  await panel.getByRole('button', { name: 'Stop and turn off' }).click()
+  await panel.getByRole('checkbox', { name: 'Work on its own' }).click()
+  await expect(warning).toContainText('changes this playground without asking you first')
+  await expect(warning).toContainText('no backup is made')
+  await expect(warning.getByRole('button', { name: 'Make a playground first' })).toHaveCount(0)
+  await warning.getByRole('button', { name: 'Cancel' }).click()
+
+  // Discard… from the band: named, sized, then gone, and the start page shows.
+  await band.getByRole('button', { name: 'Discard…' }).click()
+  const discard = page.getByRole('dialog', { name: 'Discard Playground 1?' })
+  await expect(discard).toContainText(`Its original, ${name}, is not changed`)
+  await expect(discard).toContainText(join(folder, 'playgrounds', 'Playground 1'))
+  await discard.getByRole('button', { name: 'Discard', exact: true }).click()
+  await expect(discard).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Recently opened' })).toBeVisible()
+  expect(existsSync(join(folder, 'playgrounds', 'Playground 1'))).toBe(false)
+  expect(readdirSync(join(E2E_DIR, 'trash')).some((f) => f.startsWith('Playground 1-'))).toBe(true)
+  const recent = page.getByRole('list', { name: 'Recently opened' })
+  await expect(recent.getByRole('button', { name: `Playground 1, playground of ${name}` })).toHaveCount(0)
+
+  // Discard… from a start-page row; Cancel first leaves it.
+  const made = await page.request.post('/api/playgrounds', { data: { folder, name: 'Second' } })
+  expect(made.ok()).toBeTruthy()
+  await startPage(page)
+  const row = recent.getByRole('listitem').filter({ hasText: 'Playground of' }).filter({ hasText: 'Second' })
+  await row.getByRole('button', { name: 'More for Second' }).click()
+  await page.getByRole('menuitem', { name: 'Discard…' }).click()
+  const second = page.getByRole('dialog', { name: 'Discard Second?' })
+  await second.getByRole('button', { name: 'Cancel' }).click()
+  await expect(row).toHaveCount(1)
+  await row.getByRole('button', { name: 'More for Second' }).click()
+  await page.getByRole('menuitem', { name: 'Discard…' }).click()
+  await second.getByRole('button', { name: 'Discard', exact: true }).click()
+  await expect(row).toHaveCount(0)
+  await expect(recent.getByRole('listitem').filter({ hasText: name }).first()).toBeVisible()
 })
