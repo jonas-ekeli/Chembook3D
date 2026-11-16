@@ -26,15 +26,36 @@ type Session = Xterm & {
 /** D223: the warning shown before Claude may work on its own, with what it may start. */
 function AutonomyDialog({
   autonomy,
+  playground,
   onCancel,
   onTurnOn,
+  onPlaygroundFirst,
 }: {
   autonomy: ClaudeAutonomy
+  /** D235i: the open investigation is a playground. */
+  playground: boolean
   onCancel: () => void
   onTurnOn: (jobLimit: number, cloud: boolean) => void
+  /** D235i: make a playground of this investigation and turn it on there instead. */
+  onPlaygroundFirst?: (jobLimit: number, cloud: boolean) => Promise<void>
 }) {
   const [limit, setLimit] = useState(autonomy.job_limit)
   const [cloud, setCloud] = useState(false)
+  const [making, setMaking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const first = !playground ? onPlaygroundFirst : undefined
+  const makeFirst = () => {
+    if (!first || making) return
+    setMaking(true)
+    setError(null)
+    first(limit, cloud).then(
+      () => setMaking(false),
+      (err: unknown) => {
+        setMaking(false)
+        setError(errorText(err))
+      },
+    )
+  }
   return (
     <Modal
       title="Let Claude work on its own?"
@@ -42,23 +63,47 @@ function AutonomyDialog({
       actions={
         <>
           <button onClick={onCancel}>Cancel</button>
-          <button className="danger" onClick={() => onTurnOn(limit, cloud)}>
-            Turn on
+          {first && (
+            <button
+              className="primary"
+              disabled={making}
+              title="A working copy of this investigation, opened with this switch on; this one is not changed"
+              onClick={makeFirst}
+            >
+              {making ? 'Making…' : 'Make a playground first'}
+            </button>
+          )}
+          <button className="danger" disabled={making} onClick={() => onTurnOn(limit, cloud)}>
+            {first ? 'Turn on here' : 'Turn on'}
           </button>
         </>
       }
     >
       <p>
-        While this is on, Claude changes this investigation without asking you first. It creates and changes nodes,
+        While this is on, Claude changes this {playground ? 'playground' : 'investigation'} without asking you first. It creates and changes nodes,
         edges, steps, branches, groups and analyses, imports files, and starts calculations on this computer. It also
         makes choices the app otherwise leaves to you, such as which pathway to follow or which conformer represents a
         group, and notes each one as “Claude chose”. It also opens web pages without asking, and a page can mislead
         it.
       </p>
-      <p>
-        <strong>Claude can be wrong.</strong> Check its work before you rely on it: every change is marked “claude” in
-        the history, and a copy of the investigation is saved now, in its backups folder.
-      </p>
+      {playground ? (
+        <p>
+          <strong>Claude can be wrong.</strong> Check its work before you rely on it: every change is marked “claude” in
+          the history. Its original is not changed, so no backup is made; discard the playground if you do not want
+          what Claude did.
+        </p>
+      ) : (
+        <p>
+          <strong>Claude can be wrong.</strong> Check its work before you rely on it: every change is marked “claude” in
+          the history, and a copy of the investigation is saved now, in its backups folder.
+        </p>
+      )}
+      {first && (
+        <p>
+          <strong>Or make a playground first:</strong> a working copy of this investigation, opened with this switch
+          on, for Claude to work in while this one stays as it is. Start Claude there once it opens.
+        </p>
+      )}
       <p className="muted">
         Still asked or switched off: deleting anything Claude did not make itself, everything on a server beyond new
         files where you allowed them, and shell and file tools. It turns off when the app restarts.
@@ -77,6 +122,7 @@ function AutonomyDialog({
         <input type="checkbox" checked={cloud} onChange={(event) => setCloud(event.target.checked)} /> Also start
         cloud sessions (uses your Claude usage)
       </label>
+      {error && <p role="alert">{error}</p>}
     </Modal>
   )
 }
@@ -87,11 +133,17 @@ const QUESTION_POLL = 2500
 export function ClaudePanel({
   open,
   onAttention,
+  playground = false,
+  onPlaygroundFirst,
 }: {
   /** The panel is shown on this tab. */
   open: boolean
   /** A cloud job's launch asks something: show the panel. */
   onAttention: () => void
+  /** D235i: the open investigation is a playground. */
+  playground?: boolean
+  /** D235i: "Make a playground first" on the Work on its own warning. */
+  onPlaygroundFirst?: (jobLimit: number, cloud: boolean) => Promise<void>
 }) {
   const [status, setStatus] = useState<ClaudeStatus | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
@@ -319,8 +371,8 @@ export function ClaudePanel({
       {autonomy?.on && (
         <div className="claude-alone" role="status" aria-label="Working on its own">
           <span>
-            <strong>Claude is working on its own.</strong> It changes this investigation without asking, and starts
-            local jobs of up to {limitText(autonomy.job_limit)}
+            <strong>Claude is working on its own.</strong> It changes this {playground ? 'playground' : 'investigation'}{' '}
+            without asking, and starts local jobs of up to {limitText(autonomy.job_limit)}
             {autonomy.cloud ? ' and cloud sessions' : ''}. Jobs it started keep running when you stop it; cancel them
             in Local jobs.
           </span>
@@ -333,8 +385,10 @@ export function ClaudePanel({
         createPortal(
           <AutonomyDialog
             autonomy={autonomy}
+            playground={playground}
             onCancel={() => setAsking(false)}
             onTurnOn={(jobLimit, cloud) => void switchAutonomy(true, jobLimit, cloud)}
+            onPlaygroundFirst={onPlaygroundFirst}
           />,
           document.body,
         )}

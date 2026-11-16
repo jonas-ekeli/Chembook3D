@@ -5672,6 +5672,11 @@ table.scan-path-held input.drive-value {
   background: var(--play-bg);
   border-bottom: 1px solid var(--play-border);
 }
+.recent-forget-space {
+  flex: none;
+  width: var(--ctl-h);
+  margin-right: 8px;
+}
 .playground-band .muted {
   color: var(--text-2);
 }

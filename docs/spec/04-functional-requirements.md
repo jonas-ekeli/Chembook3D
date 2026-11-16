@@ -10,9 +10,10 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-INV-02 | The app opens an investigation by folder, and keeps a list of recently opened ones; a folder that no longer holds an investigation is marked, and any entry can be removed from the list without touching its folder (D229). | WF-01 | 1 |
 | FR-INV-03 | An investigation folder copied or unzipped to another machine (Windows ↔ Linux) opens with all records and files intact. | D10, D21 | 1 |
 | FR-INV-04 | From the start page, the app makes a playground of an investigation: a full working copy in its `playgrounds/` folder, with the same record ids, a frozen copy of the database as the merge base and its files hard-linked (copied where the disk cannot link); the start page lists playgrounds indented under their original, and a band in the playground names it and its original. A playground is never synced (D235). | D235 | — |
-| FR-INV-05 | A playground can be discarded: after a confirmation that names its folder and size, its folder goes to the recycle bin and the original is not touched (D235g). | D235 | — |
+| FR-INV-05 | A playground can be discarded: after a confirmation that names its folder and size, its folder goes to the recycle bin and the original is not touched (D235g). | D235, A168 | — |
 | FR-INV-06 | A playground can be merged once into its original: a review of what it added, changed and removed, grouped by node, with a tick each, removals unticked, conflicts picked, a preview in a rolled-back session, a backup, and history entries that keep their source; a merged playground opens read-only (D235h). | D235 | — |
 | FR-INV-07 | A merge can be undone from its history entry, unless later work builds on it (D235j). | D235 | — |
+| FR-INV-08 | Claude works in a playground only when the person asks: "Make a playground first" on the Work on its own warning makes a playground of the open investigation and opens it with the switch on there; in a playground the switch makes no backup and Claude is told it works in a copy; Claude cannot make, merge or discard a playground itself (D235i). | D235, A168 | — |
 
 **AC:** create an investigation, add a node and import a file, zip the folder, unzip it on the other OS and open it: all nodes, calculations, files and history are present, and no absolute paths are needed.
 

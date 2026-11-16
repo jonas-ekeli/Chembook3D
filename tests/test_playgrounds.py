@@ -1,5 +1,6 @@
-"""Playgrounds (D235, FR-INV-04): a working copy of an investigation in its playgrounds/ folder,
-with the same record ids, a frozen base and hard-linked files (T-OPS-08, T-OPS-09)."""
+"""Playgrounds (D235, FR-INV-04, FR-INV-05): a working copy of an investigation in its
+playgrounds/ folder, with the same record ids, a frozen base and hard-linked files (T-OPS-08,
+T-OPS-09), discarded to the recycle bin (T-OPS-11), and Claude's part (T-OPS-12)."""
 
 import os
 import sqlite3
@@ -8,11 +9,16 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
-from chembook3d import playgrounds, sync
+from chembook3d import claude_panel, playgrounds, sync
 from chembook3d import settings as app_settings
-from chembook3d.investigation import BACKUP_DIR, DB_NAME, LOCK_NAME
+from chembook3d.app import create_app
+from chembook3d.investigation import BACKUP_DIR, DB_NAME, LOCK_NAME, acquire_ownership
 from tests.conftest import WATER
+
+APP = "http://127.0.0.1:8765"
+ORIGIN = {"origin": APP}  # the app's own page
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gaussian"
 SINGLE_POINT = FIXTURES / "aminationTS-full-unfrz-c1_sp_tzpop.log"
@@ -252,3 +258,130 @@ def test_migration_0032_gives_older_investigations_an_id(tmp_path):
         assert int(info.uuid, 16) >= 0
     finally:
         opened.close()
+
+
+@pytest.fixture
+def page():
+    """A client that reaches the app as its own page in the browser on this computer does."""
+    with TestClient(create_app(), base_url=APP, client=("127.0.0.1", 50000)) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def trashed(monkeypatch):
+    """The folders sent to the recycle bin, which the test then deletes itself."""
+    sent: list[Path] = []
+
+    def to_trash(path):
+        sent.append(Path(path))
+        import shutil
+
+        shutil.rmtree(path)
+
+    monkeypatch.setattr(playgrounds, "send2trash", to_trash)
+    return sent
+
+
+def test_discard_sends_the_playground_to_the_recycle_bin(page, tmp_path, trashed):
+    # T-OPS-11: closed first when open, its folder named and sized, the original untouched
+    original = _original(page, tmp_path)
+    assert _make(page, original).status_code == 200
+    folder = (original / "playgrounds" / "Playground 1").resolve()
+    page.post("/api/nodes", json={"label": "Only here", "xyz": WATER})
+
+    preview = page.get("/api/playgrounds/discard-preview", params={"folder": str(folder)}).json()
+    assert preview["name"] == "Playground 1" and preview["original_name"] == "RuCAAC cycle"
+    assert Path(preview["folder"]) == folder and preview["files"] >= 3
+    linked = next((folder / "files").rglob("*.log")).stat().st_size
+    assert preview["size"] - preview["frees"] >= linked  # hard-linked files free nothing
+
+    body = {"folder": str(folder)}
+    assert page.post("/api/playgrounds/discard", json=body).status_code == 403  # not the page
+    assert folder.is_dir() and page.get("/api/investigation").json()["playground"]
+    done = page.post("/api/playgrounds/discard", json=body, headers=ORIGIN)
+    assert done.status_code == 204, done.text
+    assert trashed == [folder] and not folder.exists()
+    assert page.get("/api/investigation").json() is None  # it was closed: none is open
+    assert page.get("/api/playgrounds").json() == {}
+    assert next((original / "files").rglob("*.log")).is_file()
+
+    page.post("/api/investigations/open", json={"folder": str(original)})
+    assert "Only here" not in {n["label"] for n in page.get("/api/nodes").json()}
+
+
+def test_discard_refuses_anything_but_an_unopened_playground(page, tmp_path, trashed):
+    original = _original(page, tmp_path)
+    assert _make(page, original).status_code == 200
+    page.post("/api/investigations/close")
+    folder = original / "playgrounds" / "Playground 1"
+
+    # The original, a folder outside it, a playground moved out of its original
+    for refused in (original, tmp_path, tmp_path / "missing"):
+        answer = page.post(
+            "/api/playgrounds/discard", json={"folder": str(refused)}, headers=ORIGIN
+        )
+        assert answer.status_code == 422 and "not a playground" in answer.json()["detail"]
+    preview = page.get("/api/playgrounds/discard-preview", params={"folder": str(original)})
+    assert preview.status_code == 422
+    assert trashed == [] and (original / DB_NAME).is_file()
+
+    # Open in another app: refused, and nothing moved
+    owner = acquire_ownership(folder)
+    try:
+        answer = page.post("/api/playgrounds/discard", json={"folder": str(folder)}, headers=ORIGIN)
+        assert answer.status_code == 409 and folder.is_dir() and trashed == []
+    finally:
+        owner.release()
+
+    # Where the recycle bin cannot take it, nothing is deleted (A168)
+    def no_bin(_path):
+        raise OSError("no recycle bin on this drive")
+
+    playgrounds.send2trash = no_bin  # undone by the fixture's monkeypatch
+    answer = page.post("/api/playgrounds/discard", json={"folder": str(folder)}, headers=ORIGIN)
+    assert answer.status_code == 422 and "nothing was deleted" in answer.json()["detail"]
+    assert (folder / DB_NAME).is_file()
+
+
+def test_make_a_playground_first_turns_claude_on_there(page, tmp_path):
+    # T-OPS-12: "Make a playground first" on the Work on its own warning; no backup is made
+    original = _original(page, tmp_path)
+    alone = {"folder": str(original), "alone": {"job_limit": 600, "cloud": False}}
+    assert page.post("/api/playgrounds", json=alone).status_code == 403  # Claude: no origin
+    assert not (original / "playgrounds").exists()
+
+    made = page.post("/api/playgrounds", json=alone, headers=ORIGIN)
+    assert made.status_code == 200, made.text
+    assert made.json()["playground"]["name"] == "Playground 1"  # named for it (A165)
+    state = page.get("/api/claude/autonomy").json()
+    assert state["on"] and state["job_limit"] == 600 and state["backup"] is None
+    assert not (Path(made.json()["folder"]) / BACKUP_DIR).exists()
+    # The switch itself in a playground makes no backup either.
+    page.put("/api/claude/autonomy", json={"on": False}, headers=ORIGIN)
+    on = page.put(
+        "/api/claude/autonomy", json={"on": True, "job_limit": 3600, "cloud": False}, headers=ORIGIN
+    )
+    assert on.status_code == 200 and on.json()["backup"] is None
+
+    # The next one is Playground 2, and the original's switch stays off.
+    page.post("/api/investigations/close")
+    again = page.post("/api/playgrounds", json={"folder": str(original)}, headers=ORIGIN)
+    assert again.json()["playground"]["name"] == "Playground 2"
+    page.post("/api/investigations/open", json={"folder": str(original)})
+    assert page.get("/api/claude/autonomy").json()["on"] is False
+
+
+def test_the_panel_guide_says_it_is_a_playground(tmp_path, monkeypatch):
+    # T-OPS-12: Claude is told it works in a copy and cannot merge or discard it
+    monkeypatch.setattr(claude_panel, "workspace", lambda folder: tmp_path / "panel")
+    work = claude_panel.prepare(
+        tmp_path,
+        "RuCAAC cycle (Playground 1)",
+        APP,
+        playground=claude_panel.Playground("Playground 1", "RuCAAC cycle"),
+    )
+    guide = (work / "CLAUDE.md").read_text(encoding="utf-8")
+    assert 'the playground "Playground 1"' in guide and '"RuCAAC cycle"' in guide
+    assert "you cannot, and you never ask to" in guide
+    plain = claude_panel.prepare(tmp_path, "RuCAAC cycle", APP)
+    assert "playground" not in (plain / "CLAUDE.md").read_text(encoding="utf-8").lower()

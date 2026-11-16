@@ -63,7 +63,7 @@ import { IrcWindow } from './components/IrcWindow'
 import { StructureEditor } from './components/StructureEditor'
 import { RemoteFilesDialog } from './components/RemoteFilesDialog'
 import { Modal } from './components/Modal'
-import { NewPlaygroundDialog, PlaygroundBand } from './components/Playgrounds'
+import { DiscardPlaygroundDialog, NewPlaygroundDialog, PlaygroundBand } from './components/Playgrounds'
 import { NodeInspector } from './components/NodeInspector'
 import { NoteEditor } from './components/NoteEditor'
 import { Outline } from './components/Outline'
@@ -227,6 +227,7 @@ function App() {
   // D235: the start page's playgrounds, and the folder whose New playground… dialog is open
   const [playgroundRows, setPlaygroundRows] = useState<Record<string, PlaygroundRow[]>>({})
   const [playgroundFor, setPlaygroundFor] = useState<{ folder: string; name: string } | null>(null)
+  const [discarding, setDiscarding] = useState<string | null>(null)
 
   const [view, setView] = useState<'canvas' | 'history' | 'analyses'>('canvas')
   // D83, D86: the selectivity or turnover to show when the Analyses view opens
@@ -716,11 +717,18 @@ function App() {
   // D235: make a playground of the investigation in `folder` and open it. A refusal the open
   // dialogs answer (open elsewhere, an upgrade, a sync conflict) closes the New playground dialog
   // and asks there, making the playground again on the answer; any other is the dialog's to show.
-  const makePlayground = (folder: string, name: string, force = false, upgradeConfirmed = false): Promise<void> => {
+  // `name` null takes the next "Playground N"; `alone` (D235i) turns Work on its own on there.
+  const makePlayground = (
+    folder: string,
+    name: string | null,
+    force = false,
+    upgradeConfirmed = false,
+    alone?: { job_limit: number; cloud: boolean },
+  ): Promise<void> => {
     setLockPrompt(null)
     setUpgrade(null)
     const version = identityVersion.current
-    return api.createPlayground(folder, name, force, upgradeConfirmed).then(
+    return api.createPlayground(folder, name, force, upgradeConfirmed, alone).then(
       (inv) => {
         setPlaygroundFor(null)
         if (version !== identityVersion.current) return
@@ -730,12 +738,19 @@ function App() {
       (err: unknown) => {
         if (err instanceof ApiError && (err.lock || err.needsUpgrade || err.syncConflict)) {
           setPlaygroundFor(null)
-          openFailed(folder, (f, u) => void makePlayground(folder, name, f, u).catch(openFailed(folder)))(err)
+          openFailed(folder, (f, u) => void makePlayground(folder, name, f, u, alone).catch(openFailed(folder)))(err)
           return
         }
         throw err
       },
     )
+  }
+
+  // D235g: a playground discarded (from its band, closing it, or from the start page).
+  const discarded = (fromBand: boolean) => {
+    setDiscarding(null)
+    if (fromBand) closed()
+    else api.playgrounds().then(setPlaygroundRows, () => undefined)
   }
 
   // D235: the start page lists each recent folder's playgrounds; read again when it shows and
@@ -1750,6 +1765,7 @@ function App() {
         onForget={(folder) => api.forgetRecent(folder).then(setSettings, (err: unknown) => setError(errorText(err)))}
         playgrounds={playgroundRows}
         onNewPlayground={(folder, name) => setPlaygroundFor({ folder, name })}
+        onDiscardPlayground={setDiscarding}
         notices={<LaunchNotices />}
       >
         {dialogs}
@@ -1760,6 +1776,13 @@ function App() {
             taken={(playgroundRows[playgroundFor.folder] ?? []).map((row) => row.name)}
             onCancel={() => setPlaygroundFor(null)}
             onMake={(name) => makePlayground(playgroundFor.folder, name)}
+          />
+        )}
+        {discarding && (
+          <DiscardPlaygroundDialog
+            folder={discarding}
+            onCancel={() => setDiscarding(null)}
+            onDiscarded={() => discarded(false)}
           />
         )}
       </StartPage>
@@ -2765,6 +2788,14 @@ function App() {
           <PlaygroundBand
             playground={investigation.playground}
             onOpenOriginal={() => openFolder(investigation.playground!.original_folder)}
+            onDiscard={() => setDiscarding(investigation.folder)}
+          />
+        )}
+        {investigation.playground && discarding && (
+          <DiscardPlaygroundDialog
+            folder={discarding}
+            onCancel={() => setDiscarding(null)}
+            onDiscarded={() => discarded(true)}
           />
         )}
         {view === 'canvas' && viewRestored === shown && (
@@ -3050,6 +3081,10 @@ function App() {
             onInspect={inspect}
             onScanEditor={openScanEditor}
             onCwd={followCwd}
+            playground={investigation.playground != null}
+            onPlaygroundFirst={(job_limit, cloud) =>
+              makePlayground(investigation.folder, null, false, false, { job_limit, cloud })
+            }
           />
         </div>
         {dialogs}

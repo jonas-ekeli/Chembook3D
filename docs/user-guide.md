@@ -216,8 +216,21 @@ canvas and the view.
   `.gitignore`. Local jobs run in the playground's own folder, and jobs still running in the
   original bring their results to the original only.
 - A playground cannot have playgrounds of its own.
+- **Discard…**, in the band or in the playground's **⋯** menu on the start screen, sends its
+  folder to the recycle bin after showing its folder and size (its files shared with the
+  original free no room). The original is not changed. If the recycle bin cannot take it, as on
+  some network drives, nothing is deleted.
 
-Merging a playground back into its original and discarding one come in later versions.
+### Let Claude work in a playground
+
+When you tick **Work on its own** in the Claude panel, the warning offers **Make a playground
+first**. That makes a playground of the open investigation and opens it with the switch on there,
+with the job limit you picked, so Claude's changes stay in the copy. Start Claude in the
+playground once it opens (a new conversation: Claude's conversations belong to each folder).
+In a playground the switch makes no backup, since the original is the copy. Claude is told it
+works in a playground; only you can merge or discard one.
+
+Merging a playground back into its original comes in a later version.
 
 ## Sync investigations between computers
 

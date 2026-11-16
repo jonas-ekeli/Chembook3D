@@ -84,6 +84,18 @@ export type PlaygroundRow = {
   foreign: boolean
 }
 
+/** D235g: what Discard's confirmation names. */
+export type PlaygroundDiscardPreview = {
+  folder: string
+  name: string
+  original_name: string
+  files: number
+  /** Bytes in its folder. */
+  size: number
+  /** Bytes discarding frees: files hard-linked with the original's free nothing. */
+  frees: number
+}
+
 export type CalculationType =
   | 'optimization'
   | 'ts_optimization'
@@ -2563,8 +2575,19 @@ export const api = {
   /** D235: the playgrounds of the recent folders, by folder as the recent list holds it. */
   playgrounds: () => request<Record<string, PlaygroundRow[]>>('GET', '/playgrounds'),
   /** D235: make a playground of the investigation in `folder` and open it. */
-  createPlayground: (folder: string, name: string, force = false, upgrade = false) =>
-    request<Investigation & { notice: string | null }>('POST', '/playgrounds', { folder, name, force, upgrade }),
+  /** `name` null: the first "Playground N" not taken; `alone` (D235i): turn Work on its own on there. */
+  createPlayground: (
+    folder: string,
+    name: string | null,
+    force = false,
+    upgrade = false,
+    alone?: { job_limit: number; cloud: boolean },
+  ) =>
+    request<Investigation & { notice: string | null }>('POST', '/playgrounds', { folder, name, force, upgrade, alone }),
+  playgroundDiscardPreview: (folder: string) =>
+    request<PlaygroundDiscardPreview>('GET', `/playgrounds/discard-preview?folder=${encodeURIComponent(folder)}`),
+  /** D235g: the playground's folder goes to the recycle bin; closed first when it is open. */
+  discardPlayground: (folder: string) => request<void>('POST', '/playgrounds/discard', { folder }),
   /** Closing a linked investigation also pushes it; the answer is the sync state (D71). */
   closeInvestigation: () => request<SyncStatus | null>('POST', '/investigations/close'),
   syncStatus: () => request<SyncStatus>('GET', '/sync'),

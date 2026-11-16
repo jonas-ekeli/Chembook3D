@@ -61,14 +61,15 @@ class Autonomy:
     def on_for(self, folder: str | Path | None) -> bool:
         return bool(self.folder) and folder is not None and str(folder) == self.folder
 
-    def turn_on(self, folder: Path, job_limit: int, cloud: bool) -> None:
-        backup = backup_database(folder)
+    def turn_on(self, folder: Path, job_limit: int, cloud: bool, backup: bool = True) -> None:
+        """`backup` False in a playground (D235i): its base and its original are the copy."""
+        copy = backup_database(folder) if backup else None
         with self.lock:
             self.folder = str(folder)
             self.job_limit = int(job_limit)
             self.cloud = bool(cloud)
             self.since = datetime.now(UTC).isoformat(timespec="seconds")
-            self.backup = backup
+            self.backup = copy
 
     def turn_off(self) -> None:
         with self.lock:

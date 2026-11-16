@@ -95,7 +95,7 @@ PROFILES = re.compile(r"^/api/energy-profiles(/.*)?$")
 IDENTITY_DISCOVERY = re.compile(
     r"^/api/(live|presence|investigation|health|folders|remote|investigations"
     r"|investigations/open|investigations/clone|sync/resolve"
-    r"|playgrounds)$"  # D235: the start page lists and makes playgrounds
+    r"|playgrounds|playgrounds/discard-preview|playgrounds/discard)$"  # D235: start page
 )
 
 

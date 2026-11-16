@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 from pydantic import BaseModel, Field
 from starlette.datastructures import Headers
 
-from chembook3d import autonomy, claude_panel, cloud_jobs, keep_going, local_jobs
+from chembook3d import autonomy, claude_panel, cloud_jobs, keep_going, local_jobs, playgrounds
 from chembook3d.api.routes import _investigation
 
 router = APIRouter(prefix="/api/claude")
@@ -48,6 +48,7 @@ class _Launch:
     name: str
     app_url: str
     alone: claude_panel.Alone | None = None  # D223: Claude works on its own in this session
+    playground: claude_panel.Playground | None = None  # D235i: the investigation is a playground
 
 
 @dataclass
@@ -165,8 +166,16 @@ def new_session(body: LaunchIn, request: Request) -> LaunchOut:
         name=investigation.name,
         app_url=f"http://127.0.0.1:{port}",
         alone=_alone(request, investigation.folder),
+        playground=_playground(investigation),
     )
     return LaunchOut(token=token)
+
+
+def _playground(investigation) -> claude_panel.Playground | None:
+    found = playgrounds.describe(investigation)
+    if found is None:
+        return None
+    return claude_panel.Playground(name=found["name"], original=found["original_name"])
 
 
 # ---------- Claude working on its own (D223) ----------
@@ -229,7 +238,9 @@ def set_autonomy(body: AutonomyIn, request: Request) -> AutonomyOut:
     investigation = _investigation(request)
     state: autonomy.Autonomy = request.app.state.live.autonomy
     if body.on:
-        state.turn_on(investigation.folder, body.job_limit, body.cloud)
+        # D235i: a playground needs no backup; its base and its original are the copy
+        playground = playgrounds.describe(investigation) is not None
+        state.turn_on(investigation.folder, body.job_limit, body.cloud, backup=not playground)
     else:
         state.turn_off()
     _panel(request.app).close_all()
@@ -341,7 +352,9 @@ async def terminal(websocket: WebSocket) -> None:
         loop.call_soon_threadsafe(queue.put_nowait, text)
 
     try:
-        work = claude_panel.prepare(launch.folder, launch.name, launch.app_url, launch.alone)
+        work = claude_panel.prepare(
+            launch.folder, launch.name, launch.app_url, launch.alone, launch.playground
+        )
         process = claude_panel.Terminal(
             claude_panel.command(executable, launch.resume),
             work,

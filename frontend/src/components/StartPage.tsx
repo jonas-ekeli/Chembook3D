@@ -137,7 +137,17 @@ function changedSince(changed: number | null): string | null {
 }
 
 /** D235: a playground, indented under its original. */
-function PlaygroundRowItem({ row, original, onOpen }: { row: PlaygroundRow; original: string; onOpen: () => void }) {
+function PlaygroundRowItem({
+  row,
+  original,
+  onOpen,
+  onDiscard,
+}: {
+  row: PlaygroundRow
+  original: string
+  onOpen: () => void
+  onDiscard: () => void
+}) {
   const since = changedSince(row.changed)
   return (
     <li className="playground-row">
@@ -172,6 +182,20 @@ function PlaygroundRowItem({ row, original, onOpen }: { row: PlaygroundRow; orig
           {since && <span>{since}</span>}
         </span>
       </button>
+      <MoreMenu
+        label={`More for ${row.name}`}
+        items={[
+          {
+            label: 'Discard…',
+            icon: 'trash',
+            danger: true,
+            title: 'Send this playground to the recycle bin (asks first); the original is not changed',
+            onSelect: onDiscard,
+          },
+        ]}
+      />
+      {/* in line with the remove buttons of the rows above */}
+      <span className="recent-forget-space" />
     </li>
   )
 }
@@ -187,6 +211,7 @@ export function StartPage({
   onForget,
   playgrounds,
   onNewPlayground,
+  onDiscardPlayground,
   notices,
   children,
 }: {
@@ -203,6 +228,8 @@ export function StartPage({
   playgrounds: Record<string, PlaygroundRow[]>
   /** D235: New playground… on a recent folder's menu (its folder and name). */
   onNewPlayground: (folder: string, name: string) => void
+  /** D235g: Discard… on a playground's row. */
+  onDiscardPlayground: (folder: string) => void
   /** The launcher's notices, under the cards. */
   notices: ReactNode
   /** The dialogs the cards open. */
@@ -259,6 +286,7 @@ export function StartPage({
                     row={row}
                     original={names[index]}
                     onOpen={() => onOpenFolder(row.folder)}
+                    onDiscard={() => onDiscardPlayground(row.folder)}
                   />
                 ))}
               </Fragment>

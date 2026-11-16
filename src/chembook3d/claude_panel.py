@@ -362,6 +362,26 @@ class Alone:
     cloud: bool  # it may start cloud sessions too
 
 
+@dataclass(frozen=True)
+class Playground:
+    """D235i: the panel's investigation is a playground of another."""
+
+    name: str
+    original: str
+
+
+# D235i: added to the guide in a playground.
+PLAYGROUND_GUIDE = """
+# This is a playground (D235)
+
+The investigation open in the app is the playground "{name}", a working copy of the
+investigation "{original}" made to try things in. What you change here does not reach
+"{original}": only the person can merge a playground into its original or discard it, in the
+app; you cannot, and you never ask to. If the person wants
+something changed in the original itself, say that they need to open it.
+"""
+
+
 def workspace(folder: Path) -> Path:
     """The working folder of the panel for one investigation, in the app's config folder, so
     `claude --continue` picks up that investigation's last conversation. Named after the
@@ -372,7 +392,13 @@ def workspace(folder: Path) -> Path:
     return config_dir() / "claude" / f"{slug}-{digest}"
 
 
-def prepare(folder: Path, name: str, app_url: str, alone: Alone | None = None) -> Path:
+def prepare(
+    folder: Path,
+    name: str,
+    app_url: str,
+    alone: Alone | None = None,
+    playground: Playground | None = None,
+) -> Path:
     """Write the panel's working folder for an investigation and return it. `alone` (D223):
     Claude works on its own, so every tool is allowed and the guide says to decide and go on."""
     work = workspace(folder)
@@ -391,6 +417,11 @@ def prepare(folder: Path, name: str, app_url: str, alone: Alone | None = None) -
     if alone is not None:
         settings["hooks"] = stop_hook(app_url)
     guide = NOTEBOOK_GUIDE.format(name=name.replace("\n", " "))
+    if playground is not None:
+        guide += PLAYGROUND_GUIDE.format(
+            name=playground.name.replace("\n", " "),
+            original=playground.original.replace("\n", " "),
+        )
     if alone is not None:
         guide += AUTONOMY_GUIDE.format(
             limit=alone.limit,

@@ -20,6 +20,7 @@ dependencies = [
     "pywinpty>=2.0.14 ; sys_platform == 'win32'",
     "rdkit>=2025.9",
     "scipy>=1.11",
+    "send2trash>=1.8,<2",
     "sqlalchemy>=2.1.1",
     "uvicorn>=0.30",
     "websockets>=13",
