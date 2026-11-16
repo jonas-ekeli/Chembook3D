@@ -17,6 +17,8 @@ import {
   type GroupLayout,
   type HistoryEntry,
   type Investigation,
+  type MergeResult,
+  type MergeReview,
   type PlaygroundRow,
   type Node,
   type Note,
@@ -63,7 +65,12 @@ import { IrcWindow } from './components/IrcWindow'
 import { StructureEditor } from './components/StructureEditor'
 import { RemoteFilesDialog } from './components/RemoteFilesDialog'
 import { Modal } from './components/Modal'
-import { DiscardPlaygroundDialog, NewPlaygroundDialog, PlaygroundBand } from './components/Playgrounds'
+import {
+  DiscardPlaygroundDialog,
+  MergePlaygroundDialog,
+  NewPlaygroundDialog,
+  PlaygroundBand,
+} from './components/Playgrounds'
 import { NodeInspector } from './components/NodeInspector'
 import { NoteEditor } from './components/NoteEditor'
 import { Outline } from './components/Outline'
@@ -228,6 +235,7 @@ function App() {
   const [playgroundRows, setPlaygroundRows] = useState<Record<string, PlaygroundRow[]>>({})
   const [playgroundFor, setPlaygroundFor] = useState<{ folder: string; name: string } | null>(null)
   const [discarding, setDiscarding] = useState<string | null>(null)
+  const [merging, setMerging] = useState<{ folder: string; review: MergeReview } | null>(null)
 
   const [view, setView] = useState<'canvas' | 'history' | 'analyses'>('canvas')
   // D83, D86: the selectivity or turnover to show when the Analyses view opens
@@ -743,6 +751,34 @@ function App() {
         }
         throw err
       },
+    )
+  }
+
+  // D235h: Merge… closes what is open, opens the playground's original (as Open does: pulled
+  // first, the lock and upgrade prompts asking again) and shows the review over it.
+  const startMerge = (folder: string, force = false, upgradeConfirmed = false) => {
+    setLockPrompt(null)
+    setUpgrade(null)
+    setError(null)
+    const version = identityVersion.current
+    api.startMerge(folder, force, upgradeConfirmed).then(
+      (inv) => {
+        // The live link may have shown the original already (it follows the switch); the
+        // review is shown either way.
+        if (version === identityVersion.current) opened(inv, true)
+        setMerging({ folder, review: inv.review })
+      },
+      (err: unknown) => openFailed(folder, (f, u) => startMerge(folder, f, u))(err),
+    )
+  }
+
+  const merged = (result: MergeResult) => {
+    const name = merging?.review.playground.name ?? 'the playground'
+    setMerging(null)
+    const { added, changed, removed } = result.counts
+    setNotice(
+      `Merged ${name}: ${added} added, ${changed} changed, ${removed} removed.` +
+        (result.backup ? ` A copy from before is in backups as ${result.backup}.` : ''),
     )
   }
 
@@ -1766,6 +1802,7 @@ function App() {
         playgrounds={playgroundRows}
         onNewPlayground={(folder, name) => setPlaygroundFor({ folder, name })}
         onDiscardPlayground={setDiscarding}
+        onMergePlayground={(folder) => startMerge(folder)}
         notices={<LaunchNotices />}
       >
         {dialogs}
@@ -2788,7 +2825,16 @@ function App() {
           <PlaygroundBand
             playground={investigation.playground}
             onOpenOriginal={() => openFolder(investigation.playground!.original_folder)}
+            onMerge={() => startMerge(investigation.folder)}
             onDiscard={() => setDiscarding(investigation.folder)}
+          />
+        )}
+        {merging && (
+          <MergePlaygroundDialog
+            folder={merging.folder}
+            review={merging.review}
+            onCancel={() => setMerging(null)}
+            onMerged={merged}
           />
         )}
         {investigation.playground && discarding && (

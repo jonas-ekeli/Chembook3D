@@ -105,6 +105,7 @@ class InvestigationOut(BaseModel):
     linked: bool = False
     sync: SyncOut | None = None  # the outcome of the pull on open, if linked
     playground: PlaygroundOut | None = None  # D235: set when this is a playground
+    read_only: bool = False  # D235h: a merged playground, which takes no changes (Q64)
 
 
 class CreateInvestigationIn(BaseModel):
@@ -604,6 +605,7 @@ def _investigation_out(investigation: Investigation, status=None) -> Investigati
         linked=sync.is_linked(investigation.folder),
         sync=_sync_out(status),
         playground=PlaygroundOut(**playground) if playground else None,
+        read_only=investigation.read_only,
     )
 
 

@@ -1,8 +1,11 @@
-"""D235, FR-INV-04, FR-INV-05: making a playground of an investigation, the playgrounds the start
-page lists under their originals, and discarding one. None is an MCP tool: Claude makes a
-playground only through the Work on its own switch, and never merges or discards one (Q69)."""
+"""D235, FR-INV-04…06: making a playground of an investigation, the playgrounds the start page
+lists under their originals, discarding one and merging one into its original. None is an MCP
+tool: Claude makes a playground only through the Work on its own switch, and never merges or
+discards one (Q69)."""
 
+import os
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -15,12 +18,21 @@ from chembook3d.api.routes import (
     InvestigationOut,
     UtcDatetime,
     _begin_switch,
+    _investigation,
+    _investigation_out,
     _set_open,
     _staging,
     close_and_push,
     open_pulled,
 )
-from chembook3d.investigation import InvestigationError, InvestigationLocked, open_investigation
+from chembook3d.investigation import (
+    Investigation,
+    InvestigationError,
+    InvestigationLocked,
+    acquire_ownership,
+    open_investigation,
+)
+from chembook3d.services import playground_merge
 
 router = APIRouter(prefix="/api")
 
@@ -174,3 +186,182 @@ def discard_playground(body: DiscardIn, request: Request):
         raise HTTPException(409, {"locked": exc.lock, "message": str(exc)}) from exc
     except InvestigationError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+# ---------- merge (D235h, FR-INV-06) ----------
+
+
+class MergeStartIn(BaseModel):
+    folder: str  # the playground's folder
+    force: bool = False  # as Open: open the original although its lock file says it is open
+    upgrade: bool = False
+
+
+class MergeIn(BaseModel):
+    folder: str  # the playground's folder
+    ticked: list[str] = Field(default_factory=list)  # change ids; what they need comes along
+
+
+class MergeFieldOut(BaseModel):
+    field: str
+    base: Any = None
+    playground: Any = None
+    original: Any = None
+    conflict: bool = False  # changed to different values on both sides
+
+
+class MergeChangeOut(BaseModel):
+    id: str  # "<record_type>:<record_id>"
+    record_type: str
+    record_id: str
+    kind: str  # added | changed | removed | conflict
+    label: str
+    summary: str
+    fields: list[MergeFieldOut]
+    conflict: str | None = None  # why it is a conflict; ticking takes the playground's side
+    ticked: bool  # the default
+    requires: list[str]  # change ids it brings
+    blocked: str | None = None  # why it cannot be merged
+
+
+class MergeSectionOut(BaseModel):
+    key: str
+    title: str
+    changes: list[MergeChangeOut]
+
+
+class MergePlaygroundOut(BaseModel):
+    name: str
+    folder: str
+    created_at: UtcDatetime | None = None
+
+
+class MergeReviewOut(BaseModel):
+    playground: MergePlaygroundOut
+    original_name: str
+    changed_since: int  # the original's history entries since the playground was made
+    sections: list[MergeSectionOut]
+
+
+class MergeStartOut(InvestigationOut):
+    review: MergeReviewOut
+
+
+class MergeResultOut(BaseModel):
+    counts: dict[str, int]  # added, changed, removed
+    brought: list[str]  # changes not ticked but needed by a ticked one
+    blockers: list[str]
+    backup: str | None = None  # the original's copy in backups/, once merged
+    history_id: int | None = None  # the merge's entry in the original's history
+
+
+def _merge_errors(exc: InvestigationError) -> HTTPException:
+    if isinstance(exc, InvestigationLocked):
+        return HTTPException(409, {"locked": exc.lock, "message": str(exc)})
+    return HTTPException(422, str(exc))
+
+
+def _playground_folder(folder: str, originals: list[Path], refusal: str) -> Path:
+    """The playground folder the page names, accepted only as a folder directly inside the
+    playgrounds/ folder of one of `originals`; anything else is refused before it is read."""
+    candidate = os.path.realpath(folder)
+    for original in originals:
+        inside = os.path.join(os.path.realpath(original), playgrounds.PLAYGROUNDS_DIR) + os.sep
+        name = candidate[len(inside) :]
+        if os.path.normcase(candidate).startswith(os.path.normcase(inside)) and name:
+            if os.sep not in name and (os.altsep is None or os.altsep not in name):
+                return Path(candidate)
+    raise HTTPException(422, refusal)
+
+
+def _started_playground(folder: str, request: Request) -> Path:
+    """Merge… starts from the start page's row of a playground of a recent investigation, or from
+    the band of the open playground (whose original is two folders up)."""
+    originals = [Path(recent) for recent in app_settings.load().recent]
+    current = getattr(request.app.state, "investigation", None)
+    if current is not None:
+        originals += [current.folder, current.folder.parent.parent]
+    return _playground_folder(
+        folder, originals, "Not a playground of an investigation on the recent list."
+    )
+
+
+def _open_original_playground(investigation: Investigation, folder: str) -> Path:
+    return _playground_folder(
+        folder, [investigation.folder], "Not a playground of the open investigation."
+    )
+
+
+def _review(investigation: Investigation, folder: Path) -> dict[str, Any]:
+    try:
+        return playground_merge.review(investigation, folder)
+    except InvestigationError as exc:
+        raise _merge_errors(exc) from exc
+
+
+@router.post("/playgrounds/merge/start", response_model=MergeStartOut)
+def start_merge(body: MergeStartIn, request: Request):
+    """Merge…: close what is open, open the playground's original as Open does (a linked one is
+    pulled first; lock and upgrade answers as Open's) and review the playground's changes."""
+    _from_the_page(request, "merge a playground")
+    try:
+        found = playground_merge.playground(_started_playground(body.folder, request))
+    except InvestigationError as exc:
+        raise _merge_errors(exc) from exc
+    current = getattr(request.app.state, "investigation", None)
+    open_here = current is not None and current.folder.resolve() == found.folder
+    if not open_here:
+        try:  # refused before anything is closed while another app has the playground open
+            acquire_ownership(found.folder).release()
+        except InvestigationError as exc:
+            raise _merge_errors(exc) from exc
+    switch = _begin_switch(request)
+    if current is not None and current.folder.resolve() == found.original:
+        original = current
+        out = _investigation_out(current)
+    else:
+        original, status = open_pulled(found.original, body.force, body.upgrade)
+        out = _set_open(request, original, switch, status)  # closes the playground if open
+    if open_here:
+        state: autonomy.Autonomy = request.app.state.live.autonomy
+        if state.on_for(current.folder):
+            state.turn_off()
+    # The original just opened, not the tab's notebook: the tab still names the playground
+    # until the answer arrives, so the identity check of _investigation does not apply here.
+    return MergeStartOut(**out.model_dump(), review=_review(original, found.folder))
+
+
+@router.get("/playgrounds/merge/review", response_model=MergeReviewOut)
+def merge_review(folder: str, request: Request):
+    """The review again; the open investigation must be the playground's original."""
+    investigation = _investigation(request)
+    return _review(investigation, _open_original_playground(investigation, folder))
+
+
+@router.post("/playgrounds/merge/preview", response_model=MergeResultOut)
+def merge_preview(body: MergeIn, request: Request):
+    """The merge of the ticked changes, run in a transaction that is rolled back: its counts,
+    what it brings and what blocks it. Nothing is written."""
+    _from_the_page(request, "merge a playground")
+    try:
+        investigation = _investigation(request)
+        found = _open_original_playground(investigation, body.folder)
+        return playground_merge.merge(investigation, found, body.ticked, dry_run=True)
+    except InvestigationError as exc:
+        raise _merge_errors(exc) from exc
+
+
+@router.post("/playgrounds/merge", response_model=MergeResultOut)
+def merge_playground(body: MergeIn, request: Request):
+    """Merge the ticked changes into the open original: backed up first, one transaction, every
+    merged change in its history; the playground is read-only afterwards (D235h, Q64). Refused
+    with the blockers, changing nothing, when anything blocks it."""
+    _from_the_page(request, "merge a playground")
+    try:
+        investigation = _investigation(request)
+        found = _open_original_playground(investigation, body.folder)
+        return playground_merge.merge(investigation, found, body.ticked)
+    except playground_merge.MergeBlocked as exc:
+        raise HTTPException(409, {"blockers": exc.result["blockers"], "message": str(exc)}) from exc
+    except InvestigationError as exc:
+        raise _merge_errors(exc) from exc

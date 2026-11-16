@@ -133,3 +133,61 @@ test('Claude is given a playground first, and playgrounds are discarded', async 
   await expect(row).toHaveCount(0)
   await expect(recent.getByRole('listitem').filter({ hasText: name }).first()).toBeVisible()
 })
+
+// D235h, T-UI-102: Merge… from the band opens the original with the review: the playground's new
+// node ticked, a label changed on both sides a conflict to pick, a removal unticked; Merge brings
+// the ticked ones and the playground then opens read-only.
+
+test('a playground is merged into its original after a review', async ({ page }) => {
+  const stamp = Date.now()
+  const folder = join(E2E_DIR, `merge-${stamp}`)
+  const name = `Merge ${stamp}`
+  expect((await page.request.post('/api/investigations', { data: { folder, name } })).ok()).toBeTruthy()
+  const both = await (await page.request.post('/api/nodes', { data: { label: 'INT1' } })).json()
+  const kept = await (await page.request.post('/api/nodes', { data: { label: 'Kept' } })).json()
+  expect((await page.request.post('/api/playgrounds', { data: { folder } })).ok()).toBeTruthy()
+  // In the playground: a new node, INT1 renamed, Kept removed.
+  await page.request.post('/api/nodes', { data: { label: 'From the playground' } })
+  await page.request.patch(`/api/nodes/${both.id}`, { data: { label: 'INT1 (playground)' } })
+  await page.request.delete(`/api/nodes/${kept.id}`)
+  // In the original, INT1 renamed too.
+  await page.request.post('/api/investigations/open', { data: { folder } })
+  await page.request.patch(`/api/nodes/${both.id}`, { data: { label: 'INT1 (original)' } })
+  await page.request.post('/api/investigations/open', { data: { folder: join(folder, 'playgrounds', 'Playground 1') } })
+  await page.goto('/')
+
+  const band = page.getByRole('note', { name: 'Playground' })
+  await band.getByRole('button', { name: 'Merge…' }).click()
+  const review = page.getByRole('dialog', { name: `Merge Playground 1 into ${name}` })
+  await expect(review).toBeVisible()
+  await expect(page.locator('.investigation')).toHaveText(name) // the original is open behind it
+  await expect(band).toHaveCount(0)
+  await expect(review.getByRole('checkbox', { name: 'From the playground' })).toBeChecked()
+  await expect(review.getByRole('checkbox', { name: 'Kept' })).not.toBeChecked()
+  const conflict = review.getByRole('radiogroup', { name: /which version/ })
+  await expect(conflict).toHaveCount(1)
+  await expect(review.getByRole('button', { name: 'Merge', exact: true })).toBeDisabled()
+  await expect(review).toContainText('Pick a version for 1 conflict first')
+  await conflict.getByRole('radio', { name: "Playground's" }).check()
+  await review.getByRole('button', { name: 'Preview' }).click()
+  await expect(review.getByRole('status')).toContainText('Merging would add 1, change 1 and remove 0 records')
+  await review.getByRole('button', { name: 'Merge', exact: true }).click()
+  await expect(review).toHaveCount(0)
+  await expect(page.getByText(/Merged Playground 1: 1 added, 1 changed, 0 removed/)).toBeVisible()
+
+  // The original has the playground's node and label, and still has Kept.
+  const labels = (await (await page.request.get('/api/nodes')).json()).map((n: { label: string }) => n.label)
+  expect(labels.sort()).toEqual(['From the playground', 'INT1 (playground)', 'Kept'])
+
+  // The playground now opens read-only, without Merge.
+  await startPage(page)
+  const recent = page.getByRole('list', { name: 'Recently opened' })
+  const row = recent.getByRole('button', { name: `Playground 1, playground of ${name}` })
+  await expect(row).toContainText('merged just now')
+  await row.click()
+  await expect(band).toContainText('read-only')
+  await expect(band.getByRole('button', { name: 'Merge…' })).toHaveCount(0)
+  const refused = await page.request.post('/api/nodes', { data: { label: 'Too late' } })
+  expect(refused.status()).toBe(409)
+  expect((await refused.json()).detail).toContain('is read-only')
+})

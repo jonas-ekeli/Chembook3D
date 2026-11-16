@@ -237,6 +237,11 @@ def set_autonomy(body: AutonomyIn, request: Request) -> AutonomyOut:
         raise HTTPException(403, "Only the app's own page can change how Claude works")
     investigation = _investigation(request)
     state: autonomy.Autonomy = request.app.state.live.autonomy
+    if body.on and investigation.read_only:
+        # D235h, Q64: a merged playground is read-only; there is nothing for Claude to do there
+        from chembook3d.api.live import read_only_message
+
+        raise HTTPException(409, read_only_message(investigation))
     if body.on:
         # D235i: a playground needs no backup; its base and its original are the copy
         playground = playgrounds.describe(investigation) is not None

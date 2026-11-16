@@ -578,6 +578,9 @@ class HistoryEntry(Base):
     old_value: Mapped[Any] = mapped_column(JSON, nullable=True, default=None)
     new_value: Mapped[Any] = mapped_column(JSON, nullable=True, default=None)
     source: Mapped[str] = mapped_column(String(16), default="manual")  # manual | import
+    # D235h: an entry a playground's merge copied into the original points to the merge's own
+    # entry ("Merged from playground"), written first; None for every other entry.
+    merge_entry_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
 
 
 class AlignmentSet(Base):

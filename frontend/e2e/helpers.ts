@@ -79,6 +79,10 @@ export async function openDemo(page: Page, template: string = DEMO_TEMPLATE): Pr
   // The demo's values in the tests are in kcal/mol, the default unit; app settings are shared by
   // all the tests, and one may have left another unit set.
   await page.request.put('/api/settings', { data: { energy_unit: 'kcal/mol' } })
+  // Wait for the energies only once the start page is up: a page that already shows an investigation
+  // (after a reload) may still be fetching its energies, and that answer is cut off by the start
+  // page's navigation, so waiting for it to finish would never end.
+  await startPage(page)
   const energies = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/energies/view')
   await openFolder(page, folder)
   await expect(canvasNode(page, 'T-S0')).toBeVisible()

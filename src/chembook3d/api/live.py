@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from chembook3d import playgrounds
 from chembook3d.api.identity import check_investigation_identity
 from chembook3d.api.routes import DbSession
 from chembook3d.autonomy import Autonomy
@@ -73,7 +74,7 @@ QUIET = re.compile(
     r"|energies/(profile|table|table\.csv)|pathways/extend|overlay|snapshot|snapshot/save|atom-match|measurements"
     r"|scan-paths|scan-paths/plan|calculations/[^/]+/steps/trim-preview"
     r"|steric-profiles/[^/]+/(difference|table\.csv)"
-    r"|imports|imports/[^/]+|imports/[^/]+/preview"
+    r"|imports|imports/[^/]+|imports/[^/]+/preview|playgrounds/merge/preview"
     r"|batch-imports|batch-imports/[^/]+|batch-imports/[^/]+/preview"
     r"|note-images|source-files/[^/]+/open|claude(/.*)?|remote(/.*)?|presence(/.*)?|shutdown"
     r"|inspections(/.*)?"  # D123c: reading a file, and staging it for the import preview
@@ -95,7 +96,25 @@ PROFILES = re.compile(r"^/api/energy-profiles(/.*)?$")
 IDENTITY_DISCOVERY = re.compile(
     r"^/api/(live|presence|investigation|health|folders|remote|investigations"
     r"|investigations/open|investigations/clone|sync/resolve"
-    r"|playgrounds|playgrounds/discard-preview|playgrounds/discard)$"  # D235: start page
+    r"|playgrounds|playgrounds/discard-preview|playgrounds/discard"  # D235: start page
+    r"|playgrounds/merge/start)$"  # D235h: opens the playground's original
+)
+
+# D235h, Q64: what a merged playground, which is read-only, still takes besides reading:
+# opening, closing and the start page; the app's and the tab's own state (settings, the live
+# link, presence, the selection, the saved view, which is then not saved); Claude's panel
+# sessions and the switch (turning it on is refused in api/claude.py); what Claude asks the page
+# to do; and requests that only read with a body (the read-only copy, the energy table,
+# overlays, measurements). Everything else that is not GET, HEAD or OPTIONS is refused, and the
+# database's connections are query-only behind this (investigation._query_only).
+READ_ONLY_TAKES = re.compile(
+    r"^/api/("
+    r"investigations(/.*)?|playgrounds(/.*)?|settings(/.*)?|shutdown"
+    r"|live|presence(/.*)?|selection|view-state"
+    r"|claude/(sessions|autonomy|stop-check)|page(/.*)?"
+    r"|snapshot|snapshot/save|energies/(profile|table|table\.csv)|pathways/(extend|alternatives)"
+    r"|overlay|atom-match|measurements"
+    r")$"
 )
 
 
@@ -263,6 +282,10 @@ class ChangeTracker:
                     scope, receive, send
                 )
                 return
+        refused = _read_only(scope, path)
+        if refused is not None:
+            await JSONResponse({"detail": refused}, status_code=409)(scope, receive, send)
+            return
         counts = (
             scope["method"] not in ("GET", "HEAD", "OPTIONS")
             and path.startswith("/api/")
@@ -294,6 +317,30 @@ class ChangeTracker:
             self.live.changed(client)
         if profiles and status.get("code", 500) < 400:
             self.live.profiles_changed()
+
+
+def _read_only(scope: Scope, path: str) -> str | None:
+    """Why a request that would change a merged playground is refused (D235h, Q64), or None."""
+    if scope["method"] in ("GET", "HEAD", "OPTIONS") or not path.startswith("/api/"):
+        return None
+    if READ_ONLY_TAKES.fullmatch(path):
+        return None
+    investigation = getattr(scope["app"].state, "investigation", None)
+    if not getattr(investigation, "read_only", False):
+        return None
+    return read_only_message(investigation)
+
+
+def read_only_message(investigation: Any) -> str:
+    found = playgrounds.describe(investigation) or {}
+    merged = found.get("merged_at")
+    when = f" on {merged:%Y-%m-%d}" if merged else ""
+    name = found.get("name") or investigation.folder.name
+    original = found.get("original_name") or "its original"
+    return (
+        f"{name} was merged into {original}{when} and is read-only. Make a new playground "
+        "from the original to go on."
+    )
 
 
 # ---------- changes ----------
