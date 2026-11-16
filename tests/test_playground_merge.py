@@ -208,6 +208,14 @@ def test_preview_changes_nothing_and_merge_applies_only_the_ticked(page, tmp_pat
         headers=ORIGIN,
     ).json()
     assert blocked["blockers"] and "Mine" in blocked["blockers"][0]
+    # Only a playground of the open investigation is previewed or merged.
+    for route in ("preview", ""):
+        outside = page.post(
+            f"/api/playgrounds/merge/{route}".rstrip("/"),
+            json={"folder": str(tmp_path / "playgrounds" / "Try"), "ticked": [edge]},
+            headers=ORIGIN,
+        )
+        assert outside.status_code == 422 and "open investigation" in outside.json()["detail"]
     removal = page.post(
         "/api/playgrounds/merge/preview",
         json={"folder": str(playground), "ticked": [f"node:{ids['TS1']}"]},
@@ -347,6 +355,13 @@ def test_merge_is_refused_while_another_app_has_the_playground_open(page, tmp_pa
         "/api/playgrounds/merge/start", json={"folder": str(original)}, headers=ORIGIN
     )
     assert answer.status_code == 422
+    # A folder outside the playgrounds/ folder of a recent investigation is not even read.
+    elsewhere = tmp_path / "elsewhere" / "playgrounds" / "Try"
+    for folder in (elsewhere, playground / ".." / ".." / ".." / "x", original / "playgrounds"):
+        answer = page.post(
+            "/api/playgrounds/merge/start", json={"folder": str(folder)}, headers=ORIGIN
+        )
+        assert answer.status_code == 422 and "recent list" in answer.json()["detail"]
 
 
 def test_a_merge_from_the_playground_itself_closes_it_first(page, tmp_path):
