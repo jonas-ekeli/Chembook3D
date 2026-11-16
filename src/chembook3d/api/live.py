@@ -94,7 +94,8 @@ PROFILES = re.compile(r"^/api/energy-profiles(/.*)?$")
 # stale tab. Close/sync/settings stay guarded: their target depends on the active notebook.
 IDENTITY_DISCOVERY = re.compile(
     r"^/api/(live|presence|investigation|health|folders|remote|investigations"
-    r"|investigations/open|investigations/clone|sync/resolve)$"
+    r"|investigations/open|investigations/clone|sync/resolve"
+    r"|playgrounds)$"  # D235: the start page lists and makes playgrounds
 )
 
 

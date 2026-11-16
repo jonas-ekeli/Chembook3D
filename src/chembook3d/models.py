@@ -81,6 +81,19 @@ class InvestigationInfo(Base):
     qh_temperature: Mapped[float | None] = mapped_column(default=None)
     qh_cutoff: Mapped[float | None] = mapped_column(default=None)
     standard_state: Mapped[str | None] = mapped_column(String(16), default=None)
+    # D235: the investigation's own id, apart from its folder (a playground merges only into the
+    # investigation whose id it holds). Set by migration 0032 for older investigations.
+    uuid: Mapped[str | None] = mapped_column(String(32), default=new_id)
+    # D235: set only in a playground, a working copy at <original>/playgrounds/<name>/: the
+    # original's uuid, the path back to it (relative, NFR-PORT-01), the playground's name, when
+    # it was made, the original's last history entry then (to count its changes since) and,
+    # once merged, when (playgrounds.py).
+    playground_of: Mapped[str | None] = mapped_column(String(32), default=None)
+    playground_original: Mapped[str | None] = mapped_column(String(200), default=None)
+    playground_name: Mapped[str | None] = mapped_column(String(200), default=None)
+    playground_created_at: Mapped[datetime | None] = mapped_column(default=None)
+    playground_history_id: Mapped[int | None] = mapped_column(default=None)
+    playground_merged_at: Mapped[datetime | None] = mapped_column(default=None)
 
 
 class Node(Base):

@@ -1,26 +1,15 @@
 // D182 (UI10): the start page. The three ways in as cards, the recently opened investigations by
 // name with their folder, when they were last opened and their size, and the Scan editor and Shut
 // down set apart at the bottom. D229: a folder that no longer holds an investigation is marked
-// as not found, and any row can be taken off the list (its folder is never touched).
+// as not found, and any row can be taken off the list (its folder is never touched). D235: each
+// investigation's playgrounds are listed under it, indented, and its menu makes a new one.
 
-import type { ReactNode } from 'react'
-import type { RecentInfo, Settings } from '../api'
+import { Fragment, type ReactNode } from 'react'
+import type { PlaygroundRow, RecentInfo, Settings } from '../api'
 import { Icon, type IconName } from '../icons'
+import { relativeTime } from '../util'
+import { MoreMenu } from './MoreMenu'
 import { ShutDownButton } from './ShutDown'
-
-/** "just now", "5 min ago", "2 h ago", "yesterday", "4 days ago", then the date. */
-function relativeTime(iso: string, now: Date = new Date()): string {
-  const when = new Date(iso)
-  const minutes = Math.round((now.getTime() - when.getTime()) / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes} min ago`
-  if (minutes < 24 * 60) return `${Math.round(minutes / 60)} h ago`
-  const midnight = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-  const days = Math.round((midnight(now) - midnight(when)) / 86400000)
-  if (days <= 1) return 'yesterday'
-  if (days < 7) return `${days} days ago`
-  return when.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-}
 
 function count(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
@@ -68,6 +57,7 @@ function RecentRow({
   missing,
   onOpen,
   onForget,
+  onNewPlayground,
 }: {
   folder: string
   info: RecentInfo | undefined
@@ -75,6 +65,7 @@ function RecentRow({
   missing: boolean
   onOpen: () => void
   onForget: () => void
+  onNewPlayground: () => void
 }) {
   const name = info?.name || folderName(folder)
   const counts = [
@@ -114,6 +105,18 @@ function RecentRow({
           {!missing && counts.length > 0 && <span>{counts.join(' · ')}</span>}
         </span>
       </button>
+      <MoreMenu
+        label={`More for ${name}`}
+        items={[
+          {
+            label: 'New playground…',
+            icon: 'playground',
+            title: 'A working copy to try things in, kept in this folder; the original is not changed (D235)',
+            disabled: missing,
+            onSelect: onNewPlayground,
+          },
+        ]}
+      />
       <button
         className="quiet recent-forget"
         aria-label={`Remove ${name} from the list`}
@@ -121,6 +124,53 @@ function RecentRow({
         onClick={onForget}
       >
         <Icon name="x" />
+      </button>
+    </li>
+  )
+}
+
+/** "original changed 3 things since", from the original's history since the playground was made. */
+function changedSince(changed: number | null): string | null {
+  if (changed === null) return null
+  if (changed === 0) return 'original unchanged since'
+  return `original changed ${count(changed, 'thing', 'things')} since`
+}
+
+/** D235: a playground, indented under its original. */
+function PlaygroundRowItem({ row, original, onOpen }: { row: PlaygroundRow; original: string; onOpen: () => void }) {
+  const since = changedSince(row.changed)
+  return (
+    <li className="playground-row">
+      <button
+        className="recent-row"
+        onClick={onOpen}
+        title={row.folder}
+        aria-label={`${row.name}, playground of ${original}`}
+      >
+        <span className="recent-icon">
+          <Icon name="playground" />
+        </span>
+        <span className="recent-what">
+          <span className="recent-name">{row.name}</span>
+          <span className="recent-folder">Playground of {original}</span>
+        </span>
+        <span className="recent-when">
+          {row.foreign && (
+            <span className="recent-missing" title="Its records were not copied from the investigation it is in">
+              <Icon name="warn" />
+              Made from another investigation
+            </span>
+          )}
+          {row.created_at && (
+            <span>
+              made{' '}
+              <time dateTime={row.created_at} title={new Date(row.created_at).toLocaleString()}>
+                {relativeTime(row.created_at)}
+              </time>
+            </span>
+          )}
+          {since && <span>{since}</span>}
+        </span>
       </button>
     </li>
   )
@@ -135,6 +185,8 @@ export function StartPage({
   onScanEditor,
   onOpenFolder,
   onForget,
+  playgrounds,
+  onNewPlayground,
   notices,
   children,
 }: {
@@ -147,6 +199,10 @@ export function StartPage({
   onOpenFolder: (folder: string) => void
   /** D229: take a folder off the recent list. */
   onForget: (folder: string) => void
+  /** D235: the playgrounds of each recent folder. */
+  playgrounds: Record<string, PlaygroundRow[]>
+  /** D235: New playground… on a recent folder's menu (its folder and name). */
+  onNewPlayground: (folder: string, name: string) => void
   /** The launcher's notices, under the cards. */
   notices: ReactNode
   /** The dialogs the cards open. */
@@ -187,15 +243,25 @@ export function StartPage({
           <h2 className="start-heading">Recently opened</h2>
           <ul className="recent" aria-label="Recently opened">
             {recent.map((folder, index) => (
-              <RecentRow
-                key={folder}
-                folder={folder}
-                info={settings?.recent_info[folder]}
-                repeated={names.filter((n) => n === names[index]).length > 1}
-                missing={settings?.recent_missing?.includes(folder) ?? false}
-                onOpen={() => onOpenFolder(folder)}
-                onForget={() => onForget(folder)}
-              />
+              <Fragment key={folder}>
+                <RecentRow
+                  folder={folder}
+                  info={settings?.recent_info[folder]}
+                  repeated={names.filter((n) => n === names[index]).length > 1}
+                  missing={settings?.recent_missing?.includes(folder) ?? false}
+                  onOpen={() => onOpenFolder(folder)}
+                  onForget={() => onForget(folder)}
+                  onNewPlayground={() => onNewPlayground(folder, names[index])}
+                />
+                {(playgrounds[folder] ?? []).map((row) => (
+                  <PlaygroundRowItem
+                    key={row.folder}
+                    row={row}
+                    original={names[index]}
+                    onOpen={() => onOpenFolder(row.folder)}
+                  />
+                ))}
+              </Fragment>
             ))}
           </ul>
         </section>

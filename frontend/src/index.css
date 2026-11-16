@@ -46,6 +46,9 @@
   --rep: #f59f00; /* a group's representative */
   --sub-edge: #7048e8; /* D193: a sub-investigation's box */
   --sub-fill: rgb(112 72 232 / 6%);
+  --play-text: #0e7090; /* D235: the playground band and icons */
+  --play-bg: #ecfdff;
+  --play-border: #a5f0fc;
   --ok: #067647;
   --ok-text: #05603a;
   --ok-bg: #ecfdf3;
@@ -208,6 +211,9 @@
   --flow-control-bg: #1c222b;
   --flow-control-hover: #262d38;
   --flow-control-border: #2b323d;
+  --play-text: #67e3f9;
+  --play-bg: #0b2a33;
+  --play-border: #155b6b;
 }
 
 * {
@@ -5627,4 +5633,51 @@ table.scan-path-held input.drive-value {
 }
 .refine-scan-points .field {
   width: 6rem;
+}
+
+/* D235: playgrounds. Their rows on the start page sit indented under their original; the band
+   under the app bar says the open investigation is one. */
+.recent li.playground-row button.recent-row {
+  padding-left: 46px;
+}
+.recent li.playground-row .recent-icon {
+  background: var(--play-bg);
+  color: var(--play-text);
+}
+.recent li.playground-row .recent-name {
+  font-weight: 500;
+}
+.recent li.playground-row .recent-folder {
+  font: inherit;
+  font-size: 12px;
+}
+.recent li.playground-row + li:not(.playground-row) {
+  border-top-color: var(--border);
+}
+/* a row's menu, like its remove button: plain on the row under the pointer or in focus */
+.recent .more-menu > button {
+  opacity: 0.5;
+}
+.recent li:hover .more-menu > button,
+.recent .more-menu > button:focus-visible {
+  opacity: 1;
+}
+.playground-band {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--play-text);
+  background: var(--play-bg);
+  border-bottom: 1px solid var(--play-border);
+}
+.playground-band .muted {
+  color: var(--text-2);
+}
+.playground-lost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--warn);
 }

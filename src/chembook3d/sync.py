@@ -47,6 +47,7 @@ IGNORED = [
     f"{BACKUP_DIR}/",
     "local-jobs/",
     "exports/",
+    "playgrounds/",  # D235: playgrounds stay on this computer
 ]
 ATTRIBUTES = ["* -text", f"{DB_NAME} binary"]
 
@@ -357,9 +358,14 @@ def _owned(
                 if not excluded.is_absolute():
                     excluded = Path(folder) / excluded
                 text = excluded.read_text(encoding="utf-8") if excluded.exists() else ""
-                if OWNER_NAME not in {line.strip() for line in text.splitlines()}:
+                present = {line.strip() for line in text.splitlines()}
+                # D235: also playgrounds/, so a playground made before its original's
+                # .gitignore had the entry is never committed to the original's repository.
+                missing = [name for name in (OWNER_NAME, "playgrounds/") if name not in present]
+                if missing:
                     excluded.parent.mkdir(parents=True, exist_ok=True)
-                    excluded.write_text(text.rstrip("\n") + f"\n{OWNER_NAME}\n", encoding="utf-8")
+                    lines = "".join(f"\n{name}" for name in missing)
+                    excluded.write_text(text.rstrip("\n") + lines + "\n", encoding="utf-8")
             yield owner
     finally:
         if acquired:
