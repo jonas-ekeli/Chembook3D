@@ -289,6 +289,19 @@ def refresh_recent(
     save(settings)
 
 
+def keep_recent(folder: Path, name: str | None = None) -> None:
+    """D235: a playground being opened keeps its original on the recent list, where the start
+    page shows it: added first when missing, else left where it is with its details."""
+    settings = load()
+    path = str(Path(folder).resolve())
+    if path in settings.recent:
+        return
+    settings.recent = ([path] + settings.recent)[:MAX_RECENT]
+    info = settings.recent_info.get(path, {}) | _details(name, None, None)
+    settings.recent_info = clean_recent_info(settings.recent_info | {path: info}, settings.recent)
+    save(settings)
+
+
 def forget_recent(path: str) -> None:
     """D229: take a folder off the recent list, by its path exactly as the list holds it; the
     folder itself is never touched."""

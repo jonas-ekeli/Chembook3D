@@ -197,6 +197,28 @@ the app is closed. **Local jobs** in the top bar lists them with **Inspect** (li
 **Cancel** and **Show node**. Each job is a folder under `local-jobs/` in the investigation, which
 sync leaves out; the result is imported onto its node when the job ends.
 
+## Playgrounds: try things in a copy
+
+A playground is a full working copy of an investigation, for trying something out without
+touching the original (D235). On the start screen, open the **⋯** menu of an investigation's row
+and choose **New playground…**, give it a name (the first is "Playground 1") and press **Make and
+open**. It copies everything as it is now: nodes, calculations, files, notes, analyses, the
+canvas and the view.
+
+- It lives in the original's own folder, under `playgrounds/<name>/`, so it moves, zips and
+  copies with the original. Its files are hard links of the original's, so they take no extra
+  room on the same disk (on a disk without hard links they are copied, and the app says so).
+- The start screen lists it indented under its original, with when it was made and how much the
+  original has changed since ("original changed 3 things since"). Click it to open it.
+- While one is open, a band under the top bar says which playground of which investigation it
+  is, and **Open original** opens the original. It works like any investigation, except that it
+  is never synced to GitHub and has no cloud jobs; a linked original gets `playgrounds/` in its
+  `.gitignore`. Local jobs run in the playground's own folder, and jobs still running in the
+  original bring their results to the original only.
+- A playground cannot have playgrounds of its own.
+
+Merging a playground back into its original and discarding one come in later versions.
+
 ## Sync investigations between computers
 
 An investigation can be synced through a private GitHub repository, so you can work on it on

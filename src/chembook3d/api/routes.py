@@ -17,8 +17,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, object_session
 
+from chembook3d import playgrounds, sync, thermochem, units, xyz
 from chembook3d import settings as app_settings
-from chembook3d import sync, thermochem, units, xyz
 from chembook3d.api import builds, downloads
 from chembook3d.api.identity import check_investigation_identity
 from chembook3d.investigation import (
@@ -87,11 +87,24 @@ class SyncOut(BaseModel):
     upstream: CommitOut | None = None
 
 
+class PlaygroundOut(BaseModel):
+    """D235: what the playground band shows; the investigation is a copy of `original_folder`."""
+
+    name: str
+    original_folder: str
+    original_name: str
+    # the original's folder still holds the investigation it was made from
+    original_found: bool
+    created_at: UtcDatetime | None = None
+    merged_at: UtcDatetime | None = None
+
+
 class InvestigationOut(BaseModel):
     name: str
     folder: str
     linked: bool = False
     sync: SyncOut | None = None  # the outcome of the pull on open, if linked
+    playground: PlaygroundOut | None = None  # D235: set when this is a playground
 
 
 class CreateInvestigationIn(BaseModel):
@@ -584,11 +597,13 @@ def _sync_out(status: sync.SyncStatus | None) -> SyncOut | None:
 
 
 def _investigation_out(investigation: Investigation, status=None) -> InvestigationOut:
+    playground = playgrounds.describe(investigation)
     return InvestigationOut(
         name=investigation.name,
         folder=str(investigation.folder),
         linked=sync.is_linked(investigation.folder),
         sync=_sync_out(status),
+        playground=PlaygroundOut(**playground) if playground else None,
     )
 
 
@@ -597,6 +612,18 @@ def _remember(investigation: Investigation, opened: bool) -> None:
     just opened goes first with the time, one being closed only has them brought up to date.
     A database that cannot be read leaves the details as they were."""
     name, nodes, branches = None, None, None
+    try:
+        playground = playgrounds.describe(investigation)
+    except SQLAlchemyError:
+        playground = None
+    if playground is not None:
+        # D235: a playground is listed under its original, never in the recent list itself;
+        # opening one keeps its original on the list.
+        if opened:
+            app_settings.keep_recent(
+                Path(playground["original_folder"]), playground["original_name"]
+            )
+        return
     try:
         name = investigation.name
         nodes, branches = investigation.counts()
@@ -699,6 +726,15 @@ def _open_folder(
     current = getattr(request.app.state, "investigation", None)
     if current is not None and folder.resolve() == current.folder.resolve():
         return _investigation_out(current)
+    investigation, status = open_pulled(folder, force, upgrade)
+    return _set_open(request, investigation, switch, status)
+
+
+def open_pulled(
+    folder: Path, force: bool = False, upgrade: bool = False
+) -> tuple[Investigation, sync.SyncStatus | None]:
+    """Open a folder as the Open button does, pulling first when it is linked (FR-SYNC-04), with
+    its refusals as HTTP errors; the caller makes it the open investigation or closes it."""
     status = None
     ownership = None
     investigation = None
@@ -730,7 +766,7 @@ def _open_folder(
     finally:
         if ownership is not None and investigation is None:
             ownership.release()
-    return _set_open(request, investigation, switch, status)
+    return investigation, status
 
 
 @router.post("/investigations/open", response_model=InvestigationOut)
@@ -797,6 +833,12 @@ def sync_now(request: Request):
 @router.post("/sync/link", response_model=SyncOut)
 def sync_link(body: LinkIn, request: Request):
     investigation = _investigation(request)
+    if playgrounds.describe(investigation) is not None:
+        raise HTTPException(
+            422,
+            "A playground stays on this computer and is never synced (D235). Its original is "
+            "synced instead.",
+        )
     try:
         return _sync_out(
             sync.link(

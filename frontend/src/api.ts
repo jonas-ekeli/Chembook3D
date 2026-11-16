@@ -57,6 +57,31 @@ export type Investigation = {
   linked: boolean
   /** What the pull on open found, when linked. */
   sync: SyncStatus | null
+  /** D235: set when this investigation is a playground, a working copy of another. */
+  playground?: PlaygroundInfo | null
+}
+
+/** D235: what the playground band shows. */
+export type PlaygroundInfo = {
+  name: string
+  original_folder: string
+  original_name: string
+  /** The original's folder still holds the investigation the playground was made from. */
+  original_found: boolean
+  created_at: string | null
+  merged_at: string | null
+}
+
+/** D235: a playground the start page lists under its original. */
+export type PlaygroundRow = {
+  folder: string
+  name: string
+  created_at: string | null
+  merged_at: string | null
+  /** The original's history entries since the playground was made (null: not readable). */
+  changed: number | null
+  /** Made from another investigation (a folder copied in by hand). */
+  foreign: boolean
 }
 
 export type CalculationType =
@@ -2535,6 +2560,11 @@ export const api = {
     request<Investigation>('POST', '/investigations/open', { folder, force, upgrade }),
   cloneInvestigation: (url: string, folder: string) =>
     request<Investigation>('POST', '/investigations/clone', { url, folder }),
+  /** D235: the playgrounds of the recent folders, by folder as the recent list holds it. */
+  playgrounds: () => request<Record<string, PlaygroundRow[]>>('GET', '/playgrounds'),
+  /** D235: make a playground of the investigation in `folder` and open it. */
+  createPlayground: (folder: string, name: string, force = false, upgrade = false) =>
+    request<Investigation & { notice: string | null }>('POST', '/playgrounds', { folder, name, force, upgrade }),
   /** Closing a linked investigation also pushes it; the answer is the sync state (D71). */
   closeInvestigation: () => request<SyncStatus | null>('POST', '/investigations/close'),
   syncStatus: () => request<SyncStatus>('GET', '/sync'),

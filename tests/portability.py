@@ -1,4 +1,5 @@
-"""T-OPS-01 / FR-INV-03: an investigation zipped on one OS opens intact on the other.
+"""T-OPS-01 / FR-INV-03: an investigation zipped on one OS opens intact on the other, with
+its playground (T-OPS-10, D235): listed under it, opened, and finding its original again.
 
 CI runs `create` on Windows and Linux, then `check` on the other OS with that zip:
 
@@ -66,7 +67,16 @@ def create(zip_path: Path) -> None:
         }
         client.post("/api/investigations/close")
 
+        # D235: a playground inside it, with a node of its own.
+        made = client.post("/api/playgrounds", json={"folder": str(folder), "name": "Try é"})
+        assert made.status_code == 200, made.text
+        client.post("/api/nodes", json={"label": "Only in the playground", "xyz": WATER})
+        expected["playground_nodes"] = client.get("/api/nodes").json()
+        client.post("/api/investigations/close")
+
         assert str(folder).encode() not in (folder / "investigation.sqlite").read_bytes()
+        playground = folder / "playgrounds" / "Try é"
+        assert str(folder).encode() not in (playground / "investigation.sqlite").read_bytes()
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(folder.rglob("*")):
                 archive.write(path, Path("investigation") / path.relative_to(folder))
@@ -95,6 +105,16 @@ def check(zip_path: Path) -> None:
         assert source["exists"]
         copy = client.get(f"/api/source-files/{source['id']}/download")
         assert copy.content == SINGLE_POINT.read_bytes()
+        client.post("/api/investigations/close")
+
+        # T-OPS-10: the playground came along, is listed under its original and finds it.
+        listed = client.get("/api/playgrounds").json()[str(folder.resolve())]
+        assert [row["name"] for row in listed] == ["Try é"]
+        opened = client.post("/api/investigations/open", json={"folder": listed[0]["folder"]})
+        assert opened.status_code == 200, opened.text
+        band = opened.json()["playground"]
+        assert Path(band["original_folder"]) == folder.resolve() and band["original_found"]
+        assert client.get("/api/nodes").json() == expected["playground_nodes"]
         client.post("/api/investigations/close")
     print(f"{expected['name']} opened intact on {platform.system()}")
 

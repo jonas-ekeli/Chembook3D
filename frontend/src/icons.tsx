@@ -209,6 +209,15 @@ const SHAPES = {
     </>
   ),
   undo: <path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />,
+  // D235: a playground, a working copy that branches off its original (Lucide git-fork)
+  playground: (
+    <>
+      <circle cx="12" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="18" cy="6" r="3" />
+      <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9M12 12v3" />
+    </>
+  ),
   keyboard: (
     <>
       <rect x="2" y="4" width="20" height="16" rx="2" />

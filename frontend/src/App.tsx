@@ -17,6 +17,7 @@ import {
   type GroupLayout,
   type HistoryEntry,
   type Investigation,
+  type PlaygroundRow,
   type Node,
   type Note,
   type NoteLayout,
@@ -62,6 +63,7 @@ import { IrcWindow } from './components/IrcWindow'
 import { StructureEditor } from './components/StructureEditor'
 import { RemoteFilesDialog } from './components/RemoteFilesDialog'
 import { Modal } from './components/Modal'
+import { NewPlaygroundDialog, PlaygroundBand } from './components/Playgrounds'
 import { NodeInspector } from './components/NodeInspector'
 import { NoteEditor } from './components/NoteEditor'
 import { Outline } from './components/Outline'
@@ -115,7 +117,14 @@ import {
 import { groupActions, selectionActions } from './panelActions'
 import { useStable } from './stable'
 
-type LockPrompt = { folder: string; host?: string; openedAt?: string; canForce?: boolean }
+type LockPrompt = {
+  folder: string
+  host?: string
+  openedAt?: string
+  canForce?: boolean
+  /** D235: what Open anyway (or Upgrade) does instead of opening the folder: make a playground of it. */
+  again?: (force: boolean, upgrade: boolean) => void
+}
 
 /** One import dialog at a time; dropped files wait in a queue (WF-04: one or more files). */
 type ImportRequest = {
@@ -214,7 +223,10 @@ function App() {
   const [canvasTools, setCanvasTools] = useState<HTMLDivElement | null>(null) // D180: Fit and Export
   const [cloning, setCloning] = useState<{ url: string; name: string } | 'address' | null>(null)
   const [conflict, setConflict] = useState<SyncConflict | null>(null)
-  const [upgrade, setUpgrade] = useState<{ folder: string } | null>(null)
+  const [upgrade, setUpgrade] = useState<Pick<LockPrompt, 'folder' | 'again'> | null>(null)
+  // D235: the start page's playgrounds, and the folder whose New playground… dialog is open
+  const [playgroundRows, setPlaygroundRows] = useState<Record<string, PlaygroundRow[]>>({})
+  const [playgroundFor, setPlaygroundFor] = useState<{ folder: string; name: string } | null>(null)
 
   const [view, setView] = useState<'canvas' | 'history' | 'analyses'>('canvas')
   // D83, D86: the selectivity or turnover to show when the Analyses view opens
@@ -678,13 +690,13 @@ function App() {
     [shownView, shownType, edgeEnergies, referenceId, settings],
   )
 
-  const openFailed = (folder: string) => (err: unknown) => {
+  const openFailed = (folder: string, again?: LockPrompt['again']) => (err: unknown) => {
     if (err instanceof ApiError && err.lock) {
-      setLockPrompt({ folder, host: err.lock.host, openedAt: err.lock.opened_at, canForce: err.lock.can_force })
+      setLockPrompt({ folder, host: err.lock.host, openedAt: err.lock.opened_at, canForce: err.lock.can_force, again })
     } else if (err instanceof ApiError && err.syncConflict) {
       setConflict(err.syncConflict)
     } else if (err instanceof ApiError && err.needsUpgrade) {
-      setUpgrade({ folder })
+      setUpgrade({ folder, again })
     } else {
       setError(errorText(err))
     }
@@ -700,6 +712,45 @@ function App() {
       openFailed(folder),
     )
   }
+
+  // D235: make a playground of the investigation in `folder` and open it. A refusal the open
+  // dialogs answer (open elsewhere, an upgrade, a sync conflict) closes the New playground dialog
+  // and asks there, making the playground again on the answer; any other is the dialog's to show.
+  const makePlayground = (folder: string, name: string, force = false, upgradeConfirmed = false): Promise<void> => {
+    setLockPrompt(null)
+    setUpgrade(null)
+    const version = identityVersion.current
+    return api.createPlayground(folder, name, force, upgradeConfirmed).then(
+      (inv) => {
+        setPlaygroundFor(null)
+        if (version !== identityVersion.current) return
+        opened(inv, true)
+        if (inv.notice) setNotice(inv.notice)
+      },
+      (err: unknown) => {
+        if (err instanceof ApiError && (err.lock || err.needsUpgrade || err.syncConflict)) {
+          setPlaygroundFor(null)
+          openFailed(folder, (f, u) => void makePlayground(folder, name, f, u).catch(openFailed(folder)))(err)
+          return
+        }
+        throw err
+      },
+    )
+  }
+
+  // D235: the start page lists each recent folder's playgrounds; read again when it shows and
+  // whenever the recent list changes.
+  useEffect(() => {
+    if (investigation !== null) return
+    let current = true
+    api.playgrounds().then(
+      (rows) => current && setPlaygroundRows(rows),
+      () => current && setPlaygroundRows({}),
+    )
+    return () => {
+      current = false
+    }
+  }, [investigation, settings?.recent])
 
   const cloneInto = (url: string, folder: string) => {
     setCloning(null)
@@ -1123,7 +1174,7 @@ function App() {
         <UpgradeDialog
           folder={upgrade.folder}
           onCancel={() => setUpgrade(null)}
-          onUpgrade={() => openFolder(upgrade.folder, false, true)}
+          onUpgrade={() => (upgrade.again ? upgrade.again(false, true) : openFolder(upgrade.folder, false, true))}
         />
       )}
       {ordering && canvas.groups.some((g) => g.id === ordering) && (
@@ -1142,7 +1193,10 @@ function App() {
             <>
               <button onClick={() => setLockPrompt(null)}>Cancel</button>
               {lockPrompt.canForce !== false && (
-                <button className="danger" onClick={() => openFolder(lockPrompt.folder, true)}>
+                <button
+                  className="danger"
+                  onClick={() => (lockPrompt.again ? lockPrompt.again(true, false) : openFolder(lockPrompt.folder, true))}
+                >
                   Open anyway
                 </button>
               )}
@@ -1694,9 +1748,20 @@ function App() {
         onScanEditor={() => openScanEditor([])}
         onOpenFolder={openFolder}
         onForget={(folder) => api.forgetRecent(folder).then(setSettings, (err: unknown) => setError(errorText(err)))}
+        playgrounds={playgroundRows}
+        onNewPlayground={(folder, name) => setPlaygroundFor({ folder, name })}
         notices={<LaunchNotices />}
       >
         {dialogs}
+        {playgroundFor && (
+          <NewPlaygroundDialog
+            original={playgroundFor.name}
+            folder={playgroundFor.folder}
+            taken={(playgroundRows[playgroundFor.folder] ?? []).map((row) => row.name)}
+            onCancel={() => setPlaygroundFor(null)}
+            onMake={(name) => makePlayground(playgroundFor.folder, name)}
+          />
+        )}
       </StartPage>
     )
   }
@@ -1806,21 +1871,27 @@ function App() {
       )
   }
 
+  const syncItems: MenuItem[] = investigation.playground
+    ? []
+    : [
+        investigation.linked
+          ? {
+              label: 'Sync with GitHub',
+              icon: 'branch',
+              detail: <SyncState status={sync} busy={syncing} />,
+              disabled: syncing,
+              onSelect: syncNow,
+              separated: true,
+            }
+          : { label: 'Sync with GitHub…', icon: 'branch', onSelect: () => setLinking(true), separated: true },
+      ]
   // D180: the investigation menu's commands; the palette offers them too (D184).
   const investigationItems: MenuItem[] = [
     { label: 'New investigation…', icon: 'plus', onSelect: () => setPicker('create') },
     { label: 'Open investigation…', icon: 'folder', onSelect: () => setPicker('open') },
     { label: 'Close investigation', icon: 'x', onSelect: close },
-    investigation.linked
-      ? {
-          label: 'Sync with GitHub',
-          icon: 'branch',
-          detail: <SyncState status={sync} busy={syncing} />,
-          disabled: syncing,
-          onSelect: syncNow,
-          separated: true,
-        }
-      : { label: 'Sync with GitHub…', icon: 'branch', onSelect: () => setLinking(true), separated: true },
+    // D235: a playground stays on this computer, so it has no Sync (Q71)
+    ...syncItems,
     {
       label: 'Share read-only copy…',
       icon: 'share',
@@ -2258,7 +2329,8 @@ function App() {
     for (const st of STATUSES) filter('statuses', st.value, `${st.label.toLowerCase()} nodes and transitions`)
     for (const st of canvas.steps) filter('steps', st.id, `step ${st.name || 'Unnamed step'}`)
     command('scan-editor', 'Scan editor', 'wave', () => openScanEditor([]))
-    command('cloud-jobs', 'Cloud jobs', 'cloud', () => setShowJobs(true))
+    // D235 (Q71): cloud jobs need a linked repository, which a playground never has
+    if (!investigation.playground) command('cloud-jobs', 'Cloud jobs', 'cloud', () => setShowJobs(true))
     command('local-jobs', 'Local jobs', 'flask', () => setShowLocalJobs(true))
     command('claude', sideTab === 'claude' ? 'Hide the Claude panel' : 'Claude panel', 'spark', () =>
       setSideTab(sideTab === 'claude' ? null : 'claude'),
@@ -2633,14 +2705,16 @@ function App() {
             <Icon name="wave" />
             <span className="tb-label">Scan editor</span>
           </button>
-          <button
-            className="quiet"
-            onClick={() => setShowJobs(true)}
-            title="Calculations handed to Claude Code cloud sessions (D93, D115)"
-          >
-            <Icon name="cloud" />
-            <span className="tb-label">Cloud jobs</span>
-          </button>
+          {!investigation.playground && (
+            <button
+              className="quiet"
+              onClick={() => setShowJobs(true)}
+              title="Calculations handed to Claude Code cloud sessions (D93, D115)"
+            >
+              <Icon name="cloud" />
+              <span className="tb-label">Cloud jobs</span>
+            </button>
+          )}
           <button
             className="quiet"
             onClick={() => setShowLocalJobs(true)}
@@ -2674,17 +2748,25 @@ function App() {
             </button>
           )}
           <span className="vsep" />
-          <SyncChip
-            linked={investigation.linked}
-            status={sync}
-            busy={syncing}
-            onSync={syncNow}
-            onLink={() => setLinking(true)}
-          />
+          {!investigation.playground && (
+            <SyncChip
+              linked={investigation.linked}
+              status={sync}
+              busy={syncing}
+              onSync={syncNow}
+              onLink={() => setLinking(true)}
+            />
+          )}
           <button className="quiet icon-only" aria-label="Settings" title="Settings" onClick={() => openSettings()}>
             <Icon name="sliders" />
           </button>
         </header>
+        {investigation.playground && (
+          <PlaygroundBand
+            playground={investigation.playground}
+            onOpenOriginal={() => openFolder(investigation.playground!.original_folder)}
+          />
+        )}
         {view === 'canvas' && viewRestored === shown && (
           // D180: the canvas's own controls, in one row under the app bar.
           <div className="canvasbar">

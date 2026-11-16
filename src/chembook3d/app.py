@@ -39,6 +39,7 @@ from chembook3d.api.measurements import router as measurement_router
 from chembook3d.api.notes import router as note_router
 from chembook3d.api.page import router as page_router
 from chembook3d.api.pathway import router as pathway_router
+from chembook3d.api.playgrounds import router as playground_router
 from chembook3d.api.remote import router as remote_router
 from chembook3d.api.routes import close_and_push, router
 from chembook3d.api.scan_editor import router as scan_editor_router
@@ -189,6 +190,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(energy_router)
     app.include_router(energy_profile_router)  # D190
     app.include_router(sub_investigation_router)  # D193
+    app.include_router(playground_router)  # D235
     app.include_router(snapshot_router)
     app.include_router(page_router)  # D226
     app.include_router(steric_router)

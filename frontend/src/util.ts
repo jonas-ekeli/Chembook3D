@@ -134,3 +134,22 @@ export function limitText(seconds: number): string {
   if (hours === 1) return '1 hour'
   return hours >= 48 && hours % 24 === 0 ? `${hours / 24} days` : `${hours} hours`
 }
+
+/** "just now", "5 min ago", "2 h ago", "yesterday", "4 days ago", then the date. */
+export function relativeTime(iso: string, now: Date = new Date()): string {
+  const when = new Date(iso)
+  const minutes = Math.round((now.getTime() - when.getTime()) / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} min ago`
+  if (minutes < 24 * 60) return `${Math.round(minutes / 60)} h ago`
+  const midnight = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  const days = Math.round((midnight(now) - midnight(when)) / 86400000)
+  if (days <= 1) return 'yesterday'
+  if (days < 7) return `${days} days ago`
+  return when.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+/** D235: "Playground 1", or the first number not taken by the investigation's playgrounds. */
+export function nextPlaygroundName(taken: string[]): string {
+  for (let n = 1; ; n++) if (!taken.includes(`Playground ${n}`)) return `Playground ${n}`
+}

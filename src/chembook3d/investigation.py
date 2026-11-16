@@ -330,9 +330,20 @@ class Investigation:
 
     @property
     def name(self) -> str:
+        """The investigation's name; a playground's says so, "RuCAAC cycle (Playground 1)", so
+        its exports and the app bar tell it from the original (D235)."""
         with self.sessions() as session:
             info = session.get(InvestigationInfo, 1)
-            return info.name if info else self.folder.name
+            if info is None:
+                return self.folder.name
+            if info.playground_of and info.playground_name:
+                return f"{info.name} ({info.playground_name})"
+            return info.name
+
+    def info(self) -> InvestigationInfo | None:
+        """The investigation's own record, detached (expire_on_commit is off)."""
+        with self.sessions() as session:
+            return session.get(InvestigationInfo, 1)
 
     def counts(self) -> tuple[int, int]:
         """D182: the nodes on the canvas (free species left out) and the branches, which the
