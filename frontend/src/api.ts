@@ -2269,7 +2269,11 @@ export function captureInvestigation() {
   }
 }
 
-const unscoped = /^\/(live|presence|investigation|health|folders|remote)(\?|$)|^\/investigations(?:\/open|\/clone)?$|^\/sync\/resolve$/
+// Mirrors live.IDENTITY_DISCOVERY: requests that open, close or switch the notebook (or only read
+// the start page) carry no identity, and their answer stands even when the live link has shown the
+// switch first. D235: making, discarding and Merge… of a playground switch it too.
+const unscoped =
+  /^\/(live|presence|investigation|health|folders|remote)(\?|$)|^\/investigations(?:\/open|\/clone)?$|^\/sync\/resolve$|^\/playgrounds(?:\/discard|\/merge\/start)?$|^\/playgrounds\/discard-preview\?/
 
 /** Browser links and image loads cannot send our header; retain the rendered target in the URL. */
 export function investigationUrl(path: string): string {

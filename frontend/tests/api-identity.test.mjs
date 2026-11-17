@@ -30,6 +30,29 @@ test('notebook reads and mutations send the displayed Unicode identity, discover
   assert.equal(new URL(calls[2].path, 'http://127.0.0.1').searchParams.get('expected_investigation'), 'C:/β notebook')
 })
 
+test('making, discarding and Merge… of a playground keep their answer when the live link switched first', async () => {
+  // D235h: Merge… opens the original; the live link may show it before the answer arrives.
+  for (const call of [
+    () => api.startMerge('C:/A/playgrounds/Try'),
+    () => api.createPlayground('C:/A', 'Try'),
+    () => api.discardPlayground('C:/A/playgrounds/Try'),
+    () => api.playgroundDiscardPreview('C:/A/playgrounds/Try'),
+  ]) {
+    const response = deferred()
+    let headers
+    globalThis.fetch = (_path, options) => {
+      headers = options.headers
+      return response.promise
+    }
+    setInvestigationIdentity('C:/A/playgrounds/Try')
+    const pending = call()
+    setInvestigationIdentity('C:/A')
+    response.resolve(Response.json({ folder: 'C:/A', review: {} }))
+    assert.deepEqual(await pending, { folder: 'C:/A', review: {} })
+    assert.equal(headers['X-Chembook-Investigation'], undefined)
+  }
+})
+
 test('a start-page mutation explicitly expects no open investigation', async () => {
   globalThis.fetch = async (_path, options) => {
     assert.equal(options.headers['X-Chembook-Investigation'], '')
