@@ -157,6 +157,13 @@ test('a playground is merged into its original after a review', async ({ page })
   await page.goto('/')
 
   const band = page.getByRole('note', { name: 'Playground' })
+  // The answer to Merge… arrives only after the live link has shown the original: it still opens
+  // the review (a slower machine saw "The investigation changed" instead, 2026-11-17).
+  await page.route('**/api/playgrounds/merge/start', async (route) => {
+    const response = await route.fetch()
+    await expect(page.locator('.investigation')).toHaveText(name)
+    await route.fulfill({ response })
+  })
   await band.getByRole('button', { name: 'Merge…' }).click()
   const review = page.getByRole('dialog', { name: `Merge Playground 1 into ${name}` })
   await expect(review).toBeVisible()
