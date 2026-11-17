@@ -1,23 +1,26 @@
 // D235: playgrounds, working copies of an investigation kept in its playgrounds/ folder. The
 // dialog that makes one from the start page, the band under the app bar while one is open, the
-// confirmation that discards one, the review that merges one into its original, and the undo of
-// that merge from its history entry.
+// confirmation that discards one, the review that merges one into its original, the undo of
+// that merge from its history entry, and the dialog that makes one its own investigation (D236).
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   api,
   ApiError,
   type HistoryEntry,
+  type Investigation,
   type MergeChange,
   type MergeResult,
   type MergeReview,
   type MergeUndo,
+  type PlaygroundDetachPreview,
   type PlaygroundDiscardPreview,
   type PlaygroundInfo,
 } from '../api'
 import { Icon } from '../icons'
 import { initialTicks, pick, setTick, unpicked, type Ticks } from '../mergeTicks'
 import { byteSize, errorText, nextPlaygroundName, relativeTime } from '../util'
+import { FolderPicker } from './FolderPicker'
 import { Modal } from './Modal'
 
 export function NewPlaygroundDialog({
@@ -159,6 +162,75 @@ export function DiscardPlaygroundDialog({
       )}
       {error && <p role="alert">{error}</p>}
     </Modal>
+  )
+}
+
+/** D236: Make its own investigation…, moving a playground's folder out of its original to a place
+ * chosen in the folder picker New investigation uses, by default next to the original under the
+ * name the app bar shows, "Original (Playground)". It opens as an investigation of its own. */
+export function DetachPlaygroundDialog({
+  folder,
+  onCancel,
+  onDetached,
+}: {
+  folder: string
+  onCancel: () => void
+  onDetached: (opened: Investigation & { notice: string | null }) => void
+}) {
+  const [preview, setPreview] = useState<PlaygroundDetachPreview | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let current = true
+    api.playgroundDetachPreview(folder).then(
+      (found) => current && setPreview(found),
+      (err: unknown) => current && setError(errorText(err)),
+    )
+    return () => {
+      current = false
+    }
+  }, [folder])
+  if (!preview) {
+    return (
+      <Modal
+        title="Make its own investigation"
+        onClose={onCancel}
+        actions={<button onClick={onCancel}>Cancel</button>}
+      >
+        {error ? <p role="alert">{error}</p> : <p className="muted">Looking at the playground…</p>}
+      </Modal>
+    )
+  }
+  const detach = (target: string, name: string) => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    api.detachPlayground(folder, target, name).then(onDetached, (err: unknown) => {
+      setBusy(false)
+      setError(errorText(err))
+    })
+  }
+  return (
+    <FolderPicker
+      mode="create"
+      title={`Make ${preview.name} its own investigation`}
+      chooseLabel={busy ? 'Moving…' : 'Move and open'}
+      nameLabel="Name of the new investigation and its folder"
+      initialName={preview.new_name}
+      initialPath={preview.place}
+      busy={busy}
+      onCancel={onCancel}
+      onChoose={detach}
+    >
+      <p>
+        <strong>{preview.name}</strong> moves out of <strong>{preview.original_name}</strong> into the folder you
+        choose, with everything done in it, and opens as an investigation of its own. It leaves the original's list and
+        can no longer be merged
+        {preview.merged && '; it was merged already, and opens for changes again'}. The original is not changed. This
+        cannot be undone from the app.
+      </p>
+      {error && <p role="alert">{error}</p>}
+    </FolderPicker>
   )
 }
 
@@ -470,12 +542,15 @@ export function PlaygroundBand({
   playground,
   onOpenOriginal,
   onMerge,
+  onDetach,
   onDiscard,
 }: {
   playground: PlaygroundInfo
   onOpenOriginal: () => void
   /** D235h: Merge… (opens the original and its review). */
   onMerge: () => void
+  /** D236: Make its own investigation… (asks where first). */
+  onDetach: () => void
   /** D235g: Discard… (asks first). */
   onDiscard: () => void
 }) {
@@ -529,6 +604,13 @@ export function PlaygroundBand({
           Merge…
         </button>
       )}
+      <button
+        className="quiet"
+        title="Move this playground out of its original into a folder of its own (asks where first)"
+        onClick={onDetach}
+      >
+        Make its own investigation…
+      </button>
       <button className="quiet" title="Send this playground to the recycle bin (asks first)" onClick={onDiscard}>
         Discard…
       </button>

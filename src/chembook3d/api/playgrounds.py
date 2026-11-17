@@ -1,7 +1,8 @@
-"""D235, FR-INV-04…07: making a playground of an investigation, the playgrounds the start page
-lists under their originals, discarding one, merging one into its original and undoing that
-merge. None is an MCP tool: Claude makes a playground only through the Work on its own switch,
-and never merges or discards one, nor undoes a merge (Q69)."""
+"""D235, FR-INV-04…07, D236, FR-INV-09: making a playground of an investigation, the playgrounds
+the start page lists under their originals, discarding one, merging one into its original,
+undoing that merge, and making one its own investigation. None is an MCP tool: Claude makes a
+playground only through the Work on its own switch, and never merges, discards or moves one out,
+nor undoes a merge (Q69, A171)."""
 
 import os
 from pathlib import Path
@@ -186,6 +187,89 @@ def discard_playground(body: DiscardIn, request: Request):
         raise HTTPException(409, {"locked": exc.lock, "message": str(exc)}) from exc
     except InvestigationError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+# ---------- making a playground its own investigation (D236, FR-INV-09) ----------
+
+
+class DetachPreviewOut(BaseModel):
+    folder: str
+    name: str  # the playground's
+    original_name: str
+    new_name: str  # the dialog's default: "Original (Playground)"
+    place: str  # the dialog's default: the folder the original is in
+    merged: bool
+
+
+class DetachIn(BaseModel):
+    folder: str  # the playground's folder
+    target: str  # the new investigation's folder, not there yet
+    name: str
+
+
+class DetachedOut(InvestigationOut):
+    notice: str | None = None
+
+
+@router.get("/playgrounds/detach-preview", response_model=DetachPreviewOut)
+def detach_preview(folder: str):
+    """What Make its own investigation… starts from: the name and the place (A171)."""
+    try:
+        return playgrounds.detach_preview(Path(folder))
+    except InvestigationError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/playgrounds/detach", response_model=DetachedOut)
+def detach_playground(body: DetachIn, request: Request):
+    """Make its own investigation…: the playground's folder moves out of its original to the
+    chosen place and opens as an investigation of its own (D236, Q72, Q73). Closed first when it
+    is the open investigation (Work on its own turned off, A171); refused before anything is
+    closed while another app has it open, a local job runs in it, or the place is taken."""
+    _from_the_page(request, "turn a playground into its own investigation")
+    folder = Path(body.folder)
+    try:
+        playgrounds.check(folder)  # a playground, before anything is closed
+        playgrounds.detach_target(folder, Path(body.target))
+        if local_jobs.busy(folder):
+            raise playgrounds.PlaygroundError(
+                "A local job is still running in the playground; its results would be lost. "
+                "Wait for it to finish or cancel it first."
+            )
+    except InvestigationError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    switch = _begin_switch(request)
+    with _SWITCHING:
+        current = getattr(request.app.state, "investigation", None)
+        closing = current is not None and folder.resolve() == current.folder.resolve()
+        if closing:
+            request.app.state.investigation = None
+    if closing:
+        close_and_push(current)
+        _staging(request).clear()
+        state: autonomy.Autonomy = request.app.state.live.autonomy
+        if state.on_for(current.folder):
+            state.turn_off()
+    try:
+        done = playgrounds.detach(folder, Path(body.target), body.name)
+        investigation = open_investigation(done.folder)
+    except InvestigationError as exc:
+        if closing:
+            _reopen(request, folder, switch)
+        if isinstance(exc, InvestigationLocked):
+            raise HTTPException(409, {"locked": exc.lock, "message": str(exc)}) from exc
+        raise HTTPException(422, str(exc)) from exc
+    out = _set_open(request, investigation, switch)
+    return DetachedOut(**out.model_dump(), notice=done.notice)
+
+
+def _reopen(request: Request, folder: Path, switch: int) -> None:
+    """The playground open again after a refused move, as it was before; if even that fails,
+    none is open and the page goes to the start page."""
+    try:
+        _set_open(request, open_investigation(folder), switch)
+    except (InvestigationError, HTTPException, OSError):
+        pass
 
 
 # ---------- merge (D235h, FR-INV-06) ----------

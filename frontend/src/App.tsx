@@ -67,6 +67,7 @@ import { StructureEditor } from './components/StructureEditor'
 import { RemoteFilesDialog } from './components/RemoteFilesDialog'
 import { Modal } from './components/Modal'
 import {
+  DetachPlaygroundDialog,
   DiscardPlaygroundDialog,
   MergePlaygroundDialog,
   UndoMergeDialog,
@@ -237,6 +238,8 @@ function App() {
   const [playgroundRows, setPlaygroundRows] = useState<Record<string, PlaygroundRow[]>>({})
   const [playgroundFor, setPlaygroundFor] = useState<{ folder: string; name: string } | null>(null)
   const [discarding, setDiscarding] = useState<string | null>(null)
+  // D236: the playground whose Make its own investigation… dialog is open
+  const [detaching, setDetaching] = useState<string | null>(null)
   const [merging, setMerging] = useState<{ folder: string; review: MergeReview } | null>(null)
 
   const [view, setView] = useState<'canvas' | 'history' | 'analyses'>('canvas')
@@ -801,6 +804,21 @@ function App() {
     if (fromBand) closed()
     else api.playgrounds().then(setPlaygroundRows, () => undefined)
   }
+
+  // D236: a playground made its own investigation, which is now open (from its band or its row).
+  // The dialog stays over the page until the answer arrives, so nothing else was opened meanwhile.
+  const detached = (inv: Investigation & { notice: string | null }) => {
+    setDetaching(null)
+    opened(inv, true)
+    if (inv.notice) setNotice(inv.notice)
+  }
+  const detachDialog = detaching && (
+    <DetachPlaygroundDialog
+      folder={detaching}
+      onCancel={() => setDetaching(null)}
+      onDetached={detached}
+    />
+  )
 
   // D235: the start page lists each recent folder's playgrounds; read again when it shows and
   // whenever the recent list changes.
@@ -1816,6 +1834,7 @@ function App() {
         onNewPlayground={(folder, name) => setPlaygroundFor({ folder, name })}
         onDiscardPlayground={setDiscarding}
         onMergePlayground={(folder) => startMerge(folder)}
+        onDetachPlayground={setDetaching}
         notices={<LaunchNotices />}
       >
         {dialogs}
@@ -1835,6 +1854,7 @@ function App() {
             onDiscarded={() => discarded(false)}
           />
         )}
+        {detachDialog}
       </StartPage>
     )
   }
@@ -2839,9 +2859,11 @@ function App() {
             playground={investigation.playground}
             onOpenOriginal={() => openFolder(investigation.playground!.original_folder)}
             onMerge={() => startMerge(investigation.folder)}
+            onDetach={() => setDetaching(investigation.folder)}
             onDiscard={() => setDiscarding(investigation.folder)}
           />
         )}
+        {investigation.playground && detachDialog}
         {merging && (
           <MergePlaygroundDialog
             folder={merging.folder}

@@ -97,7 +97,8 @@ IDENTITY_DISCOVERY = re.compile(
     r"^/api/(live|presence|investigation|health|folders|remote|investigations"
     r"|investigations/open|investigations/clone|sync/resolve"
     r"|playgrounds|playgrounds/discard-preview|playgrounds/discard"  # D235: start page
-    r"|playgrounds/merge/start)$"  # D235h: opens the playground's original
+    r"|playgrounds/merge/start"  # D235h: opens the playground's original
+    r"|playgrounds/detach|playgrounds/detach-preview)$"  # D236: opens the moved playground
 )
 
 # D235h, Q64: what a merged playground, which is read-only, still takes besides reading:

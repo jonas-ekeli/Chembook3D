@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, type FolderListing } from '../api'
 import { Modal } from './Modal'
 
@@ -16,6 +16,10 @@ export function FolderPicker({
   title,
   chooseLabel,
   initialName = '',
+  initialPath,
+  nameLabel,
+  busy = false,
+  children,
 }: {
   mode: 'open' | 'create'
   onCancel: () => void
@@ -24,6 +28,13 @@ export function FolderPicker({
   title?: string
   chooseLabel?: string
   initialName?: string
+  /** The folder listed first (default: the home folder). */
+  initialPath?: string
+  nameLabel?: string
+  /** The choice is being carried out: the button waits. */
+  busy?: boolean
+  /** Said above the folders, such as what choosing does (D236). */
+  children?: ReactNode
 }) {
   const [listing, setListing] = useState<FolderListing | null>(null)
   const [pathInput, setPathInput] = useState('')
@@ -51,13 +62,13 @@ export function FolderPicker({
       })
   }, [])
 
-  useEffect(() => browse(), [browse])
+  useEffect(() => browse(initialPath), [browse, initialPath])
 
   const trimmed = name.trim()
   const canChoose =
     listing !== null && (mode === 'open' ? listing.is_investigation : trimmed.length > 0)
   const choose = () => {
-    if (!listing || !canChoose) return
+    if (!listing || !canChoose || busy) return
     if (mode === 'open') onChoose(listing.path, '')
     else onChoose(join(listing.path, trimmed), trimmed)
   }
@@ -69,12 +80,13 @@ export function FolderPicker({
       actions={
         <>
           <button onClick={onCancel}>Cancel</button>
-          <button className="primary" disabled={!canChoose} onClick={choose}>
+          <button className="primary" disabled={!canChoose || busy} onClick={choose}>
             {chooseLabel ?? (mode === 'open' ? 'Open' : 'Create')}
           </button>
         </>
       }
     >
+      {children}
       <form
         className="path-row"
         onSubmit={(event) => {
@@ -127,7 +139,7 @@ export function FolderPicker({
       )}
       {mode === 'create' && (
         <label className="field">
-          <span>Name of the new investigation folder</span>
+          <span>{nameLabel ?? 'Name of the new investigation folder'}</span>
           <input
             aria-label="Investigation name"
             value={name}
