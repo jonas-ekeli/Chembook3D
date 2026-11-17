@@ -1,13 +1,17 @@
 // D235: playgrounds, working copies of an investigation kept in its playgrounds/ folder. The
 // dialog that makes one from the start page, the band under the app bar while one is open, the
-// confirmation that discards one, and the review that merges one into its original.
+// confirmation that discards one, the review that merges one into its original, and the undo of
+// that merge from its history entry.
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   api,
+  ApiError,
+  type HistoryEntry,
   type MergeChange,
   type MergeResult,
   type MergeReview,
+  type MergeUndo,
   type PlaygroundDiscardPreview,
   type PlaygroundInfo,
 } from '../api'
@@ -354,6 +358,109 @@ export function MergePlaygroundDialog({
         </p>
       )}
       {error && <p role="alert">{error}</p>}
+    </Modal>
+  )
+}
+
+function joined(items: string[]): string {
+  return items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+/** One line per kind of change, with the records named (the first eight, then how many more). */
+function Named({ verb, after, items }: { verb: string; after: string; items: string[] }) {
+  if (!items.length) return null
+  const shown = items.slice(0, 8)
+  const more = items.length - shown.length
+  return (
+    <li>
+      {verb} {items.length} {items.length === 1 ? 'record' : 'records'} {after}: {joined(shown.map((i) => `“${i}”`))}
+      {more > 0 && ` and ${more} more`}
+    </li>
+  )
+}
+
+/** D235j: confirm undoing a playground's merge from its history entry, after showing what it
+ * removes, brings back and puts back, or what blocks it. */
+export function UndoMergeDialog({
+  entry,
+  onClose,
+  onDone,
+}: {
+  entry: HistoryEntry
+  onClose: () => void
+  onDone: (result: MergeUndo) => void
+}) {
+  const [preview, setPreview] = useState<MergeUndo | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    api.mergeUndoPreview(entry.id).then(setPreview, (err: unknown) => setError(errorText(err)))
+  }, [entry.id])
+
+  const blockers = preview?.blockers ?? []
+  const name = preview?.name ?? (entry.new_value as { name?: string } | null)?.name ?? 'the playground'
+  const confirm = () => {
+    setBusy(true)
+    api.undoMerge(entry.id).then(onDone, (err: unknown) => {
+      setBusy(false)
+      if (err instanceof ApiError && err.blockers && preview) setPreview({ ...preview, blockers: err.blockers })
+      else setError(errorText(err))
+    })
+  }
+
+  return (
+    <Modal
+      title={`Undo the merge of ${name}?`}
+      onClose={onClose}
+      actions={
+        <>
+          <button onClick={onClose}>{blockers.length ? 'Close' : 'Cancel'}</button>
+          {preview && !blockers.length && (
+            <button className="danger" disabled={busy} onClick={confirm}>
+              Undo merge
+            </button>
+          )}
+        </>
+      }
+    >
+      {error && <p className="error">{error}</p>}
+      {!preview && !error && <p className="muted">Checking what builds on this merge…</p>}
+      {preview && blockers.length > 0 && (
+        <>
+          <p>This merge cannot be undone while later work builds on it:</p>
+          <ul aria-label="What blocks the undo">
+            {blockers.map((b) => (
+              <li key={b}>{b}</li>
+            ))}
+          </ul>
+          <p className="muted">Undo or remove those first, then try again.</p>
+        </>
+      )}
+      {preview && !blockers.length && (
+        <>
+          <ul aria-label="What the undo does">
+            <Named verb="Removes" after="the merge added" items={preview.removed} />
+            <Named verb="Brings back" after="the merge removed" items={preview.restored} />
+            {preview.put_back.map((p) => (
+              <li key={p.label}>
+                Puts back the {joined(p.fields)} “{p.label}” had before the merge
+              </li>
+            ))}
+            {preview.kept.map((k) => (
+              <li key={k.label + k.field}>
+                Keeps the {k.field} of “{k.label}” as it is: it was changed after the merge
+              </li>
+            ))}
+          </ul>
+          <p className="muted">
+            A copy of the investigation is saved in backups first. The history keeps the merge and records the undo.
+            {preview.playground_back
+              ? ` ${name} opens for changes again and can be merged again.`
+              : ` ${name} is no longer there, so only this investigation changes.`}
+          </p>
+        </>
+      )}
     </Modal>
   )
 }

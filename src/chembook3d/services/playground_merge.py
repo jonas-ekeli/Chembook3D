@@ -23,8 +23,9 @@ note pictures come along with what uses them and are never changes of their own.
 
 The merge is one transaction on the original, with foreign keys checked at its end (PRAGMA
 defer_foreign_keys), so the order of the writes does not matter; a preview runs the same and is
-rolled back. It writes one "merge" entry first, with what PR 4's undo needs, and copies the
-playground's own history entries of what it merged, keeping their source and pointing to it.
+rolled back. It writes one "merge" entry first, with what its undo (D235j,
+`playground_merge_undo`) needs, and copies the playground's own history entries of what it
+merged, keeping their source and pointing to it.
 """
 
 import base64
@@ -1224,29 +1225,45 @@ def _copy_history(session: Session, merged: Plan, chosen: list[Change], merge_id
 
 def _undo_data(before: Rows, after: Rows) -> dict[str, Any]:
     """What the merge wrote, row by row, for its undo (D235j): inserted rows by key, updated
-    columns with their values before, deleted rows whole (cascades included)."""
+    columns with their values before, deleted rows whole (cascades included). And what it wrote,
+    so the undo tells later work apart: inserted rows whole ("inserted_rows"; levels, files
+    and pictures left out, which the undo never compares) and the updated columns' new values
+    ("updated_to"). Merges made before these two keys fall back to the history."""
     inserted: dict[str, list] = {}
+    inserted_rows: dict[str, list] = {}
     updated: dict[str, dict] = {}
+    updated_to: dict[str, dict] = {}
     deleted: dict[str, list] = {}
     for table, rows in after.items():
         old = before.get(table, {})
         new_keys = [list(k) for k in rows if k not in old]
         gone = [_json_safe(row) for k, row in old.items() if k not in rows]
-        changed = {}
+        changed, changed_to = {}, {}
         for key, row in rows.items():
             was = old.get(key)
             if was is None:
                 continue
             columns = {c: v for c, v in was.items() if row.get(c) != v}
             if columns:
-                changed[json.dumps(list(key), default=str)] = _json_safe(columns)
+                name = json.dumps(list(key), default=str)
+                changed[name] = _json_safe(columns)
+                changed_to[name] = _json_safe({c: row.get(c) for c in columns})
         if new_keys:
             inserted[table] = new_keys
+            if table not in HIDDEN:
+                inserted_rows[table] = [_json_safe(row) for k, row in rows.items() if k not in old]
         if gone:
             deleted[table] = gone
         if changed:
             updated[table] = changed
-    return {"inserted": inserted, "updated": updated, "deleted": deleted}
+            updated_to[table] = changed_to
+    return {
+        "inserted": inserted,
+        "updated": updated,
+        "deleted": deleted,
+        "inserted_rows": inserted_rows,
+        "updated_to": updated_to,
+    }
 
 
 def _violations(session: Session) -> set[tuple]:

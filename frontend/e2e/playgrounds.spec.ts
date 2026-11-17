@@ -198,3 +198,55 @@ test('a playground is merged into its original after a review', async ({ page })
   expect(refused.status()).toBe(409)
   expect((await refused.json()).detail).toContain('is read-only')
 })
+
+// D235j, T-UI-103: Undo merge on the merge's line of the original's history lists what it does,
+// puts the original back and lets the playground be changed and merged again.
+test("a playground's merge is undone from the original's history", async ({ page, baseURL }) => {
+  const stamp = Date.now()
+  const folder = join(E2E_DIR, `undo-merge-${stamp}`)
+  const name = `Undo merge ${stamp}`
+  expect((await page.request.post('/api/investigations', { data: { folder, name } })).ok()).toBeTruthy()
+  const node = await (await page.request.post('/api/nodes', { data: { label: 'INT1' } })).json()
+  expect((await page.request.post('/api/playgrounds', { data: { folder } })).ok()).toBeTruthy()
+  await page.request.post('/api/nodes', { data: { label: 'From the playground' } })
+  await page.request.patch(`/api/nodes/${node.id}`, { data: { label: 'INT1 (playground)' } })
+  // Merged through the routes, as the review would with its default ticks.
+  const playground = join(folder, 'playgrounds', 'Playground 1')
+  const origin = { Origin: baseURL ?? '' }
+  const started = await page.request.post('/api/playgrounds/merge/start', {
+    data: { folder: playground },
+    headers: origin,
+  })
+  expect(started.ok()).toBeTruthy()
+  const review = (await started.json()).review as { sections: { changes: { id: string; ticked: boolean }[] }[] }
+  const ticked = review.sections.flatMap((s) => s.changes.filter((c) => c.ticked).map((c) => c.id))
+  const merged = await page.request.post('/api/playgrounds/merge', { data: { folder: playground, ticked }, headers: origin })
+  expect(merged.ok()).toBeTruthy()
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'History', exact: true }).click()
+  const history = page.getByRole('list', { name: 'History' })
+  await expect(history).toContainText('Merged from playground “Playground 1”: 1 added, 1 changed, 0 removed')
+  await history.getByRole('button', { name: 'Undo merge' }).click()
+  const undo = page.getByRole('dialog', { name: 'Undo the merge of Playground 1?' })
+  const what = undo.getByRole('list', { name: 'What the undo does' })
+  await expect(what).toContainText('Removes 1 record the merge added: “From the playground”')
+  await expect(what).toContainText('Puts back the label “INT1 (playground)” had before the merge')
+  await undo.getByRole('button', { name: 'Undo merge' }).click()
+  await expect(undo).toHaveCount(0)
+  await expect(page.getByText(/Undid the merge of Playground 1\. Playground 1 can be changed and merged again\. A copy from before is in backups as investigation\.sqlite\.undo-merge-/)).toBeVisible()
+  await expect(history).toContainText('Undid the merge from playground “Playground 1”')
+  await expect(history.getByRole('button', { name: 'Undo merge' })).toHaveCount(0)
+  const labels = (await (await page.request.get('/api/nodes')).json()).map((n: { label: string }) => n.label)
+  expect(labels).toEqual(['INT1'])
+
+  // The playground opens for changes again, with Merge….
+  await startPage(page)
+  const recent = page.getByRole('list', { name: 'Recently opened' })
+  const row = recent.getByRole('button', { name: `Playground 1, playground of ${name}` })
+  await expect(row).not.toContainText('merged')
+  await row.click()
+  const band = page.getByRole('note', { name: 'Playground' })
+  await expect(band).not.toContainText('read-only')
+  await expect(band.getByRole('button', { name: 'Merge…' })).toBeVisible()
+})

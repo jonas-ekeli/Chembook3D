@@ -1177,7 +1177,8 @@ export type HistoryEntry = {
   record_id: string
   // split, reconnect, add_members, remove_member and dissolve are the structural actions INV-3
   // records as one entry each
-  // undo_import (one file) and undo (a batch) undo an import (D102)
+  // undo_import (one file) and undo (a batch) undo an import (D102); merge and undo_merge are a
+  // playground's merge into this investigation and its undo (D235h, D235j)
   action:
     | 'create'
     | 'update'
@@ -1189,12 +1190,15 @@ export type HistoryEntry = {
     | 'dissolve'
     | 'undo_import'
     | 'undo'
+    | 'merge'
+    | 'undo_merge'
   field: string | null
   old_value: unknown
   new_value: unknown
   source: string
-  /** D102: the entry's import can still be undone, one file or a whole batch */
-  undo?: 'import' | 'batch' | null
+  /** D102: the entry's import can still be undone, one file or a whole batch; D235j: a
+   * playground's merge that can still be undone */
+  undo?: 'import' | 'batch' | 'merge' | null
 }
 
 /** D102: what undoing one imported file removes and puts back. */
@@ -1215,6 +1219,25 @@ export type UndoPreview = {
   folder: string | null
   blockers: string[]
   files: UndoFile[]
+}
+
+/** D235j: what undoing a playground's merge removes, brings back and puts back, or what blocks it. */
+export type MergeUndo = {
+  name: string
+  blockers: string[]
+  /** What the merge added, removed again. */
+  removed: string[]
+  /** What the merge removed, brought back. */
+  restored: string[]
+  /** Records whose fields the merge changed, put back as they were. */
+  put_back: { label: string; fields: string[] }[]
+  /** Fields changed again after the merge, kept as they are. */
+  kept: { label: string; field: string }[]
+  counts: { removed: number; restored: number; put_back: number; kept: number }
+  backup: string | null
+  /** The playground is still there and can be merged again. */
+  playground_back: boolean
+  history_id: number | null
 }
 
 export type RecentInfo = {
@@ -2704,6 +2727,9 @@ export const api = {
 
   undoPreview: (entryId: number) => request<UndoPreview>('GET', `/history/${entryId}/undo`),
   undoImport: (entryId: number) => request<UndoPreview>('POST', `/history/${entryId}/undo`),
+  /** D235j: undo a playground's merge from its history entry; the preview writes nothing. */
+  mergeUndoPreview: (entryId: number) => request<MergeUndo>('GET', `/playgrounds/merge/${entryId}/undo`),
+  undoMerge: (entryId: number) => request<MergeUndo>('POST', `/playgrounds/merge/${entryId}/undo`),
 
   overview: (since?: string | null) =>
     request<Overview>('GET', since ? `/overview?since=${encodeURIComponent(since)}` : '/overview'),
