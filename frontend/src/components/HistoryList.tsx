@@ -281,6 +281,23 @@ function describeThermo(entry: HistoryEntry): string | null {
   return `${THERMO_FIELDS[field] ?? field}: ${thermoValue(field, entry.old_value)} → ${thermoValue(field, entry.new_value)}`
 }
 
+/** D235h, D235j: a playground merged into this investigation, and that merge undone. */
+function describeMerge(entry: HistoryEntry): string | null {
+  if (entry.record_type !== 'playground') return null
+  const value = (entry.new_value ?? {}) as { name?: string; counts?: Record<string, number> }
+  const name = `“${value.name ?? 'a playground'}”`
+  const counts = value.counts ?? {}
+  if (entry.action === 'merge') {
+    return `Merged from playground ${name}: ${counts.added ?? 0} added, ${counts.changed ?? 0} changed, ${counts.removed ?? 0} removed`
+  }
+  if (entry.action === 'undo_merge') {
+    const parts = [`${counts.removed ?? 0} removed`, `${counts.restored ?? 0} brought back`, `${counts.put_back ?? 0} put back`]
+    if (counts.kept) parts.push(`${counts.kept} kept as changed later`)
+    return `Undid the merge from playground ${name}: ${parts.join(', ')}`
+  }
+  return null
+}
+
 /** D102: an import undone, one file or a whole batch. */
 function describeUndo(entry: HistoryEntry): string | null {
   if (entry.action === 'undo_import') {
@@ -307,6 +324,7 @@ function describeUndo(entry: HistoryEntry): string | null {
 
 function describe(entry: HistoryEntry, names: Names): string {
   const other =
+    describeMerge(entry) ??
     describeUndo(entry) ??
     describeNote(entry) ??
     describeThermo(entry) ??
@@ -355,7 +373,9 @@ function RecordLink({
   // A pinned note's changes are recorded on its node (D85).
   const nodeId =
     entry.record_type === 'node' || entry.record_type === 'note' ? entry.record_id : (value?.node_id ?? null)
-  if (entry.record_type === 'thermochemistry') return <span className="muted">investigation</span>
+  if (entry.record_type === 'thermochemistry' || entry.record_type === 'playground') {
+    return <span className="muted">investigation</span>
+  }
   if (STRUCTURE_TYPES[entry.record_type]) {
     const name = names.get(entry.record_id)
     return <span className="muted">{name ? `${STRUCTURE_TYPES[entry.record_type]} ${name}` : STRUCTURE_TYPES[entry.record_type]}</span>
@@ -412,7 +432,7 @@ export function HistoryList({
           )}
           {onUndo && entry.undo && (
             <button className="small" onClick={() => onUndo(entry)}>
-              {entry.undo === 'batch' ? 'Undo batch' : 'Undo import'}
+              {entry.undo === 'batch' ? 'Undo batch' : entry.undo === 'merge' ? 'Undo merge' : 'Undo import'}
             </button>
           )}
         </li>

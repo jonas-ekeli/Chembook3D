@@ -1,7 +1,7 @@
-"""D235, FR-INV-04…06: making a playground of an investigation, the playgrounds the start page
-lists under their originals, discarding one and merging one into its original. None is an MCP
-tool: Claude makes a playground only through the Work on its own switch, and never merges or
-discards one (Q69)."""
+"""D235, FR-INV-04…07: making a playground of an investigation, the playgrounds the start page
+lists under their originals, discarding one, merging one into its original and undoing that
+merge. None is an MCP tool: Claude makes a playground only through the Work on its own switch,
+and never merges or discards one, nor undoes a merge (Q69)."""
 
 import os
 from pathlib import Path
@@ -32,7 +32,7 @@ from chembook3d.investigation import (
     acquire_ownership,
     open_investigation,
 )
-from chembook3d.services import playground_merge
+from chembook3d.services import playground_merge, playground_merge_undo
 
 router = APIRouter(prefix="/api")
 
@@ -365,3 +365,57 @@ def merge_playground(body: MergeIn, request: Request):
         raise HTTPException(409, {"blockers": exc.result["blockers"], "message": str(exc)}) from exc
     except InvestigationError as exc:
         raise _merge_errors(exc) from exc
+
+
+# ---------- undoing a merge (D235j, FR-INV-07) ----------
+
+
+class MergeUndoFieldsOut(BaseModel):
+    label: str
+    fields: list[str]
+
+
+class MergeUndoKeptOut(BaseModel):
+    label: str
+    field: str
+
+
+class MergeUndoOut(BaseModel):
+    name: str  # the playground's
+    blockers: list[str]
+    removed: list[str]  # what the merge added, as its review named it
+    restored: list[str]  # what the merge removed, brought back
+    put_back: list[MergeUndoFieldsOut]  # fields going back to their value before the merge
+    kept: list[MergeUndoKeptOut]  # fields changed again since, which keep their later value
+    counts: dict[str, int]  # removed, restored, put_back, kept
+    backup: str | None = None  # the original's copy in backups/, once undone
+    playground_back: bool  # the playground is there and can be merged again
+    history_id: int | None = None  # the undo's entry in the original's history
+
+
+def _undo_errors(exc: InvestigationError) -> HTTPException:
+    if isinstance(exc, playground_merge_undo.UndoMergeBlocked):
+        return HTTPException(409, {"blockers": exc.result["blockers"], "message": str(exc)})
+    return HTTPException(422, str(exc))
+
+
+@router.get("/playgrounds/merge/{entry_id}/undo", response_model=MergeUndoOut)
+def preview_merge_undo(entry_id: int, request: Request):
+    """What undoing a merge would remove, bring back, put back and keep, and what blocks it,
+    run in a transaction that is rolled back. Nothing is written."""
+    try:
+        return playground_merge_undo.undo(_investigation(request), entry_id, dry_run=True)
+    except InvestigationError as exc:
+        raise _undo_errors(exc) from exc
+
+
+@router.post("/playgrounds/merge/{entry_id}/undo", response_model=MergeUndoOut)
+def undo_merge(entry_id: int, request: Request):
+    """Undo a merge as one new change (D235j): the original is backed up first; refused with the
+    blockers, changing nothing, while later work builds on what the merge wrote. The playground
+    is writable again and can be merged again."""
+    _from_the_page(request, "undo a merge")
+    try:
+        return playground_merge_undo.undo(_investigation(request), entry_id)
+    except InvestigationError as exc:
+        raise _undo_errors(exc) from exc

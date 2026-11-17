@@ -250,6 +250,18 @@ changed and removed since it was made, grouped by node, with a tick box each.
 A playground merges once. Afterwards it still opens, read-only, so you can look at it; make a
 new playground from the original to go on.
 
+### Undo a merge
+
+In the original's **History**, the "Merged from playground" line has **Undo merge**. It first
+lists what the undo does: what the merge added is removed, what it removed comes back, and the
+fields it changed go back to their values before. A field changed again after the merge is kept
+as it is, and the list says so. **Undo merge** saves a copy of the original in `backups` first.
+
+The undo is refused, with a list of what is in the way, while later work builds on the merge:
+for example an edge, a calculation or a note added to a node the merge brought, or a merged node
+changed since. Undo or remove those first. Afterwards the playground opens for changes again and
+can be merged again, with different ticks if you like.
+
 ## Sync investigations between computers
 
 An investigation can be synced through a private GitHub repository, so you can work on it on

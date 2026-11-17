@@ -18,6 +18,7 @@ import {
   type HistoryEntry,
   type Investigation,
   type MergeResult,
+  type MergeUndo,
   type MergeReview,
   type PlaygroundRow,
   type Node,
@@ -68,6 +69,7 @@ import { Modal } from './components/Modal'
 import {
   DiscardPlaygroundDialog,
   MergePlaygroundDialog,
+  UndoMergeDialog,
   NewPlaygroundDialog,
   PlaygroundBand,
 } from './components/Playgrounds'
@@ -778,6 +780,17 @@ function App() {
     const { added, changed, removed } = result.counts
     setNotice(
       `Merged ${name}: ${added} added, ${changed} changed, ${removed} removed.` +
+        (result.backup ? ` A copy from before is in backups as ${result.backup}.` : ''),
+    )
+  }
+
+  // D235j: a playground's merge undone from its history entry.
+  const mergeUndone = (result: MergeUndo) => {
+    setUndoing(null)
+    reload()
+    setNotice(
+      `Undid the merge of ${result.name}.` +
+        (result.playground_back ? ` ${result.name} can be changed and merged again.` : '') +
         (result.backup ? ` A copy from before is in backups as ${result.backup}.` : ''),
     )
   }
@@ -3105,7 +3118,7 @@ function App() {
               onSelect={(id) => selectNode(id, true)}
               onUndo={setUndoing}
             />
-            {undoing && (
+            {undoing && undoing.undo !== 'merge' && (
               <UndoImportDialog
                 entry={undoing}
                 onClose={() => setUndoing(null)}
@@ -3114,6 +3127,9 @@ function App() {
                   reload()
                 }}
               />
+            )}
+            {undoing && undoing.undo === 'merge' && (
+              <UndoMergeDialog entry={undoing} onClose={() => setUndoing(null)} onDone={mergeUndone} />
             )}
           </main>
         )}
