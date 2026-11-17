@@ -10,6 +10,9 @@ it is now record by record. The copy is the investigation's own: Git, Claude's f
 exports and backups stay with the original (A165).
 """
 
+import errno
+import json
+import logging
 import os
 import re
 import shutil
@@ -34,11 +37,14 @@ from chembook3d.investigation import (
 )
 from chembook3d.models import new_id, utcnow
 
+log = logging.getLogger(__name__)
+
 PLAYGROUNDS_DIR = "playgrounds"
 BASE_DIR = "playground"
 BASE_NAME = "base.sqlite"
 BACK = "../.."  # from <original>/playgrounds/<name>/ to the original
 MAKING = ".making-"  # a playground being made; renamed to its name once whole
+DETACHING = ".detaching-"  # a playground becoming its own investigation (D236)
 # The UI tests' stand-in for the recycle bin: a folder discarded playgrounds are moved into, so a
 # test run never fills the recycle bin of the computer it runs on.
 TRASH_ENV = "CHEMBOOK3D_TRASH_DIR"
@@ -355,3 +361,196 @@ def discard(folder: Path) -> None:
         raise PlaygroundError(
             f"The playground could not be moved to the recycle bin ({exc}); nothing was deleted"
         ) from exc
+
+
+# ---------- making a playground its own investigation (D236, FR-INV-09) ----------
+
+
+@dataclass
+class Detached:
+    folder: Path
+    notice: str  # what the app says once the new investigation is open
+
+
+def _plain_name(name: str) -> str:
+    """A name a folder can take on Windows and Linux alike, for the dialog's default."""
+    folder = _BAD.sub("-", " ".join(name.split())).rstrip(" .")
+    return folder + "-" if _RESERVED.match(folder) else folder
+
+
+def detach_preview(folder: Path) -> dict[str, Any]:
+    """What Make its own investigation… starts from (A171): the name the app bar shows now,
+    "Original (Playground)", and the folder the original is in."""
+    folder = Path(folder)
+    name, original_name = check(folder)
+    info = _read(folder / DB_NAME, "SELECT playground_merged_at FROM investigation_info")
+    original = folder.resolve().parent.parent
+    return {
+        "folder": str(folder.resolve()),
+        "name": name,
+        "original_name": original_name,
+        "new_name": _plain_name(f"{original_name} ({name})"),
+        "place": str(original.parent),
+        "merged": bool(info and info[0][0]),
+    }
+
+
+def detach_target(folder: Path, target: Path) -> Path:
+    """The new investigation's folder, refused (D236, A171) when it is there already, its parent
+    is not, or it is inside the original (an investigation never sits inside another)."""
+    target = Path(target).expanduser()
+    if not target.is_absolute():
+        raise PlaygroundError("Choose the new investigation's folder by its full path")
+    target = target.resolve()
+    if target.exists():
+        raise PlaygroundError(f"{target} already exists. Choose a new folder name.")
+    if not target.parent.is_dir():
+        raise PlaygroundError(f"{target.parent} does not exist")
+    original = Path(folder).resolve().parent.parent
+    if target == original or original in target.parents:
+        raise PlaygroundError(
+            "Choose a place outside the original's folder: an investigation cannot sit inside "
+            "another one"
+        )
+    return target
+
+
+def _rename(source: Path, target: Path) -> None:
+    os.rename(source, target)
+
+
+def _other_disk(exc: OSError) -> bool:
+    """A rename refused because the target is on another disk (EXDEV; Windows says
+    ERROR_NOT_SAME_DEVICE)."""
+    return exc.errno == errno.EXDEV or getattr(exc, "winerror", None) == 17
+
+
+def _size(folder: Path) -> int:
+    size = 0
+    for root, _dirs, names in os.walk(folder):
+        for name in names:
+            try:
+                size += (Path(root) / name).lstat().st_size
+            except OSError:
+                continue
+    return size
+
+
+def _copy_across(folder: Path, work: Path) -> None:
+    """The playground's folder copied to another disk, checked against its free space first;
+    a failed copy is removed (A171). Hard-linked files become plain copies there."""
+    needed = _size(folder)
+    free = shutil.disk_usage(work.parent).free
+    if needed > free:
+        raise PlaygroundError(
+            f"The playground needs {needed / 1e6:.0f} MB and the disk of {work.parent} has "
+            f"{free / 1e6:.0f} MB free; nothing was moved"
+        )
+    try:
+        shutil.copytree(folder, work, symlinks=True)
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        raise
+
+
+def _unlink(db_path: Path, name: str, playground_name: str, original_name: str) -> None:
+    """The investigation's own record no longer a playground's: its name saved, the playground
+    fields cleared (so a merged one opens writable, Q73), and one history entry."""
+    with closing(sqlite3.connect(db_path)) as db:
+        own = db.execute("SELECT uuid FROM investigation_info WHERE id = 1").fetchone()
+        db.execute(
+            "UPDATE investigation_info SET name = ?, playground_of = NULL, "
+            "playground_original = NULL, playground_name = NULL, playground_created_at = NULL, "
+            "playground_history_id = NULL, playground_merged_at = NULL WHERE id = 1",
+            (name,),
+        )
+        db.execute(
+            "INSERT INTO history (timestamp, record_type, record_id, action, new_value, source) "
+            "VALUES (?, 'playground', ?, 'detach', ?, 'manual')",
+            (
+                _stored(utcnow()),
+                (own[0] if own else None) or new_id(),
+                json.dumps({"name": playground_name, "original_name": original_name}),
+            ),
+        )
+        db.commit()
+
+
+def _remove_old(folder: Path) -> str:
+    """After a copy to another disk: the playground's old folder to the recycle bin. The
+    investigation is whole in its new place, so where the bin cannot take it, it is deleted, as
+    a move between disks does."""
+    try:
+        stand_in = os.environ.get(TRASH_ENV)
+        if stand_in:
+            Path(stand_in).mkdir(parents=True, exist_ok=True)
+            os.replace(folder, Path(stand_in) / f"{folder.name}-{new_id()}")
+        else:
+            send2trash(str(folder))
+        return " Its old folder in the original went to the recycle bin."
+    except OSError:
+        pass
+    try:
+        shutil.rmtree(folder)
+        return " Its old folder in the original was deleted: the recycle bin could not take it."
+    except OSError as exc:
+        return f" Its old folder could not be removed ({exc}); delete {folder} yourself."
+
+
+def detach(folder: Path, target: Path, name: str) -> Detached:
+    """Make a playground its own investigation (D236, FR-INV-09): its folder moved out of the
+    original to `target` (a rename on the same disk; on another, a copy and then the old folder to
+    the recycle bin, Q72), its link and frozen base dropped, saved under `name`. Moved under a
+    hidden name first and renamed once whole, so a half-moved one is never an investigation in
+    the chosen place. The original is not opened or written; a merge done earlier stays there and
+    can still be undone. Refused while another app has it open or a local job runs in it."""
+    from chembook3d import local_jobs  # imports the services, which import this module
+
+    folder = Path(folder).resolve()
+    playground_name, original_name = check(folder)
+    name = " ".join(name.split())
+    if not name:
+        raise PlaygroundError("Give the new investigation a name")
+    target = detach_target(folder, target)
+    acquire_ownership(folder).release()  # refused while another app has it open
+    if local_jobs.busy(folder):
+        raise PlaygroundError(
+            "A local job is still running in the playground; its results would be lost. Wait "
+            "for it to finish or cancel it first."
+        )
+    work = target.parent / f"{DETACHING}{new_id()}"
+    copied = False
+    try:
+        _rename(folder, work)
+    except OSError as exc:
+        if not _other_disk(exc):
+            raise PlaygroundError(f"The playground could not be moved: {exc}") from exc
+        _copy_across(folder, work)
+        copied = True
+    try:
+        _unlink(work / DB_NAME, name, playground_name, original_name)
+    except BaseException as exc:
+        if copied:
+            shutil.rmtree(work, ignore_errors=True)
+        else:
+            _rename(work, folder)
+        if isinstance(exc, sqlite3.Error):
+            raise PlaygroundError(f"The playground could not be changed: {exc}") from exc
+        raise
+    # From here it is its own investigation, wherever it ends up.
+    try:
+        if target.exists():
+            raise OSError(f"{target} appeared meanwhile")
+        _rename(work, target)
+    except OSError as exc:
+        raise PlaygroundError(
+            f"The investigation was made but could not be renamed ({exc}); it is in {work}"
+        ) from exc
+    try:
+        shutil.rmtree(target / BASE_DIR)
+    except OSError as exc:  # a leftover file only: nothing reads it outside a playground
+        log.warning("could not remove %s: %s", target / BASE_DIR, exc)
+    said = f"{playground_name} is now its own investigation, in {target}."
+    if copied:
+        said += _remove_old(folder)
+    return Detached(target, said)

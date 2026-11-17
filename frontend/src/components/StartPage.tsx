@@ -142,12 +142,14 @@ function PlaygroundRowItem({
   original,
   onOpen,
   onMerge,
+  onDetach,
   onDiscard,
 }: {
   row: PlaygroundRow
   original: string
   onOpen: () => void
   onMerge: () => void
+  onDetach: () => void
   onDiscard: () => void
 }) {
   const since = changedSince(row.changed)
@@ -206,6 +208,12 @@ function PlaygroundRowItem({
             onSelect: onMerge,
           },
           {
+            label: 'Make its own investigation…',
+            icon: 'folder',
+            title: 'Move this playground out of its original into a folder of its own (asks where first)',
+            onSelect: onDetach,
+          },
+          {
             label: 'Discard…',
             icon: 'trash',
             danger: true,
@@ -233,6 +241,7 @@ export function StartPage({
   onNewPlayground,
   onDiscardPlayground,
   onMergePlayground,
+  onDetachPlayground,
   notices,
   children,
 }: {
@@ -253,6 +262,8 @@ export function StartPage({
   onDiscardPlayground: (folder: string) => void
   /** D235h: Merge… on a playground's row. */
   onMergePlayground: (folder: string) => void
+  /** D236: Make its own investigation… on a playground's row. */
+  onDetachPlayground: (folder: string) => void
   /** The launcher's notices, under the cards. */
   notices: ReactNode
   /** The dialogs the cards open. */
@@ -310,6 +321,7 @@ export function StartPage({
                     original={names[index]}
                     onOpen={() => onOpenFolder(row.folder)}
                     onMerge={() => onMergePlayground(row.folder)}
+                    onDetach={() => onDetachPlayground(row.folder)}
                     onDiscard={() => onDiscardPlayground(row.folder)}
                   />
                 ))}

@@ -281,7 +281,8 @@ function describeThermo(entry: HistoryEntry): string | null {
   return `${THERMO_FIELDS[field] ?? field}: ${thermoValue(field, entry.old_value)} → ${thermoValue(field, entry.new_value)}`
 }
 
-/** D235h, D235j: a playground merged into this investigation, and that merge undone. */
+/** D235h, D235j, D236: a playground merged into this investigation, that merge undone, and this
+ * investigation made from a playground. */
 function describeMerge(entry: HistoryEntry): string | null {
   if (entry.record_type !== 'playground') return null
   const value = (entry.new_value ?? {}) as { name?: string; counts?: Record<string, number> }
@@ -294,6 +295,11 @@ function describeMerge(entry: HistoryEntry): string | null {
     const parts = [`${counts.removed ?? 0} removed`, `${counts.restored ?? 0} brought back`, `${counts.put_back ?? 0} put back`]
     if (counts.kept) parts.push(`${counts.kept} kept as changed later`)
     return `Undid the merge from playground ${name}: ${parts.join(', ')}`
+  }
+  if (entry.action === 'detach') {
+    // D236: this investigation was that playground until it was moved out
+    const original = (entry.new_value as { original_name?: string } | null)?.original_name
+    return `Made its own investigation from playground ${name}${original ? ` of “${original}”` : ''}`
   }
   return null
 }

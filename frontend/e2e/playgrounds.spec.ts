@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { E2E_DIR, startPage } from './helpers.ts'
 
@@ -249,4 +249,45 @@ test("a playground's merge is undone from the original's history", async ({ page
   const band = page.getByRole('note', { name: 'Playground' })
   await expect(band).not.toContainText('read-only')
   await expect(band.getByRole('button', { name: 'Merge…' })).toBeVisible()
+})
+
+// D236, T-UI-104: Make its own investigation… from the band moves the playground out of its
+// original into the folder picked (next to the original by default) and opens it there under the
+// new name, without the band; the start page no longer lists it under the original.
+
+test('a playground is made its own investigation', async ({ page }) => {
+  const stamp = Date.now()
+  const folder = join(E2E_DIR, `detach-${stamp}`)
+  const name = `Detach ${stamp}`
+  expect((await page.request.post('/api/investigations', { data: { folder, name } })).ok()).toBeTruthy()
+  expect((await page.request.post('/api/playgrounds', { data: { folder } })).ok()).toBeTruthy()
+  await page.request.post('/api/nodes', { data: { label: 'Tried here' } })
+  await page.goto('/')
+
+  const band = page.getByRole('note', { name: 'Playground' })
+  await band.getByRole('button', { name: 'Make its own investigation…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Make Playground 1 its own investigation' })
+  await expect(dialog).toContainText(`moves out of ${name}`)
+  await expect(dialog).toContainText('can no longer be merged')
+  await expect(dialog.getByRole('textbox', { name: 'Investigation name' })).toHaveValue(`${name} (Playground 1)`)
+  // next to the original (Windows may give the temporary folder's long name, so only its end)
+  await expect(dialog.getByRole('textbox', { name: 'Folder path' })).toHaveValue(new RegExp(`${basename(E2E_DIR)}$`))
+  const study = `Study ${stamp}`
+  await dialog.getByRole('textbox', { name: 'Investigation name' }).fill(study)
+  await dialog.getByRole('button', { name: 'Move and open' }).click()
+  await expect(dialog).toHaveCount(0)
+
+  await expect(page.locator('.investigation')).toHaveText(study)
+  await expect(band).toHaveCount(0)
+  await expect(page.getByRole('group', { name: 'Node Tried here', exact: true })).toBeVisible()
+  await expect(page.getByText('Playground 1 is now its own investigation, in')).toContainText(study)
+  expect(existsSync(join(folder, 'playgrounds', 'Playground 1'))).toBe(false)
+  expect(existsSync(join(E2E_DIR, study, 'investigation.sqlite'))).toBe(true)
+  expect(existsSync(join(E2E_DIR, study, 'playground'))).toBe(false)
+
+  await startPage(page)
+  const recent = page.getByRole('list', { name: 'Recently opened' })
+  await expect(recent.getByRole('button', { name: `Playground 1, playground of ${name}` })).toHaveCount(0)
+  await expect(recent.getByRole('listitem').filter({ hasText: study }).first()).toBeVisible()
+  await expect(recent.getByRole('listitem').filter({ hasText: name }).first()).toBeVisible()
 })

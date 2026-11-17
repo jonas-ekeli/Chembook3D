@@ -145,6 +145,19 @@ export type PlaygroundDiscardPreview = {
   frees: number
 }
 
+/** D236: what Make its own investigation… starts from. */
+export type PlaygroundDetachPreview = {
+  folder: string
+  /** The playground's name. */
+  name: string
+  original_name: string
+  /** The default name: "Original (Playground)". */
+  new_name: string
+  /** The default place: the folder the original is in. */
+  place: string
+  merged: boolean
+}
+
 export type CalculationType =
   | 'optimization'
   | 'ts_optimization'
@@ -1178,7 +1191,8 @@ export type HistoryEntry = {
   // split, reconnect, add_members, remove_member and dissolve are the structural actions INV-3
   // records as one entry each
   // undo_import (one file) and undo (a batch) undo an import (D102); merge and undo_merge are a
-  // playground's merge into this investigation and its undo (D235h, D235j)
+  // playground's merge into this investigation and its undo (D235h, D235j); detach is this
+  // investigation made from a playground (D236)
   action:
     | 'create'
     | 'update'
@@ -1192,6 +1206,7 @@ export type HistoryEntry = {
     | 'undo'
     | 'merge'
     | 'undo_merge'
+    | 'detach'
   field: string | null
   old_value: unknown
   new_value: unknown
@@ -2294,9 +2309,10 @@ export function captureInvestigation() {
 
 // Mirrors live.IDENTITY_DISCOVERY: requests that open, close or switch the notebook (or only read
 // the start page) carry no identity, and their answer stands even when the live link has shown the
-// switch first. D235: making, discarding and Merge… of a playground switch it too.
+// switch first. D235: making, discarding and Merge… of a playground switch it too, and so does
+// making one its own investigation (D236). Mirrors live.IDENTITY_DISCOVERY.
 const unscoped =
-  /^\/(live|presence|investigation|health|folders|remote)(\?|$)|^\/investigations(?:\/open|\/clone)?$|^\/sync\/resolve$|^\/playgrounds(?:\/discard|\/merge\/start)?$|^\/playgrounds\/discard-preview\?/
+  /^\/(live|presence|investigation|health|folders|remote)(\?|$)|^\/investigations(?:\/open|\/clone)?$|^\/sync\/resolve$|^\/playgrounds(?:\/discard|\/merge\/start|\/detach)?$|^\/playgrounds\/(?:discard|detach)-preview\?/
 
 /** Browser links and image loads cannot send our header; retain the rendered target in the URL. */
 export function investigationUrl(path: string): string {
@@ -2674,6 +2690,12 @@ export const api = {
     request<MergeResult>('POST', '/playgrounds/merge', { folder, ticked }),
   /** D235g: the playground's folder goes to the recycle bin; closed first when it is open. */
   discardPlayground: (folder: string) => request<void>('POST', '/playgrounds/discard', { folder }),
+  /** D236: the name and place Make its own investigation… starts from. */
+  playgroundDetachPreview: (folder: string) =>
+    request<PlaygroundDetachPreview>('GET', `/playgrounds/detach-preview?folder=${encodeURIComponent(folder)}`),
+  /** D236: move the playground out of its original to `target` as its own investigation, and open it. */
+  detachPlayground: (folder: string, target: string, name: string) =>
+    request<Investigation & { notice: string | null }>('POST', '/playgrounds/detach', { folder, target, name }),
   /** Closing a linked investigation also pushes it; the answer is the sync state (D71). */
   closeInvestigation: () => request<SyncStatus | null>('POST', '/investigations/close'),
   syncStatus: () => request<SyncStatus>('GET', '/sync'),
