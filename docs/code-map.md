@@ -539,7 +539,7 @@ Routes for all of these are in `api/pathway.py`.
 ### Jobs and the worker
 
 - `local_jobs.py` writes `local-jobs/<id>/job.json` and copies `local_worker.py` there as `worker.py`. `_spawn` starts it detached (new session on Linux; `DETACHED_PROCESS`, breakaway from uv's job object on Windows) with the environment's PATH, thread counts and `PSI_SCRATCH`.
-- `job_status` reads `progress.json` (heartbeat every 5 s, alive for `ALIVE_S`), `result.json` and `cancel`. `cancel` kills the process when its heartbeat is fresh.
+- `job_status` reads `progress.json` (heartbeat every 5 s, alive for `ALIVE_S`, or longer while the worker's own process runs: `_worker_process`, D241, since Psi4's long steps hold up the heartbeat thread), `result.json` and `cancel`. `cancel` kills the process while `_alive` holds.
 - `estimate` gives each method's time for a structure from `TIMING` (70 atoms, 4 cores) or this computer's own seconds per step (`calibrate` after each import, kept in `local.json` by `local_tools.save_calibration`).
 - `import_result` imports `result.json` onto the job's node with `imports.commit` (parser `parsers/local_result.py`, recognised first in `imports.read_file`).
 - `local_worker.py` runs only in the tools' Python (stdlib, numpy, geomeTRIC, tblite, Psi4): the queue lock (`Queue`, `local-jobs.lock` in the tools folder); `make_calculator` per method from `_engine`: `stub`/`stub-low`/`stub-saddle` for tests, `gfn2`, `gxtb` (runs xtb, `read_xtb_gradient`), `b97-3c`, `r2scan-3c`, `mace-omol` (`_mace`, D237; `mace-stub` in tests). Psi4 reads the last step's orbitals as its guess. `run_s` in the result is the time computing, without the wait for the lock.

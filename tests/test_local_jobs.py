@@ -189,6 +189,60 @@ def test_a_job_whose_process_ended_without_a_result_is_stopped(open_client, wate
     assert open_client.post(f"/api/local/jobs/{path.name}/cancel").json()["status"] == "stopped"
 
 
+def test_a_busy_job_whose_heartbeat_lags_is_still_running(open_client, water, stub_tools):
+    """T-LOC-42 (D241): Psi4's long steps hold up the heartbeat thread for minutes. While the
+    worker's own process runs, the job is running (and can be cancelled); a process that got
+    the same id later does not count."""
+    folder = folder_of(open_client)
+    busy = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        start_new_session=True,
+        **(
+            {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+            if sys.platform == "win32"
+            else {}
+        ),  # type: ignore[attr-defined]
+    )
+    try:
+        written = local_jobs._now()  # the worker writes after its process started
+        old = "2026-01-01T00:01:00Z"
+        for name, queued_at in (("2026-01-01-busy", written), ("2026-01-01-reused", old)):
+            path = local_jobs.jobs_dir(folder) / name
+            path.mkdir(parents=True)
+            job = {
+                "id": name,
+                "node_id": water,
+                "node_label": "water",
+                "method": "stub",
+                "created": old,
+                "elements": ["O"],
+                "coordinates": [[0, 0, 0]],
+            }
+            (path / "job.json").write_text(json.dumps(job))
+            progress = {
+                "state": "running",
+                "pid": busy.pid,
+                "queued_at": queued_at,
+                "heartbeat_at": old,  # long before ALIVE_S
+            }
+            (path / "progress.json").write_text(json.dumps(progress))
+        job = open_client.get("/api/local/jobs/2026-01-01-busy").json()
+        assert job["status"] == "running" and job["active"]
+        # The id names a process that started after this worker first wrote: not the worker.
+        reused = open_client.get("/api/local/jobs/2026-01-01-reused").json()
+        assert reused["status"] == "stopped" and not reused["active"]
+
+        cancelled = open_client.post("/api/local/jobs/2026-01-01-busy/cancel").json()
+        assert cancelled["status"] == "cancelled"
+        assert busy.wait(10) is not None
+        gone = open_client.get("/api/local/jobs/2026-01-01-busy").json()
+        assert gone["status"] == "cancelled" and not gone["active"]
+    finally:
+        if busy.poll() is None:
+            busy.kill()
+            busy.wait(10)
+
+
 def test_constraints_are_checked_and_held(open_client, water, stub_tools):
     bad = open_client.post(
         "/api/local/jobs",
