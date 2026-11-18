@@ -994,7 +994,6 @@ def create_ts_guess(
     pairs: list[list[int]] | None = None,
     start_member_id: str | None = None,
     end_member_id: str | None = None,
-    name: str | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
     """D238: start a TS guess between two structures joined by an edge, in the start's atom
@@ -1045,7 +1044,7 @@ def create_ts_guess(
             )
     label = methods()[method]
     with _records:
-        job_id = _new_id(folder, name or f"TS guess {start.label} {end.label}")
+        job_id = _new_id(folder, f"TS guess {start.label} {end.label}")
         path = jobs_dir(folder) / job_id
         path.mkdir(parents=True)
         job = {

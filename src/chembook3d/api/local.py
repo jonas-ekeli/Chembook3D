@@ -376,7 +376,6 @@ class TsGuessIn(BaseModel):
         None, description="[start atom, end atom] pairs (from 1) fixed in the atom match (D113)"
     )
     method: str = Field("mace-omol", description="mace-omol (MACE-OMOL-0, D237)")
-    name: str | None = None
 
 
 @router.post("/ts-guess")
@@ -396,7 +395,6 @@ def start_ts_guess(body: TsGuessIn, request: Request, session: DbSession) -> dic
             body.pairs,
             body.start_member_id,
             body.end_member_id,
-            body.name,
             _claude_limit(request, folder),
         )
     except local_jobs.LocalJobError as exc:
