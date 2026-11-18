@@ -46,6 +46,7 @@ import { CloudJobsDialog } from './components/CloudJobsDialog'
 import { useScanPathImports } from './cloudJobs'
 import { LocalJobsDialog } from './components/LocalJobsDialog'
 import { RefineDialog } from './components/RefineDialog'
+import { SinglePointDialog } from './components/SinglePointDialog'
 import { scanText, tsCheckText, useLocalJobs } from './localJobs'
 import { CanvasPane, type CanvasEnergy, type CanvasContextMenu, type CanvasTarget, type TidySides } from './components/Canvas'
 import { EnergyDrawer, type DrawerPath, type DrawerView } from './components/EnergyDrawer'
@@ -223,6 +224,7 @@ function App() {
   const [showJobs, setShowJobs] = useState(false) // D115
   const [showLocalJobs, setShowLocalJobs] = useState(false) // D213
   const [refineNode, setRefineNode] = useState<string | null>(null) // D213: its Refine geometry dialog
+  const [singlePoint, setSinglePoint] = useState<string[] | null>(null) // D240: the nodes of a single point dialog
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   // Git sync (D71)
@@ -628,6 +630,14 @@ function App() {
       )
       return
     }
+    if (job.kind === 'single_point') {
+      // D240: a single point comes in as a calculation on its node.
+      const energy = job.result?.energy
+      setNotice(
+        `The ${job.level} single point of “${job.node_label}” is done and added to ${where ? `${where} ` : ''}it${energy != null ? ` (E ${energy.toFixed(6)} Eh)` : ''} (it can be undone in History).`,
+      )
+      return
+    }
     if (job.scan) {
       // D218: a scan comes in as a node of its own.
       setNotice(
@@ -642,7 +652,9 @@ function App() {
     )
   }
   const localJobs = useLocalJobs(investigation?.folder ?? null, localImported, (job, message) =>
-    setNotice(`The ${job.level} refine of “${job.node_label}” could not be imported: ${message} (Local jobs)`),
+    setNotice(
+      `The ${job.level} ${job.kind === 'single_point' ? 'single point' : 'refine'} of “${job.node_label}” could not be imported: ${message} (Local jobs)`,
+    ),
   )
   const runningLocal = localJobs.jobs.filter((job) => job.active).length
 
@@ -1332,6 +1344,24 @@ function App() {
           onInspect={(job) => inspect([{ path: `${job.node_label} · ${job.level}`, job: job.id }])}
           onSettings={() => {
             setShowLocalJobs(false)
+            setSettingsSection('local')
+            setShowSettings(true)
+          }}
+        />
+      )}
+      {singlePoint && investigation && (
+        <SinglePointDialog
+          nodes={singlePoint.map((id) => canvas.nodes.find((n) => n.id === id)).filter((n): n is Node => !!n)}
+          onClose={() => setSinglePoint(null)}
+          onStarted={(jobs) => {
+            localJobs.refresh()
+            const what = jobs.length === 1 ? `A single point of “${jobs[0].node_label}”` : `${jobs.length} single points`
+            setNotice(
+              `${what} with ${jobs[0]?.level ?? ''} started on this computer${jobs.length > 1 ? ', one after another' : ''}; Local jobs shows how ${jobs.length === 1 ? 'it goes' : 'they go'}.`,
+            )
+          }}
+          onSettings={() => {
+            setSinglePoint(null)
             setSettingsSection('local')
             setShowSettings(true)
           }}
@@ -2090,6 +2120,7 @@ function App() {
       },
       { label: 'Edit structure in 3D…', icon: 'pencil', onSelect: () => setEditingNode(node.id) },
       node.atom_count > 0 && { label: 'Refine geometry…', icon: 'flask', onSelect: () => setRefineNode(node.id) },
+      node.atom_count > 0 && { label: 'Single point on this computer…', icon: 'flask', onSelect: () => setSinglePoint([node.id]) },
       !species &&
         node.role === 'transition_state' && { label: 'IRC…', icon: 'wave', onSelect: () => setIrcNode(node.id) },
       !species && { label: 'Start energy pathway here', icon: 'chart', separated: true, onSelect: startPathway },
@@ -2147,7 +2178,7 @@ function App() {
       ...groupActions(group, canvas).map(
         (action, index): MenuItem => ({
           label: action.label,
-          icon: action.key === 'overlay' ? 'cube' : 'target',
+          icon: action.key === 'overlay' ? 'cube' : action.key === 'single-point' ? 'flask' : 'target',
           title: action.title,
           disabled: action.disabled,
           separated: index === 0,
@@ -2207,6 +2238,7 @@ function App() {
     match: 'link',
     'scan-path': 'wave',
     'ts-guess': 'flask',
+    'single-point': 'flask',
     sterics: 'target',
     selectivity: 'chart',
     equilibrium: 'chart',
@@ -2629,6 +2661,7 @@ function App() {
         }}
         onSelectivity={() => newSelectivity(multiNodes, multiGroups)}
         onEquilibrium={() => newEquilibrium(multiNodes, multiGroups)}
+        onSinglePoint={setSinglePoint}
         onTsGuess={(job) => {
           localJobs.refresh()
           setNotice(
@@ -2665,6 +2698,7 @@ function App() {
         servers={remote?.enabled ? remote.servers.filter((s) => s.connected) : []}
         onIrc={() => setIrcNode(selectedNode.id)}
         onRefine={() => setRefineNode(selectedNode.id)}
+        onSinglePoint={() => setSinglePoint([selectedNode.id])}
         onEditStructure={() => setEditingNode(selectedNode.id)}
         energy={canvasEnergy}
         levelLabel={levelLabel}
@@ -2682,6 +2716,7 @@ function App() {
         onSelectNode={(id) => selectNode(id, true)}
         onSelectBranch={selectBranch}
         energy={{ view: shownView, typeName: shownType, settings }}
+        onSinglePoint={setSinglePoint}
         asked={asked}
       />
     )

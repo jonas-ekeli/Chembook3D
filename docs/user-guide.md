@@ -209,6 +209,18 @@ single points** (off by default) adds about half an hour for a 70-atom complex: 
 held at six lengths from the saddle toward the separated end, and the frame with the highest
 PBE-D3M(BJ)/def2-SVP energy comes back as a second TS node below the first.
 
+**Single points.** **Single point on this computer…** on a node (right-click menu or inspector), or
+**Single points on this computer…** for several selected nodes and groups (**Single points of the
+members…** for one group), computes the energy of each structure as it is with Psi4, one job per
+node, one after another. The default level is PBE-D3M(BJ)/def2-TZVP (about 10 minutes for a
+70-atom complex on 4 cores); PBE-D3M(BJ)/def2-SVP (about 4 minutes), r2SCAN-3c, B97-3c and the
+slower hybrids PBE0-D3(BJ)/def2-TZVP and ωB97M-V/def2-TZVP are offered too, each with its
+estimate. Each comes back as a single-point calculation on its node, at the composite level of
+the node's optimization, for example `Psi4 PBE-D3M(BJ)/def2-TZVP // MACE MACE-OMOL-0`; with a
+frequency job at that geometry level (**Frequencies at the result**) the free energies at that
+level follow. Use them to rank conformers and check guesses before your own HPC runs. r2SCAN-3c
+lost the barrier of a Ru [2+2] step in a test, so it is not the default.
+
 **Follow and import.** Jobs run one at a time, as programs of their own, so they keep running when
 the app is closed. **Local jobs** in the top bar lists them with **Inspect** (live, every 5 s),
 **Cancel** and **Show node**. Each job is a folder under `local-jobs/` in the investigation, which

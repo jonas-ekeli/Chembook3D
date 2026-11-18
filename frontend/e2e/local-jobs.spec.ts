@@ -441,3 +441,45 @@ test('a TS guess between two minima is planned from the selection panel', async 
   await dialog.getByRole('button', { name: 'Install it in Settings' }).click()
   await expect(page.getByRole('dialog', { name: 'Settings' }).getByLabel('MACE status')).toHaveText('Not installed')
 })
+
+// T-UI-108, D240: single points on this computer, from the node's menu and for several nodes from
+// the selection panel; each comes back as a single-point calculation on its node.
+test('single points on this computer are added to their nodes', async ({ page }) => {
+  test.slow()
+  await newInvestigation(page, 'Local single points')
+  for (const [label, x] of [
+    ['first', 0],
+    ['second', 400],
+  ] as const) {
+    const response = await page.request.post('/api/nodes', { data: { label, xyz: WATER, pos_x: x, pos_y: 100, charge: 0, multiplicity: 1 } })
+    expect(response.ok()).toBeTruthy()
+  }
+  await page.reload()
+
+  await canvasNode(page, 'first').click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Single point on this computer…' }).click()
+  const one = page.getByRole('dialog', { name: 'Single point of “first”' })
+  // The default level is PBE-D3M(BJ)/def2-TZVP, with an estimate for the node's atoms.
+  await expect(one.getByLabel('Level', { exact: true })).toHaveValue('pbe-tzvp')
+  await expect(one.getByLabel('Level', { exact: true }).locator('option', { hasText: /^r2SCAN-3c · about/ })).toHaveCount(1)
+  await one.getByLabel('Level', { exact: true }).selectOption('r2scan-3c')
+  await expect(one.getByLabel('Level help')).toContainText('Lost the barrier')
+  await expect(one.getByLabel('Structures')).toContainText('first · 3 atoms · charge 0, multiplicity 1')
+  await one.getByRole('button', { name: 'Cancel' }).click()
+
+  await canvasNode(page, 'first').click()
+  await canvasNode(page, 'second').click({ modifiers: ['Control'] })
+  await page.getByLabel('Selection inspector').getByRole('button', { name: 'Single points on this computer…' }).click()
+  const both = page.getByRole('dialog', { name: 'Single points of 2 structures' })
+  await both.getByLabel('Level', { exact: true }).selectOption('stub')
+  await expect(both.getByLabel('Estimate')).toContainText('in all, one after another')
+  await both.getByRole('button', { name: 'Start 2' }).click()
+  await expect(both).toHaveCount(0)
+  await expect(page.getByText(/2 single points with stub-sp\/def2-SVP started on this computer/)).toBeVisible()
+
+  // Both finish and are added to their nodes by themselves.
+  await page.getByRole('button', { name: /^Local jobs/ }).click()
+  const rows = page.getByRole('dialog', { name: 'Local jobs' }).getByRole('table', { name: 'Local jobs' })
+  await expect(rows.getByText('Done, imported')).toHaveCount(2, { timeout: 60_000 })
+  await expect(rows.getByText(/single point/).first()).toBeVisible()
+})

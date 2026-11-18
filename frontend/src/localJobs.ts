@@ -16,6 +16,13 @@ export function localStatusText(job: LocalJob): string {
       return 'Waiting for another local job'
     case 'running':
       if (job.progress.phase) return `Running, ${job.progress.phase.toLowerCase()}`
+      if (job.kind === 'single_point') {
+        // D240: one SCF, then the energy
+        const scf = job.progress.scf
+        if (!scf) return 'Running'
+        if (scf.converged) return `Running: SCF converged in ${scf.iteration} iterations`
+        return `Running: SCF iteration ${scf.iteration}${scf.delta_e !== null ? `, ΔE ${scf.delta_e.toExponential(1)} Eh` : ''}`
+      }
       if (job.progress.scf) {
         // D220: a DFT step takes minutes; how far the one in progress has got
         const { iteration, delta_e: change, converged } = job.progress.scf
@@ -28,7 +35,7 @@ export function localStatusText(job: LocalJob): string {
     case 'cancelling':
       return 'Stopping'
     case 'converged':
-      return 'Converged'
+      return job.kind === 'single_point' ? 'Done' : 'Converged'
     case 'not_converged':
       return 'Stopped before converging'
     case 'failed':
@@ -55,6 +62,7 @@ export function progressText(job: LocalJob): string | null {
   const { energies, max_gradient: gradient } = job.progress
   if (!energies.length) return null
   const parts = []
+  if (job.kind === 'single_point' && job.result?.energy != null) parts.push(`E ${job.result.energy.toFixed(6)} Eh`) // D240
   if (energies.length > 1) parts.push(`ΔE ${((energies[energies.length - 1] - energies[0]) * KCAL).toFixed(2)} kcal/mol`)
   if (gradient !== null) parts.push(`max gradient ${gradient.toExponential(1)} Eh/bohr`)
   if (job.result?.elapsed_s) parts.push(duration(job.result.elapsed_s))

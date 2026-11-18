@@ -28,7 +28,7 @@ import { ScanPathsSection } from './ScanPathsOnEdge'
 import { MAX_OVERLAY, OverlayDialog } from './OverlayDialog'
 import { CompareStericsDialog } from './Sterics'
 import { useRequest, type Request } from '../commands'
-import { groupActions, scanPathEnds, selectionActions } from '../panelActions'
+import { groupActions, scanPathEnds, selectionActions, singlePointNodes } from '../panelActions'
 import { memberShare, populationSummary } from '../populations'
 import { errorText } from '../util'
 
@@ -752,6 +752,7 @@ export function GroupInspector({
   onSelectNode,
   onSelectBranch,
   energy,
+  onSinglePoint,
   asked,
 }: {
   group: Group
@@ -761,6 +762,8 @@ export function GroupInspector({
   onSelectNode: (id: string) => void
   onSelectBranch: (id: string) => void
   energy: { view: EnergyView | null; typeName: string; settings: Settings | null }
+  /** D240: single points of these nodes on this computer */
+  onSinglePoint?: (nodeIds: string[]) => void
   /** D184: an action asked from a right-click menu, the palette or a key. */
   asked?: Request | null
 }) {
@@ -795,6 +798,8 @@ export function GroupInspector({
     if (action === 'remove') setRemoving(true)
     else if (action === 'overlay' && enabled('overlay')) setOverlay(true)
     else if (action === 'sterics' && enabled('sterics')) setSterics(true)
+    else if (action === 'single-point' && enabled('single-point'))
+      onSinglePoint?.(singlePointNodes([], [group], canvas).map((n) => n.id))
   })
 
   return (
@@ -950,7 +955,13 @@ export function GroupInspector({
             <button
               key={action.key}
               disabled={action.disabled}
-              onClick={() => (action.key === 'overlay' ? setOverlay(true) : setSterics(true))}
+              onClick={() =>
+                action.key === 'overlay'
+                  ? setOverlay(true)
+                  : action.key === 'single-point'
+                    ? onSinglePoint?.(singlePointNodes([], [group], canvas).map((n) => n.id))
+                    : setSterics(true)
+              }
               title={action.title}
             >
               {action.label}
@@ -1102,6 +1113,7 @@ export function SelectionInspector({
   onSelectivity,
   onEquilibrium,
   onTsGuess,
+  onSinglePoint,
   onSettings,
   asked,
 }: {
@@ -1111,6 +1123,8 @@ export function SelectionInspector({
   onChanged: () => void
   /** D238: a TS guess started on this computer */
   onTsGuess?: (job: LocalJob) => void
+  /** D240: single points of these nodes on this computer */
+  onSinglePoint?: (nodeIds: string[]) => void
   /** Settings › Local calculations */
   onSettings?: () => void
   onGroupCreated: (group: Group) => void
@@ -1153,6 +1167,7 @@ export function SelectionInspector({
     else if (key === 'match') setMatching(true)
     else if (key === 'scan-path') setScanning(true)
     else if (key === 'ts-guess') setGuessing(true)
+    else if (key === 'single-point') onSinglePoint?.(singlePointNodes(nodes, groups, canvas).map((n) => n.id))
     else if (key === 'sterics') setSterics(true)
     else if (key === 'selectivity') onSelectivity()
     else if (key === 'equilibrium') onEquilibrium()

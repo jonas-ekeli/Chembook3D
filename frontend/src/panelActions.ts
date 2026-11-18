@@ -4,9 +4,27 @@ import { MAX_OVERLAY } from './components/OverlayDialog'
 /** An action of a panel's button row, which its record's right-click menu offers too (D184). */
 export type PanelAction = { key: string; label: string; title: string; disabled: boolean; primary?: boolean }
 
-/** A group's Overlay members and Compare sterics (FR-3D-04, D81). */
+/** D240: the nodes a single point on this computer runs on: the selected nodes and every
+ * selected group's members, once each, those with a structure only. */
+export function singlePointNodes(nodes: Node[], groups: Group[], canvas: Canvas): Node[] {
+  const ids = [...nodes.map((n) => n.id), ...groups.flatMap((g) => g.member_ids)]
+  const seen = new Set<string>()
+  const out: Node[] = []
+  for (const id of ids) {
+    const node = seen.has(id) ? undefined : canvas.nodes.find((n) => n.id === id)
+    seen.add(id)
+    if (node && node.atom_count > 0) out.push(node)
+  }
+  return out
+}
+
+const SINGLE_POINT_TITLE = 'The energy of each structure as it is, with Psi4 on this computer, added to its node (D240)'
+
+/** A group's Overlay members and Compare sterics (FR-3D-04, D81), and its members' single points
+ * (D240). */
 export function groupActions(group: Group, canvas: Canvas): PanelAction[] {
   const shapes = group.member_ids.filter((id) => canvas.nodes.some((n) => n.id === id && n.xyz)).length
+  const structures = singlePointNodes([], [group], canvas).length
   return [
     {
       key: 'overlay',
@@ -20,13 +38,19 @@ export function groupActions(group: Group, canvas: Canvas): PanelAction[] {
       disabled: shapes < 1,
       title: 'Buried volume and steric maps of the members (D81)',
     },
+    {
+      key: 'single-point',
+      label: 'Single points of the members…',
+      disabled: structures < 1,
+      title: SINGLE_POINT_TITLE,
+    },
   ]
 }
 
 /** The selection's actions, in the panel's order: add to a group selected with the nodes (A20),
  * create a group (WF-07), overlay (FR-3D-04), match atoms (D113), scan path (D114), TS guess
- * (D238), compare sterics (D81), selectivity (D83) and conformer equilibrium (D171). D184: its
- * right-click menu offers the same. */
+ * (D238), single points (D240), compare sterics (D81), selectivity (D83) and conformer
+ * equilibrium (D171). D184: its right-click menu offers the same. */
 export function selectionActions(nodes: Node[], groups: Group[], canvas: Canvas): PanelAction[] {
   const free = nodes.filter((n) => !n.group_id)
   const target = groups.length === 1 ? groups[0] : null
@@ -75,6 +99,12 @@ export function selectionActions(nodes: Node[], groups: Group[], canvas: Canvas)
       title: scanEnds
         ? 'A starting structure for a TS between the two, found with MACE-OMOL-0 on this computer (D238)'
         : 'Select two nodes or groups joined by an edge',
+    },
+    {
+      key: 'single-point',
+      label: 'Single points on this computer…',
+      disabled: singlePointNodes(nodes, groups, canvas).length < 1,
+      title: SINGLE_POINT_TITLE,
     },
     {
       key: 'sterics',

@@ -16,6 +16,10 @@ started from, as any optimization output imported onto that node would be (D23, 
 node without calculations the result becomes the node's geometry; on a node whose own
 optimization the job started from it continues it as a pre-optimization chain (D100); on a
 node with calculations at its geometry it goes to a derived node.
+
+D240: a single point (`create_single_points`) computes the energy of a node's structure as it
+is, with Psi4, and is imported onto that node as a single-point calculation; its geometry level
+is the node's optimization (FR-CALC-04).
 """
 
 from __future__ import annotations
@@ -166,8 +170,13 @@ def _duration(seconds: float) -> str:
 
 
 def calibrate(result: dict[str, Any], job: dict[str, Any]) -> None:
-    """Keep what a finished job took per step, scaled back to 70 atoms on 4 cores."""
-    cycles, elapsed = result.get("cycles"), result.get("elapsed_s")
+    """Keep what a finished job took per step, scaled back to 70 atoms on 4 cores. The time is
+    the worker's own computing (`run_s`), without its wait for other jobs, where it says."""
+    if job.get("kind") == SINGLE_POINT:
+        _calibrate_single_point(result, job)
+        return
+    cycles = result.get("cycles")
+    elapsed = result.get("run_s") or result.get("elapsed_s")
     method = job.get("method")
     if not cycles or not elapsed or method not in METHODS or cycles < 3:
         return
@@ -720,7 +729,7 @@ def _lines(path: Path) -> list[dict[str, Any]]:
 # from the end of psi4.out to tell how far the step in progress has got.
 _SCF_ITERATION = re.compile(r"@\S+ iter\s+(\d+):\s+(-?\d+\.\d+)\s+(-?\d+\.\d+e[+-]\d+)")
 SCF_TAIL = 262_144  # bytes: more than one SCF of a large system prints
-PSI4_METHODS = {"b97-3c", "r2scan-3c", "oniom"}
+PSI4_METHODS = {"b97-3c", "r2scan-3c", "oniom", "psi4-sp"}
 
 
 def scf_progress(path: Path) -> dict[str, Any] | None:
@@ -794,6 +803,8 @@ def inspect_data(folder: Path, job_id: str) -> tuple[dict[str, Any], dict[str, A
         "criteria": _criteria(path / CRITERIA, len(frames)),
         "energy": next((e for e in reversed(energies) if e is not None), None),
     }
+    if job.get("single_point"):
+        data["single_point"] = job["single_point"]  # D240
     if not frames:
         data["coordinates"] = job.get("coordinates")  # the start, until the first step
     if job.get("scan"):
@@ -923,7 +934,17 @@ def _import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any
     job = read_job(folder, job_id)
     if job.get("kind") == TS_GUESS:
         return _import_ts_guess(session, folder, job_id, job, path)
-    if job.get("scan"):
+    if job.get("kind") == SINGLE_POINT:
+        # D240: onto the node, at its structure: a single-point calculation, its geometry level
+        # the node's optimization that ended on that structure (FR-CALC-04)
+        level = (job.get("single_point") or {}).get("level", "")
+        name = f"{slug(status['node_label'], 60)}-{slug(level)}-single-point.json"
+        options = imports.ImportOptions(
+            target_node_id=node.id,
+            origin_path=str(path),
+            original_name=name,
+        )
+    elif job.get("scan"):
         # D218: a scan is a node of its own beside the one it started from, in its step and
         # branch, as an imported Gaussian scan is (D200); the start node keeps its structure.
         name = f"{slug(status['node_label'], 60)}-{status['method']}-scan.json"
@@ -1283,3 +1304,232 @@ def _commit(
     imported = _commit_file(session, folder, job_id, path, options)
     update_job(folder, job_id, imported=imported, import_error=None)
     return {**job_status(folder, job_id), "imported": imported}
+
+
+# ---------- D240: single points on this computer ----------
+
+SINGLE_POINT = "single_point"
+SP_METHOD = "psi4-sp"  # the worker's method for every level: Psi4, energy only
+SP_TEST_METHOD = "stub-sp"
+SP_DEFAULT = "pbe-tzvp"
+SP_MAX_NODES = 100
+SP_POWER = 2.7  # how a single point's time grows with the atoms (as the DFT refines', A143)
+# A smaller structure's time is mostly start-up, so it would scale up to far too little (water's
+# 3 s at PBE/def2-TZVP to 2 hours for 70 atoms): it is not kept.
+SP_CALIBRATION_ATOMS = 20
+# D240: the levels offered, the default first. `psi4` and `basis` are what Psi4 is asked for;
+# `method`, `dispersion` and `basis_name` the level the calculation is imported at. `seconds`:
+# one single point of a 70-atom Ru complex on 4 cores from a fresh guess. Measured 2026-11-18 on
+# a 73-atom Ru [2+2] system (Psi4 1.11, density fitting): PBE/def2-TZVP 10.4-12.4 min,
+# PBE/def2-SVP 3.8-4.2 min, r2SCAN-3c 10.6-13.0 min, B97-3c 5.4-5.5 min, PBE0/def2-TZVP 22 min;
+# ωB97M-V is a guess until this computer has run one. `scf_type` "direct" for ωB97M-V: with
+# density fitting Psi4 writes its range-separated exchange integrals to disk, tens of GB for a
+# 73-atom complex (it ran out of disk in the scoping test), and the faster DF-J/COSX schemes
+# refuse range-separated functionals.
+SP_LEVELS: dict[str, dict[str, Any]] = {
+    "pbe-tzvp": {
+        "label": "PBE-D3M(BJ)/def2-TZVP",
+        "psi4": "pbe-d3mbj",
+        "basis": "def2-tzvp",
+        "method": "PBE",
+        "dispersion": "D3M(BJ)",
+        "basis_name": "def2-TZVP",
+        "seconds": 600.0,
+        "note": "Your Saga functional with a smaller basis; kept a Ru [2+2] barrier within "
+        "0.3 kcal/mol of PBE/def2-SVP.",
+    },
+    "pbe-svp": {
+        "label": "PBE-D3M(BJ)/def2-SVP",
+        "psi4": "pbe-d3mbj",
+        "basis": "def2-svp",
+        "method": "PBE",
+        "dispersion": "D3M(BJ)",
+        "basis_name": "def2-SVP",
+        "seconds": 215.0,
+        "note": "The geometry level of your Gaussian runs; the fastest.",
+    },
+    "r2scan-3c": {
+        "label": "r2SCAN-3c",
+        "psi4": "r2scan-3c",
+        "basis": None,
+        "method": "r2SCAN-3c",
+        "dispersion": "",
+        "basis_name": "",
+        "seconds": 630.0,
+        "note": "Lost the barrier on a Ru [2+2] test (−0.6 kcal/mol against PBE's 4.6).",
+    },
+    "b97-3c": {
+        "label": "B97-3c",
+        "psi4": "b97-3c",
+        "basis": None,
+        "method": "B97-3c",
+        "dispersion": "",
+        "basis_name": "",
+        "seconds": 295.0,
+        "note": "A cheap composite method; kept a Ru [2+2] barrier (5.2 kcal/mol).",
+    },
+    "pbe0-tzvp": {
+        "label": "PBE0-D3(BJ)/def2-TZVP",
+        "psi4": "pbe0-d3bj",
+        "basis": "def2-tzvp",
+        "method": "PBE0",
+        "dispersion": "D3(BJ)",
+        "basis_name": "def2-TZVP",
+        "seconds": 1175.0,
+        "note": "A hybrid: about twice PBE's time.",
+    },
+    "wb97m-v-tzvp": {
+        "label": "ωB97M-V/def2-TZVP",
+        "psi4": "wb97m-v",
+        "basis": "def2-tzvp",
+        "method": "wB97M-V",
+        "dispersion": "",
+        "basis_name": "def2-TZVP",
+        "scf_type": "direct",
+        "seconds": 3600.0,
+        "note": "A range-separated hybrid with its own dispersion, run integral-direct (no "
+        "density fitting): the slowest.",
+    },
+}
+# CHEMBOOK3D_LOCAL_STUB=1 only (tests): the stub engine's energy, at once
+SP_TEST_LEVELS: dict[str, dict[str, Any]] = {
+    "stub": {
+        "label": "stub-sp/def2-SVP",
+        "psi4": "stub",
+        "basis": None,
+        "method": "stub-sp",
+        "dispersion": "",
+        "basis_name": "def2-SVP",
+        "seconds": 1.0,
+        "note": "Tests only.",
+    },
+}
+
+
+def sp_levels() -> dict[str, dict[str, Any]]:
+    """D240: the single point levels offered (the tests' stand-in too, with
+    CHEMBOOK3D_LOCAL_STUB)."""
+    if os.environ.get("CHEMBOOK3D_LOCAL_STUB") == "1":
+        return {**SP_LEVELS, **SP_TEST_LEVELS}
+    return dict(SP_LEVELS)
+
+
+def _sp_scale(atoms: int, cores: int) -> float:
+    return (max(atoms, 1) / TIMING_ATOMS) ** SP_POWER * (TIMING_CORES / max(cores, 1)) ** 0.85
+
+
+def sp_estimate(level: str, atoms: int, cores: int) -> dict[str, Any]:
+    """D240: one single point's seconds for a structure, and whether this computer measured
+    it (`calibrate` keeps each level's own time as `sp:<level>`)."""
+    measured = local_tools.calibration().get(f"sp:{level}")
+    spec = sp_levels().get(level) or SP_LEVELS[SP_DEFAULT]
+    base = measured if measured else float(spec["seconds"])
+    return {"seconds": round(base * _sp_scale(atoms, cores)), "measured": bool(measured)}
+
+
+def _calibrate_single_point(result: dict[str, Any], job: dict[str, Any]) -> None:
+    level = (job.get("single_point") or {}).get("level")
+    elapsed = result.get("run_s") or result.get("elapsed_s")
+    atoms = len(job.get("elements") or [])
+    if level not in SP_LEVELS or not elapsed or atoms < SP_CALIBRATION_ATOMS:
+        return
+    scale = _sp_scale(atoms, int(job.get("cores", 1)))
+    local_tools.save_calibration(f"sp:{level}", float(elapsed) / scale)
+
+
+def sp_levels_status(atoms: int | None, cores: int) -> list[dict[str, Any]]:
+    """D240: the levels as the tools' status lists them, each with its estimate for `atoms`."""
+    return [
+        {
+            "value": key,
+            "label": spec["label"],
+            "note": spec["note"],
+            "default": key == SP_DEFAULT,
+            "estimate": sp_estimate(key, atoms, cores) if atoms else None,
+        }
+        for key, spec in sp_levels().items()
+    ]
+
+
+def create_single_points(
+    folder: Path,
+    nodes: list[Node],
+    level: str = SP_DEFAULT,
+    charge: int | None = None,
+    multiplicity: int | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """D240: a single point of each node's structure as it is, one job per node; the jobs wait
+    for each other through the tools folder's lock, so they run one after another. Charge and
+    multiplicity are each node's own unless given. `limit` (seconds, D223) refuses the lot when
+    their estimates add up to more."""
+    offered = sp_levels()
+    if level not in offered:
+        raise LocalJobError(f"Unknown level {level!r}; offered: {', '.join(offered)}")
+    if not nodes:
+        raise LocalJobError("Choose at least one node with a structure")
+    if len(nodes) > SP_MAX_NODES:
+        raise LocalJobError(f"At most {SP_MAX_NODES} single points at a time")
+    if len({n.id for n in nodes}) != len(nodes):
+        raise LocalJobError("A node is listed twice")
+    method = SP_TEST_METHOD if level in SP_TEST_LEVELS else SP_METHOD
+    if local_tools.worker_python(method) is None:
+        raise LocalJobError(_install_first(method))
+    if multiplicity is not None and multiplicity < 1:
+        raise LocalJobError("The multiplicity is at least 1")
+    structures = []
+    for node in nodes:
+        atoms = node_service.atoms_of(node)
+        if not atoms:
+            raise LocalJobError(f'Node "{node.label}" has no coordinates')
+        structures.append((node, atoms))
+    resources = local_tools.resources()
+    if limit is not None:
+        seconds = sum(sp_estimate(level, len(a), resources.cores)["seconds"] for _, a in structures)
+        if seconds > limit:
+            raise LocalJobError(
+                f"{'These single points are' if len(nodes) > 1 else 'This single point is'} "
+                f"estimated at about {_duration(seconds)}, over the {_duration(limit)} the user "
+                "allows for a job you start on your own. Use a faster level or fewer nodes, or "
+                "leave it and tell the user, who can start it or raise the limit."
+            )
+    spec = offered[level]
+    started = []
+    for node, atoms in structures:
+        with _records:
+            job_id = _new_id(folder, f"{node.label} {spec['label']} SP")
+            path = jobs_dir(folder) / job_id
+            path.mkdir(parents=True)
+            job = {
+                "id": job_id,
+                "kind": SINGLE_POINT,
+                "node_id": node.id,
+                "node_label": node.label,
+                "method": method,
+                "level": spec["label"],
+                "charge": charge if charge is not None else (node.charge or 0),
+                "multiplicity": multiplicity
+                if multiplicity is not None
+                else (node.multiplicity or 1),
+                "cores": resources.cores,
+                "memory_mb": resources.memory_mb,
+                "elements": [a.element for a in atoms],
+                "coordinates": [[a.x, a.y, a.z] for a in atoms],
+                "constraints": None,
+                "created": _now(),
+                "single_point": {
+                    "level": level,
+                    **{k: spec[k] for k in ("label", "psi4", "basis", "method", "dispersion")},
+                    "basis_name": spec["basis_name"],
+                    "scf_type": spec.get("scf_type", "df"),
+                },
+            }
+            if history.SOURCE.get() != "manual":
+                job["started_by"] = history.SOURCE.get()  # D223
+            if method == SP_TEST_METHOD and os.environ.get("CHEMBOOK3D_LOCAL_STUB_DELAY"):
+                job["stub_delay_s"] = float(os.environ["CHEMBOOK3D_LOCAL_STUB_DELAY"])
+            _write(path / JOB_JSON, job)
+            shutil.copyfile(WORKER_SOURCE, path / WORKER)
+        _spawn(path)
+        started.append(job_status(folder, job_id))
+    return started

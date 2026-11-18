@@ -87,6 +87,8 @@ def _status(request: Request, atoms: int | None = None, model: int | None = None
     out["ts_guess"] = None
     if atoms and offered:
         out["ts_guess"] = local_jobs.ts_guess_estimate("mace-omol", atoms, out["cores"])
+    # D240: the single point levels, each with its estimate for `atoms`
+    out["single_point_levels"] = local_jobs.sp_levels_status(atoms, out["cores"])
     return out
 
 
@@ -96,7 +98,8 @@ def tools_status(
 ) -> dict[str, Any]:
     """Whether the tools are installed, their versions, an install under way, the cores and
     memory a job may use, and the methods a refine offers, each with a time estimate for a
-    structure of `atoms` atoms (an ONIOM one for a DFT core and link atoms of `model`)."""
+    structure of `atoms` atoms (an ONIOM one for a DFT core and link atoms of `model`); D240:
+    the single point levels with theirs."""
     return _status(request, atoms, model)
 
 
@@ -402,6 +405,47 @@ def start_ts_guess(body: TsGuessIn, request: Request, session: DbSession) -> dic
             body.end_member_id,
             _claude_limit(request, folder),
             body.correct,
+        )
+    except local_jobs.LocalJobError as exc:
+        raise _refused(exc) from exc
+
+
+class SinglePointsIn(BaseModel):
+    node_ids: list[str] = Field(
+        description="The nodes whose structures get a single point, one job each (a group's "
+        f"members listed one by one); 1 to {local_jobs.SP_MAX_NODES}"
+    )
+    level: str = Field(
+        local_jobs.SP_DEFAULT,
+        description="pbe-tzvp: PBE-D3M(BJ)/def2-TZVP (the default, about 10 min for 70 atoms "
+        "on 4 cores); pbe-svp: PBE-D3M(BJ)/def2-SVP (about 4 min); r2scan-3c (lost the barrier "
+        "of a Ru [2+2] step, so not for barriers there); b97-3c; pbe0-tzvp: PBE0-D3(BJ)/"
+        "def2-TZVP and wb97m-v-tzvp: ωB97M-V/def2-TZVP, hybrids (PBE0 about 20 min, "
+        "ωB97M-V slower). "
+        "get_local_tools?atoms=N lists them with estimates as single_point_levels",
+    )
+    charge: int | None = Field(None, description="Default: each node's charge, else 0")
+    multiplicity: int | None = Field(None, ge=1, description="Default: each node's, else 1")
+
+
+@router.post("/single-points")
+def start_single_points(
+    body: SinglePointsIn, request: Request, session: DbSession
+) -> list[dict[str, Any]]:
+    """D240: a single point of each node's structure as it is, on this computer with Psi4,
+    one job per node, run one after another; each is imported onto its node as a single-point
+    calculation whose geometry level is the node's optimization."""
+    _local_page_only(request)
+    folder = _investigation(request).folder
+    nodes = [get(session, Node, node_id, "Node") for node_id in body.node_ids]
+    try:
+        return local_jobs.create_single_points(
+            folder,
+            nodes,
+            body.level,
+            body.charge,
+            body.multiplicity,
+            _claude_limit(request, folder),
         )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc
