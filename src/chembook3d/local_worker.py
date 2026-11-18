@@ -4,7 +4,8 @@ This file runs in the private tools environment (``local_tools.py``), not in the
 Python: the app copies it into ``local-jobs/<id>/worker.py`` and starts it as a detached
 process, ``<tools python> -I worker.py <job folder> --lock <lock file>``, so the job keeps
 running when the app stops. It may import only the standard library and the tools
-environment's packages (numpy, geomeTRIC, tblite, Psi4), never ``chembook3d``.
+environment's packages (numpy, geomeTRIC, tblite, Psi4; in the MACE environment, D237, also
+PyTorch, ASE, Sella and mace-torch), never ``chembook3d``.
 
 Files in the job folder:
 - ``job.json`` (written by the app): method, charge, multiplicity, cores, memory, elements and
@@ -35,6 +36,7 @@ from pathlib import Path
 
 HARTREE_TO_KCAL = 627.509474
 BOHR_TO_ANGSTROM = 0.529177210903
+EV_TO_HARTREE = 1 / 27.211386245988
 HEARTBEAT_S = 5.0
 LOCK_POLL_S = 2.0
 WORKER_VERSION = 1
@@ -56,6 +58,8 @@ METHOD_LABELS = {
     "stub": ("stub", "stub"),
     "oniom-stub": ("stub", "ONIOM(stub:stub-low)"),
     "stub-saddle": ("stub", "stub-saddle"),
+    "mace-omol": ("MACE", "MACE-OMOL-0"),  # D237
+    "mace-stub": ("stub", "mace-stub"),
 }
 
 
@@ -346,6 +350,35 @@ def _psi4(method: str, numbers, charge: int, unpaired: int, job: dict, folder: P
     return dft
 
 
+def _mace(numbers, start, charge: int, multiplicity: int, job: dict):
+    """D237: MACE-OMOL-0 (mace-torch's MACECalculator, its "omol" head, double precision on
+    the CPU). The model reads the total charge and the spin multiplicity, as OMol25 was
+    computed. Its Hessians come from differences of gradients, as the other methods' do: the
+    model's own second derivative needs more memory than a computer may have (over 13 GB for
+    73 atoms)."""
+    import numpy as np
+    import torch
+    from ase import Atoms
+    from mace.calculators import MACECalculator
+
+    torch.set_num_threads(max(1, int(job.get("cores", 1))))
+    calculator = MACECalculator(
+        model_paths=job["mace_model"], device="cpu", default_dtype="float64", head="omol"
+    )
+    atoms = Atoms(numbers=list(numbers), positions=np.asarray(start) * BOHR_TO_ANGSTROM)
+    atoms.info["charge"] = charge
+    atoms.info["spin"] = multiplicity
+    atoms.calc = calculator
+
+    def mace(x):
+        atoms.positions = np.asarray(x, float).reshape(-1, 3) * BOHR_TO_ANGSTROM
+        energy = float(atoms.get_potential_energy()) * EV_TO_HARTREE
+        forces = np.asarray(atoms.get_forces(), float)
+        return energy, -forces * EV_TO_HARTREE * BOHR_TO_ANGSTROM
+
+    return mace
+
+
 def _engine(method: str, numbers, start, job: dict, folder: Path, delay: bool = True):
     """One method on one system (atomic numbers, starting coordinates in Bohr); `delay` lets a
     test engine wait as the job asks (not while it computes a Hessian)."""
@@ -364,6 +397,10 @@ def _engine(method: str, numbers, start, job: dict, folder: Path, delay: bool = 
         return _gxtb(numbers, charge, unpaired, job, folder)
     if method in ("b97-3c", "r2scan-3c"):
         return _psi4(method, numbers, charge, unpaired, job, folder)
+    if method == "mace-omol":
+        return _mace(numbers, start, charge, unpaired + 1, job)
+    if method == "mace-stub":  # D237: the tests' MACE, run in the MACE environment's place
+        return _stub(start, 0.98, 0.1, wait)
     raise ValueError(f"unknown method {method!r}")
 
 
@@ -498,6 +535,8 @@ def versions(method: str) -> dict:
         names.append("tblite")
     if method in ("b97-3c", "r2scan-3c", "oniom"):
         names += ["psi4", "dftd4", "dftd3"]
+    if method == "mace-omol":
+        names += ["torch", "mace-torch", "ase"]
     for name in names:
         try:
             found[name] = metadata.version(name)
@@ -625,6 +664,8 @@ def run(folder: Path, lock: Path | None) -> int:
         result["versions"] = versions(method)
         if job.get("gxtb_version"):
             result["versions"]["xtb"] = job["gxtb_version"]
+        if method == "mace-omol":  # D237: the version a MACE level is read with
+            result["versions"]["mace"] = result["versions"].get("mace-torch")
         calculate = make_calculator(job, numbers, folder)
 
         import geometric

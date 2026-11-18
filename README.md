@@ -49,7 +49,8 @@ branches, rotamer groups, ethylene joining and leaving, and the closed cycle's �
   already has calculations makes a new, derived node, so results stay with the geometry they
   belong to.
 - **Runs quick calculations on this computer.** Optional local jobs refine a structure with
-  GFN2-xTB, g-xTB or a fast DFT method (B97-3c, r2SCAN-3c, ONIOM) through Psi4: optimizations,
+  GFN2-xTB, g-xTB, the machine-learned MACE-OMOL-0 or a fast DFT method (B97-3c, r2SCAN-3c,
+  ONIOM) through Psi4: optimizations,
   transition-state searches, relaxed scans and frequencies, imported onto the node when done.
 - **Works next to your cluster.** An optional terminal on Saga or another SSH server lists, inspects
   and imports output files there without copying them by hand.
@@ -109,7 +110,7 @@ flowchart LR
         CP["Claude panel<br/>(optional)"]
         MCP["chembook3d mcp<br/>notebook tools"]
         KEEP["SSH keeper<br/>(optional)"]
-        LOC["Local jobs<br/>GFN2-xTB · g-xTB · DFT via Psi4<br/>(optional)"]
+        LOC["Local jobs<br/>GFN2-xTB · g-xTB · MACE-OMOL-0 · DFT via Psi4<br/>(optional)"]
     end
     UI <-->|"REST /api + live updates"| API
     API <-->|"SQLAlchemy + Alembic"| DB
@@ -255,8 +256,8 @@ merged:
 | UI tests | About 140 Playwright tests, driving the real interface against the real server. |
 | Portability | An investigation made on Windows is opened on Linux and the other way round, its records are checked, and its copied output file must match byte for byte. |
 
-A further job, not yet required for merging, installs the local-calculation tools (Psi4, tblite,
-geomeTRIC and g-xTB) and runs the local-calculation tests with them. Test outputs are public samples with their sources and licences listed in
+Two further jobs, not required for merging, install the local-calculation tools (Psi4, tblite,
+geomeTRIC and g-xTB; and MACE-OMOL-0 with its model) and run the local-calculation tests with them. Test outputs are public samples with their sources and licences listed in
 [`tests/fixtures/README.md`](tests/fixtures/README.md); a few rare cases use synthetic Gaussian
 text made by `tests/gaussian_text.py`.
 
@@ -268,7 +269,7 @@ text made by `tests/gaussian_text.py`.
   shown as printed, labelled with its model. No frequency scale factor is applied to G_qh; the
   frequencies are used as the program printed them.
 - **Not a workflow engine:** the app does not submit or monitor jobs on clusters. It reads what
-  they produce. Optional local jobs (GFN2-xTB, g-xTB, fast DFT) and cloud xTB/CREST jobs are
+  they produce. Optional local jobs (GFN2-xTB, g-xTB, MACE-OMOL-0, fast DFT) and cloud xTB/CREST jobs are
   for quick structures, not production runs.
 - **One user, one computer at a time.** No login, no server to share. Sync keeps several
   computers in step through git, one at a time.

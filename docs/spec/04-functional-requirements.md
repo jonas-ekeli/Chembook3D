@@ -369,6 +369,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-LOC-09 | Refine geometry runs a relaxed scan with any local method: one to four coordinates driven together from their start to their end over the same points, each point optimized from the one before; it is imported as a scan node of its own beside the start node. | D218 | after 5 |
 | FR-LOC-10 | With GFN2-xTB or g-xTB, a relaxed scan can be a 2D grid of two coordinates; it is imported as a node whose step movie shows the energy surface, each cell showing its point. | D219 | after 5 |
 | FR-LOC-11 | A local job can be inspected while it runs: its steps so far in 3D with their energies and convergence criteria, a running scan's points, and how far a DFT step has got, read again every few seconds until the job ends; nothing is imported from the window. | D220 | after 5 |
+| FR-LOC-12 | Settings, Local calculations installs MACE-OMOL-0 on request once the user accepts its licence (its own pinned environment and the model, checked by SHA-256); once installed, Refine geometry offers it as a method, imported at the level "MACE MACE-OMOL-0"; a TS search with it starts from its own Hessian. | D237 | after 5 |
 
 **AC:** install the tools in Settings; on a node without calculations choose Refine geometry…, GFN2-xTB, Start; close the tab and open the app again later: the job ran on, its result is the node's optimization at "tblite GFN2-xTB" with a step movie, and the node's geometry is the result.
 

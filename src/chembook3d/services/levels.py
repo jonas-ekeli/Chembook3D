@@ -65,8 +65,9 @@ def canonical_method(method: str, multiplicity: int | None) -> str:
 
 
 # Methods that come with their own basis set: semi-empirical xTB (and GFN-FF), the composite
-# "3c" methods and ONIOM, whose layers each name theirs (D161).
-_BUILT_IN_BASIS = re.compile(r"(-3C$|^GFN|XTB|^ONIOM\s*\()", re.IGNORECASE)
+# "3c" methods and ONIOM, whose layers each name theirs (D161); a machine-learned potential such
+# as MACE-OMOL-0 has none (D237).
+_BUILT_IN_BASIS = re.compile(r"(-3C$|^GFN|XTB|^ONIOM\s*\(|^MACE)", re.IGNORECASE)
 
 
 def needs_basis(program: str, method: str) -> bool:

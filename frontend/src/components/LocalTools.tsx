@@ -46,6 +46,59 @@ export function GxtbControl({ tools, onTools }: { tools: LocalTools | null; onTo
   )
 }
 
+/** D237: the optional MACE-OMOL-0 install: its licence is accepted with a tick before the
+ * download is offered. */
+export function MaceControl({ tools, onTools }: { tools: LocalTools | null; onTools: (t: LocalTools) => void }) {
+  const [error, setError] = useState<string | null>(null)
+  const [accepted, setAccepted] = useState(false)
+  if (!tools) return <span className="muted">…</span>
+  const mace = tools.mace
+  if (!mace.supported) return <span className="muted">Not offered on this computer</span>
+  const running = mace.install.state === 'running'
+  const label = !mace.installed ? 'Install MACE-OMOL-0' : mace.up_to_date ? 'Reinstall MACE' : 'Update MACE'
+  return (
+    <div className="local-tools-install">
+      {!mace.installed && (
+        <label className="small">
+          <input type="checkbox" checked={accepted} disabled={running} onChange={(e) => setAccepted(e.target.checked)} /> I
+          accept the model’s{' '}
+          <a href={mace.licence.url} target="_blank" rel="noreferrer">
+            {mace.licence.name}
+          </a>{' '}
+          ({mace.licence.summary})
+        </label>
+      )}
+      <button
+        disabled={running || (!mace.installed && !accepted)}
+        onClick={() => {
+          setError(null)
+          api.installMace(mace.installed || accepted).then(onTools, (err: unknown) => setError(errorText(err)))
+        }}
+      >
+        {running ? 'Installing…' : label}
+      </button>
+      <div className="small" role="status" aria-label="MACE status">
+        {running && `${mace.install.step} · ${minutes(mace.install.seconds)}`}
+        {!running && mace.install.state === 'failed' && (
+          <span className="cloud-job-problem">Install failed: {mace.install.error}</span>
+        )}
+        {!running &&
+          mace.install.state !== 'failed' &&
+          (mace.installed
+            ? `Installed${mace.up_to_date ? '' : '; this version of the app has a newer one'}${
+                mace.versions['mace-torch'] ? ` · mace-torch ${mace.versions['mace-torch']}` : ''
+              }${mace.versions.torch ? ` · PyTorch ${mace.versions.torch}` : ''}`
+            : 'Not installed')}
+      </div>
+      {error && (
+        <div className="small cloud-job-problem" role="alert">
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function InstallControl({ tools, onTools }: { tools: LocalTools | null; onTools: (t: LocalTools) => void }) {
   const [error, setError] = useState<string | null>(null)
   if (!tools) return <span className="muted">…</span>

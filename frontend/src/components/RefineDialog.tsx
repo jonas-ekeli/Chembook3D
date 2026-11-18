@@ -20,6 +20,8 @@ const HELP: Record<string, string> = {
   gxtb: 'g-xTB: closer to DFT than GFN2-xTB, at a few times its cost (a development version).',
   'b97-3c': 'The whole molecule at DFT quality, its steric pocket included.',
   'r2scan-3c': 'A little better than B97-3c, at about 1.4 times its cost.',
+  'mace-omol':
+    'MACE-OMOL-0: a machine-learned potential trained on DFT; keeps pi-complexes and cycloaddition barriers that xTB loses. For guess structures; take energies from DFT.',
   oniom:
     'r2SCAN-3c on the metal and the atoms around it, GFN2-xTB on the rest: the core at DFT quality in a fraction of the time.',
   'oniom-stub': 'A layered stand-in for tests.',
@@ -39,7 +41,7 @@ function duration(seconds: number): string {
  * at their current value or a target). The result is imported onto the node when it finishes
  * (a node without calculations takes its geometry; on one with calculations it goes to a
  * derived node, D23). */
-const FREQUENCY_METHODS = new Set(['gfn2', 'gxtb', 'stub', 'stub-saddle'])
+const FREQUENCY_METHODS = new Set(['gfn2', 'gxtb', 'stub', 'stub-saddle', 'mace-omol', 'mace-stub'])
 
 export function RefineDialog({
   node,
@@ -130,7 +132,7 @@ export function RefineDialog({
     (!layered || Boolean(core?.usable)) &&
     !('error' in reactingRead) &&
     !(scanRead && 'error' in scanRead)
-  // D217: GFN2-xTB and g-xTB are cheap enough for a Hessian at their own level: a TS search
+  // D217: GFN2-xTB and g-xTB (D237: and MACE-OMOL-0) are cheap enough for a Hessian at their own level: a TS search
   // with one starts from it, and frequencies at the result are on for a TS search, offered
   // for a minimum. DFT and ONIOM searches start from, and are checked with, GFN2-xTB ones.
   const ownLevel = FREQUENCY_METHODS.has(method)

@@ -67,7 +67,7 @@ NOT_OFFERED = re.compile(
     r"|nodes/[^/]+/irc/(summary|files/[^/]+)"
     # D213: installing the local tools and setting their cores and memory (PUT) are the
     # settings' own; reading their state is get_local_tools (D222)
-    r"|local/tools(/install|/gxtb)?"
+    r"|local/tools(/install|/gxtb|/mace)?"
     r"|presence(/.*)?|shutdown)$"  # D107: tabs coming and going, and the Shut down button
 )
 

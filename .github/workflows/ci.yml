@@ -200,3 +200,25 @@ jobs:
         env:
           CHEMBOOK3D_TOOLS_DIR: ${{ runner.temp }}/chembook3d-tools
           CHEMBOOK3D_REAL_TOOLS: "1"
+
+  mace-tools:
+    # D237: the optional MACE-OMOL-0 install (its environment and the 422 MB model) and a real
+    # refine with it. Like "Local tools", not a required check.
+    name: MACE tools (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      - run: uv sync --locked
+      - run: uv run python -m chembook3d.local_tools install-mace --accept-licence
+        env:
+          CHEMBOOK3D_TOOLS_DIR: ${{ runner.temp }}/chembook3d-tools
+      - run: uv run pytest -W error tests/test_local_mace.py
+        env:
+          CHEMBOOK3D_TOOLS_DIR: ${{ runner.temp }}/chembook3d-tools
+          CHEMBOOK3D_REAL_TOOLS: "1"

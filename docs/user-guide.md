@@ -173,8 +173,11 @@ tblite, geomeTRIC and the dispersion corrections from conda-forge, about 1.5 GB,
 It takes 5 to 10 minutes and keeps going if you close the tab. The tools go into the app's own
 data folder (`%LOCALAPPDATA%\chembook3d\tools` on Windows, `~/.local/share/chembook3d/tools` on
 Linux), never into an investigation. **Install g-xTB** adds the Grimme group's g-xTB (about
-40 MB). The same section sets how many cores and how much memory a job may use. Without the
-interface, `uv run python -m chembook3d.local_tools install` (and `install-gxtb`) does the same.
+40 MB). **Install MACE-OMOL-0**, once you tick that you accept the model's licence (the Academic
+Software License, non-commercial), adds a machine-learned potential trained on DFT data, in an
+environment of its own (about 1.5 GB with the 422 MB model). The same section sets how many cores
+and how much memory a job may use. Without the interface, `uv run python -m chembook3d.local_tools
+install` (and `install-gxtb`, `install-mace --accept-licence`) does the same.
 
 **Refine a structure.** **Refine geometry…** on a node (right-click menu or inspector) opens the
 job dialog:
@@ -183,13 +186,14 @@ job dialog:
 |---|---|
 | GFN2-xTB | Tight binding; seconds to minutes. |
 | g-xTB | Newer tight binding, closer to DFT, a few times GFN2-xTB's cost (after **Install g-xTB**). |
+| MACE-OMOL-0 | Machine-learned potential trained on DFT (after **Install MACE-OMOL-0**); seconds a step. Keeps pi-complexes and cycloaddition barriers that xTB loses; use its structures as guesses and take energies from DFT. |
 | B97-3c, r2SCAN-3c | Fast composite DFT through Psi4; hours for a 70-atom metal complex. |
 | ONIOM(r2SCAN-3c:GFN2-xTB) | r2SCAN-3c on the metal and the atoms around it, GFN2-xTB on the rest. |
 
 Set the charge and multiplicity, then choose what to run: **Search for a transition state** (with
 the reacting atoms, if you know them), a **Relaxed scan** of one coordinate, several coordinates
 together, or a **2D grid** shown as a surface map (GFN2-xTB and g-xTB only), **Frequencies at the
-result** (GFN2-xTB and g-xTB), and held distances, angles or dihedrals. The dialog shows an
+result** (GFN2-xTB, g-xTB and MACE-OMOL-0), and held distances, angles or dihedrals. The dialog shows an
 estimate of how long the job takes, which gets better after each job on this computer.
 
 **Follow and import.** Jobs run one at a time, as programs of their own, so they keep running when

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type LocalTools } from './api'
-import { GxtbControl, InstallControl } from './components/LocalTools'
+import { GxtbControl, InstallControl, MaceControl } from './components/LocalTools'
 import { NumberSetting } from './components/NumberSetting'
 import type { SettingSection } from './components/SettingsDialog'
 import { SETTINGS_SECTIONS } from './settingsSections'
@@ -27,7 +27,10 @@ function useLocalTools(): [LocalTools | null, (next: LocalTools) => void, string
   useEffect(() => {
     void load()
   }, [load])
-  const running = tools?.install.state === 'running' || tools?.gxtb.install.state === 'running'
+  const running =
+    tools?.install.state === 'running' ||
+    tools?.gxtb.install.state === 'running' ||
+    tools?.mace.install.state === 'running'
   useEffect(() => {
     if (!running) return
     const timer = window.setInterval(() => void load(), INSTALL_POLL)
@@ -89,6 +92,25 @@ export function useLocalToolsSection(): SettingSection {
           </>
         ),
         control: <GxtbControl tools={tools} onTools={setTools} />,
+      },
+      {
+        name: 'MACE-OMOL-0 (optional)',
+        help: (
+          <>
+            A machine-learned potential trained on DFT (ωB97M-V, the OMol25 data). Unlike xTB it keeps pi-complexes and
+            cycloaddition barriers, so Refine geometry with it gives good guesses for minima and transition states, and it
+            runs the TS guess between two structures. A download of about 1.5 GB, no account.
+          </>
+        ),
+        more: (
+          <>
+            The model ({tools?.mace.download_mb ?? 422} MB) comes from the MACE authors’ GitHub release under the Academic
+            Software License, which allows academic and other non-commercial use; it is not part of Chembook3D. It runs in an
+            environment of its own beside the tools (PyTorch on the CPU, ASE, Sella and mace-torch), at fixed versions. Use
+            its structures as starting guesses; take energies from your own DFT calculations.
+          </>
+        ),
+        control: <MaceControl tools={tools} onTools={setTools} />,
       },
       {
         name: 'Cores',
