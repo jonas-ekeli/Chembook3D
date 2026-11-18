@@ -933,8 +933,9 @@ def psi4_single_point(
 ):
     """Psi4 single points, Hartree from coordinates in Å: the method `name` (e.g. `pbe-d3mbj`,
     `r2scan-3c`) with `basis` (None for a 3c method, which brings its own), RKS or UKS by the
-    multiplicity, density fitting unless `scf_type` says otherwise (D240: ωB97M-V runs
-    "direct"); each SCF after the first starts from the last one's orbitals (D239, D240)."""
+    multiplicity, density fitting unless `scf_type` says otherwise (then without Psi4's
+    density-fitted first guess); each SCF after the first starts from the last one's orbitals
+    (D239, D240)."""
     import numpy as np
 
     scratch = folder / "scratch"

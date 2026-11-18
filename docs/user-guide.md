@@ -214,8 +214,7 @@ PBE-D3M(BJ)/def2-SVP energy comes back as a second TS node below the first.
 members…** for one group), computes the energy of each structure as it is with Psi4, one job per
 node, one after another. The default level is PBE-D3M(BJ)/def2-TZVP (about 10 minutes for a
 70-atom complex on 4 cores); PBE-D3M(BJ)/def2-SVP (about 4 minutes), r2SCAN-3c, B97-3c and the
-slower hybrids PBE0-D3(BJ)/def2-TZVP and ωB97M-V/def2-TZVP are offered too, each with its
-estimate. Each comes back as a single-point calculation on its node, at the composite level of
+hybrid PBE0-D3(BJ)/def2-TZVP (about 20 minutes) are offered too, each with its estimate. Each comes back as a single-point calculation on its node, at the composite level of
 the node's optimization, for example `Psi4 PBE-D3M(BJ)/def2-TZVP // MACE MACE-OMOL-0`; with a
 frequency job at that geometry level (**Frequencies at the result**) the free energies at that
 level follow. Use them to rank conformers and check guesses before your own HPC runs. r2SCAN-3c
