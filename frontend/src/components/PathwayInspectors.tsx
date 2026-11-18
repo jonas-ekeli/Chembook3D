@@ -10,6 +10,7 @@ import {
   type EnergyView,
   type Group,
   type GroupDeletePreview,
+  type LocalJob,
   type Node,
   type NodeDeletePreview,
   type Settings,
@@ -22,6 +23,7 @@ import { Modal } from './Modal'
 import { Notes, TextField } from './Fields'
 import { AtomMatchDialog } from './AtomMatchDialog'
 import { ScanPathDialog } from './ScanPathDialog'
+import { TsGuessDialog } from './TsGuessDialog'
 import { ScanPathsSection } from './ScanPathsOnEdge'
 import { MAX_OVERLAY, OverlayDialog } from './OverlayDialog'
 import { CompareStericsDialog } from './Sterics'
@@ -1099,12 +1101,18 @@ export function SelectionInspector({
   onGroupCreated,
   onSelectivity,
   onEquilibrium,
+  onTsGuess,
+  onSettings,
   asked,
 }: {
   nodes: Node[]
   groups: Group[]
   canvas: Canvas
   onChanged: () => void
+  /** D238: a TS guess started on this computer */
+  onTsGuess?: (job: LocalJob) => void
+  /** Settings › Local calculations */
+  onSettings?: () => void
   onGroupCreated: (group: Group) => void
   /** D83: compare the selected items as the outcomes of a new selectivity. */
   onSelectivity: () => void
@@ -1120,6 +1128,7 @@ export function SelectionInspector({
   const [sterics, setSterics] = useState(false)
   const [matching, setMatching] = useState(false)
   const [scanning, setScanning] = useState(false)
+  const [guessing, setGuessing] = useState(false)
   const scanEnds = scanPathEnds(nodes, groups, canvas)
   const assign = (fields: { step_id?: string | null; branch_id?: string | null }) =>
     Promise.all(nodes.map((n) => api.updateNode(n.id, fields))).then(
@@ -1143,6 +1152,7 @@ export function SelectionInspector({
     else if (key === 'overlay') setOverlay(true)
     else if (key === 'match') setMatching(true)
     else if (key === 'scan-path') setScanning(true)
+    else if (key === 'ts-guess') setGuessing(true)
     else if (key === 'sterics') setSterics(true)
     else if (key === 'selectivity') onSelectivity()
     else if (key === 'equilibrium') onEquilibrium()
@@ -1242,6 +1252,21 @@ export function SelectionInspector({
       )}
       {overlay && nodes.length >= 2 && <OverlayDialog nodes={nodes} onClose={() => setOverlay(false)} />}
       {scanning && scanEnds && <ScanPathDialog startId={scanEnds[0]} endId={scanEnds[1]} onClose={() => setScanning(false)} />}
+      {guessing && scanEnds && (
+        <TsGuessDialog
+          startId={scanEnds[0]}
+          endId={scanEnds[1]}
+          onClose={() => setGuessing(false)}
+          onStarted={(job) => onTsGuess?.(job)}
+          onSettings={
+            onSettings &&
+            (() => {
+              setGuessing(false)
+              onSettings()
+            })
+          }
+        />
+      )}
       {matching && nodes.length === 2 && <AtomMatchDialog nodes={[nodes[0], nodes[1]]} onClose={() => setMatching(false)} />}
       {sterics && (
         <CompareStericsDialog nodes={nodes.filter((n) => n.xyz)} title={describeSelection(nodes, [])} onClose={() => setSterics(false)} />

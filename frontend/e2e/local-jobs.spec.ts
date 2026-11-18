@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { E2E_DIR, startPage } from './helpers.ts'
+import { E2E_DIR, canvasNode, newInvestigation, startPage } from './helpers.ts'
 
 // T-UI-83, D213: Refine geometry runs on this computer (here the worker's test method with the
 // app's own Python, playwright.config.ts), Local jobs follows it, and its result is imported onto
@@ -404,4 +404,38 @@ test('a 2D grid scan shows its energy surface', async ({ page }) => {
   await surface.getByRole('button', { name: /^Point 1: B\(1,2\) 0\.90 Å, B\(1,3\) 0\.90 Å/ }).click()
   await expect(movie.locator('.surface-current')).toHaveCount(1)
   await expect(movie.getByRole('button', { name: 'Open in Scan editor' })).toHaveCount(0)
+})
+
+// T-UI-106, D238: a TS guess between two structures joined by an edge, from the selection panel:
+// the dialog shows the match and the bond that changes, and asks for MACE-OMOL-0 when it is not
+// installed (the run itself is the backend's test, T-LOC-35).
+const STRETCHED = '3\nstretched\nO 0.000000 0.000000 0.117300\nH 0.000000 2.100000 -1.000000\nH 0.000000 -0.757200 -0.469200\n'
+
+test('a TS guess between two minima is planned from the selection panel', async ({ page }) => {
+  test.slow()
+  await newInvestigation(page, 'Local TS guess')
+  const ids: string[] = []
+  for (const [label, xyz, x] of [
+    ['bound', WATER, 0],
+    ['apart', STRETCHED, 400],
+  ] as const) {
+    const response = await page.request.post('/api/nodes', { data: { label, xyz, pos_x: x, pos_y: 100, charge: 0, multiplicity: 1 } })
+    expect(response.ok()).toBeTruthy()
+    ids.push(((await response.json()) as { id: string }).id)
+  }
+  expect((await page.request.post('/api/transitions', { data: { source_id: ids[0], target_id: ids[1] } })).ok()).toBeTruthy()
+  await page.reload()
+  await canvasNode(page, 'apart').click()
+  await canvasNode(page, 'bound').click({ modifiers: ['Control'] })
+  await page.getByLabel('Selection inspector').getByRole('button', { name: 'TS guess on this computer…' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'TS guess on this computer' })
+  // The edge runs from bound to apart, whatever the order of selection.
+  await expect(dialog.getByLabel('TS guess plan')).toContainText('From “bound” to “apart”')
+  await expect(dialog.getByLabel('Match summary')).toContainText('1 bond breaks')
+  await expect(dialog.getByLabel('Reacting atoms')).toContainText('O1–H2 (breaks)')
+  // MACE-OMOL-0 is not installed here: Start waits for it, and Settings is one click away.
+  await expect(dialog.getByRole('button', { name: 'Start' })).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Install it in Settings' }).click()
+  await expect(page.getByRole('dialog', { name: 'Settings' }).getByLabel('MACE status')).toHaveText('Not installed')
 })

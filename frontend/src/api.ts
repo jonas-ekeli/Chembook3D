@@ -1008,6 +1008,8 @@ export type LocalTools = {
     download_mb: number
     install: { state: 'idle' | 'running' | 'done' | 'failed'; step: string; error: string | null; seconds: number | null }
   }
+  /** D238: a TS guess's estimate for the `atoms` asked about, when MACE-OMOL-0 is installed */
+  ts_guess?: { seconds_per_step: number; gradients: number; seconds: number } | null
   /** the methods a refine offers: value for the request, label to show */
   methods: {
     value: string
@@ -1072,9 +1074,35 @@ export type ModeCheck = {
   mode?: number[][]
 }
 
+/** D238: a TS guess's two ends and the bonds that change, atoms counted from 0. */
+export type TsGuessSpec = {
+  start_id: string
+  end_id: string
+  start_label: string
+  end_label: string
+  edge_id: string
+  formed: number[][]
+  broken: number[][]
+  reacting: number[]
+  method_label: string
+  match_rmsd: number
+}
+
+/** D238: what a TS guess found: the IDPP band (kcal/mol from its lowest image), the changing
+ * bonds' lengths (Å) at the ends and the saddle, and its warnings. */
+export type TsGuessFound = {
+  band: { kcal: number[]; top: number; maxima: number[] } | null
+  bonds: { atoms: number[]; start: number; saddle: number; end: number }[] | null
+  warnings: string[] | null
+  converged: boolean | null
+  saddle_kcal: number | null
+}
+
 export type LocalJob = {
   id: string
-  kind: 'refine'
+  kind: 'refine' | 'ts_guess'
+  /** D238: a TS guess between two structures joined by an edge */
+  ts_guess?: TsGuessSpec | null
   node_id: string
   node_label: string
   method: string
@@ -1128,6 +1156,8 @@ export type LocalJob = {
     frequencies?: { level: string; imaginary: number[]; count: number } | null
     /** D217: the final structure, sent when the result's TS check has a mode to animate */
     final_xyz?: string | null
+    /** D238: what a TS guess found */
+    ts_guess?: TsGuessFound | null
     /** D218: a scan's points: the coordinates' values, the energy and whether it converged */
     scan?: {
       coordinates: LocalScan['coordinates']
@@ -2981,6 +3011,14 @@ export const api = {
   saveLocalResources: (body: { cores: number | null; memory_mb: number | null }) =>
     request<LocalTools>('PUT', '/local/tools', body),
   localJobs: () => request<LocalJob[]>('GET', '/local/jobs'),
+  /** D238: a TS guess between two structures joined by an edge, run on this computer */
+  startTsGuess: (body: {
+    start_id: string
+    end_id: string
+    start_member_id?: string | null
+    end_member_id?: string | null
+    pairs?: [number, number][] | null
+  }) => request<LocalJob>('POST', '/local/ts-guess', body),
   startRefine: (body: {
     node_id: string
     method: string

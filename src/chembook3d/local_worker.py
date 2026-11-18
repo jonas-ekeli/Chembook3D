@@ -622,6 +622,291 @@ def xyz_frame(symbols, coords_ang, comment: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+# ---------- D238: a TS guess between two minima ----------
+
+TS_IMAGES = 7  # IDPP images between the two ends
+END_FMAX = 0.02  # eV/Å: the ends' minima (about Gaussian's default largest force)
+SADDLE_FMAX = 0.01  # eV/Å: the saddle point
+SADDLE_STEPS = 300
+HUMP_KCAL = 1.0  # a second maximum of the band counts when it stands this far above its valleys
+WAVENUMBER = 5140.4872  # cm-1 per sqrt(Hartree / (Bohr² amu))
+SPURIOUS_CM = 50.0  # a smaller imaginary wavenumber is noise of a partial Hessian, not a mode
+BOND_SCALE = 1.25  # bonded: closer than this times the sum of covalent radii
+
+
+def engine_calculator(calculate, cancelled):
+    """An ASE calculator of a worker engine (Bohr and Hartree in, eV and Å out)."""
+    import numpy as np
+    from ase.calculators.calculator import Calculator, all_changes
+
+    class EngineCalculator(Calculator):
+        implemented_properties = ["energy", "forces"]
+
+        def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
+            super().calculate(atoms, properties, system_changes)
+            if cancelled():
+                raise Cancelled()
+            energy, grad = calculate(np.asarray(self.atoms.positions) / BOHR_TO_ANGSTROM)
+            grad = np.asarray(grad, float).reshape(-1, 3)
+            self.results = {
+                "energy": float(energy) / EV_TO_HARTREE,
+                "forces": -grad / EV_TO_HARTREE / BOHR_TO_ANGSTROM,
+            }
+
+    return EngineCalculator()
+
+
+def aligned(moving, reference):
+    """`moving` (n x 3) turned and shifted onto `reference` by least squares (Kabsch)."""
+    import numpy as np
+
+    a = np.asarray(moving, float)
+    b = np.asarray(reference, float)
+    ca, cb = a.mean(axis=0), b.mean(axis=0)
+    u, _, vt = np.linalg.svd((a - ca).T @ (b - cb))
+    d = np.sign(np.linalg.det(u @ vt))
+    rotation = u @ np.diag([1.0, 1.0, d]) @ vt
+    return (a - ca) @ rotation + cb
+
+
+def bonded(symbols, coords) -> list[tuple[int, int]]:
+    """Pairs closer than BOND_SCALE times their covalent radii (geomeTRIC's radii)."""
+    import numpy as np
+    from geometric.molecule import Elements, Radii  # covalent radii in Å from H on
+
+    x = np.asarray(coords, float)
+    radii = [Radii[Elements.index(s) - 1] for s in symbols]
+    out = []
+    for i in range(len(x)):
+        for j in range(i + 1, len(x)):
+            if np.linalg.norm(x[i] - x[j]) < BOND_SCALE * (radii[i] + radii[j]):
+                out.append((i, j))
+    return out
+
+
+def humps(energies, least: float = HUMP_KCAL) -> list[int]:
+    """The images that are maxima of a band (energies in kcal/mol) by their prominence: each
+    stands at least `least` above the higher of its two valleys, a valley being the lowest point
+    between it and the nearest higher image (or the band's end) on that side."""
+    found = []
+    n = len(energies)
+    for k in range(1, n - 1):
+        if not (energies[k] >= energies[k - 1] and energies[k] > energies[k + 1]):
+            continue
+        left = k - 1
+        while left > 0 and energies[left] <= energies[k]:
+            left -= 1
+        right = k + 1
+        while right < n - 1 and energies[right] <= energies[k]:
+            right += 1
+        valleys = (min(energies[left:k]), min(energies[k + 1 : right + 1]))
+        if energies[k] - max(valleys) >= least:
+            found.append(k)
+    return found
+
+
+def stretch(x, mode, pair) -> float:
+    """How much a (normalized) mode stretches the bond between a pair of atoms: the change of
+    its length along the mode, first order."""
+    import numpy as np
+
+    x = np.asarray(x, float)
+    m = np.asarray(mode, float)
+    a, b = (int(i) for i in pair)
+    unit = (x[a] - x[b]) / np.linalg.norm(x[a] - x[b])
+    return abs(float(unit @ (m[a] - m[b])))
+
+
+def partial_mode_check(symbols, x, calculate, region, reacting, progress=None) -> dict:
+    """D238: the Hessian of the `region` atoms only (central differences of their gradient,
+    the rest held), mass-weighted: its imaginary wavenumbers (cm-1, noise under SPURIOUS_CM
+    left out), the first one's mode over the whole molecule (zero outside the region) and its
+    share on the `reacting` atoms."""
+    import numpy as np
+    from geometric.molecule import PeriodicTable
+
+    region = sorted(set(int(a) for a in region))
+    columns = [3 * a + k for a in region for k in range(3)]
+    flat = np.asarray(x, float).reshape(-1)
+    size = len(columns)
+    hessian = np.zeros((size, size))
+    for row, c in enumerate(columns):
+        plus, minus = flat.copy(), flat.copy()
+        plus[c] += HESSIAN_STEP
+        minus[c] -= HESSIAN_STEP
+        g_plus = np.asarray(calculate(plus.reshape(-1, 3))[1], float).reshape(-1)[columns]
+        g_minus = np.asarray(calculate(minus.reshape(-1, 3))[1], float).reshape(-1)[columns]
+        hessian[row] = (g_plus - g_minus) / (2 * HESSIAN_STEP)
+        if progress is not None and (row % 6 == 5 or row == size - 1):
+            progress.update(phase=f"Mode check {row + 1}/{size}")
+    hessian = (hessian + hessian.T) / 2
+    if len(region) == len(symbols):
+        # the whole molecule: translations and rotations projected out, as for a full Hessian
+        return {**mode_check(symbols, x, hessian, reacting), "region": region, "partial": False}
+    masses = np.repeat([PeriodicTable[symbols[a]] for a in region], 3)
+    weighted = hessian / np.sqrt(np.outer(masses, masses))
+    values, vectors = np.linalg.eigh(weighted)
+    wavenumbers = np.sign(values) * np.sqrt(np.abs(values)) * WAVENUMBER
+    imaginary = [round(float(w), 1) for w in wavenumbers if w < -SPURIOUS_CM]
+    out: dict = {
+        "imaginary": imaginary,
+        "lowest": [round(float(w), 1) for w in wavenumbers[:3]],
+        "region": region,
+        "partial": True,
+    }
+    if imaginary:
+        cartesian = vectors[:, 0] / np.sqrt(masses)
+        mode = np.zeros((len(symbols), 3))
+        mode[region] = (cartesian / np.linalg.norm(cartesian)).reshape(-1, 3)
+        out["atoms"] = moving_atoms(mode)
+        out["mode"] = mode.round(5).tolist()
+        if reacting:
+            weight = (mode**2).sum(axis=1)
+            share = float(weight[list(reacting)].sum() / weight.sum())
+            out["share_on_reacting"] = round(share, 3)
+            out["on_reacting"] = share >= MODE_SHARE
+    return out
+
+
+def ts_guess(job, calculate, symbols, folder: Path, progress, cancelled, record) -> dict:
+    """D238: a TS guess between the job's two ends (start in job.json's coordinates, the end in
+    ts_guess.end, same atom order): each end optimized to a minimum (Sella), an IDPP band of
+    TS_IMAGES images between them scored with the method, Sella's saddle search (order 1,
+    internal coordinates) from the band's highest image, and a check of the saddle's Hessian on
+    the reacting region. `record(coords_ang, energy)` keeps each step of the saddle search.
+    Returns what result.json's `ts_guess` holds, with the saddle's coordinates (Å)."""
+    import numpy as np
+    from ase import Atoms
+    from ase.mep import NEB
+    from sella import Sella
+
+    spec = job["ts_guess"]
+    numbers = [ELEMENTS.index(s) + 1 for s in symbols]
+    warnings: list[str] = []
+    out: dict = {"warnings": warnings}
+
+    def atoms_at(coords):
+        found = Atoms(numbers=numbers, positions=np.asarray(coords, float))
+        found.calc = engine_calculator(calculate, cancelled)
+        return found
+
+    def kcal(atoms) -> float:
+        return float(atoms.get_potential_energy()) * EV_TO_HARTREE * HARTREE_TO_KCAL
+
+    log = str(folder / "sella.log")
+    ends = {}
+    for which, coords in (("start", job["coordinates"]), ("end", spec["end"])):
+        progress.update(phase=f"Optimizing the {which} (minimum)")
+        atoms = atoms_at(coords)
+        if spec.get("optimize_ends", True):
+            optimizer = Sella(atoms, order=0, internal=True, logfile=log)
+            done = bool(optimizer.run(fmax=END_FMAX, steps=SADDLE_STEPS))
+        else:
+            done = True
+        moved = float(
+            np.sqrt(
+                ((aligned(atoms.positions, coords) - np.asarray(coords)) ** 2).sum(axis=1).mean()
+            )
+        )
+        ends[which] = {
+            "coordinates": np.asarray(atoms.positions).round(6).tolist(),
+            "energy": float(atoms.get_potential_energy()) * EV_TO_HARTREE,
+            "converged": done,
+            "rmsd_from_node": round(moved, 3),
+        }
+        if not done:
+            warnings.append(f"The {which} did not reach a minimum in {SADDLE_STEPS} steps.")
+        (folder / f"{which}-minimum.xyz").write_text(
+            xyz_frame(symbols, atoms.positions, f"{which} minimum, {spec['method_label']}"),
+            encoding="utf-8",
+        )
+    out["ends"] = ends
+    first = np.asarray(ends["start"]["coordinates"])
+    last = aligned(ends["end"]["coordinates"], first)
+
+    progress.update(phase=f"IDPP band of {TS_IMAGES} images")
+    images = [atoms_at(first)]
+    images += [atoms_at(first) for _ in range(TS_IMAGES)]
+    images.append(atoms_at(last))
+    NEB(images, method="improvedtangent").interpolate(method="idpp")  # only interpolated
+    band = []
+    for k, image in enumerate(images):
+        progress.update(phase=f"Scoring the band {k + 1}/{len(images)}")
+        band.append(kcal(image))
+    lowest = min(band[0], band[-1])
+    relative = [round(e - lowest, 2) for e in band]
+    tops = humps(relative)
+    top = max(range(1, len(images) - 1), key=lambda k: band[k])
+    out["band"] = {"kcal": relative, "top": top, "maxima": tops}
+    with (folder / "band.xyz").open("w", encoding="utf-8") as fh:
+        for k, image in enumerate(images):
+            fh.write(xyz_frame(symbols, image.positions, f"image {k} {relative[k]:.2f} kcal/mol"))
+    if len(tops) > 1:
+        warnings.append(
+            f"The straight path between the ends has {len(tops)} maxima (images "
+            f"{', '.join(str(k) for k in tops)}): there may be an intermediate between them. The "
+            "guess starts from the highest; consider a structure in between."
+        )
+    if top in (1, len(images) - 2) and band[top] - max(band[0], band[-1]) < HUMP_KCAL:
+        warnings.append("The band has no clear maximum between the ends.")
+
+    progress.update(phase="Saddle search (Sella)")
+    saddle = atoms_at(images[top].positions)
+    optimizer = Sella(saddle, order=1, internal=True, logfile=log)
+
+    def keep():
+        record(np.asarray(saddle.positions), float(saddle.get_potential_energy()) * EV_TO_HARTREE)
+
+    optimizer.attach(keep, interval=1)
+    converged = bool(optimizer.run(fmax=SADDLE_FMAX, steps=SADDLE_STEPS))
+    out["converged"] = converged
+    if not converged:
+        warnings.append(f"The saddle search did not converge in {SADDLE_STEPS} steps.")
+    x = np.asarray(saddle.positions)
+    reacting = [int(a) for a in spec.get("reacting") or []]
+    pairs = bonded(symbols, x)
+    region = set(reacting)
+    for i, j in pairs:
+        if i in reacting or j in reacting:
+            region |= {i, j}
+    out["mode_check"] = partial_mode_check(
+        symbols, x / BOHR_TO_ANGSTROM, calculate, sorted(region), reacting, progress
+    )
+    check = out["mode_check"]
+    changing = [list(b) for b in spec.get("formed", []) + spec.get("broken", [])]
+    if changing and check.get("mode"):
+        # The mode is on the bonds that change when it stretches one of them more than any
+        # other bond of the region: the share of its amplitude is swayed by hydrogens, which
+        # move most in Cartesian terms even when a C–C bond is what forms.
+        inside = set(check["region"])
+        others = [p for p in pairs if p[0] in inside and p[1] in inside]
+        others = [p for p in others if sorted(p) not in [sorted(c) for c in changing]]
+        mine = max(stretch(x, check["mode"], c) for c in changing)
+        theirs = max((stretch(x, check["mode"], p) for p in others), default=0.0)
+        check["stretch"] = {"changing": round(mine, 3), "other": round(theirs, 3)}
+        check["on_reacting"] = mine >= theirs
+    if len(check["imaginary"]) != 1:
+        warnings.append(
+            f"The saddle has {len(check['imaginary'])} imaginary modes on the reacting region, "
+            "not one."
+        )
+    elif reacting and not check.get("on_reacting"):
+        warnings.append("Its imaginary mode is not on the bonds that change.")
+    out["bonds"] = [
+        {
+            "atoms": [int(a), int(b)],
+            "start": round(float(np.linalg.norm(first[a] - first[b])), 3),
+            "saddle": round(float(np.linalg.norm(x[a] - x[b])), 3),
+            "end": round(float(np.linalg.norm(last[a] - last[b])), 3),
+        }
+        for a, b in changing
+    ]
+    out["saddle_kcal"] = round(kcal(saddle) - lowest, 2)
+    out["coordinates"] = x.round(8).tolist()
+    progress.update(phase=None)
+    return out
+
+
 def run(folder: Path, lock: Path | None) -> int:
     import numpy as np
 
@@ -667,177 +952,200 @@ def run(folder: Path, lock: Path | None) -> int:
         if method == "mace-omol":  # D237: the version a MACE level is read with
             result["versions"]["mace"] = result["versions"].get("mace-torch")
         calculate = make_calculator(job, numbers, folder)
+        if job.get("kind") == "ts_guess":
+            # D238: a TS guess between two minima instead of one optimization
+            traj = folder / "trajectory.xyz"
+            traj.write_text("", encoding="utf-8")
 
-        import geometric
-        import geometric.engine
-        import geometric.errors
-        import geometric.molecule
-        import geometric.optimize
+            def record(coords, energy):
+                energies.append(energy)
+                frames.append(np.asarray(coords).round(6).tolist())
+                criteria.append([])
+                with traj.open("a", encoding="utf-8") as fh:
+                    fh.write(
+                        xyz_frame(symbols, coords, f"cycle {len(energies)} energy {energy:.10f}")
+                    )
+                last["coords"], last["energy"] = np.asarray(coords), energy
+                progress.update(cycle=len(energies), energy=energy, energies=energies[-200:])
 
-        traj = folder / "trajectory.xyz"
-        traj.write_text("", encoding="utf-8")
-        judged = folder / CRITERIA
-        judged.write_text("", encoding="utf-8")
+            found = ts_guess(job, calculate, symbols, folder, progress, cancel_file.exists, record)
+            last["coords"] = np.asarray(found.pop("coordinates"))
+            result["ts_guess"] = found
+            result["ts_check"] = {"end": found["mode_check"], "level": f"{label}, reacting region"}
+            result["state"] = "converged" if found["converged"] else "not_converged"
+        else:
+            import geometric
+            import geometric.engine
+            import geometric.errors
+            import geometric.molecule
+            import geometric.optimize
 
-        def store(found: list) -> None:
-            if not frames:
-                return
-            criteria[-1] = [[name, round(v, 10), t, unit] for name, v, t, unit in found]
-            with judged.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps({"frame": len(frames) - 1, "criteria": criteria[-1]}) + "\n")
+            traj = folder / "trajectory.xyz"
+            traj.write_text("", encoding="utf-8")
+            judged = folder / CRITERIA
+            judged.write_text("", encoding="utf-8")
 
-        record_criteria(store)
+            def store(found: list) -> None:
+                if not frames:
+                    return
+                criteria[-1] = [[name, round(v, 10), t, unit] for name, v, t, unit in found]
+                with judged.open("a", encoding="utf-8") as fh:
+                    fh.write(
+                        json.dumps({"frame": len(frames) - 1, "criteria": criteria[-1]}) + "\n"
+                    )
 
-        class Engine(geometric.engine.Engine):
-            def calc_new(self, coords, dirname):
-                if cancel_file.exists():
-                    raise Cancelled()
-                x = np.asarray(coords, float).reshape(-1, 3)
-                energy, grad = calculate(x)
-                grad = np.asarray(grad, float).reshape(-1, 3)
-                ang = x * BOHR_TO_ANGSTROM
-                # D218: a scan point starts on the last one's structure; it is kept once.
-                again = bool(frames) and np.allclose(ang, last["coords"], atol=1e-7)
-                if not again:
-                    energies.append(energy)
-                    frames.append(ang.round(6).tolist())
-                    frame_points.append(point["index"])
-                    criteria.append([])
-                    comment = f"cycle {len(energies)} energy {energy:.10f}"
-                    if job.get("scan"):  # D220: its point, for the Inspect window
-                        comment += f" point {point['index']}"
-                    with traj.open("a", encoding="utf-8") as fh:
-                        fh.write(xyz_frame(symbols, ang, comment))
-                last["coords"], last["energy"] = ang, energy
-                progress.update(
-                    cycle=len(energies),
-                    energy=energy,
-                    max_gradient=float(np.abs(grad).max()),
-                    energies=energies[-200:],
-                )
-                return {"energy": energy, "gradient": grad.ravel()}
+            record_criteria(store)
 
-        molecule = geometric.molecule.Molecule()
-        molecule.elem = symbols
-        molecule.xyzs = [start.copy()]
-        engine = Engine(molecule)
-        options = {
-            "customengine": engine,
-            "input": str(folder / "geometric"),
-            "maxiter": int(job.get("maxiter", 300)),
-            "convergence_set": job.get("convergence", "GAU"),
-            "transition": bool(job.get("transition", False)),
-        }
-        text = read_constraints(job)
-        if text:
-            (folder / "constraints.txt").write_text(text, encoding="utf-8")
-            options["constraints"] = str(folder / "constraints.txt")
-        if job.get("hessian"):
-            options["hessian"] = job["hessian"]
-        hessian_engine = None
-        frequency_engine = None
-        if job.get("frequencies"):
-            # D217: frequencies at the job's own level once it has converged (cheap methods
-            # only: GFN2-xTB, g-xTB), imported as a frequency calculation on the result.
-            own = _engine(method, numbers, start / BOHR_TO_ANGSTROM, job, folder, delay=False)
+            class Engine(geometric.engine.Engine):
+                def calc_new(self, coords, dirname):
+                    if cancel_file.exists():
+                        raise Cancelled()
+                    x = np.asarray(coords, float).reshape(-1, 3)
+                    energy, grad = calculate(x)
+                    grad = np.asarray(grad, float).reshape(-1, 3)
+                    ang = x * BOHR_TO_ANGSTROM
+                    # D218: a scan point starts on the last one's structure; it is kept once.
+                    again = bool(frames) and np.allclose(ang, last["coords"], atol=1e-7)
+                    if not again:
+                        energies.append(energy)
+                        frames.append(ang.round(6).tolist())
+                        frame_points.append(point["index"])
+                        criteria.append([])
+                        comment = f"cycle {len(energies)} energy {energy:.10f}"
+                        if job.get("scan"):  # D220: its point, for the Inspect window
+                            comment += f" point {point['index']}"
+                        with traj.open("a", encoding="utf-8") as fh:
+                            fh.write(xyz_frame(symbols, ang, comment))
+                    last["coords"], last["energy"] = ang, energy
+                    progress.update(
+                        cycle=len(energies),
+                        energy=energy,
+                        max_gradient=float(np.abs(grad).max()),
+                        energies=energies[-200:],
+                    )
+                    return {"energy": energy, "gradient": grad.ravel()}
 
-            def frequency_engine(x, raw=own):
-                if cancel_file.exists():
-                    raise Cancelled()
-                return raw(x)
-
-        if job.get("transition"):
-            # D215: geomeTRIC starts the TS search from a Hessian; a cheap one (GFN2-xTB on the
-            # whole molecule, by finite differences) instead of one at the job's own level.
-            raw = _engine(
-                job.get("ts_hessian", "gfn2"),
-                numbers,
-                start / BOHR_TO_ANGSTROM,
-                job,
-                folder,
-                delay=False,
-            )
-
-            def hessian_engine(x, raw=raw):
-                if cancel_file.exists():
-                    raise Cancelled()
-                return raw(x)
-
-            x0 = start / BOHR_TO_ANGSTROM
-            first = numerical_hessian(hessian_engine, x0, progress, "Starting Hessian")
-            np.savetxt(folder / "hessian.txt", first)
-            options["hessian"] = "file:" + str(folder / "hessian.txt")
-            result["ts_check"] = {"start": mode_check(symbols, x0, first, job.get("reacting"))}
-            result["ts_check"]["start"].pop("mode", None)  # only the final mode is shown
-            progress.update(phase=None)
-        converged = True
-        _redirect_geometric_log(log)
-        scan = job.get("scan")
-        if scan:
-            # D218: a relaxed scan, one constrained optimization per point, each started from
-            # the one before; a point that does not converge is kept and the scan goes on.
-            values = scan_values(scan)
-            cells = [cell for _, _, cell in grid_cells(scan)] if scan.get("grid") else None
-            points = []
-            for k, value in enumerate(values):
-                point["index"] = k + 1
-                progress.update(phase=f"Point {k + 1} of {len(values)}")
-                held = [
-                    (c["kind"], c["atoms"], v)
-                    for c, v in zip(scan["coordinates"], value, strict=True)
-                ]
-                text = read_constraints(job, held)
-                (folder / "constraints.txt").write_text(text or "", encoding="utf-8")
-                molecule.xyzs = [np.asarray(last["coords"], float).copy()]
-                options["customengine"] = Engine(molecule)
+            molecule = geometric.molecule.Molecule()
+            molecule.elem = symbols
+            molecule.xyzs = [start.copy()]
+            engine = Engine(molecule)
+            options = {
+                "customengine": engine,
+                "input": str(folder / "geometric"),
+                "maxiter": int(job.get("maxiter", 300)),
+                "convergence_set": job.get("convergence", "GAU"),
+                "transition": bool(job.get("transition", False)),
+            }
+            text = read_constraints(job)
+            if text:
+                (folder / "constraints.txt").write_text(text, encoding="utf-8")
                 options["constraints"] = str(folder / "constraints.txt")
-                done = True
+            if job.get("hessian"):
+                options["hessian"] = job["hessian"]
+            hessian_engine = None
+            frequency_engine = None
+            if job.get("frequencies"):
+                # D217: frequencies at the job's own level once it has converged (cheap methods
+                # only: GFN2-xTB, g-xTB), imported as a frequency calculation on the result.
+                own = _engine(method, numbers, start / BOHR_TO_ANGSTROM, job, folder, delay=False)
+
+                def frequency_engine(x, raw=own):
+                    if cancel_file.exists():
+                        raise Cancelled()
+                    return raw(x)
+
+            if job.get("transition"):
+                # D215: geomeTRIC starts the TS search from a Hessian; a cheap one (GFN2-xTB on the
+                # whole molecule, by finite differences) instead of one at the job's own level.
+                raw = _engine(
+                    job.get("ts_hessian", "gfn2"),
+                    numbers,
+                    start / BOHR_TO_ANGSTROM,
+                    job,
+                    folder,
+                    delay=False,
+                )
+
+                def hessian_engine(x, raw=raw):
+                    if cancel_file.exists():
+                        raise Cancelled()
+                    return raw(x)
+
+                x0 = start / BOHR_TO_ANGSTROM
+                first = numerical_hessian(hessian_engine, x0, progress, "Starting Hessian")
+                np.savetxt(folder / "hessian.txt", first)
+                options["hessian"] = "file:" + str(folder / "hessian.txt")
+                result["ts_check"] = {"start": mode_check(symbols, x0, first, job.get("reacting"))}
+                result["ts_check"]["start"].pop("mode", None)  # only the final mode is shown
+                progress.update(phase=None)
+            converged = True
+            _redirect_geometric_log(log)
+            scan = job.get("scan")
+            if scan:
+                # D218: a relaxed scan, one constrained optimization per point, each started from
+                # the one before; a point that does not converge is kept and the scan goes on.
+                values = scan_values(scan)
+                cells = [cell for _, _, cell in grid_cells(scan)] if scan.get("grid") else None
+                points = []
+                for k, value in enumerate(values):
+                    point["index"] = k + 1
+                    progress.update(phase=f"Point {k + 1} of {len(values)}")
+                    held = [
+                        (c["kind"], c["atoms"], v)
+                        for c, v in zip(scan["coordinates"], value, strict=True)
+                    ]
+                    text = read_constraints(job, held)
+                    (folder / "constraints.txt").write_text(text or "", encoding="utf-8")
+                    molecule.xyzs = [np.asarray(last["coords"], float).copy()]
+                    options["customengine"] = Engine(molecule)
+                    options["constraints"] = str(folder / "constraints.txt")
+                    done = True
+                    try:
+                        geometric.optimize.run_optimizer(**options)
+                    except geometric.errors.GeomOptNotConvergedError:
+                        done = False
+                    finally:
+                        _close_geometric_logs()
+                    points.append(
+                        {
+                            "values": [round(v, 6) for v in value],
+                            "frame": len(frames) - 1,
+                            "energy": last["energy"],
+                            "converged": done,
+                        }
+                    )
+                    if cells is not None:
+                        points[-1]["cell"] = cells[k]
+                    with (folder / SCAN_POINTS).open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps(points[-1]) + "\n")  # D220: for the Inspect window
+                    converged = converged and done
+                result["scan"] = {**scan, "points": points}
+                progress.update(phase=None)
+            else:
                 try:
                     geometric.optimize.run_optimizer(**options)
                 except geometric.errors.GeomOptNotConvergedError:
-                    done = False
-                finally:
-                    _close_geometric_logs()
-                points.append(
-                    {
-                        "values": [round(v, 6) for v in value],
-                        "frame": len(frames) - 1,
-                        "energy": last["energy"],
-                        "converged": done,
-                    }
-                )
-                if cells is not None:
-                    points[-1]["cell"] = cells[k]
-                with (folder / SCAN_POINTS).open("a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(points[-1]) + "\n")  # D220: for the Inspect window
-                converged = converged and done
-            result["scan"] = {**scan, "points": points}
-            progress.update(phase=None)
-        else:
-            try:
-                geometric.optimize.run_optimizer(**options)
-            except geometric.errors.GeomOptNotConvergedError:
-                converged = False
-        result["state"] = "converged" if converged else "not_converged"
-        x1 = np.asarray(last["coords"]) / BOHR_TO_ANGSTROM
-        if frequency_engine is not None and frames and converged:
-            final = numerical_hessian(frequency_engine, x1, progress, "Frequencies")
-            freqs, modes = harmonic(symbols, x1, final)
-            result["frequencies"] = {
-                "level": result["level"],
-                "energy": last["energy"],
-                "wavenumbers": freqs.round(2).tolist(),
-                "modes": modes.round(5).tolist(),
-            }
-            if hessian_engine is not None:  # the TS check is read from the same Hessian
+                    converged = False
+            result["state"] = "converged" if converged else "not_converged"
+            x1 = np.asarray(last["coords"]) / BOHR_TO_ANGSTROM
+            if frequency_engine is not None and frames and converged:
+                final = numerical_hessian(frequency_engine, x1, progress, "Frequencies")
+                freqs, modes = harmonic(symbols, x1, final)
+                result["frequencies"] = {
+                    "level": result["level"],
+                    "energy": last["energy"],
+                    "wavenumbers": freqs.round(2).tolist(),
+                    "modes": modes.round(5).tolist(),
+                }
+                if hessian_engine is not None:  # the TS check is read from the same Hessian
+                    result["ts_check"]["end"] = mode_check(symbols, x1, final, job.get("reacting"))
+                    result["ts_check"]["level"] = label
+            elif hessian_engine is not None and frames:
+                final = numerical_hessian(hessian_engine, x1, progress, "Final Hessian")
                 result["ts_check"]["end"] = mode_check(symbols, x1, final, job.get("reacting"))
-                result["ts_check"]["level"] = label
-        elif hessian_engine is not None and frames:
-            final = numerical_hessian(hessian_engine, x1, progress, "Final Hessian")
-            result["ts_check"]["end"] = mode_check(symbols, x1, final, job.get("reacting"))
-            name = job.get("ts_hessian", "gfn2")
-            result["ts_check"]["level"] = METHOD_LABELS.get(name, (name, name))[1]
-        progress.update(phase=None)
+                name = job.get("ts_hessian", "gfn2")
+                result["ts_check"]["level"] = METHOD_LABELS.get(name, (name, name))[1]
+            progress.update(phase=None)
     except Cancelled:
         result["state"] = "cancelled"
     except Exception as exc:  # noqa: BLE001 - every failure goes into result.json

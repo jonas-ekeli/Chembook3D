@@ -31,12 +31,14 @@ chembook3d = "chembook3d.cli:main"
 
 [dependency-groups]
 dev = [
+    "ase>=3.26",
     "coverage>=7.10",
     "geometric>=1.1",
     "httpx2>=2.13.1",
     "pytest>=8",
     "pytest-xdist>=3.6",
     "ruff>=0.6",
+    "sella>=2.6",
 ]
 
 [build-system]

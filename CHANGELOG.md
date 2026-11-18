@@ -6,6 +6,9 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- TS guess on this computer (D238): two structures joined by an edge give a starting structure
+  for a TS, found with MACE-OMOL-0 (both ends minimized, an IDPP band, Sella's saddle search and
+  a check that the mode is on the reacting atoms), imported as a new TS node between them.
 - MACE-OMOL-0 on this computer (D237): an optional install of the machine-learned potential and
   its own environment, after accepting the model's licence; Refine geometry with it keeps the
   pi-complexes and cycloaddition barriers that xTB loses, for guess structures.

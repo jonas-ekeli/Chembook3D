@@ -24,9 +24,9 @@ export function groupActions(group: Group, canvas: Canvas): PanelAction[] {
 }
 
 /** The selection's actions, in the panel's order: add to a group selected with the nodes (A20),
- * create a group (WF-07), overlay (FR-3D-04), match atoms (D113), scan path (D114), compare sterics
- * (D81), selectivity (D83) and conformer equilibrium (D171). D184: its right-click menu offers the
- * same. */
+ * create a group (WF-07), overlay (FR-3D-04), match atoms (D113), scan path (D114), TS guess
+ * (D238), compare sterics (D81), selectivity (D83) and conformer equilibrium (D171). D184: its
+ * right-click menu offers the same. */
 export function selectionActions(nodes: Node[], groups: Group[], canvas: Canvas): PanelAction[] {
   const free = nodes.filter((n) => !n.group_id)
   const target = groups.length === 1 ? groups[0] : null
@@ -66,6 +66,14 @@ export function selectionActions(nodes: Node[], groups: Group[], canvas: Canvas)
       disabled: !scanEnds,
       title: scanEnds
         ? 'A path of xTB structures from one to the other, designed and run by a Claude Code cloud session (D114)'
+        : 'Select two nodes or groups joined by an edge',
+    },
+    {
+      key: 'ts-guess',
+      label: 'TS guess on this computer…',
+      disabled: !scanEnds,
+      title: scanEnds
+        ? 'A starting structure for a TS between the two, found with MACE-OMOL-0 on this computer (D238)'
         : 'Select two nodes or groups joined by an edge',
     },
     {

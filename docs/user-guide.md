@@ -196,6 +196,16 @@ together, or a **2D grid** shown as a surface map (GFN2-xTB and g-xTB only), **F
 result** (GFN2-xTB, g-xTB and MACE-OMOL-0), and held distances, angles or dihedrals. The dialog shows an
 estimate of how long the job takes, which gets better after each job on this computer.
 
+**Guess a transition state between two minima.** Select two nodes (or groups) joined by an
+edge and choose **TS guess on this computer…** in the selection panel or its right-click menu
+(after **Install MACE-OMOL-0**). The dialog matches the two structures' atoms, as a scan path does,
+and lists the bonds that form and break. The job optimizes both ends with MACE-OMOL-0, joins them
+with an interpolated path, searches for the saddle point from its highest point and checks that
+the imaginary mode moves the reacting atoms; a few minutes for a 70-atom complex. The guess comes
+back as a new TS node between the two, with notes saying how the bonds change and any warning
+(two maxima along the path, a search that did not converge, a mode elsewhere). Optimize it as a
+TS at your own level; its energy is not for comparison with DFT.
+
 **Follow and import.** Jobs run one at a time, as programs of their own, so they keep running when
 the app is closed. **Local jobs** in the top bar lists them with **Inspect** (live, every 5 s),
 **Cancel** and **Show node**. Each job is a folder under `local-jobs/` in the investigation, which
