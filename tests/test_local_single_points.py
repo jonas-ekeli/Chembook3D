@@ -62,7 +62,9 @@ def test_single_points_are_imported_onto_their_nodes_at_the_composite_level(open
         "wb97m-v-tzvp",
         "stub",
     }
-    assert 300 < levels[0]["estimate"]["seconds"] < 1200  # about 10 min for 70 atoms, 4 cores
+    # about 10 min for 70 atoms on 4 cores, scaled to the cores this computer gives a job
+    scaled = levels[0]["estimate"]["seconds"] * (status["cores"] / 4) ** 0.85
+    assert 300 < scaled < 1200
     assert "barrier" in next(lv for lv in levels if lv["value"] == "r2scan-3c")["note"]
 
     # The first node has its own optimization with frequencies; the second is a drawn structure.
