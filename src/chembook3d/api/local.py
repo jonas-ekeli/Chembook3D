@@ -419,9 +419,8 @@ class SinglePointsIn(BaseModel):
         local_jobs.SP_DEFAULT,
         description="pbe-tzvp: PBE-D3M(BJ)/def2-TZVP (the default, about 10 min for 70 atoms "
         "on 4 cores); pbe-svp: PBE-D3M(BJ)/def2-SVP (about 4 min); r2scan-3c (lost the barrier "
-        "of a Ru [2+2] step, so not for barriers there); b97-3c; pbe0-tzvp: PBE0-D3(BJ)/"
-        "def2-TZVP and wb97m-v-tzvp: ωB97M-V/def2-TZVP, hybrids (PBE0 about 20 min, "
-        "ωB97M-V slower). "
+        "of a Ru [2+2] step, so not for barriers there); b97-3c (about 5 min); pbe0-tzvp: "
+        "PBE0-D3(BJ)/def2-TZVP, a hybrid (about 20 min). "
         "get_local_tools?atoms=N lists them with estimates as single_point_levels",
     )
     charge: int | None = Field(None, description="Default: each node's charge, else 0")

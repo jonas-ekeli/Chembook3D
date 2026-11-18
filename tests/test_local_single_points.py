@@ -59,7 +59,6 @@ def test_single_points_are_imported_onto_their_nodes_at_the_composite_level(open
         "r2scan-3c",
         "b97-3c",
         "pbe0-tzvp",
-        "wb97m-v-tzvp",
         "stub",
     }
     # about 10 min for 70 atoms on 4 cores, scaled to the cores this computer gives a job
@@ -221,4 +220,4 @@ def test_real_tools_single_points(open_client, monkeypatch):
         names[level] = calc["composite_label"]
     assert names["pbe-tzvp"] == "Psi4 PBE-D3M(BJ)/def2-TZVP"
     assert names["r2scan-3c"] == "Psi4 r2SCAN-3c"
-    assert names["wb97m-v-tzvp"] == "Psi4 wB97M-V/def2-TZVP"
+    assert names["pbe0-tzvp"] == "Psi4 PBE0-D3(BJ)/def2-TZVP"
