@@ -948,6 +948,10 @@ def psi4_single_point(
     psi4.set_num_threads(max(1, int(job.get("cores", 1))))
     psi4.core.IOManager.shared_object().set_default_path(str(scratch))
     options = {"reference": "uks" if unpaired else "rks", "scf_type": scf_type, "maxiter": 200}
+    if scf_type != "df":
+        # Psi4 otherwise converges with density fitting first (DF_SCF_GUESS), which writes the
+        # range-separated exchange integrals to disk all the same
+        options["df_scf_guess"] = False
     if basis:
         options["basis"] = basis
     psi4.set_options(options)

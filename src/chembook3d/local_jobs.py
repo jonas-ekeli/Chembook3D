@@ -1314,6 +1314,9 @@ SP_TEST_METHOD = "stub-sp"
 SP_DEFAULT = "pbe-tzvp"
 SP_MAX_NODES = 100
 SP_POWER = 2.7  # how a single point's time grows with the atoms (as the DFT refines', A143)
+# A smaller structure's time is mostly start-up, so it would scale up to far too little (water's
+# 3 s at PBE/def2-TZVP to 2 hours for 70 atoms): it is not kept.
+SP_CALIBRATION_ATOMS = 20
 # D240: the levels offered, the default first. `psi4` and `basis` are what Psi4 is asked for;
 # `method`, `dispersion` and `basis_name` the level the calculation is imported at. `seconds`:
 # one single point of a 70-atom Ru complex on 4 cores from a fresh guess. Measured 2026-11-18 on
@@ -1427,9 +1430,9 @@ def sp_estimate(level: str, atoms: int, cores: int) -> dict[str, Any]:
 def _calibrate_single_point(result: dict[str, Any], job: dict[str, Any]) -> None:
     level = (job.get("single_point") or {}).get("level")
     elapsed = result.get("run_s") or result.get("elapsed_s")
-    if level not in SP_LEVELS or not elapsed:
-        return
     atoms = len(job.get("elements") or [])
+    if level not in SP_LEVELS or not elapsed or atoms < SP_CALIBRATION_ATOMS:
+        return
     scale = _sp_scale(atoms, int(job.get("cores", 1)))
     local_tools.save_calibration(f"sp:{level}", float(elapsed) / scale)
 

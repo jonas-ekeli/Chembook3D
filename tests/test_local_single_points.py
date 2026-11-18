@@ -190,6 +190,9 @@ def test_a_single_points_time_is_learnt_per_level():
         "elements": ["C"] * 70,
         "cores": 4,
     }
+    small = {**job, "elements": ["O", "H", "H"]}
+    local_jobs.calibrate({"elapsed_s": 3.0, "run_s": 3.0}, small)  # mostly start-up: not kept
+    assert local_jobs.sp_estimate("pbe-svp", 70, 4)["measured"] is False
     local_jobs.calibrate({"elapsed_s": 900.0, "run_s": 300.0}, job)  # 600 s waiting
     assert local_jobs.sp_estimate("pbe-svp", 70, 4) == {"seconds": 300, "measured": True}
     assert local_jobs.sp_estimate("pbe-tzvp", 70, 4)["measured"] is False
