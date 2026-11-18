@@ -32,6 +32,7 @@ export function TsGuessDialog({
   const [answer, setAnswer] = useState<{ key: string; plan: ScanPathPlan | null; error: string | null } | null>(null)
   const [tools, setTools] = useState<LocalTools | null>(null)
   const [reviewing, setReviewing] = useState<boolean | null>(null)
+  const [correct, setCorrect] = useState(false)
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
   const key = JSON.stringify([ends, members, pairs])
@@ -99,6 +100,7 @@ export function TsGuessDialog({
         start_member_id: members.start,
         end_member_id: members.end,
         pairs: pairs.length ? pairs : null,
+        correct,
       })
       .then(
         (job) => {
@@ -161,6 +163,16 @@ export function TsGuessDialog({
               About {duration(tools.ts_guess.seconds)} for {count} atoms on {tools.cores} core{tools.cores === 1 ? '' : 's'}.
             </p>
           )}
+          <label className="check">
+            <input type="checkbox" checked={correct} onChange={(event) => setCorrect(event.target.checked)} />
+            Correct the saddle with PBE single points
+          </label>
+          <p className="muted small" aria-label="Correction">
+            MACE-OMOL-0 may place the TS at a forming bond that is too short (on a Ru [2+2] test, 2.18 Å against DFT's 2.56 Å). This holds that bond at six
+            lengths 0.1 Å apart from the saddle toward the separated end, minimizes each with MACE-OMOL-0, and keeps the one with
+            the highest PBE-D3M(BJ)/def2-SVP energy as a second TS node; the raw guess stays.
+            {tools?.ts_guess && ` About ${duration(tools.ts_guess.correction_seconds)} more.`}
+          </p>
           {(['start', 'end'] as const).map(
             (which) =>
               plan[which].members.length > 1 && (

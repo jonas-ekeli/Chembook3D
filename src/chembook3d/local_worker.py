@@ -907,6 +907,174 @@ def ts_guess(job, calculate, symbols, folder: Path, progress, cancelled, record)
     return out
 
 
+# ---------- D239: an optional DFT correction of the TS guess ----------
+
+CORRECT_STEP = 0.1  # Å between the frames along the forming bond
+CORRECT_FRAMES = 6  # the saddle's own length and five more toward the longer end
+CORRECT_FMAX = 0.03  # eV/Å: each frame's minimum with the bond held
+CORRECT_STEPS = 200
+FLAT_KCAL = 1.0  # single points spanning less than this are too flat to pick a maximum from
+CORRECT_LEVEL = "PBE-D3M(BJ)/def2-SVP"
+STUB_PEAK = 0.2  # Å past the saddle: where the tests' stand-in single points peak
+
+
+def correction_single_point(job: dict, numbers, folder: Path):
+    """D239: the correction's single points, Hartree from coordinates in Å: PBE with
+    D3(BJ) in its modified damping, def2-SVP (def2's ECPs for the heavy atoms) and density
+    fitting, through Psi4; each frame's SCF starts from the last frame's orbitals."""
+    import numpy as np
+
+    scratch = folder / "scratch"
+    scratch.mkdir(exist_ok=True)
+    import psi4
+
+    charge = int(job.get("charge", 0))
+    unpaired = int(job.get("multiplicity", 1)) - 1
+    psi4.core.set_output_file(str(folder / "psi4.out"), False)
+    psi4.set_memory(int(job.get("memory_mb", 2000)) * 1_000_000)
+    psi4.set_num_threads(max(1, int(job.get("cores", 1))))
+    psi4.core.IOManager.shared_object().set_default_path(str(scratch))
+    psi4.set_options(
+        {
+            "reference": "uks" if unpaired else "rks",
+            "basis": "def2-svp",
+            "scf_type": "df",
+            "maxiter": 200,
+        }
+    )
+    symbols = [ELEMENTS[z - 1] for z in numbers]
+    started = {"done": False}
+
+    def single_point(x) -> float:
+        lines = [f"{charge} {unpaired + 1}"]
+        lines += [
+            f"{s} {a:.10f} {b:.10f} {c:.10f}"
+            for s, (a, b, c) in zip(symbols, np.asarray(x, float), strict=True)
+        ]
+        lines += ["units angstrom", "symmetry c1", "no_reorient", "no_com"]
+        psi4.geometry("\n".join(lines))
+        psi4.set_options({"guess": "read" if started["done"] else "sad"})
+        try:
+            energy = psi4.energy("pbe-d3mbj")
+        except psi4.SCFConvergenceError:
+            if not started["done"]:
+                raise
+            psi4.set_options({"guess": "sad"})
+            energy = psi4.energy("pbe-d3mbj")
+        started["done"] = True
+        return float(energy)
+
+    return single_point
+
+
+def forming_bond(bonds: list[dict], x, mode) -> dict:
+    """D239: of the bonds that change, the one the saddle's imaginary mode stretches most (the
+    one that changes most between the ends when there is no mode)."""
+    import numpy as np
+
+    x = np.asarray(x, float)
+
+    def along(bond: dict) -> float:
+        a, b = bond["atoms"]
+        if mode is None:
+            return abs(bond["end"] - bond["start"])
+        m = np.asarray(mode, float)
+        unit = (x[a] - x[b]) / np.linalg.norm(x[a] - x[b])
+        return abs(float(unit @ (m[a] - m[b])))
+
+    return max(bonds, key=along)
+
+
+def ts_correction(
+    job, calculate, symbols, saddle, found, folder: Path, progress, cancelled, single_point
+) -> dict:
+    """D239: the TS guess corrected toward the DFT barrier: from the saddle (Å), the forming
+    bond is held at its length and at CORRECT_FRAMES - 1 more lengths CORRECT_STEP apart toward
+    the end where it is longer, each frame minimized with the method (BFGS, the bond held,
+    each from the frame before), a single point of `single_point` on each, and the highest one
+    picked. Returns what result.json's `ts_guess.correction` holds, with the picked frame's
+    coordinates (Å) and the method's energy there (Hartree)."""
+    import numpy as np
+    from ase import Atoms
+    from ase.constraints import FixBondLength
+    from ase.optimize import BFGS
+
+    warnings: list[str] = []
+    out: dict = {"level": CORRECT_LEVEL, "warnings": warnings}
+    bonds = found.get("bonds") or []
+    if not bonds:
+        warnings.append(
+            "No bond forms or breaks between the ends, so there is no bond to correct along."
+        )
+        return out
+    x = np.asarray(saddle, float)
+    bond = forming_bond(bonds, x, (found.get("mode_check") or {}).get("mode"))
+    a, b = (int(i) for i in bond["atoms"])
+    here = float(np.linalg.norm(x[a] - x[b]))
+    far = max(float(bond["start"]), float(bond["end"]))
+    sign = 1.0 if far >= here else -1.0
+    values = [here + sign * k * CORRECT_STEP for k in range(CORRECT_FRAMES)]
+    values = [v for v in values if sign * (far - v) > -1e-9] or [here]
+    out["bond"] = [a, b]
+    numbers = [ELEMENTS.index(s) + 1 for s in symbols]
+    log = str(folder / "correction.log")
+    previous = x
+    frames = []
+    for k, value in enumerate(values):
+        atoms = Atoms(numbers=numbers, positions=previous)
+        atoms.set_distance(a, b, value, fix=0.5)
+        atoms.set_constraint(FixBondLength(a, b))
+        atoms.calc = engine_calculator(calculate, cancelled)
+        progress.update(phase=f"Correction: frame {k + 1}/{len(values)} at {value:.2f} Å")
+        converged = bool(BFGS(atoms, logfile=log).run(fmax=CORRECT_FMAX, steps=CORRECT_STEPS))
+        energy = float(atoms.get_potential_energy()) * EV_TO_HARTREE
+        previous = np.asarray(atoms.positions)
+        if cancelled():
+            raise Cancelled()
+        progress.update(phase=f"Correction: {CORRECT_LEVEL} single point {k + 1}/{len(values)}")
+        if job["ts_guess"].get("correct") == "stub":  # tests: a maximum STUB_PEAK past the saddle
+            point = -((value - (here + sign * STUB_PEAK)) ** 2)
+        else:
+            point = single_point(previous)
+        frames.append(
+            {
+                "value": round(value, 3),
+                "converged": converged,
+                "energy": energy,
+                "single_point": point,
+                "coordinates": previous.round(6).tolist(),
+            }
+        )
+    lowest = min(f["single_point"] for f in frames)
+    for f in frames:
+        f["kcal"] = round((f["single_point"] - lowest) * HARTREE_TO_KCAL, 2)
+    picked = max(range(len(frames)), key=lambda i: frames[i]["single_point"])
+    span = max(f["kcal"] for f in frames)
+    if span < FLAT_KCAL:
+        warnings.append(
+            f"The single points span only {span:.1f} kcal/mol along the bond: too flat to place "
+            "the barrier; the highest is kept anyway."
+        )
+    elif len(frames) > 1 and picked == len(frames) - 1:
+        warnings.append(
+            f"The highest single point is the last frame ({frames[picked]['value']:.2f} Å): the "
+            "barrier may lie further along the bond."
+        )
+    elif len(frames) > 1 and picked == 0:
+        warnings.append(
+            "The highest single point is at the saddle's own bond length: the correction does "
+            "not move it, and the barrier may lie at a shorter bond."
+        )
+    if not frames[picked]["converged"]:
+        warnings.append(f"The picked frame's minimum did not converge in {CORRECT_STEPS} steps.")
+    out["picked"] = picked
+    out["coordinates"] = frames[picked]["coordinates"]
+    out["energy"] = frames[picked]["energy"]
+    out["frames"] = [{k: v for k, v in f.items() if k != "coordinates"} for f in frames]
+    progress.update(phase=None)
+    return out
+
+
 def run(folder: Path, lock: Path | None) -> int:
     import numpy as np
 
@@ -973,6 +1141,22 @@ def run(folder: Path, lock: Path | None) -> int:
             result["ts_guess"] = found
             result["ts_check"] = {"end": found["mode_check"], "level": f"{label}, reacting region"}
             result["state"] = "converged" if found["converged"] else "not_converged"
+            if job["ts_guess"].get("correct"):
+                # D239: the optional correction, kept beside the raw guess
+                single_point = None
+                if job["ts_guess"]["correct"] != "stub":
+                    single_point = correction_single_point(job, numbers, folder)
+                found["correction"] = ts_correction(
+                    job,
+                    calculate,
+                    symbols,
+                    last["coords"],
+                    found,
+                    folder,
+                    progress,
+                    cancel_file.exists,
+                    single_point,
+                )
         else:
             import geometric
             import geometric.engine

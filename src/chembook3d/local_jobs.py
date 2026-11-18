@@ -639,6 +639,11 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
             out["result"]["ts_guess"] = {
                 k: found.get(k) for k in ("band", "bonds", "warnings", "converged", "saddle_kcal")
             }
+            correction = found.get("correction")
+            if correction:  # D239: without the picked frame's coordinates
+                out["result"]["ts_guess"]["correction"] = {
+                    k: v for k, v in correction.items() if k != "coordinates"
+                }
         found = result.get("frequencies")
         if found:  # D217: what the frequency step will show, without its modes
             wavenumbers = found.get("wavenumbers") or []
@@ -970,6 +975,7 @@ def _import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any
 # ---------- D238: a TS guess between two minima ----------
 
 TS_GUESS = "ts_guess"
+CORRECTED = "corrected.json"  # D239: the corrected guess, imported as a node of its own
 TS_GUESS_METHODS = {"mace-omol"}
 TS_GUESS_TEST_METHODS = {"stub-saddle"}
 # A143-style estimate: two minima, the band, the saddle search and the mode check on about this
@@ -977,12 +983,27 @@ TS_GUESS_TEST_METHODS = {"stub-saddle"}
 TS_GUESS_STEPS = {"ends": 2 * 60, "band": 10, "saddle": 60}
 TS_GUESS_REGION = 16
 TS_GUESS_OFFSET = 0.5  # the guess's node sits halfway between its ends (as D115's path)
+# D239: the correction's frames (a held-bond minimum and a single point each), and a single
+# point's seconds for 70 atoms on 4 cores (PBE-D3M(BJ)/def2-SVP, a 73-atom Ru complex: 10 to
+# 20 minutes), growing with the cube of the atoms
+CORRECT_FRAMES = 6
+CORRECT_GRADIENTS = 40
+CORRECT_SECONDS = 900.0
+CORRECTED_DY = 140.0  # the corrected guess's node sits below the raw one
 
 
 def ts_guess_estimate(method: str, atoms: int, cores: int) -> dict[str, Any]:
+    """D238: a TS guess's seconds; D239: those its correction adds."""
     per = estimate(method, atoms, cores)["seconds_per_step"]
     gradients = sum(TS_GUESS_STEPS.values()) + 6 * TS_GUESS_REGION
-    return {"seconds_per_step": per, "gradients": gradients, "seconds": round(per * gradients)}
+    single_point = CORRECT_SECONDS * (atoms / 70) ** 3 * 4 / max(1, cores)
+    correction = CORRECT_FRAMES * (CORRECT_GRADIENTS * per + single_point)
+    return {
+        "seconds_per_step": per,
+        "gradients": gradients,
+        "seconds": round(per * gradients),
+        "correction_seconds": round(correction),
+    }
 
 
 def create_ts_guess(
@@ -996,10 +1017,12 @@ def create_ts_guess(
     end_member_id: str | None = None,
     name: str | None = None,
     limit: int | None = None,
+    correct: bool = False,
 ) -> dict[str, Any]:
     """D238: start a TS guess between two structures joined by an edge, in the start's atom
     order (D113's match): both ends optimized with the method, an IDPP band, Sella's saddle
-    search from its top and a check of the saddle's mode on the reacting atoms."""
+    search from its top and a check of the saddle's mode on the reacting atoms; D239: with
+    `correct`, the saddle is then corrected along its forming bond with DFT single points."""
     from chembook3d.services import scan_path
 
     offered = TS_GUESS_METHODS | (
@@ -1037,7 +1060,8 @@ def create_ts_guess(
         reacting = sorted(moving_atoms(moved))
     resources = local_tools.resources()
     if limit is not None:
-        seconds = ts_guess_estimate(method, len(rows), resources.cores)["seconds"]
+        found = ts_guess_estimate(method, len(rows), resources.cores)
+        seconds = found["seconds"] + (found["correction_seconds"] if correct else 0)
         if seconds > limit:
             raise LocalJobError(
                 f"This TS guess is estimated at about {_duration(seconds)}, over the "
@@ -1079,6 +1103,8 @@ def create_ts_guess(
                 "match_rmsd": round(float(plan.match.rmsd), 3),
             },
         }
+        if correct:  # D239: the tests' engine has stand-in single points
+            job["ts_guess"]["correct"] = "stub" if method in TS_GUESS_TEST_METHODS else "pbe"
         if history.SOURCE.get() != "manual":
             job["started_by"] = history.SOURCE.get()
         job["mace_model"] = str(local_tools.mace_model())
@@ -1125,6 +1151,33 @@ def ts_guess_notes(job: dict[str, Any], result: dict[str, Any]) -> str:
     lines += [f"Warning: {w}" for w in found.get("warnings") or []]
     if result.get("state") == "not_converged":
         lines.append("The saddle search did not converge; this is its last structure.")
+    if (found.get("correction") or {}).get("frames"):
+        lines.append(
+            f"A {found['correction']['level']} correction is a node of its own beside this one "
+            "(D239)."
+        )
+    return "\n".join(lines)
+
+
+def correction_notes(job: dict[str, Any], result: dict[str, Any]) -> str:
+    """D239: the notes of a corrected TS guess: the bond held, each frame's single point and
+    the warnings."""
+    spec = job.get("ts_guess") or {}
+    found = (result.get("ts_guess") or {}).get("correction") or {}
+    a, b = (int(i) + 1 for i in found["bond"])
+    picked = found["frames"][found["picked"]]
+    lines = [
+        f"TS guess between “{spec.get('start_label', '')}” and “{spec.get('end_label', '')}”, "
+        f"corrected with {found['level']} single points (D239): from the "
+        f"{result.get('level') or job.get('level')} saddle, bond {a}–{b} held at "
+        f"{len(found['frames'])} lengths 0.1 Å apart, each frame minimized with the bond "
+        "held, and the frame with the highest single point kept.",
+        f"This is the frame at {picked['value']:.2f} Å; its energy is the "
+        f"{result.get('level') or job.get('level')} one, not for comparison with DFT.",
+        "Single points (kcal/mol from the lowest): "
+        + ", ".join(f"{f['value']:.2f} Å {f['kcal']:.1f}" for f in found["frames"]),
+    ]
+    lines += [f"Warning: {w}" for w in found.get("warnings") or []]
     return "\n".join(lines)
 
 
@@ -1160,10 +1213,49 @@ def _import_ts_guess(
         b = _place(session, end) if end is not None else (a[0] + 400.0, a[1])
         options.pos_x = a[0] + TS_GUESS_OFFSET * (b[0] - a[0])
         options.pos_y = a[1] + TS_GUESS_OFFSET * (b[1] - a[1])
-    return _commit(session, folder, job_id, path, options)
+    correction = (result.get("ts_guess") or {}).get("correction") or {}
+    if not correction.get("coordinates"):
+        return _commit(session, folder, job_id, path, options)
+    # D239: the raw guess first, recorded as the job's import; then the corrected one beside it
+    imported = _commit_file(session, folder, job_id, path, options)
+    update_job(folder, job_id, imported=imported, import_error=None)
+    a, b = correction["bond"]
+    value = correction["frames"][correction["picked"]]["value"]
+    held = {
+        **result,
+        "state": "converged",
+        "frames": [correction["coordinates"]],
+        "energies": [correction["energy"]],
+        "coordinates": correction["coordinates"],
+        "energy": correction["energy"],
+        "constraints": {"distances": [{"atoms": [a, b], "value": value}]},
+        "ts_check": None,
+        "frequencies": None,
+    }
+    corrected = path.with_name(CORRECTED)
+    _write(corrected, held)
+    level = correction.get("level", "DFT").split("/")[0].split("-")[0]
+    second = imports.ImportOptions(
+        origin_path=str(corrected),
+        original_name=f"{slug(f'ts guess {start_name} {end_name} corrected', 60)}.json",
+        label=f"TS guess {start_name} to {end_name}, {level}-corrected"[:200],
+        role=Role.TRANSITION_STATE,
+        status=Status.PLANNED,
+        duplicate_action="new",
+        notes=correction_notes(job, result),
+        step_id=options.step_id,
+        branch_id=options.branch_id,
+        canvas_id=options.canvas_id,
+        pos_x=options.pos_x,
+        pos_y=None if options.pos_y is None else options.pos_y + CORRECTED_DY,
+    )
+    found = _commit_file(session, folder, job_id, corrected, second)
+    imported = {**imported, "corrected_node_id": found["node_id"]}
+    update_job(folder, job_id, imported=imported, import_error=None)
+    return {**job_status(folder, job_id), "imported": imported}
 
 
-def _commit(
+def _commit_file(
     session: Session, folder: Path, job_id: str, path: Path, options: imports.ImportOptions
 ) -> dict[str, Any]:
     staging = imports.Staging()
@@ -1177,11 +1269,17 @@ def _commit(
             raise LocalJobError(str(exc)) from exc
     finally:
         staging.clear()
-    imported = {
+    return {
         "node_id": committed.derived_node_id or committed.node_id,
         "derived": bool(committed.derived_node_id),
         "calculation_ids": list(committed.calculation_ids),
         "at": _now(),
     }
+
+
+def _commit(
+    session: Session, folder: Path, job_id: str, path: Path, options: imports.ImportOptions
+) -> dict[str, Any]:
+    imported = _commit_file(session, folder, job_id, path, options)
     update_job(folder, job_id, imported=imported, import_error=None)
     return {**job_status(folder, job_id), "imported": imported}

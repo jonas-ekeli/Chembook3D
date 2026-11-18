@@ -261,7 +261,17 @@ export function tsGuessText(job: LocalJob): { summary: string | null; warnings: 
   if (band) parts.push(`IDPP band top ${band.kcal[band.top]?.toFixed(1) ?? '?'} kcal/mol above its lowest image`)
   const bonds = (found.bonds ?? []).map((b) => `${b.atoms[0] + 1}–${b.atoms[1] + 1} ${b.saddle.toFixed(2)} Å (ends ${b.start.toFixed(2)}, ${b.end.toFixed(2)})`)
   if (bonds.length) parts.push(`at the saddle ${bonds.join('; ')}`)
-  return { summary: parts.length ? `${parts.join(', ')}.` : null, warnings: found.warnings ?? [] }
+  const warnings = [...(found.warnings ?? [])]
+  const fix = found.correction
+  let summary = parts.length ? `${parts.join(', ')}.` : null
+  if (fix?.frames?.length && fix.bond && fix.picked !== undefined) {
+    // D239: the corrected guess, a node of its own
+    const picked = fix.frames[fix.picked]
+    const text = `${fix.level} correction: bond ${fix.bond[0] + 1}–${fix.bond[1] + 1} held at ${fix.frames.length} lengths, highest single point at ${picked.value.toFixed(2)} Å.`
+    summary = summary ? `${summary} ${text}` : text
+  }
+  warnings.push(...(fix?.warnings ?? []))
+  return { summary, warnings }
 }
 
 export function tsCheckText(job: LocalJob): string | null {
