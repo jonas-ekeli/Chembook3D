@@ -527,12 +527,13 @@ Routes for all of these are in `api/pathway.py`.
 
 ## Calculations on this computer (D213–D220, FR-LOC)
 
-### Tools install and g-xTB (D213, D216)
+### Tools install, g-xTB and MACE (D213, D216, D237)
 
 - `local_tools.py` keeps the tools folder (`tools_dir()`: the data dir's `tools/`, or `<config>/tools` under `CHEMBOOK3D_CONFIG_DIR`, or `CHEMBOOK3D_TOOLS_DIR`).
 - It downloads micromamba (`MICROMAMBA_URL`, `MICROMAMBA_SHA256`) and builds `env-new/` from `assets/local-tools/<platform>.txt` (explicit conda-forge list with MD5s, made by `scripts/make_local_tools_lock.py`), checks it (`check`), writes `env/chembook3d-tools.json` and swaps it in.
 - `Installer` runs that in a thread (`app.state.local_tools`, held in `Lifetime.holds` so a launched app waits for it). `python -m chembook3d.local_tools install` does it without the app (CI).
 - g-xTB (D216) is a second install (`install_gxtb`, `Installer("gxtb")`, `GXTB` pins per platform, `gxtb_binary`), offered as the method `gxtb` once there (`install-gxtb` for CI).
+- MACE-OMOL-0 (D237) is a third install (`install_mace`, `Installer("mace")`, which needs `accept`): its own environment in `mace/env` from `assets/local-tools/mace-<platform>.txt` plus pip's `mace-wheels.txt` (both made by `scripts/make_local_tools_lock.py --mace`), the model `MACE_MODEL_FILE` beside it (`MACE_MODEL_SHA256`), checked by `MACE_CHECK`. `MACE_METHODS` run with `mace_python()` (`worker_python(method)`); `install-mace --accept-licence` for CI (job "MACE tools").
 - `local.json` there holds cores and memory (`resources`).
 
 ### Jobs and the worker
@@ -541,7 +542,7 @@ Routes for all of these are in `api/pathway.py`.
 - `job_status` reads `progress.json` (heartbeat every 5 s, alive for `ALIVE_S`), `result.json` and `cancel`. `cancel` kills the process when its heartbeat is fresh.
 - `estimate` gives each method's time for a structure from `TIMING` (70 atoms, 4 cores) or this computer's own seconds per step (`calibrate` after each import, kept in `local.json` by `local_tools.save_calibration`).
 - `import_result` imports `result.json` onto the job's node with `imports.commit` (parser `parsers/local_result.py`, recognised first in `imports.read_file`).
-- `local_worker.py` runs only in the tools' Python (stdlib, numpy, geomeTRIC, tblite, Psi4): the queue lock (`Queue`, `local-jobs.lock` in the tools folder); `make_calculator` per method from `_engine`: `stub`/`stub-low`/`stub-saddle` for tests, `gfn2`, `gxtb` (runs xtb, `read_xtb_gradient`), `b97-3c`, `r2scan-3c`. Psi4 reads the last step's orbitals as its guess.
+- `local_worker.py` runs only in the tools' Python (stdlib, numpy, geomeTRIC, tblite, Psi4): the queue lock (`Queue`, `local-jobs.lock` in the tools folder); `make_calculator` per method from `_engine`: `stub`/`stub-low`/`stub-saddle` for tests, `gfn2`, `gxtb` (runs xtb, `read_xtb_gradient`), `b97-3c`, `r2scan-3c`, `mace-omol` (`_mace`, D237; `mace-stub` in tests). Psi4 reads the last step's orbitals as its guess.
 - geomeTRIC's custom `Engine`; constraints as geomeTRIC's `$freeze`/`$set` text (`read_constraints`).
 
 ### ONIOM (D214)
@@ -573,11 +574,11 @@ Routes for all of these are in `api/pathway.py`.
 ### Routes, frontend and tests
 
 - Routes in `api/local.py`: `GET /api/local/tools` is the MCP read tool `get_local_tools` (D222; installing and `PUT` stay the page's own); jobs are MCP tools `*_local_*` (`_scan` fills a scanned coordinate's missing start from the node's structure, D222); `POST /api/local/core` is `check_local_core`, which also gives `mode_atoms` from `local_jobs.mode_atoms`.
-- `localToolsSection.tsx` (the Settings section) and `components/LocalTools.tsx`.
+- `localToolsSection.tsx` (the Settings section) and `components/LocalTools.tsx` (`MaceControl`: the licence tick, D237).
 - `components/RefineDialog.tsx` (node menu and the panel's ⋯ menu): the ONIOM core editor with its 3D view in `components/RefineCore.tsx`; constraints read by `readConstraints`, and D165's earlier ones by `heldBefore` in `localJobs.ts`.
 - `components/LocalJobsDialog.tsx` (canvas toolbar, palette; Show mode animates the final TS check's mode, D217).
 - `localJobs.ts` (`tsCheckText`, `progressText`; `useLocalJobs`: reads every 3 s while a job runs, else every minute, and imports finished results).
-- Tests: `tests/test_local_jobs.py`, `tests/test_local_oniom.py`, `tests/test_local_ts.py`, `tests/test_local_gxtb.py` (stub method with the test's Python via `CHEMBOOK3D_LOCAL_PYTHON` and `CHEMBOOK3D_LOCAL_STUB`; the real tools with `CHEMBOOK3D_REAL_TOOLS=1`, CI job "Local tools"), `e2e/local-jobs.spec.ts`.
+- Tests: `tests/test_local_jobs.py`, `tests/test_local_oniom.py`, `tests/test_local_ts.py`, `tests/test_local_gxtb.py`, `tests/test_local_mace.py` (stub method with the test's Python via `CHEMBOOK3D_LOCAL_PYTHON` and `CHEMBOOK3D_LOCAL_STUB`; the real tools with `CHEMBOOK3D_REAL_TOOLS=1`, CI job "Local tools"), `e2e/local-jobs.spec.ts`.
 
 ## Cloud calculation jobs (D93, A40)
 

@@ -6,6 +6,9 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- MACE-OMOL-0 on this computer (D237): an optional install of the machine-learned potential and
+  its own environment, after accepting the model's licence; Refine geometry with it keeps the
+  pi-complexes and cycloaddition barriers that xTB loses, for guess structures.
 - Claude reads PDFs (D232): a paper or its supporting information on this computer, page by
   page, with the pages a compound's label is on and pages or parts of pages as pictures it can
   see; scanned pages are said to have no text.

@@ -996,6 +996,18 @@ export type LocalTools = {
     up_to_date: boolean
     install: { state: 'idle' | 'running' | 'done' | 'failed'; step: string; error: string | null }
   }
+  /** D237: MACE-OMOL-0, an optional install of its own (its environment and the model) */
+  mace: {
+    supported: boolean
+    installed: boolean
+    version: string | null
+    up_to_date: boolean
+    versions: Record<string, string>
+    licence: { name: string; url: string; summary: string }
+    accepted_at: string | null
+    download_mb: number
+    install: { state: 'idle' | 'running' | 'done' | 'failed'; step: string; error: string | null; seconds: number | null }
+  }
   /** the methods a refine offers: value for the request, label to show */
   methods: {
     value: string
@@ -2964,6 +2976,8 @@ export const api = {
   localTools: (atoms?: number) => request<LocalTools>('GET', `/local/tools${atoms ? `?atoms=${atoms}` : ''}`),
   installLocalTools: () => request<LocalTools>('POST', '/local/tools/install'),
   installGxtb: () => request<LocalTools>('POST', '/local/tools/gxtb'),
+  /** D237: `accept` says the user accepted the model's licence */
+  installMace: (accept: boolean) => request<LocalTools>('POST', '/local/tools/mace', { accept_licence: accept }),
   saveLocalResources: (body: { cores: number | null; memory_mb: number | null }) =>
     request<LocalTools>('PUT', '/local/tools', body),
   localJobs: () => request<LocalJob[]>('GET', '/local/jobs'),

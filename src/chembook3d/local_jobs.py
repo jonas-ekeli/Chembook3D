@@ -64,6 +64,7 @@ METHODS = {
     "r2scan-3c": "r2SCAN-3c",
     "oniom": "ONIOM(r2SCAN-3c:GFN2-xTB)",
     "gxtb": "g-xTB",  # D216: offered once installed (local_tools.install_gxtb)
+    "mace-omol": "MACE-OMOL-0",  # D237: offered once installed (local_tools.install_mace)
 }
 # D214: the methods with a DFT core, its high and low level.
 LAYERED = {"oniom": ("r2scan-3c", "gfn2"), "oniom-stub": ("stub", "stub-low")}
@@ -82,16 +83,24 @@ TIMING = {
     "oniom": {"seconds": 550.0, "power": 2.7},
     # g-xTB: a guess (not measured here) of a few times GFN2-xTB's cost, until a job has run.
     "gxtb": {"seconds": 2.0, "power": 2.0},
+    # D237: MACE-OMOL-0 on the CPU, 3.7 s a gradient measured 2026-11-18 on a 73-atom Ru complex
+    # (4 cores); a message-passing model grows about linearly with the atoms.
+    "mace-omol": {"seconds": 3.5, "power": 1.2},
     "stub": {"seconds": 1.0, "power": 0.0},
 }
 TIMING_ATOMS, TIMING_CORES = 70, 4
 # CHEMBOOK3D_LOCAL_STUB=1 only (tests)
-TEST_METHODS = {"stub": "stub", "oniom-stub": "ONIOM(stub:stub-low)", "stub-saddle": "stub-saddle"}
+TEST_METHODS = {
+    "stub": "stub",
+    "oniom-stub": "ONIOM(stub:stub-low)",
+    "stub-saddle": "stub-saddle",
+    "mace-stub": "mace-stub",  # D237: run as MACE is, in CHEMBOOK3D_MACE_PYTHON
+}
 # D217: methods cheap enough for a numerical Hessian at the job's own level, so a TS search with
 # one starts from its own Hessian and ends with frequencies at that level (on by default for a
 # TS search, offered for a minimum); DFT and ONIOM keep the GFN2-xTB check instead.
-FREQUENCY_METHODS = {"gfn2", "gxtb", "stub", "stub-saddle"}
-OWN_HESSIAN = {"gfn2", "gxtb", "stub-saddle"}
+FREQUENCY_METHODS = {"gfn2", "gxtb", "stub", "stub-saddle", "mace-omol", "mace-stub"}
+OWN_HESSIAN = {"gfn2", "gxtb", "stub-saddle", "mace-omol", "mace-stub"}
 
 _records = threading.Lock()
 # The workers this app started: kept so Python never warns that one is still running, and
@@ -112,8 +121,12 @@ def methods() -> dict[str, str]:
     offered = dict(METHODS)
     if local_tools.gxtb_binary() is None:
         offered.pop("gxtb")
+    mace = local_tools.mace_python() is not None
+    if not mace:
+        offered.pop("mace-omol")
     if os.environ.get("CHEMBOOK3D_LOCAL_STUB") == "1":
-        return {**offered, **TEST_METHODS}
+        tests = {k: v for k, v in TEST_METHODS.items() if mace or k not in local_tools.MACE_METHODS}
+        return {**offered, **tests}
     return offered
 
 
@@ -282,8 +295,8 @@ def create_job(
         raise LocalJobError(f'Node "{node.label}" has no coordinates')
     if multiplicity < 1:
         raise LocalJobError("The multiplicity is at least 1")
-    if local_tools.worker_python() is None:
-        raise LocalJobError("Install the local tools first (Settings, Local calculations)")
+    if local_tools.worker_python(method) is None:
+        raise LocalJobError(_install_first(method))
     if scan is not None:
         if transition:
             raise LocalJobError("A scan cannot also be a transition state search")
@@ -345,6 +358,8 @@ def create_job(
         if method == "gxtb":
             job["gxtb"] = str(local_tools.gxtb_binary())
             job["gxtb_version"] = local_tools.gxtb_status().get("version")
+        if method in local_tools.MACE_METHODS:
+            job["mace_model"] = str(local_tools.mace_model())  # D237
         if transition:
             # D215: a TS search, started from a GFN2-xTB Hessian (the tests' stand-in for it);
             # D217: a g-xTB one from a g-xTB Hessian.
@@ -493,20 +508,31 @@ def check_core(atoms: list[Any], core: list[int], charge: int, multiplicity: int
     )
 
 
+def _install_first(method: str) -> str:
+    if method in local_tools.MACE_METHODS:
+        return "Install MACE-OMOL-0 first (Settings, Local calculations)"
+    return "Install the local tools first (Settings, Local calculations)"
+
+
 def _spawn(path: Path) -> None:
     """Start the worker as a process of its own: a new session on Linux; on Windows detached
-    and outside the app's job object when the job allows it (uv runs the app in one)."""
-    python = local_tools.worker_python()
+    and outside the app's job object when the job allows it (uv runs the app in one). A MACE
+    job (D237) runs with the MACE environment's Python."""
+    job = _read(path / JOB_JSON) or {}
+    method = job.get("method")
+    python = local_tools.worker_python(method)
     if python is None:
-        raise LocalJobError("Install the local tools first (Settings, Local calculations)")
+        raise LocalJobError(_install_first(str(method)))
     argv = [str(python), "-I", str(path / WORKER), str(path)]
     argv += ["--lock", str(local_tools.lock_path())]
-    job = _read(path / JOB_JSON) or {}
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME")}
     env["PYTHONNOUSERSITE"] = "1"
-    if not os.environ.get("CHEMBOOK3D_LOCAL_PYTHON"):
+    mace = method in local_tools.MACE_METHODS
+    override = "CHEMBOOK3D_MACE_PYTHON" if mace else "CHEMBOOK3D_LOCAL_PYTHON"
+    if not os.environ.get(override):
+        tools = local_tools.mace_dir() / "env" if mace else None
         env["PATH"] = os.pathsep.join(
-            [str(p) for p in local_tools.env_path_dirs()] + [env.get("PATH", "")]
+            [str(p) for p in local_tools.env_path_dirs(tools)] + [env.get("PATH", "")]
         )
     threads = str(job.get("cores", 1))
     for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):

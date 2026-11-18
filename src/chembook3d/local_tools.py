@@ -15,6 +15,13 @@ CHEMBOOK3D_CONFIG_DIR is set (tests), or CHEMBOOK3D_TOOLS_DIR. It holds:
 - ``local-jobs.lock``: held by the running job, so jobs run one after another.
 
 An update builds ``env-new/`` beside the old environment and swaps it in only when it works.
+
+D237: MACE-OMOL-0, optional, is a third install in ``mace/``: an environment of its own (the same
+tools plus PyTorch on the CPU, ASE, Sella and mace-torch, from `assets/local-tools/mace-*`) and
+the model file, which the user downloads from the MACE authors' GitHub release after accepting
+its licence (the Academic Software License, non-commercial). The model is never part of
+Chembook3D (GPL-3.0) and needs no account. Jobs with the method `mace-omol` run in that
+environment's Python.
 """
 
 from __future__ import annotations
@@ -68,6 +75,32 @@ GXTB = {
     ),
 }
 GXTB_MARKER = "chembook3d-gxtb.json"
+# D237: MACE-OMOL-0 (mace-torch's `mace_omol`), its model file pinned by SHA-256.
+MACE_VERSION = "mace-omol-0-1"  # bumped when the lists or the model change
+MACE_MODEL_FILE = "MACE-omol-0-extra-large-1024.model"
+MACE_MODEL_URL = (
+    "https://github.com/ACEsuit/mace-foundations/releases/download/mace_omol_0/" + MACE_MODEL_FILE
+)
+MACE_MODEL_SHA256 = "9b64b4fd5153ca578c694abc57806d8111050de6ff652e695c9b525bc4d36469"
+MACE_MODEL_MB = 422
+MACE_LICENCE = {
+    "name": "Academic Software License (ASL)",
+    "url": "https://github.com/gabor1/ASL",
+    "summary": "free for academic and other non-commercial use; not part of Chembook3D",
+}
+MACE_MARKER = "chembook3d-mace.json"
+MACE_WHEELS = LOCKS / "mace-wheels.txt"
+MACE_CHECK = (
+    "import json, sys\n"
+    "from importlib import metadata\n"
+    "import torch, ase, sella, psi4, geometric\n"
+    "from mace.calculators import MACECalculator\n"
+    "found = {'python': sys.version.split()[0], 'torch': torch.__version__}\n"
+    "found['psi4'] = psi4.__version__\n"
+    "for name in ('mace-torch', 'ase', 'sella', 'geometric', 'numpy'):\n"
+    "    found[name] = metadata.version(name)\n"
+    "print(json.dumps(found))\n"
+)
 MARKER = "chembook3d-tools.json"
 SETTINGS = "local.json"
 LOCK_FILE = "local-jobs.lock"
@@ -152,13 +185,62 @@ def env_path_dirs(env: Path | None = None) -> list[Path]:
     return [env / "bin"]
 
 
-def worker_python() -> Path | None:
-    """The Python a job runs with: the environment's, or CHEMBOOK3D_LOCAL_PYTHON (tests)."""
+def worker_python(method: str | None = None) -> Path | None:
+    """The Python a job runs with: the environment's, or CHEMBOOK3D_LOCAL_PYTHON (tests); a
+    MACE method's (D237) is the MACE environment's."""
+    if method in MACE_METHODS:
+        return mace_python()
     override = os.environ.get("CHEMBOOK3D_LOCAL_PYTHON")
     if override:
         return Path(override)
     python = env_python()
     return python if python.is_file() and (env_dir() / MARKER).is_file() else None
+
+
+# D237: the methods that run in the MACE environment (`mace-stub` is the tests' stand-in).
+MACE_METHODS = {"mace-omol", "mace-stub"}
+
+
+def mace_dir() -> Path:
+    return tools_dir() / "mace"
+
+
+def mace_python() -> Path | None:
+    """The MACE environment's Python, once it and the model are installed (D237);
+    CHEMBOOK3D_MACE_PYTHON in tests."""
+    override = os.environ.get("CHEMBOOK3D_MACE_PYTHON")
+    if override:
+        return Path(override)
+    python = env_python(mace_dir() / "env")
+    return python if python.is_file() and mace_model() is not None else None
+
+
+def mace_model() -> Path | None:
+    """The installed MACE-OMOL-0 model file, or None (CHEMBOOK3D_MACE_MODEL in tests)."""
+    if os.environ.get("CHEMBOOK3D_MACE_MODEL"):
+        return Path(os.environ["CHEMBOOK3D_MACE_MODEL"])
+    if not (mace_dir() / MACE_MARKER).is_file():
+        return None
+    path = mace_dir() / MACE_MODEL_FILE
+    return path if path.is_file() else None
+
+
+def mace_status() -> dict[str, Any]:
+    try:
+        marker = json.loads((mace_dir() / MACE_MARKER).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        marker = {}
+    conda = conda_platform()
+    return {
+        "supported": conda is not None and (LOCKS / f"mace-{conda}.txt").is_file(),
+        "installed": mace_python() is not None,
+        "version": marker.get("version"),
+        "up_to_date": marker.get("version") == MACE_VERSION,
+        "versions": marker.get("versions") or {},
+        "licence": MACE_LICENCE,
+        "accepted_at": marker.get("licence_accepted"),
+        "download_mb": MACE_MODEL_MB,
+    }
 
 
 # ---------- cores and memory ----------
@@ -303,14 +385,19 @@ class Installer:
         self.current = Install()
         self.thread: threading.Thread | None = None
 
-    def start(self, busy: bool = False) -> Install:
-        """`busy`: a local job is running, so the environment must not be replaced."""
+    def start(self, busy: bool = False, accept: bool = False) -> Install:
+        """`busy`: a local job is running, so the environment must not be replaced. `accept`:
+        the user accepted MACE-OMOL-0's licence (D237), which its install needs."""
         conda = conda_platform()
         packages = package_list(conda)
         if conda is None or packages is None:
             raise ToolsError("Local calculations are offered on Windows and Linux (x86-64) only")
         if self.what == "gxtb" and conda not in GXTB:
             raise ToolsError("g-xTB is offered on Windows and Linux (x86-64) only")
+        if self.what == "mace" and not accept:
+            raise ToolsError(
+                f"MACE-OMOL-0 is under the {MACE_LICENCE['name']}; accept it to download the model"
+            )
         if busy:
             raise ToolsError("Wait for the running local job to finish, or cancel it, first")
         with self.lock:
@@ -332,6 +419,8 @@ class Installer:
         try:
             if self.what == "gxtb":
                 install_gxtb(conda, self._say)
+            elif self.what == "mace":
+                install_mace(conda, self._say)
             else:
                 install(conda, packages, self._say)
         except Exception as exc:  # noqa: BLE001 - shown in the settings section
@@ -474,14 +563,14 @@ def _clean_env() -> dict[str, str]:
     return env
 
 
-def check(env: Path) -> dict[str, str]:
+def check(env: Path, script: str = CHECK) -> dict[str, str]:
     """The versions of the tools in `env`, by importing them there."""
     run_env = _clean_env()
     run_env["PATH"] = os.pathsep.join(
         [str(p) for p in env_path_dirs(env)] + [run_env.get("PATH", "")]
     )
     result = subprocess.run(
-        [str(env_python(env)), "-I", "-c", CHECK],
+        [str(env_python(env)), "-I", "-c", script],
         cwd=env,  # Psi4 leaves a timer.dat where it runs
         capture_output=True,
         text=True,
@@ -541,6 +630,92 @@ def install(conda: str, packages: Path, say=lambda step: None) -> dict[str, Any]
     return marker
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        while chunk := fh.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def install_mace(conda: str, say: Callable[[str], None]) -> dict[str, Any]:
+    """D237: build the MACE environment in ``mace-new/`` (micromamba from the pinned list, then
+    pip's pinned wheels), download the model (or keep the one already there when its SHA-256
+    matches), check that MACE loads, and swap it in."""
+    packages = LOCKS / f"mace-{conda}.txt"
+    if not packages.is_file():
+        raise ToolsError("MACE-OMOL-0 is offered on Windows and Linux (x86-64) only")
+    folder = tools_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    say("Downloading micromamba")
+    command = micromamba(conda)
+    new = folder / "mace-new"
+    root = folder / "mamba-root"
+    shutil.rmtree(new, ignore_errors=True)
+    new.mkdir(parents=True)
+    env = _clean_env()
+    env["MAMBA_ROOT_PREFIX"] = str(root)
+    log_path = folder / "install-mace.log"
+    say("Downloading and installing PyTorch, ASE and the tools from conda-forge (10–20 min)")
+    with log_path.open("w", encoding="utf-8") as log:
+        result = subprocess.run(
+            [*command, "create", "-y", "-q", "-r", str(root), "-p", str(new / "env")]
+            + ["--file", str(packages)],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            env=env,
+            **_hidden(),
+        )
+        if result.returncode == 0:
+            say("Installing MACE and Sella from PyPI")
+            env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+            result = subprocess.run(
+                [str(env_python(new / "env")), "-I", "-m", "pip", "install", "--no-deps"]
+                + ["--require-hashes", "--only-binary", ":all:", "--no-cache-dir"]
+                + ["-r", str(MACE_WHEELS)],
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=env,
+                **_hidden(),
+            )
+    if result.returncode != 0:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        shutil.rmtree(new, ignore_errors=True)
+        raise ToolsError("The MACE environment failed: " + " ".join(lines[-3:]))
+    shutil.rmtree(root / "pkgs", ignore_errors=True)
+    model = new / MACE_MODEL_FILE
+    kept = mace_dir() / MACE_MODEL_FILE
+    if kept.is_file() and _sha256(kept) == MACE_MODEL_SHA256:
+        say("Keeping the downloaded model")
+        shutil.copyfile(kept, model)
+    else:
+        say(f"Downloading the MACE-OMOL-0 model ({MACE_MODEL_MB} MB)")
+        _download(MACE_MODEL_URL, model, MACE_MODEL_SHA256)
+    say("Checking MACE")
+    found = check(new / "env", MACE_CHECK)
+    marker = {
+        "version": MACE_VERSION,
+        "platform": conda,
+        "model": MACE_MODEL_FILE,
+        "model_sha256": MACE_MODEL_SHA256,
+        "licence": MACE_LICENCE["name"],
+        "licence_accepted": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "installed": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "versions": found,
+    }
+    (new / MACE_MARKER).write_text(json.dumps(marker, indent=1), encoding="utf-8")
+    say("Replacing the old MACE install")
+    old = mace_dir()
+    if old.exists():
+        trash = folder / "mace-old"
+        shutil.rmtree(trash, ignore_errors=True)
+        os.replace(old, trash)
+        shutil.rmtree(trash, ignore_errors=True)
+    os.replace(new, old)
+    say("Installed")
+    return marker
+
+
 def status(installer: Installer | None = None) -> dict[str, Any]:
     """What the settings section shows."""
     conda = conda_platform()
@@ -576,14 +751,19 @@ def status(installer: Installer | None = None) -> dict[str, Any]:
         "logical_cores": os.cpu_count() or 1,
         "total_memory_mb": total_memory_mb(),
         "gxtb": gxtb_status(),
+        "mace": mace_status(),
     }
 
 
 def main(argv: list[str] | None = None) -> int:
-    """`python -m chembook3d.local_tools install`: install the tools without the app (CI)."""
+    """`python -m chembook3d.local_tools install`: install the tools without the app (CI);
+    `install-mace --accept-licence` the MACE environment and model (D237)."""
     args = sys.argv[1:] if argv is None else argv
-    if args not in (["install"], ["install-gxtb"]):
-        print("usage: python -m chembook3d.local_tools install | install-gxtb")
+    if args not in (["install"], ["install-gxtb"], ["install-mace", "--accept-licence"]):
+        print(
+            "usage: python -m chembook3d.local_tools install | install-gxtb | "
+            "install-mace --accept-licence"
+        )
         return 2
     conda = conda_platform()
     packages = package_list(conda)
@@ -593,6 +773,8 @@ def main(argv: list[str] | None = None) -> int:
     say = lambda step: print(step, flush=True)  # noqa: E731
     if args == ["install-gxtb"]:
         marker = install_gxtb(conda, say)
+    elif args[0] == "install-mace":
+        marker = install_mace(conda, say)
     else:
         marker = install(conda, packages, say)
     print(json.dumps(marker, indent=1))

@@ -36,6 +36,16 @@ test('a refine on this computer is followed under Local jobs and imported onto i
   // D216: g-xTB is an optional install of its own.
   await expect(settings.getByLabel('g-xTB status')).toHaveText('Not installed')
   await expect(settings.getByRole('button', { name: 'Install g-xTB' })).toBeEnabled()
+  // T-UI-105, D237: MACE-OMOL-0 too, offered only once its licence is accepted.
+  await expect(settings.getByLabel('MACE status')).toHaveText('Not installed')
+  const installMace = settings.getByRole('button', { name: 'Install MACE-OMOL-0' })
+  await expect(installMace).toBeDisabled()
+  await expect(settings.getByRole('link', { name: 'Academic Software License (ASL)' })).toHaveAttribute(
+    'href',
+    'https://github.com/gabor1/ASL',
+  )
+  await settings.getByRole('checkbox', { name: /I accept the model’s/ }).check()
+  await expect(installMace).toBeEnabled()
   await page.keyboard.press('Escape')
 
   // Refine geometry… on the node's menu.

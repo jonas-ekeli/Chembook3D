@@ -74,6 +74,15 @@ them as separate programs:
 - optionally [g-xTB](https://github.com/grimme-lab/g-xtb) (GPL-3.0), the Grimme group's build of
   xtb 6.7.1 with g-xTB, downloaded from that repository at a pinned commit and checked by SHA-256
   (D216);
+- optionally MACE-OMOL-0 (D237), in an environment of its own: the model file
+  [MACE-omol-0-extra-large-1024](https://github.com/ACEsuit/mace-foundations/releases/tag/mace_omol_0)
+  under the [Academic Software License](https://github.com/gabor1/ASL) (non-commercial use; the
+  user accepts it before the download, which is checked by SHA-256), run with
+  [mace-torch](https://github.com/ACEsuit/mace) (MIT), [PyTorch](https://pytorch.org)
+  (BSD-3-Clause), [ASE](https://wiki.fysik.dtu.dk/ase/) (LGPL-2.1-or-later),
+  [Sella](https://github.com/zadorlab/sella) (LGPL-3.0), [JAX](https://github.com/jax-ml/jax)
+  (Apache-2.0) and [matscipy](https://github.com/libAtoms/matscipy) (LGPL-2.1-or-later), the last
+  five wheels from PyPI pinned by SHA-256 in `mace-wheels.txt`;
 - their dependencies, listed with exact versions in `src/chembook3d/assets/local-tools/`, among
   them OpenBLAS (BSD-3-Clause) on Linux and Intel MKL (Intel Simplified Software License) on
   Windows.

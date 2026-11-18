@@ -6,6 +6,7 @@ importing jobs are offered.
 Every write is refused from a web page of another origin, as for cloud jobs (`api/jobs.py`).
 """
 
+import time
 from dataclasses import asdict
 from typing import Any, Literal
 
@@ -41,6 +42,13 @@ def gxtb_installer(request: Request) -> local_tools.Installer:
     return found
 
 
+def mace_installer(request: Request) -> local_tools.Installer:
+    found = getattr(request.app.state, "mace_installer", None)
+    if found is None:
+        found = request.app.state.mace_installer = local_tools.Installer("mace")
+    return found
+
+
 def _open_folder(request: Request):
     investigation = getattr(request.app.state, "investigation", None)
     return investigation.folder if investigation is not None else None
@@ -56,6 +64,15 @@ def _status(request: Request, atoms: int | None = None, model: int | None = None
     out = local_tools.status(installer(request))
     current = gxtb_installer(request).current
     out["gxtb"]["install"] = {"state": current.state, "step": current.step, "error": current.error}
+    current = mace_installer(request).current
+    out["mace"]["install"] = {
+        "state": current.state,
+        "step": current.step,
+        "error": current.error,
+        "seconds": round((current.finished or time.time()) - current.started)
+        if current.started
+        else None,
+    }
     out["methods"] = [
         {
             "value": key,
@@ -97,6 +114,26 @@ def install_gxtb(request: Request) -> dict[str, Any]:
         raise HTTPException(422, "Install the local tools first")
     try:
         gxtb_installer(request).start(busy=local_jobs.busy(_open_folder(request)))
+    except local_tools.ToolsError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _status(request)
+
+
+class MaceIn(BaseModel):
+    accept_licence: bool = Field(
+        False, description="The user accepted MACE-OMOL-0's Academic Software License"
+    )
+
+
+@router.post("/tools/mace")
+def install_mace(body: MaceIn, request: Request) -> dict[str, Any]:
+    """D237: install MACE-OMOL-0 (its environment and the model), optional; the user accepts
+    the model's licence first."""
+    _local_page_only(request)
+    try:
+        mace_installer(request).start(
+            busy=local_jobs.busy(_open_folder(request)), accept=body.accept_licence
+        )
     except local_tools.ToolsError as exc:
         raise HTTPException(422, str(exc)) from exc
     return _status(request)
@@ -164,8 +201,10 @@ class RefineIn(BaseModel):
         "the user installed it), closer to DFT than GFN2-xTB at a few times its cost; b97-3c: "
         "B97-3c (Psi4), the whole molecule at DFT quality, hours for 70 atoms; r2scan-3c: "
         "r2SCAN-3c (Psi4), a little better than B97-3c at about 1.4 times its cost; oniom: "
-        "r2SCAN-3c on a core, GFN2-xTB on the rest (D214). get_local_tools lists the methods "
-        "this computer offers",
+        "r2SCAN-3c on a core, GFN2-xTB on the rest (D214); mace-omol: MACE-OMOL-0 (D237, only "
+        "when the user installed it), a machine-learned potential that keeps pi-complexes and "
+        "cycloaddition barriers xTB loses, seconds a step, for guess structures. "
+        "get_local_tools lists the methods this computer offers",
     )
     charge: int | None = Field(None, description="Default: the node's charge, else 0")
     multiplicity: int | None = Field(None, ge=1, description="Default: the node's, else 1")
@@ -194,7 +233,7 @@ class RefineIn(BaseModel):
     frequencies: bool | None = Field(
         None,
         description="D217: frequencies at the result at the job's own level, imported as a "
-        "frequency calculation (gfn2 and gxtb only); default on for a TS search",
+        "frequency calculation (gfn2, gxtb and mace-omol only); default on for a TS search",
     )
     name: str | None = None
 
