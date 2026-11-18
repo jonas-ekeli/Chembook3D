@@ -928,11 +928,13 @@ def correction_single_point(job: dict, numbers, folder: Path):
     return psi4_single_point(job, numbers, folder, "pbe-d3mbj", "def2-svp")
 
 
-def psi4_single_point(job: dict, numbers, folder: Path, name: str, basis: str | None):
+def psi4_single_point(
+    job: dict, numbers, folder: Path, name: str, basis: str | None, scf_type: str = "df"
+):
     """Psi4 single points, Hartree from coordinates in Å: the method `name` (e.g. `pbe-d3mbj`,
     `r2scan-3c`) with `basis` (None for a 3c method, which brings its own), RKS or UKS by the
-    multiplicity, density fitting; each SCF after the first starts from the last one's
-    orbitals (D239, D240)."""
+    multiplicity, density fitting unless `scf_type` says otherwise (D240: ωB97M-V runs
+    "direct"); each SCF after the first starts from the last one's orbitals (D239, D240)."""
     import numpy as np
 
     scratch = folder / "scratch"
@@ -945,7 +947,7 @@ def psi4_single_point(job: dict, numbers, folder: Path, name: str, basis: str | 
     psi4.set_memory(int(job.get("memory_mb", 2000)) * 1_000_000)
     psi4.set_num_threads(max(1, int(job.get("cores", 1))))
     psi4.core.IOManager.shared_object().set_default_path(str(scratch))
-    options = {"reference": "uks" if unpaired else "rks", "scf_type": "df", "maxiter": 200}
+    options = {"reference": "uks" if unpaired else "rks", "scf_type": scf_type, "maxiter": 200}
     if basis:
         options["basis"] = basis
     psi4.set_options(options)
@@ -984,7 +986,9 @@ def single_point_energy(job: dict, numbers, folder: Path, x) -> float:
         start = np.asarray(x, float) / BOHR_TO_ANGSTROM
         energy, _ = _stub(start, 0.98, 0.1, float(job.get("stub_delay_s", 0)))(start)
         return float(energy) - 1.0
-    return psi4_single_point(job, numbers, folder, spec["psi4"], spec.get("basis"))(x)
+    return psi4_single_point(
+        job, numbers, folder, spec["psi4"], spec.get("basis"), spec.get("scf_type") or "df"
+    )(x)
 
 
 def forming_bond(bonds: list[dict], x, mode) -> dict:

@@ -557,7 +557,7 @@ Routes for all of these are in `api/pathway.py`.
 ### Single points (D240)
 
 - `local_jobs.create_single_points` (route `POST /api/local/single-points`, MCP `start_local_single_points`) writes one job of kind `single_point` (`SINGLE_POINT`, method `psi4-sp`, `stub-sp` in tests) per node, with its level from `SP_LEVELS` (`sp_levels()`, `SP_DEFAULT`) in `job["single_point"]`; the jobs queue through the lock. `sp_estimate` (`SP_LEVELS[...]["seconds"]`, calibrated per level as `sp:<level>` by `calibrate` from the worker's `run_s`); `sp_levels_status` is the tools' status's `single_point_levels`.
-- `local_worker.single_point_energy` (Psi4 through `psi4_single_point`, which D239's `correction_single_point` uses too); the result carries `single_point`.
+- `local_worker.single_point_energy` (Psi4 through `psi4_single_point`, which D239's `correction_single_point` uses too; a level's `scf_type`, "direct" for ωB97M-V, whose density-fitted range-separated exchange needs tens of GB of disk); the result carries `single_point`.
 - `parsers/local_result._single_point` reads it as one single-point step (method, dispersion, basis from the level), so `imports.commit` gives it the node's optimization as its geometry level (FR-CALC-04).
 - `components/SinglePointDialog.tsx`, opened from the node menu, the inspector's ⋯ menu, the selection action and the group action `single-point` (`panelActions.singlePointNodes`).
 - Tests: `tests/test_local_single_points.py` (every level with real Psi4 under `CHEMBOOK3D_REAL_TOOLS=1`), `e2e/local-jobs.spec.ts`.
