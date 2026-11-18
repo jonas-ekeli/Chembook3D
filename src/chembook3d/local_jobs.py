@@ -520,6 +520,8 @@ def _spawn(path: Path) -> None:
     job (D237) runs with the MACE environment's Python."""
     job = _read(path / JOB_JSON) or {}
     method = job.get("method")
+    if job.get("kind") == TS_GUESS:
+        method = "mace-omol"  # D238: ASE and Sella are in the MACE environment only
     python = local_tools.worker_python(method)
     if python is None:
         raise LocalJobError(_install_first(str(method)))
@@ -599,6 +601,8 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
     out = dict(job)
     out.pop("coordinates", None)
     out.pop("elements", None)
+    if job.get("ts_guess"):  # D238: its end's coordinates stay in job.json
+        out["ts_guess"] = {k: v for k, v in job["ts_guess"].items() if k != "end"}
     out["atoms"] = len(job.get("elements") or [])
     out["status"] = status
     out["active"] = status in ("starting", "queued", "running", "cancelling")
@@ -630,6 +634,11 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
                 "scan",
             )
         }
+        found = result.get("ts_guess")
+        if found:  # D238: what the guess's notes say, without the ends' structures
+            out["result"]["ts_guess"] = {
+                k: found.get(k) for k in ("band", "bonds", "warnings", "converged", "saddle_kcal")
+            }
         found = result.get("frequencies")
         if found:  # D217: what the frequency step will show, without its modes
             wavenumbers = found.get("wavenumbers") or []
@@ -901,12 +910,14 @@ def _import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any
     if status["status"] not in ("converged", "not_converged"):
         raise LocalJobError(f"This job has no result to import ({status['status']})")
     node = session.get(Node, status["node_id"])
-    if node is None:
+    if node is None and status.get("kind") != TS_GUESS:
         message = f'The node "{status["node_label"]}" this job was started from is gone'
         update_job(folder, job_id, import_error=message)
         raise LocalJobError(message)
     path = job_dir(folder, job_id) / RESULT
     job = read_job(folder, job_id)
+    if job.get("kind") == TS_GUESS:
+        return _import_ts_guess(session, folder, job_id, job, path)
     if job.get("scan"):
         # D218: a scan is a node of its own beside the one it started from, in its step and
         # branch, as an imported Gaussian scan is (D200); the start node keeps its structure.
@@ -953,4 +964,224 @@ def _import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any
         calibrate(result, read_job(folder, job_id))
     except (OSError, ValueError):
         pass
+    return {**job_status(folder, job_id), "imported": imported}
+
+
+# ---------- D238: a TS guess between two minima ----------
+
+TS_GUESS = "ts_guess"
+TS_GUESS_METHODS = {"mace-omol"}
+TS_GUESS_TEST_METHODS = {"stub-saddle"}
+# A143-style estimate: two minima, the band, the saddle search and the mode check on about this
+# many region atoms, each counted in gradients of the method.
+TS_GUESS_STEPS = {"ends": 2 * 60, "band": 10, "saddle": 60}
+TS_GUESS_REGION = 16
+TS_GUESS_OFFSET = 0.5  # the guess's node sits halfway between its ends (as D115's path)
+
+
+def ts_guess_estimate(method: str, atoms: int, cores: int) -> dict[str, Any]:
+    per = estimate(method, atoms, cores)["seconds_per_step"]
+    gradients = sum(TS_GUESS_STEPS.values()) + 6 * TS_GUESS_REGION
+    return {"seconds_per_step": per, "gradients": gradients, "seconds": round(per * gradients)}
+
+
+def create_ts_guess(
+    session: Session,
+    folder: Path,
+    start_id: str,
+    end_id: str,
+    method: str = "mace-omol",
+    pairs: list[list[int]] | None = None,
+    start_member_id: str | None = None,
+    end_member_id: str | None = None,
+    name: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """D238: start a TS guess between two structures joined by an edge, in the start's atom
+    order (D113's match): both ends optimized with the method, an IDPP band, Sella's saddle
+    search from its top and a check of the saddle's mode on the reacting atoms."""
+    from chembook3d.services import scan_path
+
+    offered = TS_GUESS_METHODS | (
+        TS_GUESS_TEST_METHODS if os.environ.get("CHEMBOOK3D_LOCAL_STUB") == "1" else set()
+    )
+    if method not in offered or method not in methods():
+        if method in TS_GUESS_METHODS:
+            raise LocalJobError(_install_first(method))
+        raise LocalJobError(f"A TS guess runs with {', '.join(sorted(TS_GUESS_METHODS))}")
+    if local_tools.worker_python("mace-omol") is None:
+        raise LocalJobError(_install_first("mace-omol"))
+    try:
+        plan = scan_path.plan(session, start_id, end_id, pairs, start_member_id, end_member_id)
+    except RecordError as exc:
+        message = str(exc).replace("a scan path runs", "a TS guess runs")
+        raise LocalJobError(message[:1].upper() + message[1:]) from exc
+    if plan.species is not None:
+        raise LocalJobError(
+            "A TS guess needs the same atoms at both ends; this edge has a species joining or "
+            "leaving. Make a node of the complex with the species close by first."
+        )
+    start, end = plan.start.node, plan.end.node
+    rows, renumbered = plan.start_rows, plan.renumbered
+    elements = [r[0] for r in rows]
+    formed = [[int(i), int(j)] for i, j in plan.match.formed]
+    broken = [[int(i), int(j)] for i, j in plan.match.broken]
+    reacting = sorted({a for pair in formed + broken for a in pair})
+    if not reacting:
+        # no bond changes: the atoms that move most between the ends stand for them
+        from chembook3d.local_worker import moving_atoms
+
+        moved = np.array([r[1:4] for r in renumbered], float) - np.array(
+            [r[1:4] for r in rows], float
+        )
+        reacting = sorted(moving_atoms(moved))
+    resources = local_tools.resources()
+    if limit is not None:
+        seconds = ts_guess_estimate(method, len(rows), resources.cores)["seconds"]
+        if seconds > limit:
+            raise LocalJobError(
+                f"This TS guess is estimated at about {_duration(seconds)}, over the "
+                f"{_duration(limit)} the user allows for a job you start on your own."
+            )
+    label = methods()[method]
+    with _records:
+        job_id = _new_id(folder, name or f"TS guess {start.label} {end.label}")
+        path = jobs_dir(folder) / job_id
+        path.mkdir(parents=True)
+        job = {
+            "id": job_id,
+            "kind": TS_GUESS,
+            "node_id": start.id,
+            "node_label": start.label,
+            "method": method,
+            "level": label,
+            "charge": plan.charge,
+            "multiplicity": plan.multiplicity,
+            "cores": resources.cores,
+            "memory_mb": resources.memory_mb,
+            "elements": elements,
+            "coordinates": [[float(v) for v in r[1:4]] for r in rows],
+            "constraints": None,
+            "transition": True,
+            "reacting": reacting,
+            "created": _now(),
+            "ts_guess": {
+                "start_id": start.id,
+                "end_id": end.id,
+                "start_label": start.label,
+                "end_label": end.label,
+                "edge_id": plan.edge.id,
+                "end": [[float(v) for v in r[1:4]] for r in renumbered],
+                "formed": formed,
+                "broken": broken,
+                "reacting": reacting,
+                "method_label": label,
+                "match_rmsd": round(float(plan.match.rmsd), 3),
+            },
+        }
+        if history.SOURCE.get() != "manual":
+            job["started_by"] = history.SOURCE.get()
+        job["mace_model"] = str(local_tools.mace_model())
+        if method in TEST_METHODS and os.environ.get("CHEMBOOK3D_LOCAL_STUB_DELAY"):
+            job["stub_delay_s"] = float(os.environ["CHEMBOOK3D_LOCAL_STUB_DELAY"])
+        _write(path / JOB_JSON, job)
+        shutil.copyfile(WORKER_SOURCE, path / WORKER)
+    _spawn(path)
+    return job_status(folder, job_id)
+
+
+def ts_guess_notes(job: dict[str, Any], result: dict[str, Any]) -> str:
+    """D238: the notes of a TS guess's node: its ends, the bonds that change, the band, the
+    mode check and any warning."""
+    spec = job.get("ts_guess") or {}
+    found = result.get("ts_guess") or {}
+    lines = [
+        f"TS guess between “{spec.get('start_label', '')}” and “{spec.get('end_label', '')}”, "
+        f"{result.get('level') or job.get('level')} on this computer (D238): both ends "
+        "optimized, an IDPP band between them, Sella's saddle search from its highest image.",
+        "A starting structure for a TS optimization at your own level; its energy is not for "
+        "comparison with DFT.",
+    ]
+    for bond in found.get("bonds") or []:
+        a, b = (int(i) + 1 for i in bond["atoms"])
+        lines.append(
+            f"Bond {a}–{b}: {bond['start']} Å at the start, {bond['saddle']} Å here, "
+            f"{bond['end']} Å at the end."
+        )
+    band = (found.get("band") or {}).get("kcal")
+    if band:
+        lines.append("Band (kcal/mol from the lower end): " + ", ".join(f"{e:.1f}" for e in band))
+    check = found.get("mode_check") or {}
+    if check:
+        imaginary = check.get("imaginary") or []
+        text = ", ".join(f"{abs(f):.0f}i" for f in imaginary) or "none"
+        share = check.get("share_on_reacting")
+        lines.append(
+            f"Mode check on {len(check.get('region') or [])} atoms around the reacting ones: "
+            f"imaginary {text}"
+            + (f"; {round(100 * share)} % of the first on the reacting atoms" if share else "")
+            + "."
+        )
+    lines += [f"Warning: {w}" for w in found.get("warnings") or []]
+    if result.get("state") == "not_converged":
+        lines.append("The saddle search did not converge; this is its last structure.")
+    return "\n".join(lines)
+
+
+def _import_ts_guess(
+    session: Session, folder: Path, job_id: str, job: dict[str, Any], path: Path
+) -> dict[str, Any]:
+    """D238: the guess as a new node halfway between its ends, role TS, status planned, no
+    edges (as D115's path), in the start's step and branch, with the notes of ts_guess_notes."""
+    from chembook3d.models import GroupNode, Role, Status
+    from chembook3d.services.scan_path import _place
+
+    spec = job["ts_guess"]
+    result = _read(path) or {}
+    start = session.get(Node, spec["start_id"])
+    end = session.get(Node, spec["end_id"])
+    start_name = start.label if start is not None else spec["start_label"]
+    end_name = end.label if end is not None else spec["end_label"]
+    options = imports.ImportOptions(
+        origin_path=str(path),
+        original_name=f"{slug(f'ts guess {start_name} {end_name}', 60)}.json",
+        label=f"TS guess {start_name} to {end_name}"[:200],
+        role=Role.TRANSITION_STATE,
+        status=Status.PLANNED,
+        duplicate_action="new",
+        notes=ts_guess_notes(job, result),
+    )
+    if start is not None:
+        group = session.get(GroupNode, start.group_id) if start.group_id else None
+        options.step_id = start.step_id or (group.step_id if group else None)
+        options.branch_id = start.branch_id or (group.outgoing_branch_id if group else None)
+        options.canvas_id = start.canvas_id
+        a = _place(session, start)
+        b = _place(session, end) if end is not None else (a[0] + 400.0, a[1])
+        options.pos_x = a[0] + TS_GUESS_OFFSET * (b[0] - a[0])
+        options.pos_y = a[1] + TS_GUESS_OFFSET * (b[1] - a[1])
+    return _commit(session, folder, job_id, path, options)
+
+
+def _commit(
+    session: Session, folder: Path, job_id: str, path: Path, options: imports.ImportOptions
+) -> dict[str, Any]:
+    staging = imports.Staging()
+    try:
+        device = platform.node() or "this computer"
+        staged = staging.add(path.read_bytes(), options.original_name, str(path), device=device)
+        try:
+            committed = imports.commit(session, folder, staged, options)
+        except (imports.ImportBlocked, imports.ImportFailed) as exc:
+            update_job(folder, job_id, import_error=str(exc))
+            raise LocalJobError(str(exc)) from exc
+    finally:
+        staging.clear()
+    imported = {
+        "node_id": committed.derived_node_id or committed.node_id,
+        "derived": bool(committed.derived_node_id),
+        "calculation_ids": list(committed.calculation_ids),
+        "at": _now(),
+    }
+    update_job(folder, job_id, imported=imported, import_error=None)
     return {**job_status(folder, job_id), "imported": imported}

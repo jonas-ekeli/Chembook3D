@@ -82,6 +82,11 @@ def _status(request: Request, atoms: int | None = None, model: int | None = None
         }
         for key, label in local_jobs.methods().items()
     ]
+    # D238: the TS guess between two structures, when MACE-OMOL-0 is there
+    offered = "mace-omol" in local_jobs.methods()
+    out["ts_guess"] = None
+    if atoms and offered:
+        out["ts_guess"] = local_jobs.ts_guess_estimate("mace-omol", atoms, out["cores"])
     return out
 
 
@@ -356,6 +361,42 @@ def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[s
             _check_core(body.reacting, count, "Reacting"),
             body.frequencies,
             _scan(body.scan, atoms),
+            _claude_limit(request, folder),
+        )
+    except local_jobs.LocalJobError as exc:
+        raise _refused(exc) from exc
+
+
+class TsGuessIn(BaseModel):
+    start_id: str = Field(description="The start: a node, or a group for its representative")
+    end_id: str = Field(description="The end, joined to the start by an edge")
+    start_member_id: str | None = Field(None, description="A group's member to use instead")
+    end_member_id: str | None = None
+    pairs: list[list[int]] | None = Field(
+        None, description="[start atom, end atom] pairs (from 1) fixed in the atom match (D113)"
+    )
+    method: str = Field("mace-omol", description="mace-omol (MACE-OMOL-0, D237)")
+    name: str | None = None
+
+
+@router.post("/ts-guess")
+def start_ts_guess(body: TsGuessIn, request: Request, session: DbSession) -> dict[str, Any]:
+    """D238: a TS guess between two structures joined by an edge, on this computer: both ends
+    optimized with MACE-OMOL-0, an IDPP band, Sella's saddle search from its top and a mode
+    check; imported as a new TS node halfway between them when it finishes."""
+    _local_page_only(request)
+    folder = _investigation(request).folder
+    try:
+        return local_jobs.create_ts_guess(
+            session,
+            folder,
+            body.start_id,
+            body.end_id,
+            body.method,
+            body.pairs,
+            body.start_member_id,
+            body.end_member_id,
+            body.name,
             _claude_limit(request, folder),
         )
     except local_jobs.LocalJobError as exc:

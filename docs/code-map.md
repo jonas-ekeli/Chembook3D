@@ -545,6 +545,14 @@ Routes for all of these are in `api/pathway.py`.
 - `local_worker.py` runs only in the tools' Python (stdlib, numpy, geomeTRIC, tblite, Psi4): the queue lock (`Queue`, `local-jobs.lock` in the tools folder); `make_calculator` per method from `_engine`: `stub`/`stub-low`/`stub-saddle` for tests, `gfn2`, `gxtb` (runs xtb, `read_xtb_gradient`), `b97-3c`, `r2scan-3c`, `mace-omol` (`_mace`, D237; `mace-stub` in tests). Psi4 reads the last step's orbitals as its guess.
 - geomeTRIC's custom `Engine`; constraints as geomeTRIC's `$freeze`/`$set` text (`read_constraints`).
 
+### TS guess between two structures (D238)
+
+- `local_jobs.create_ts_guess` (route `POST /api/local/ts-guess`, MCP `start_local_ts_guess`) plans with `scan_path.plan` (ends, atom match, charge) and writes a job of kind `ts_guess` (`TS_GUESS`): the start's coordinates, the end's renumbered in `job["ts_guess"]["end"]`, the reacting atoms from the bonds that form or break. `ts_guess_estimate` (in the tools' status as `ts_guess`).
+- `local_worker.ts_guess`: Sella minima of both ends, `aligned`, the IDPP band (`ase.mep.NEB.interpolate("idpp")`) scored and checked by `humps`, Sella `order=1` from its top (`engine_calculator` wraps the method), `partial_mode_check` over the reacting atoms and their neighbours (`bonded`).
+- `_import_ts_guess` imports the saddle as a new TS node halfway between the ends, with `ts_guess_notes`.
+- `components/TsGuessDialog.tsx` (selection action `ts-guess` in `panelActions.ts`, shown in `PathwayInspectors.tsx`); Local jobs shows `tsGuessText` (`localJobs.ts`).
+- Tests: `tests/test_local_ts_guess.py` (the `stub-saddle` double well; ASE and Sella are dev dependencies), `e2e/local-jobs.spec.ts`.
+
 ### ONIOM (D214)
 
 - `services/oniom.py` suggests the DFT core (`suggest`, `close`) and checks it with its link atoms (`build` → `Core`).

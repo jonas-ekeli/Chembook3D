@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
 import { api, type LocalJob } from '../api'
-import { localStatusText, progressText, scanText, tsCheckText } from '../localJobs'
+import { localStatusText, progressText, scanText, tsCheckText, tsGuessText } from '../localJobs'
 import { Modal } from './Modal'
 import { errorText, withDisplacements } from '../util'
 import { Viewer3D } from './Viewer3D'
@@ -127,16 +127,21 @@ export function LocalJobsDialog({
                 const shown = showMode === job.id && mode && xyz ? withDisplacements(xyz, mode) : null
                 const found = job.result?.frequencies
                 const scanned = scanText(job)
+                const guess = tsGuessText(job)
                 return (
                   <Fragment key={job.id}>
                     <tr aria-label={job.id}>
                       <td>
-                        <strong>{job.node_label}</strong>
+                        <strong>
+                          {job.kind === 'ts_guess' && job.ts_guess
+                            ? `TS guess “${job.ts_guess.start_label}” to “${job.ts_guess.end_label}”`
+                            : job.node_label}
+                        </strong>
                         <div className="muted small">
                           {job.level} · charge {job.charge}, multiplicity {job.multiplicity} · {job.atoms} atoms ·{' '}
                           {job.cores} core{job.cores === 1 ? '' : 's'} · {created(job)}
                           {job.constraints && ' · with constraints'}
-                          {job.transition && ' · TS search'}
+                          {job.transition && job.kind !== 'ts_guess' && ' · TS search'}
                           {job.scan &&
                             (job.scan.grid
                               ? ` · 2D grid scan, ${job.scan.points} points`
@@ -174,6 +179,16 @@ export function LocalJobsDialog({
                             frequency calculation.
                           </div>
                         )}
+                        {guess.summary && (
+                          <div className="small" aria-label="TS guess">
+                            {guess.summary}
+                          </div>
+                        )}
+                        {guess.warnings.map((w) => (
+                          <div key={w} className="small cloud-job-problem">
+                            {w}
+                          </div>
+                        ))}
                         {scanned && (
                           <div className="small" aria-label="Scan">
                             {scanned}

@@ -1522,6 +1522,23 @@ TOOLS: list[ToolSpec] = [
         "estimate and ask first when it is over an hour.",
     ),
     T(
+        "start_local_ts_guess",
+        "write",
+        "POST",
+        "/api/local/ts-guess",
+        "A transition state guess between two structures joined by an edge, on this computer "
+        "(D238), with MACE-OMOL-0 (D237; only when the user installed it): both ends optimized, "
+        "an IDPP band between them in the start's atom order (D113's match; pairs fixes atoms "
+        "by hand, from 1), Sella's saddle search from the band's highest image and a check that "
+        "the saddle's imaginary mode is on the bonds that change. Imported by itself as a new "
+        "TS node halfway between the ends, no edges, with notes on the band, the bonds and any "
+        "warning (two maxima on the band, no single imaginary mode). Both ends need the same "
+        "atoms (no species joining on the edge). It is a starting structure for a TS "
+        "optimization at the user's own level, not an energy. get_local_tools?atoms=N gives "
+        "its time as ts_guess; plan_scan_path shows the match first. Tens of minutes for a "
+        "70-atom complex: only start one the user asked for.",
+    ),
+    T(
         "check_local_core",
         "read",
         "POST",

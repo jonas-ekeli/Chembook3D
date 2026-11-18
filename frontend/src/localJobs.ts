@@ -251,6 +251,19 @@ export function scanText(job: LocalJob): string | null {
 
 /** D215: what the check of a TS search's final structure found, in a sentence; null when the
  * job is no TS search or has no final check. */
+/** D238: what a TS guess found: the band's maxima, the changing bonds at the saddle (Å) and
+ * its warnings. */
+export function tsGuessText(job: LocalJob): { summary: string | null; warnings: string[] } {
+  const found = job.result?.ts_guess
+  if (!found) return { summary: null, warnings: [] }
+  const parts: string[] = []
+  const band = found.band
+  if (band) parts.push(`IDPP band top ${band.kcal[band.top]?.toFixed(1) ?? '?'} kcal/mol above its lowest image`)
+  const bonds = (found.bonds ?? []).map((b) => `${b.atoms[0] + 1}–${b.atoms[1] + 1} ${b.saddle.toFixed(2)} Å (ends ${b.start.toFixed(2)}, ${b.end.toFixed(2)})`)
+  if (bonds.length) parts.push(`at the saddle ${bonds.join('; ')}`)
+  return { summary: parts.length ? `${parts.join(', ')}.` : null, warnings: found.warnings ?? [] }
+}
+
 export function tsCheckText(job: LocalJob): string | null {
   const check = job.result?.ts_check
   const end = check?.end
