@@ -27,7 +27,12 @@ from tests.fake_ssh_server import CODE, PASSWORD, USER, FakeSaga, FakeXServer, f
 APP = "http://127.0.0.1:8765"
 ORIGIN = {"origin": APP}
 WS = "ws://127.0.0.1:8765"
-ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][A-Za-z0-9]|\r")
+# OSC sequences end with BEL or ST (ESC \): Ubuntu 26.04's login files print systemd's
+# ST-ended OSC 3008 shell context around each command, and matching on to the next BEL ate the
+# output between them.
+ANSI = re.compile(
+    r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\r"
+)
 
 
 @pytest.fixture
