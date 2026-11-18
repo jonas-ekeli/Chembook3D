@@ -1555,7 +1555,7 @@ TOOLS: list[ToolSpec] = [
         "conformers or checking guess structures before the user's own HPC runs, not final "
         "energies. Levels (get_local_tools?atoms=N gives single_point_levels with estimates): "
         "pbe-tzvp (the default), pbe-svp, r2scan-3c (lost the barrier of a Ru [2+2] step), "
-        "b97-3c, pbe0-tzvp and wb97m-v-tzvp (slow hybrids). List a group's members one by "
+        "b97-3c and pbe0-tzvp (a hybrid, about twice PBE's time). List a group's members one by "
         "one. Minutes each for a 70-atom complex: only start them when the user asked, and "
         "say the estimate and ask first when the lot is over an hour.",
     ),

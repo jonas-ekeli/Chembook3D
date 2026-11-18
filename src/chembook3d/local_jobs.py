@@ -1395,11 +1395,11 @@ SP_CALIBRATION_ATOMS = 20
 # `method`, `dispersion` and `basis_name` the level the calculation is imported at. `seconds`:
 # one single point of a 70-atom Ru complex on 4 cores from a fresh guess. Measured 2026-11-18 on
 # a 73-atom Ru [2+2] system (Psi4 1.11, density fitting): PBE/def2-TZVP 10.4-12.4 min,
-# PBE/def2-SVP 3.8-4.2 min, r2SCAN-3c 10.6-13.0 min, B97-3c 5.4-5.5 min, PBE0/def2-TZVP 22 min;
-# ωB97M-V is a guess until this computer has run one. `scf_type` "direct" for ωB97M-V: with
-# density fitting Psi4 writes its range-separated exchange integrals to disk, tens of GB for a
-# 73-atom complex (it ran out of disk in the scoping test), and the faster DF-J/COSX schemes
-# refuse range-separated functionals.
+# PBE/def2-SVP 3.8-4.2 min, r2SCAN-3c 10.6-13.0 min, B97-3c 5.4-5.5 min, PBE0/def2-TZVP 21-22 min.
+# ωB97M-V/def2-TZVP is not offered: with density fitting Psi4 writes its range-separated exchange
+# integrals to disk (tens of GB for that system: it ran out of disk), and integral-direct it had
+# not finished its first SCF cycle after 30 minutes (over 8 hours a single point). A level may
+# still set `scf_type` for the worker.
 SP_LEVELS: dict[str, dict[str, Any]] = {
     "pbe-tzvp": {
         "label": "PBE-D3M(BJ)/def2-TZVP",
@@ -1450,19 +1450,8 @@ SP_LEVELS: dict[str, dict[str, Any]] = {
         "dispersion": "D3(BJ)",
         "basis_name": "def2-TZVP",
         "seconds": 1175.0,
-        "note": "A hybrid: about twice PBE's time.",
-    },
-    "wb97m-v-tzvp": {
-        "label": "ωB97M-V/def2-TZVP",
-        "psi4": "wb97m-v",
-        "basis": "def2-tzvp",
-        "method": "wB97M-V",
-        "dispersion": "",
-        "basis_name": "def2-TZVP",
-        "scf_type": "direct",
-        "seconds": 3600.0,
-        "note": "A range-separated hybrid with its own dispersion, run integral-direct (no "
-        "density fitting): the slowest.",
+        "note": "A hybrid, about twice PBE's time; 1.7 kcal/mol for the Ru [2+2] barrier "
+        "(PBE/def2-TZVP 4.6).",
     },
 }
 # CHEMBOOK3D_LOCAL_STUB=1 only (tests): the stub engine's energy, at once
