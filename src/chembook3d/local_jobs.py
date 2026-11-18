@@ -57,7 +57,7 @@ CANCEL = "cancel"
 TRAJECTORY = "trajectory.xyz"
 WORKER = "worker.py"
 WORKER_SOURCE = Path(__file__).with_name("local_worker.py")
-ALIVE_S = 30.0  # a heartbeat older than this: the process is gone
+ALIVE_S = 30.0  # a heartbeat older than this: the process is gone, unless it still runs (D241)
 STARTING_S = 60.0  # a job without a heartbeat yet is starting for this long
 _JOB_ID = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9-]{1,60}$")
 
@@ -584,10 +584,84 @@ def _spawn(path: Path) -> None:
 
 
 def _alive(progress: dict[str, Any] | None) -> bool:
+    """The worker still runs: its heartbeat is fresh, or it is busy and its process still lives.
+
+    The heartbeat is a Python thread, and Psi4's long steps (one SCF cycle on disk-stored
+    integrals, 90 s for 1,536 basis functions) hold Python's lock, so it can lag for minutes
+    while the job is fine (D241)."""
     if not progress or progress.get("state") == "finished":
         return False
     age = _age(progress.get("heartbeat_at"))
-    return age is not None and age < ALIVE_S
+    if age is None:
+        return False
+    return age < ALIVE_S or _worker_process(progress)
+
+
+def _worker_process(progress: dict[str, Any]) -> bool:
+    """The process `pid` names is still the worker that wrote `progress`: it runs, and it started
+    before the worker first wrote (`queued_at`). A process given the same id after the worker
+    ended (after a restart of the computer, say) started later."""
+    pid, first = progress.get("pid"), _epoch(progress.get("queued_at"))
+    if not isinstance(pid, int) or pid <= 0 or first is None:
+        return False
+    started = _process_started(pid)
+    # queued_at is cut to whole seconds, so up to a second before the process it names
+    return started is not None and started <= first + 2.0
+
+
+def _epoch(stamp: str | None) -> float | None:
+    if not stamp:
+        return None
+    try:
+        return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    except ValueError:
+        return None
+
+
+def _process_started(pid: int) -> float | None:
+    """When the running process `pid` started (seconds since 1970), or None: no such process,
+    one that has ended, or a system this cannot ask (then only the heartbeat counts)."""
+    if sys.platform == "win32":
+        return _process_started_windows(pid)
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
+        boot = next(
+            float(line.split()[1])
+            for line in Path("/proc/stat").read_text(encoding="utf-8").splitlines()
+            if line.startswith("btime ")
+        )
+        fields = stat[stat.rindex(")") + 2 :].split()
+        if fields[0] in ("Z", "X"):  # a zombie: ended, not yet reaped
+            return None
+        return boot + int(fields[19]) / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, StopIteration):
+        return None
+
+
+def _process_started_windows(pid: int) -> float | None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value != 259:
+            return None  # 259: STILL_ACTIVE
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not kernel32.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
+            return None
+        created = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime  # 100 ns since 1601
+        return created / 1e7 - 11644473600.0
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def job_status(folder: Path, job_id: str) -> dict[str, Any]:
