@@ -27,7 +27,12 @@ from tests.fake_ssh_server import CODE, PASSWORD, USER, FakeSaga, FakeXServer, f
 APP = "http://127.0.0.1:8765"
 ORIGIN = {"origin": APP}
 WS = "ws://127.0.0.1:8765"
-ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][A-Za-z0-9]|\r")
+# OSC sequences end with BEL or ST (ESC \): Ubuntu 26.04's login files print systemd's
+# ST-ended OSC 3008 shell context around each command, and matching on to the next BEL ate the
+# output between them.
+ANSI = re.compile(
+    r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\r"
+)
 
 
 @pytest.fixture
@@ -130,13 +135,30 @@ def _terminal(local):
     return local.websocket_connect(f"{WS}/api/remote/terminal?token={token}&rows=30&cols=100")
 
 
+def _receive_json(ws, seconds: float) -> dict:
+    """The next message, or a TimeoutError after `seconds`: the test client's own receive waits
+    for ever, which hung a CI job until its 30-minute limit with nothing said."""
+
+    async def receive() -> dict:
+        with anyio.fail_after(seconds):
+            return await ws._send_rx.receive()
+
+    message = ws.portal.call(receive)
+    ws._raise_on_close(message)
+    return json.loads(message["text"])
+
+
 def _read_until(ws, check) -> tuple[str, list[dict]]:
-    """Output (without escape sequences) and other messages until `check(text, messages)`."""
+    """Output (without escape sequences) and other messages until `check(text, messages)`;
+    after 20 s without it, fails showing what came."""
     seen, messages = "", []
     deadline = time.monotonic() + 20
     while not check(seen, messages):
-        assert time.monotonic() < deadline, seen
-        message = ws.receive_json()
+        left = deadline - time.monotonic()
+        try:
+            message = _receive_json(ws, max(left, 0.01))
+        except TimeoutError:
+            pytest.fail(f"not seen within 20 s; output {seen!r}, messages {messages!r}")
         if message["type"] == "output":
             seen += ANSI.sub("", message["data"])
         else:
