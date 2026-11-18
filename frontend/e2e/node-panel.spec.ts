@@ -51,7 +51,7 @@ test('the node panel: header, stat strip, ⋯ menu by keyboard, jump bar', async
   await more.focus()
   await page.keyboard.press('Enter')
   const menu = page.getByRole('menu', { name: 'More node actions' })
-  await expect(menu.getByRole('menuitem')).toHaveText([/^IRC…/, 'Refine geometry…', 'Split into branches…', 'Delete node'])
+  await expect(menu.getByRole('menuitem')).toHaveText([/^IRC…/, 'Refine geometry…', 'Single point on this computer…', 'Split into branches…', 'Delete node'])
   await expect(menu.getByRole('menuitem', { name: 'IRC…' })).toBeFocused()
   await page.keyboard.press('ArrowDown')
   await expect(menu.getByRole('menuitem', { name: 'Refine geometry…' })).toBeFocused()

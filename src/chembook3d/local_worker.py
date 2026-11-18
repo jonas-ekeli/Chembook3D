@@ -9,7 +9,8 @@ PyTorch, ASE, Sella and mace-torch), never ``chembook3d``.
 
 Files in the job folder:
 - ``job.json`` (written by the app): method, charge, multiplicity, cores, memory, elements and
-  coordinates in Angstrom, optional constraints.
+  coordinates in Angstrom, optional constraints; D240: a ``single_point`` job computes the
+  energy of those coordinates only (Psi4), its level in ``job["single_point"]``.
 - ``progress.json`` (rewritten here): state (queued, running), pid, cycle, energy, largest
   gradient component, and a heartbeat time renewed every few seconds while the process lives.
 - ``trajectory.xyz``: one frame per optimizer step, the comment holding the energy (and, D220,
@@ -60,6 +61,8 @@ METHOD_LABELS = {
     "stub-saddle": ("stub", "stub-saddle"),
     "mace-omol": ("MACE", "MACE-OMOL-0"),  # D237
     "mace-stub": ("stub", "mace-stub"),
+    "psi4-sp": ("Psi4", "single point"),  # D240: the level is in the job
+    "stub-sp": ("stub", "single point"),
 }
 
 
@@ -533,7 +536,7 @@ def versions(method: str) -> dict:
     names = ["numpy", "geometric"]
     if method in ("gfn2", "oniom"):
         names.append("tblite")
-    if method in ("b97-3c", "r2scan-3c", "oniom"):
+    if method in ("b97-3c", "r2scan-3c", "oniom", "psi4-sp"):
         names += ["psi4", "dftd4", "dftd3"]
     if method == "mace-omol":
         names += ["torch", "mace-torch", "ase"]
@@ -922,6 +925,14 @@ def correction_single_point(job: dict, numbers, folder: Path):
     """D239: the correction's single points, Hartree from coordinates in Å: PBE with
     D3(BJ) in its modified damping, def2-SVP (def2's ECPs for the heavy atoms) and density
     fitting, through Psi4; each frame's SCF starts from the last frame's orbitals."""
+    return psi4_single_point(job, numbers, folder, "pbe-d3mbj", "def2-svp")
+
+
+def psi4_single_point(job: dict, numbers, folder: Path, name: str, basis: str | None):
+    """Psi4 single points, Hartree from coordinates in Å: the method `name` (e.g. `pbe-d3mbj`,
+    `r2scan-3c`) with `basis` (None for a 3c method, which brings its own), RKS or UKS by the
+    multiplicity, density fitting; each SCF after the first starts from the last one's
+    orbitals (D239, D240)."""
     import numpy as np
 
     scratch = folder / "scratch"
@@ -934,18 +945,14 @@ def correction_single_point(job: dict, numbers, folder: Path):
     psi4.set_memory(int(job.get("memory_mb", 2000)) * 1_000_000)
     psi4.set_num_threads(max(1, int(job.get("cores", 1))))
     psi4.core.IOManager.shared_object().set_default_path(str(scratch))
-    psi4.set_options(
-        {
-            "reference": "uks" if unpaired else "rks",
-            "basis": "def2-svp",
-            "scf_type": "df",
-            "maxiter": 200,
-        }
-    )
+    options = {"reference": "uks" if unpaired else "rks", "scf_type": "df", "maxiter": 200}
+    if basis:
+        options["basis"] = basis
+    psi4.set_options(options)
     symbols = [ELEMENTS[z - 1] for z in numbers]
     started = {"done": False}
 
-    def single_point(x) -> float:
+    def energy_of(x) -> float:
         lines = [f"{charge} {unpaired + 1}"]
         lines += [
             f"{s} {a:.10f} {b:.10f} {c:.10f}"
@@ -955,16 +962,29 @@ def correction_single_point(job: dict, numbers, folder: Path):
         psi4.geometry("\n".join(lines))
         psi4.set_options({"guess": "read" if started["done"] else "sad"})
         try:
-            energy = psi4.energy("pbe-d3mbj")
+            energy = psi4.energy(name)
         except psi4.SCFConvergenceError:
             if not started["done"]:
                 raise
             psi4.set_options({"guess": "sad"})
-            energy = psi4.energy("pbe-d3mbj")
+            energy = psi4.energy(name)
         started["done"] = True
         return float(energy)
 
-    return single_point
+    return energy_of
+
+
+def single_point_energy(job: dict, numbers, folder: Path, x) -> float:
+    """D240: the energy (Hartree) of the structure `x` (Å) at the job's single point level:
+    Psi4, energy only; the tests' `stub-sp` gives the stub engine's energy instead."""
+    import numpy as np
+
+    spec = job["single_point"]
+    if job["method"] == "stub-sp":
+        start = np.asarray(x, float) / BOHR_TO_ANGSTROM
+        energy, _ = _stub(start, 0.98, 0.1, float(job.get("stub_delay_s", 0)))(start)
+        return float(energy) - 1.0
+    return psi4_single_point(job, numbers, folder, spec["psi4"], spec.get("basis"))(x)
 
 
 def forming_bond(bonds: list[dict], x, mode) -> dict:
@@ -1110,17 +1130,32 @@ def run(folder: Path, lock: Path | None) -> int:
     frame_points: list[int] = []  # D218: per frame, the scan point it belongs to (from 1)
     criteria: list[list] = []  # D220: per frame, the criteria geomeTRIC judged it by
     point = {"index": 1}
+    t_run = None
     try:
         queue = Queue(lock)
         queue.wait(cancel_file.exists)
         progress.update(state="running", started_at=now())
+        t_run = time.time()  # D240: the time computing, without the wait for other jobs
         result["versions"] = versions(method)
         if job.get("gxtb_version"):
             result["versions"]["xtb"] = job["gxtb_version"]
         if method == "mace-omol":  # D237: the version a MACE level is read with
             result["versions"]["mace"] = result["versions"].get("mace-torch")
-        calculate = make_calculator(job, numbers, folder)
-        if job.get("kind") == "ts_guess":
+        if job.get("kind") == "single_point":
+            # D240: the energy of the structure as it is; nothing moves
+            energy = single_point_energy(job, numbers, folder, start)
+            energies.append(energy)
+            frames.append(start.round(6).tolist())
+            criteria.append([])
+            last["energy"] = energy
+            progress.update(cycle=1, energy=energy, energies=energies)
+            result["single_point"] = job["single_point"]
+            result["state"] = "converged"
+            found = sys.modules.get("psi4")  # it has no package metadata for versions()
+            if found is not None and not result["versions"].get("psi4"):
+                result["versions"]["psi4"] = str(getattr(found, "__version__", ""))
+        elif job.get("kind") == "ts_guess":
+            calculate = make_calculator(job, numbers, folder)
             # D238: a TS guess between two minima instead of one optimization
             traj = folder / "trajectory.xyz"
             traj.write_text("", encoding="utf-8")
@@ -1158,6 +1193,7 @@ def run(folder: Path, lock: Path | None) -> int:
                     single_point,
                 )
         else:
+            calculate = make_calculator(job, numbers, folder)
             import geometric
             import geometric.engine
             import geometric.errors
@@ -1346,6 +1382,8 @@ def run(folder: Path, lock: Path | None) -> int:
     result["elements"] = symbols
     result["coordinates"] = np.asarray(last["coords"]).round(8).tolist()
     result["elapsed_s"] = round(time.time() - t0, 1)
+    if t_run is not None:
+        result["run_s"] = round(time.time() - t_run, 1)
     result["finished_at"] = now()
     progress.stopped.set()
     shutil.rmtree(folder / "scratch", ignore_errors=True)  # Psi4's integrals and orbitals

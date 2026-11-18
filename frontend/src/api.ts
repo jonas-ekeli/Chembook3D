@@ -1010,6 +1010,8 @@ export type LocalTools = {
   }
   /** D238: a TS guess's estimate for the `atoms` asked about, when MACE-OMOL-0 is installed */
   ts_guess?: { seconds_per_step: number; gradients: number; seconds: number; correction_seconds: number } | null
+  /** D240: the single point levels, the default first, each with its estimate for `atoms` */
+  single_point_levels?: SinglePointLevel[]
   /** the methods a refine offers: value for the request, label to show */
   methods: {
     value: string
@@ -1022,6 +1024,16 @@ export type LocalTools = {
 }
 
 type Estimate = { seconds_per_step: number; steps: number; seconds: number; measured: boolean }
+
+/** D240: a level a single point on this computer offers */
+export type SinglePointLevel = {
+  value: string
+  label: string
+  note: string
+  default: boolean
+  /** one single point's seconds for the `atoms` asked about, measured on this computer or not */
+  estimate: { seconds: number; measured: boolean } | null
+}
 
 /** D214: the DFT core of an ONIOM refine, atoms counted from 0. */
 export type LocalCore = {
@@ -1111,7 +1123,9 @@ export type TsGuessFound = {
 
 export type LocalJob = {
   id: string
-  kind: 'refine' | 'ts_guess'
+  kind: 'refine' | 'ts_guess' | 'single_point'
+  /** D240: a single point's level */
+  single_point?: { level: string; label: string } | null
   /** D238: a TS guess between two structures joined by an edge */
   ts_guess?: TsGuessSpec | null
   node_id: string
@@ -3040,6 +3054,9 @@ export const api = {
     /** D239: also correct the saddle with PBE single points */
     correct?: boolean
   }) => request<LocalJob>('POST', '/local/ts-guess', body),
+  /** D240: a single point of each node's structure on this computer, one job per node */
+  startSinglePoints: (body: { node_ids: string[]; level: string }) =>
+    request<LocalJob[]>('POST', '/local/single-points', body),
   startRefine: (body: {
     node_id: string
     method: string

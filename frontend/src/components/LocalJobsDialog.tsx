@@ -142,6 +142,7 @@ export function LocalJobsDialog({
                           {job.cores} core{job.cores === 1 ? '' : 's'} · {created(job)}
                           {job.constraints && ' · with constraints'}
                           {job.transition && job.kind !== 'ts_guess' && ' · TS search'}
+                          {job.kind === 'single_point' && ' · single point'}
                           {job.scan &&
                             (job.scan.grid
                               ? ` · 2D grid scan, ${job.scan.points} points`

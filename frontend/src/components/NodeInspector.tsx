@@ -158,6 +158,7 @@ export function NodeInspector({
   servers = [],
   onIrc,
   onRefine,
+  onSinglePoint,
   onEditStructure,
   energy,
   levelLabel,
@@ -187,6 +188,8 @@ export function NodeInspector({
   onIrc?: () => void
   /** D213: Refine geometry… on this computer */
   onRefine?: () => void
+  /** D240: a single point of the structure on this computer */
+  onSinglePoint?: () => void
   /** D139: open the Edit structure window. */
   onEditStructure?: () => void
   /** D179: the energy view as the canvas has it (level, type, reference), for the stat strip. */
@@ -382,6 +385,14 @@ export function NodeInspector({
       icon: 'flask',
       title: 'Optimize the structure on this computer (D213)',
       onSelect: onRefine,
+    })
+  }
+  if (onSinglePoint && node.atom_count > 0) {
+    moreItems.push({
+      label: 'Single point on this computer…',
+      icon: 'flask',
+      title: 'The energy of the structure as it is, with Psi4 on this computer (D240)',
+      onSelect: onSinglePoint,
     })
   }
   if (!isSpecies) {

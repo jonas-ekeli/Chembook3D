@@ -542,7 +542,7 @@ Routes for all of these are in `api/pathway.py`.
 - `job_status` reads `progress.json` (heartbeat every 5 s, alive for `ALIVE_S`), `result.json` and `cancel`. `cancel` kills the process when its heartbeat is fresh.
 - `estimate` gives each method's time for a structure from `TIMING` (70 atoms, 4 cores) or this computer's own seconds per step (`calibrate` after each import, kept in `local.json` by `local_tools.save_calibration`).
 - `import_result` imports `result.json` onto the job's node with `imports.commit` (parser `parsers/local_result.py`, recognised first in `imports.read_file`).
-- `local_worker.py` runs only in the tools' Python (stdlib, numpy, geomeTRIC, tblite, Psi4): the queue lock (`Queue`, `local-jobs.lock` in the tools folder); `make_calculator` per method from `_engine`: `stub`/`stub-low`/`stub-saddle` for tests, `gfn2`, `gxtb` (runs xtb, `read_xtb_gradient`), `b97-3c`, `r2scan-3c`, `mace-omol` (`_mace`, D237; `mace-stub` in tests). Psi4 reads the last step's orbitals as its guess.
+- `local_worker.py` runs only in the tools' Python (stdlib, numpy, geomeTRIC, tblite, Psi4): the queue lock (`Queue`, `local-jobs.lock` in the tools folder); `make_calculator` per method from `_engine`: `stub`/`stub-low`/`stub-saddle` for tests, `gfn2`, `gxtb` (runs xtb, `read_xtb_gradient`), `b97-3c`, `r2scan-3c`, `mace-omol` (`_mace`, D237; `mace-stub` in tests). Psi4 reads the last step's orbitals as its guess. `run_s` in the result is the time computing, without the wait for the lock.
 - geomeTRIC's custom `Engine`; constraints as geomeTRIC's `$freeze`/`$set` text (`read_constraints`).
 
 ### TS guess between two structures (D238)
@@ -553,6 +553,14 @@ Routes for all of these are in `api/pathway.py`.
 - D239's correction (`job["ts_guess"]["correct"]`: `pbe`, or `stub` for the test engine): `local_worker.ts_correction` holds `forming_bond` at `CORRECT_FRAMES` lengths (ASE `FixBondLength`, BFGS) with `correction_single_point` (Psi4 `pbe-d3mbj`, def2-SVP); `_import_ts_guess` writes the picked frame to `corrected.json` and imports it as a second node (`correction_notes`, `imported.corrected_node_id`).
 - `components/TsGuessDialog.tsx` (selection action `ts-guess` in `panelActions.ts`, shown in `PathwayInspectors.tsx`); Local jobs shows `tsGuessText` (`localJobs.ts`).
 - Tests: `tests/test_local_ts_guess.py` (the `stub-saddle` double well; ASE and Sella are dev dependencies), `e2e/local-jobs.spec.ts`.
+
+### Single points (D240)
+
+- `local_jobs.create_single_points` (route `POST /api/local/single-points`, MCP `start_local_single_points`) writes one job of kind `single_point` (`SINGLE_POINT`, method `psi4-sp`, `stub-sp` in tests) per node, with its level from `SP_LEVELS` (`sp_levels()`, `SP_DEFAULT`) in `job["single_point"]`; the jobs queue through the lock. `sp_estimate` (`SP_LEVELS[...]["seconds"]`, calibrated per level as `sp:<level>` by `calibrate` from the worker's `run_s`); `sp_levels_status` is the tools' status's `single_point_levels`.
+- `local_worker.single_point_energy` (Psi4 through `psi4_single_point`, which D239's `correction_single_point` uses too); the result carries `single_point`.
+- `parsers/local_result._single_point` reads it as one single-point step (method, dispersion, basis from the level), so `imports.commit` gives it the node's optimization as its geometry level (FR-CALC-04).
+- `components/SinglePointDialog.tsx`, opened from the node menu, the inspector's ⋯ menu, the selection action and the group action `single-point` (`panelActions.singlePointNodes`).
+- Tests: `tests/test_local_single_points.py` (every level with real Psi4 under `CHEMBOOK3D_REAL_TOOLS=1`), `e2e/local-jobs.spec.ts`.
 
 ### ONIOM (D214)
 

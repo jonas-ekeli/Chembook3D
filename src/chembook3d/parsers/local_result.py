@@ -28,6 +28,11 @@ converged point.
 D220: each structure carries the convergence criteria geomeTRIC judged it by (`criteria`), and
 `parse_data` also reads what a running job has written so far (state `RUNNING`: not yet
 converged or ended), for the Inspect window.
+
+D240: a single point's result (`single_point`: the level as method, dispersion and basis) is read
+as one single-point step at the job's structure, so its import onto the node gives it the
+node's optimization as its geometry level (FR-CALC-04), e.g. `Psi4 PBE-D3M(BJ)/def2-TZVP // MACE
+MACE-OMOL-0`.
 """
 
 import json
@@ -226,6 +231,35 @@ def _scan(data: dict, geometries: list[list[Atom]], energies: list) -> ParsedFil
     return ParsedFile(program=str(data.get("program") or "local"), version=version, steps=[step])
 
 
+def _single_point(data: dict, geometries: list[list[Atom]]) -> ParsedFile:
+    """D240: the energy of the job's structure, at the level the job names."""
+    spec = data["single_point"]
+    route = Route(
+        text=f"local {data.get('method', '')} single point",
+        method=spec.get("method") or data.get("level"),
+        basis=spec.get("basis_name") or "",
+        dispersion=spec.get("dispersion") or None,
+    )
+    route.job_type = "single_point"
+    step = ParsedStep(
+        index=1,
+        route=route,
+        charge=data.get("charge"),
+        multiplicity=data.get("multiplicity"),
+        geometries=geometries[-1:],
+    )
+    step.resolved_basis = spec.get("basis_name") or ""
+    step.scf_energy = _energy(data.get("energy"))
+    step.geometry_energies = [step.scf_energy] if geometries else []
+    state = data.get("state")
+    step.termination = "normal" if state == "converged" else "abnormal"
+    step.missing = [] if step.scf_energy is not None else ["total energy"]
+    if not geometries:
+        step.missing.append("geometry")
+    version = (data.get("versions") or {}).get(str(data.get("program", "")).lower())
+    return ParsedFile(program=str(data.get("program") or "local"), version=version, steps=[step])
+
+
 def parse(text: str) -> ParsedFile:
     try:
         data = json.loads(text)
@@ -257,6 +291,8 @@ def parse_data(data: object) -> ParsedFile:
             ]
         ]
     state = data.get("state")
+    if data.get("single_point"):
+        return _single_point(data, geometries)
     if data.get("scan"):
         return _scan(data, geometries, energies)
     method = data.get("level") or data.get("method")

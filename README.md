@@ -52,7 +52,8 @@ branches, rotamer groups, ethylene joining and leaving, and the closed cycle's Î
   GFN2-xTB, g-xTB, the machine-learned MACE-OMOL-0 or a fast DFT method (B97-3c, r2SCAN-3c,
   ONIOM) through Psi4: optimizations,
   transition-state searches, relaxed scans and frequencies, imported onto the node when done,
-  and a TS guess between two minima joined by an edge (MACE-OMOL-0).
+  a TS guess between two minima joined by an edge (MACE-OMOL-0), and DFT single points on a
+  node's structure (PBE-D3M(BJ)/def2-TZVP by default).
 - **Works next to your cluster.** An optional terminal on Saga or another SSH server lists, inspects
   and imports output files there without copying them by hand.
 - **Records history.** Every change, by you, an import or Claude, is in an append-only history,
