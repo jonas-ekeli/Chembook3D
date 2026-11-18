@@ -6,6 +6,8 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- TS guess correction (D239): optionally, the TS guess's forming bond is held at six lengths
+  and the frame with the highest PBE-D3M(BJ)/def2-SVP single point becomes a second TS node.
 - TS guess on this computer (D238): two structures joined by an edge give a starting structure
   for a TS, found with MACE-OMOL-0 (both ends minimized, an IDPP band, Sella's saddle search and
   a check that the mode is on the reacting atoms), imported as a new TS node between them.

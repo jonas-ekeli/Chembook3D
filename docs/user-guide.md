@@ -204,7 +204,10 @@ with an interpolated path, searches for the saddle point from its highest point 
 the imaginary mode moves the reacting atoms; a few minutes for a 70-atom complex. The guess comes
 back as a new TS node between the two, with notes saying how the bonds change and any warning
 (two maxima along the path, a search that did not converge, a mode elsewhere). Optimize it as a
-TS at your own level; its energy is not for comparison with DFT.
+TS at your own level; its energy is not for comparison with DFT. **Correct the saddle with PBE
+single points** (off by default) adds about half an hour for a 70-atom complex: the forming bond is
+held at six lengths from the saddle toward the separated end, and the frame with the highest
+PBE-D3M(BJ)/def2-SVP energy comes back as a second TS node below the first.
 
 **Follow and import.** Jobs run one at a time, as programs of their own, so they keep running when
 the app is closed. **Local jobs** in the top bar lists them with **Inspect** (live, every 5 s),

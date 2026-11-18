@@ -623,7 +623,7 @@ function App() {
     if (job.kind === 'ts_guess') {
       // D238: a TS guess comes in as a new TS node between its two ends.
       setNotice(
-        `The TS guess between “${job.ts_guess?.start_label ?? job.node_label}” and “${job.ts_guess?.end_label ?? ''}” is done and imported as a new TS node between them (it can be undone in History).` +
+        `The TS guess between “${job.ts_guess?.start_label ?? job.node_label}” and “${job.ts_guess?.end_label ?? ''}” is done and imported as a new TS node between them${job.imported?.corrected_node_id ? ', with its PBE-corrected guess below it' : ''} (it can be undone in History).` +
           (tsCheckText(job) ? ` ${tsCheckText(job)}` : ''),
       )
       return

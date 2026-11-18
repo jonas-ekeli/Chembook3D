@@ -434,6 +434,8 @@ test('a TS guess between two minima is planned from the selection panel', async 
   await expect(dialog.getByLabel('TS guess plan')).toContainText('From “bound” to “apart”')
   await expect(dialog.getByLabel('Match summary')).toContainText('1 bond breaks')
   await expect(dialog.getByLabel('Reacting atoms')).toContainText('O1–H2 (breaks)')
+  // T-UI-107, D239: the PBE correction is offered and off unless ticked.
+  await expect(dialog.getByRole('checkbox', { name: 'Correct the saddle with PBE single points' })).not.toBeChecked()
   // MACE-OMOL-0 is not installed here: Start waits for it, and Settings is one click away.
   await expect(dialog.getByRole('button', { name: 'Start' })).toBeDisabled()
   await dialog.getByRole('button', { name: 'Install it in Settings' }).click()

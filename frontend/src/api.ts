@@ -1009,7 +1009,7 @@ export type LocalTools = {
     install: { state: 'idle' | 'running' | 'done' | 'failed'; step: string; error: string | null; seconds: number | null }
   }
   /** D238: a TS guess's estimate for the `atoms` asked about, when MACE-OMOL-0 is installed */
-  ts_guess?: { seconds_per_step: number; gradients: number; seconds: number } | null
+  ts_guess?: { seconds_per_step: number; gradients: number; seconds: number; correction_seconds: number } | null
   /** the methods a refine offers: value for the request, label to show */
   methods: {
     value: string
@@ -1086,6 +1086,8 @@ export type TsGuessSpec = {
   reacting: number[]
   method_label: string
   match_rmsd: number
+  /** D239: the saddle corrected with PBE single points as well */
+  correct?: 'pbe' | 'stub'
 }
 
 /** D238: what a TS guess found: the IDPP band (kcal/mol from its lowest image), the changing
@@ -1096,6 +1098,15 @@ export type TsGuessFound = {
   warnings: string[] | null
   converged: boolean | null
   saddle_kcal: number | null
+  /** D239: the bond held (from 0), each frame's length (Å) and single point (kcal/mol from the
+   * lowest), the frame picked */
+  correction?: {
+    level: string
+    bond?: number[]
+    frames?: { value: number; kcal: number; converged: boolean }[]
+    picked?: number
+    warnings: string[]
+  } | null
 }
 
 export type LocalJob = {
@@ -1164,7 +1175,15 @@ export type LocalJob = {
       points: { values: number[]; energy: number | null; converged: boolean }[]
     } | null
   }
-  imported?: { node_id: string; derived: boolean; calculation_ids: string[]; at: string; present?: boolean } | null
+  imported?: {
+    node_id: string
+    derived: boolean
+    calculation_ids: string[]
+    at: string
+    present?: boolean
+    /** D239: the corrected TS guess's own node */
+    corrected_node_id?: string
+  } | null
   import_error?: string | null
 }
 
@@ -3018,6 +3037,8 @@ export const api = {
     start_member_id?: string | null
     end_member_id?: string | null
     pairs?: [number, number][] | null
+    /** D239: also correct the saddle with PBE single points */
+    correct?: boolean
   }) => request<LocalJob>('POST', '/local/ts-guess', body),
   startRefine: (body: {
     node_id: string

@@ -376,6 +376,11 @@ class TsGuessIn(BaseModel):
         None, description="[start atom, end atom] pairs (from 1) fixed in the atom match (D113)"
     )
     method: str = Field("mace-omol", description="mace-omol (MACE-OMOL-0, D237)")
+    correct: bool = Field(
+        False,
+        description="D239: also correct the saddle along its forming bond with PBE-D3M(BJ)/"
+        "def2-SVP single points (about half an hour for 70 atoms); kept as a second TS node",
+    )
 
 
 @router.post("/ts-guess")
@@ -396,6 +401,7 @@ def start_ts_guess(body: TsGuessIn, request: Request, session: DbSession) -> dic
             body.start_member_id,
             body.end_member_id,
             _claude_limit(request, folder),
+            body.correct,
         )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc

@@ -124,6 +124,69 @@ def test_ts_guess_between_two_minima(open_client):
     assert reactant == []  # the ends are not changed
 
 
+def test_forming_bond_follows_the_mode():
+    """T-LOC-37: of the bonds that change, the correction holds the one the saddle's mode
+    stretches most, else the one that changes most between the ends (D239)."""
+    x = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0]])
+    bonds = [
+        {"atoms": [0, 1], "start": 1.5, "saddle": 2.0, "end": 2.8},
+        {"atoms": [0, 2], "start": 2.9, "saddle": 2.0, "end": 1.4},
+    ]
+    along_y = np.zeros((3, 3))
+    along_y[2, 1] = 1.0
+    assert local_worker.forming_bond(bonds, x, along_y)["atoms"] == [0, 2]
+    assert local_worker.forming_bond(bonds, x, None)["atoms"] == [0, 2]  # 1.5 Å against 1.3
+    bonds[0]["end"] = 3.5
+    assert local_worker.forming_bond(bonds, x, None)["atoms"] == [0, 1]
+
+
+@pytest.mark.usefixtures("stub_tools", "stub_mace")
+def test_corrected_ts_guess_is_a_second_node(open_client):
+    """T-LOC-38: a TS guess with the correction (D239; stand-in single points peaking past
+    the saddle): the O–H bond held from the saddle toward the longer end, 0.1 Å apart and not
+    past that end; the highest single point picked with a warning when it is the last frame;
+    imported as a second TS node below the raw one, held at that length, with notes on the
+    single points; the raw guess stays the job's import."""
+    if REAL:
+        pytest.skip("the double-well engine is the tests' own")
+    start_id, end_id = two_ends(open_client)
+    status = open_client.get("/api/local/tools?atoms=3").json()
+    assert status["ts_guess"]["correction_seconds"] > 0
+    job = open_client.post(
+        "/api/local/ts-guess",
+        json={"start_id": start_id, "end_id": end_id, "method": "stub-saddle", "correct": True},
+    ).json()
+    done = wait_for(open_client, job["id"], finished, timeout=300)
+    folder = folder_of(open_client) / "local-jobs" / job["id"]
+    assert done["status"] == "converged", (folder / "worker.err").read_text()
+    found = done["result"]["ts_guess"]["correction"]
+    assert found["bond"] == [0, 1] and found["level"] == "PBE-D3M(BJ)/def2-SVP"
+    values = [f["value"] for f in found["frames"]]
+    end = 2.2 * BOHR
+    assert values[0] == pytest.approx(1.90 * BOHR, abs=0.02)
+    assert all(
+        b - a == pytest.approx(0.1, abs=1e-3) for a, b in zip(values, values[1:], strict=False)
+    )
+    assert values[-1] <= end < values[-1] + 0.1
+    assert found["picked"] == len(values) - 1 and "last frame" in found["warnings"][0]
+    assert "coordinates" not in found
+
+    imported = open_client.post(f"/api/local/jobs/{job['id']}/import").json()["imported"]
+    raw = open_client.get(f"/api/nodes/{imported['node_id']}").json()
+    assert raw["label"] == "TS guess reactant to product" and "PBE" in raw["notes"]
+    node = open_client.get(f"/api/nodes/{imported['corrected_node_id']}").json()
+    assert node["label"] == "TS guess reactant to product, PBE-corrected"
+    assert node["role"] == "transition_state" and node["status"] == "planned"
+    assert node["pos_x"] == pytest.approx(200) and node["pos_y"] == pytest.approx(240)
+    assert "Single points" in node["notes"] and "last frame" in node["notes"]
+    xyz = np.array([[float(v) for v in line.split()[1:4]] for line in node["xyz"].splitlines()[2:]])
+    assert np.linalg.norm(xyz[0] - xyz[1]) == pytest.approx(values[-1], abs=1e-3)
+    calcs = open_client.get(f"/api/nodes/{node['id']}/calculations").json()
+    assert "constrained" in json.dumps(calcs[0])
+    again = open_client.get(f"/api/local/jobs/{job['id']}").json()
+    assert again["imported"]["node_id"] == raw["id"]
+
+
 @pytest.mark.usefixtures("stub_tools", "stub_mace")
 def test_ts_guess_is_refused(open_client, monkeypatch):
     """T-LOC-36: without an edge, with another method, or without MACE installed."""
