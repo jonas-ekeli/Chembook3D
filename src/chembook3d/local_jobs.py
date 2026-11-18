@@ -984,11 +984,12 @@ TS_GUESS_STEPS = {"ends": 2 * 60, "band": 10, "saddle": 60}
 TS_GUESS_REGION = 16
 TS_GUESS_OFFSET = 0.5  # the guess's node sits halfway between its ends (as D115's path)
 # D239: the correction's frames (a held-bond minimum and a single point each), and a single
-# point's seconds for 70 atoms on 4 cores (PBE-D3M(BJ)/def2-SVP, a 73-atom Ru complex: 10 to
-# 20 minutes), growing with the cube of the atoms
+# point's seconds for 70 atoms on 4 cores (PBE-D3M(BJ)/def2-SVP on a 73-atom Ru complex: 1 to 4
+# minutes, the first longest, the rest starting from its orbitals), growing with the cube of the
+# atoms
 CORRECT_FRAMES = 6
 CORRECT_GRADIENTS = 40
-CORRECT_SECONDS = 900.0
+CORRECT_SECONDS = 150.0
 CORRECTED_DY = 140.0  # the corrected guess's node sits below the raw one
 
 

@@ -1540,7 +1540,7 @@ TOOLS: list[ToolSpec] = [
         "the user asks) then holds the forming bond at six lengths 0.1 Å apart from the saddle "
         "toward the separated end, minimizes each with MACE and keeps the one with the highest "
         "PBE-D3M(BJ)/def2-SVP single point as a second TS node (its time is ts_guess's "
-        "correction_seconds, an hour or more).",
+        "correction_seconds, about half an hour for 70 atoms).",
     ),
     T(
         "check_local_core",

@@ -379,7 +379,7 @@ class TsGuessIn(BaseModel):
     correct: bool = Field(
         False,
         description="D239: also correct the saddle along its forming bond with PBE-D3M(BJ)/"
-        "def2-SVP single points (an hour or more for 70 atoms); kept as a second TS node",
+        "def2-SVP single points (about half an hour for 70 atoms); kept as a second TS node",
     )
 
 
