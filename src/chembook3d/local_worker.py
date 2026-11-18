@@ -913,7 +913,7 @@ CORRECT_STEP = 0.1  # Å between the frames along the forming bond
 CORRECT_FRAMES = 6  # the saddle's own length and five more toward the longer end
 CORRECT_FMAX = 0.03  # eV/Å: each frame's minimum with the bond held
 CORRECT_STEPS = 200
-FLAT_KCAL = 1.0  # single points spanning less than this are too flat to pick a maximum from
+FLAT_KCAL = 0.5  # single points spanning less than this are too flat to pick a maximum from
 CORRECT_LEVEL = "PBE-D3M(BJ)/def2-SVP"
 STUB_PEAK = 0.2  # Å past the saddle: where the tests' stand-in single points peak
 
