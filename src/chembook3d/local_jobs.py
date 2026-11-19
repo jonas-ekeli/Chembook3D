@@ -1241,7 +1241,8 @@ def ts_guess_notes(job: dict[str, Any], result: dict[str, Any]) -> str:
             f"Mode check on {len(check.get('region') or [])} atoms around the reacting ones: "
             f"imaginary {text}"
             + (f"; {round(100 * share)} % of the first on the reacting atoms" if share else "")
-            + "."
+            + ". It is kept on this node's calculation (its mode under Vibrations in 3D); a "
+            "Hessian of part of the molecule gives no ZPE or G (D242)."
         )
     lines += [f"Warning: {w}" for w in found.get("warnings") or []]
     if result.get("state") == "not_converged":
@@ -1271,6 +1272,8 @@ def correction_notes(job: dict[str, Any], result: dict[str, Any]) -> str:
         f"{result.get('level') or job.get('level')} one, not for comparison with DFT.",
         "Single points (kcal/mol from the lowest): "
         + ", ".join(f"{f['value']:.2f} Å {f['kcal']:.1f}" for f in found["frames"]),
+        "The mode check is of the uncorrected saddle and stays on its node; this frame has none "
+        "(D242).",
     ]
     lines += [f"Warning: {w}" for w in found.get("warnings") or []]
     return "\n".join(lines)
@@ -1326,6 +1329,8 @@ def _import_ts_guess(
         "constraints": {"distances": [{"atoms": [a, b], "value": value}]},
         "ts_check": None,
         "frequencies": None,
+        # D242: the check was of the raw saddle, not of this frame (one bond held)
+        "ts_guess": {k: v for k, v in result["ts_guess"].items() if k != "mode_check"},
     }
     corrected = path.with_name(CORRECTED)
     _write(corrected, held)

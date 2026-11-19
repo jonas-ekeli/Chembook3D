@@ -11,6 +11,7 @@ import {
   type ThermoModel,
 } from '../api'
 import { errorText, hartree } from '../util'
+import { modeCheckText } from '../localJobs'
 import { BasisSetsDialog } from './BasisSets'
 
 const LEVEL_FIELDS: { key: keyof LevelFields; label: string }[] = [
@@ -276,6 +277,12 @@ export function ResultValues({
           <dd>
             {r.molecular_mass} amu, σ = {r.symmetry_number ?? '—'} ({r.point_group ?? '—'})
           </dd>
+        </>
+      )}
+      {r.mode_check && (
+        <>
+          <dt>Mode check</dt>
+          <dd aria-label="Mode check">{modeCheckText(r.mode_check)}</dd>
         </>
       )}
       {r.frequencies.length > 0 && (

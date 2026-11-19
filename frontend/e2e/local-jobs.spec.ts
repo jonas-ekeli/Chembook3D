@@ -442,6 +442,62 @@ test('a TS guess between two minima is planned from the selection panel', async 
   await expect(page.getByRole('dialog', { name: 'Settings' }).getByLabel('MACE status')).toHaveText('Not installed')
 })
 
+// T-UI-109, D242: a TS guess's calculation keeps the check of its saddle, a Hessian of the reacting
+// region only: its record says so and that no ZPE or G comes from it, and the 3D view animates its
+// mode. The result is written here as the worker writes it (the run is T-LOC-35's).
+const GUESS = {
+  format: 'chembook3d-local-result',
+  program: 'MACE',
+  method: 'mace-omol',
+  level: 'MACE MACE-OMOL-0',
+  state: 'converged',
+  transition: true,
+  charge: 0,
+  multiplicity: 1,
+  elements: ['O', 'H', 'H'],
+  frames: [
+    [
+      [0, 0, 0.1173],
+      [0, 1.4, -0.7],
+      [0, -0.7572, -0.4692],
+    ],
+  ],
+  energies: [-76.3],
+  energy: -76.3,
+  ts_guess: {
+    mode_check: {
+      imaginary: [-202.4],
+      lowest: [-202.4, 310.2, 905.6],
+      region: [0, 1, 2],
+      partial: true,
+      on_reacting: true,
+      mode: [
+        [0, -0.1, 0.05],
+        [0, 0.98, -0.1],
+        [0, 0.02, 0.01],
+      ],
+    },
+  },
+}
+
+test("a TS guess's mode check stays on its calculation", async ({ page }) => {
+  await newInvestigation(page, 'Mode check')
+  await page.getByRole('button', { name: 'Import file…' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Upload a file').setInputFiles({ name: 'ts-guess.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(GUESS, null, 1)) })
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  const inspector = page.getByLabel('Node inspector')
+  await inspector.getByLabel('Calculations').getByRole('button').first().click()
+  await expect(inspector.getByLabel('Mode check')).toHaveText(
+    'MACE MACE-OMOL-0 a Hessian of 3 atoms around the reacting ones, the rest held: one imaginary mode (202i cm⁻¹), on the bonds that change. A check of the guess only, so no ZPE or G comes from it. Its mode is under Vibrations in 3D.',
+  )
+  const modes = inspector.getByLabel('Animate mode')
+  await expect(modes.locator('option')).toHaveText(['No animation', 'Mode 1: 202.4i cm⁻¹'])
+  await modes.selectOption({ index: 1 })
+  await expect(inspector.getByTestId('viewer3d').locator('canvas')).toBeVisible()
+  await expect(inspector.getByRole('alert')).toHaveCount(0)
+})
+
 // T-UI-108, D240: single points on this computer, from the node's menu and for several nodes from
 // the selection panel; each comes back as a single-point calculation on its node.
 test('single points on this computer are added to their nodes', async ({ page }) => {

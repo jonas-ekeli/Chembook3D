@@ -12,7 +12,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
-from pydantic import AfterValidator, BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, object_session
@@ -258,6 +258,26 @@ class LevelOut(BaseModel):
     solvent: str
 
 
+class ModeCheckOut(BaseModel):
+    """D242: a TS guess's check of its saddle, a Hessian over the reacting region only; its
+    mode itself comes from `/calculations/{id}/modes`."""
+
+    level: str | None = None
+    imaginary: list[float] = []  # cm⁻¹, negative
+    lowest: list[float] = []
+    region: list[int] = []  # 0-based atoms
+    partial: bool = True
+    on_reacting: bool | None = None
+    has_mode: bool = False
+
+    @classmethod
+    def of(cls, found: dict[str, Any] | None) -> "ModeCheckOut | None":
+        if not found:
+            return None
+        fields = {k: v for k, v in found.items() if k in cls.model_fields and k != "has_mode"}
+        return cls(**fields, has_mode=bool(found.get("mode")))
+
+
 class ResultOut(BaseModel):
     energy: float | None
     zpe: float | None
@@ -279,6 +299,12 @@ class ResultOut(BaseModel):
     optimization_converged: bool | None
     geometry_count: int
     printed: dict[str, str]
+    mode_check: ModeCheckOut | None = None  # D242
+
+    @field_validator("mode_check", mode="before")
+    @classmethod
+    def _summary(cls, found: Any) -> Any:
+        return ModeCheckOut.of(found) if isinstance(found, dict) else found
 
 
 class QuasiHarmonicOut(BaseModel):
