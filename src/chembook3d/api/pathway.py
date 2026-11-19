@@ -943,6 +943,13 @@ def atom_match(body: AtomMatchIn, session: DbSession):
     return atom_match_out(start, end, result)
 
 
+@router.post("/atom-match/save", response_model=GeometryOut)
+def save_atom_match(body: AtomMatchIn, session: DbSession):
+    """D243: the end saved in the start's numbering, in place or as a new derived node."""
+    node, derived = atom_matching.save_renumbered(session, body.start_id, body.end_id, body.pairs)
+    return GeometryOut(node=_node_out(session, node), derived=derived)
+
+
 @router.post("/overlay", response_model=OverlayOut)
 def overlay(body: OverlayIn, session: DbSession):
     """FR-3D-04, D80: the nodes' geometries placed on the reference's."""

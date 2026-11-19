@@ -463,6 +463,30 @@ def match_nodes(
     return start, end, match(start.geometry, end.geometry, pairs_from(fixed or []))
 
 
+def save_renumbered(
+    session: Session, start_id: str, end_id: str, fixed: list[list[int]] | None = None
+) -> tuple[Node, bool]:
+    """D243: the end node in the start's numbering, at its own coordinates (only the order of its
+    atoms changes). A node with no calculations changes in place (ID-4, its alignment and steric
+    atoms following); one with calculations keeps them and a new node is derived (ID-5). The
+    match is made again from the same pairs, so what is saved is what was reviewed. Returns the
+    node saved and whether it is a new one."""
+    from chembook3d.services import nodes
+
+    start, end, result = match_nodes(session, start_id, end_id, fixed)
+    if result.mapping == list(range(len(result.mapping))):
+        raise RecordError(
+            f"“{end.label or 'Untitled node'}” is already numbered as "
+            f"“{start.label or 'Untitled node'}”: nothing to save"
+        )
+    rows = [list(end.geometry[j]) for j in result.mapping]
+    if nodes.calculation_count(session, end.id) == 0:
+        nodes.edit_in_place(session, end, rows)
+        return end, False
+    label = f"{end.label or 'Untitled node'} (numbered as {start.label or 'Untitled node'})"
+    return nodes.derive(session, end, rows, label=label), True
+
+
 def summary(result: Match) -> dict[str, Any]:
     """The match with 1-based atom numbers, as the API and the job folder (D113) carry it."""
     return {

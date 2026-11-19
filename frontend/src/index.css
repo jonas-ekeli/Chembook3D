@@ -4768,6 +4768,11 @@ pre.basis-text {
 .atom-match-views .viewer {
   height: 380px;
 }
+.atom-match-direction {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+}
 .atom-match-options,
 .atom-match-fixed {
   display: flex;

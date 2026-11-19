@@ -3092,6 +3092,9 @@ export const api = {
   importLocalJob: (id: string) => request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/import`),
   atomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>
     request<AtomMatch>('POST', '/atom-match', { start_id: startId, end_id: endId, pairs }),
+  /** D243: the end saved in the start's numbering, in place or as a new derived node. */
+  saveAtomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>
+    request<{ node: Node; derived: boolean }>('POST', '/atom-match/save', { start_id: startId, end_id: endId, pairs }),
   energyProfiles: () => request<EnergyProfile[]>('GET', '/energy-profiles'),
   createEnergyProfile: (body: { name?: string; paths?: ProfilePath[]; reference_id?: string | null }) =>
     request<EnergyProfile>('POST', '/energy-profiles', body),

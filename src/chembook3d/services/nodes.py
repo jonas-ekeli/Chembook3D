@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from chembook3d import xyz
 from chembook3d.models import (
+    AlignmentSetAtoms,
     Branch,
     Calculation,
     GroupNode,
@@ -19,10 +20,12 @@ from chembook3d.models import (
     ReactionStep,
     Role,
     Status,
+    StericProfile,
+    StericProfileAtoms,
     SubInvestigation,
     TransitionSpecies,
 )
-from chembook3d.services import concentrations, history, transitions
+from chembook3d.services import concentrations, history, sterics, transitions
 
 EDITABLE_FIELDS = (
     "label",
@@ -39,6 +42,9 @@ EDITABLE_FIELDS = (
 # Canvas positions and the saved 3D orientation: how a node is shown, not recorded in history.
 LAYOUT_FIELDS = ("pos_x", "pos_y", "view_rotation")
 DERIVED_NODE_OFFSET = 60.0
+# D243: how far apart two coordinates may be and still be the same atom moved to another line
+# (the xyz text keeps 8 decimals).
+SAME_ATOM = 1e-5
 
 
 class NodeError(ValueError):
@@ -279,19 +285,90 @@ def set_geometry(
     geometry = _geometry_from_atoms(xyz.parse_xyz(xyz_text))
 
     if not new_node and calculation_count(session, node.id) == 0:  # ID-4: edit in place
-        if node.geometry != geometry:
-            history.record(session, "node", node.id, "update", "geometry", node.geometry, geometry)
-            node.geometry = geometry
-            session.flush()
+        edit_in_place(session, node, geometry)
         return GeometryResult(node, derived=False)
 
     return GeometryResult(derive(session, node, geometry), derived=True)
 
 
-def derive(session: Session, node: Node, geometry: list[list[Any]]) -> Node:
+def edit_in_place(session: Session, node: Node, geometry: list[list[Any]]) -> None:
+    """ID-4: new coordinates on a node with no calculations, in the history. When they are the
+    same atoms in another order (D243: renumbered by Match atoms, or that change restored from
+    the history), the node's atoms in alignment sets and steric profiles follow them."""
+    if node.geometry == geometry:
+        return
+    order = reordering(node.geometry, geometry)
+    history.record(session, "node", node.id, "update", "geometry", node.geometry, geometry)
+    if order is None:
+        node.geometry = geometry
+    else:
+        _renumber_atom_lists(session, node, geometry, order)
+    session.flush()
+
+
+def reordering(old: list[list[Any]] | None, new: list[list[Any]]) -> list[int] | None:
+    """D243: for each atom of `new` (0-based) the atom of `old` it is, when `new` is `old`'s
+    atoms in another order (same element, coordinates within SAME_ATOM); otherwise None."""
+    if not old or len(old) != len(new):
+        return None
+    free: dict[str, list[int]] = {}
+    for j, row in enumerate(old):
+        free.setdefault(row[0], []).append(j)
+    order = []
+    for row in new:
+        candidates = free.get(row[0], [])
+        hit = next(
+            (
+                j
+                for j in candidates
+                if all(abs(a - b) <= SAME_ATOM for a, b in zip(old[j][1:4], row[1:4], strict=True))
+            ),
+            None,
+        )
+        if hit is None:
+            return None
+        candidates.remove(hit)
+        order.append(hit)
+    return None if order == list(range(len(order))) else order
+
+
+def _renumber_atom_lists(
+    session: Session, node: Node, geometry: list[list[Any]], order: list[int]
+) -> None:
+    """D243: the node takes `geometry`, its atoms in another order, and its 1-based atom numbers
+    in alignment sets (D80) and steric profiles (D81) move with the atoms. Neither list is in
+    the history (A31, A32). A steric result that was up to date stays so: the same atoms bury
+    the same volume, whatever their numbers."""
+    number = {old + 1: new + 1 for new, old in enumerate(order)}
+
+    def moved(atoms: list[Any]) -> list[Any]:
+        return [number.get(a, a) for a in atoms]
+
+    for entry in session.scalars(
+        select(AlignmentSetAtoms).where(AlignmentSetAtoms.node_id == node.id)
+    ):
+        entry.atoms = moved(entry.atoms)
+    current = []
+    for entry in session.scalars(
+        select(StericProfileAtoms).where(StericProfileAtoms.node_id == node.id)
+    ):
+        profile = session.get(StericProfile, entry.profile_id)
+        if profile is not None and entry.result is not None:
+            if sterics.stale_reason(profile, entry, node) is None:
+                current.append((profile, entry))
+        for field in sterics.ATOM_LISTS:
+            setattr(entry, field, moved(getattr(entry, field)))
+    node.geometry = geometry
+    for profile, entry in current:
+        entry.result_inputs = sterics.inputs(profile, entry, node)
+
+
+def derive(
+    session: Session, node: Node, geometry: list[list[Any]], label: str | None = None
+) -> Node:
     """ID-5: the original keeps its geometry and calculations; the edit becomes a new node."""
     derived = Node(
-        label=f"{node.label} (derived)" if node.label else "derived",
+        label=label or (f"{node.label} (derived)" if node.label else "derived"),
         kind=node.kind,
         role=node.role,
         charge=node.charge,

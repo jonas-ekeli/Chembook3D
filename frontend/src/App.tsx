@@ -2662,6 +2662,15 @@ function App() {
         onSelectivity={() => newSelectivity(multiNodes, multiGroups)}
         onEquilibrium={() => newEquilibrium(multiNodes, multiGroups)}
         onSinglePoint={setSinglePoint}
+        onRenumbered={(node, derived) => {
+          choose({ kind: 'node', id: node.id })
+          reload()
+          setNotice(
+            derived
+              ? `“${nodeName(node)}” is a new node with the matched atom order; the node it came from keeps its calculations.`
+              : `“${nodeName(node)}” now has the matched atom order.`,
+          )
+        }}
         onTsGuess={(job) => {
           localJobs.refresh()
           setNotice(

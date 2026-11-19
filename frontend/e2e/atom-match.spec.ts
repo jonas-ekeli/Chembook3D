@@ -3,7 +3,8 @@ import { expect, test } from '@playwright/test'
 import { newInvestigation, canvasNode } from './helpers.ts'
 
 // T-UI-17, D113: two structures of the same atoms numbered differently are matched, reviewed
-// side by side, and the end is saved in the start's order.
+// side by side, and the end is downloaded in the start's order. T-UI-110, D243: either one can be
+// renumbered, and Save gives it the other's order in the notebook.
 
 // Glycerol, the first conformer of the CREST fixture.
 const GLYCEROL = [
@@ -56,17 +57,24 @@ test('match the atoms of two structures numbered differently', async ({ page }) 
 
   // The end saved in the start's order: the same elements and, turned back, the same atoms.
   const download = page.waitForEvent('download')
-  await dialog.getByRole('button', { name: 'Download renumbered end' }).click()
+  await dialog.getByRole('button', { name: 'Download renumbered' }).click()
   const saved = readFileSync(await (await download).path(), 'utf8').trim().split('\n').slice(2)
   expect(saved.map((line) => line.split(/\s+/)[0])).toEqual(GLYCEROL.map(([e]) => e))
   const first = saved[0].split(/\s+/).slice(1).map(Number)
   expect(first[0]).toBeCloseTo(GLYCEROL[0][1], 3)
   expect(first[2]).toBeCloseTo(GLYCEROL[0][3], 3)
 
-  // Swapping the ends matches the other way round; they already share nothing else.
-  await dialog.getByRole('button', { name: 'Swap ends' }).click()
-  await expect(dialog.getByText('The atoms of “start” are matched to the numbering of “end”.')).toBeVisible()
+  // The other way round: the start renumbered to match the end, and saved in place.
+  await dialog.getByRole('radio', { name: 'Renumber “start” to match “end”' }).check()
+  await expect(dialog.getByText('Saving changes the atom order of “start”, not its coordinates.', { exact: false })).toBeVisible()
   await expect(dialog.getByLabel('Match summary')).toContainText('no bond forms or breaks')
-  await dialog.getByRole('button', { name: 'Close' }).click()
+  await dialog.getByRole('button', { name: 'Save “start” renumbered' }).click()
   await expect(dialog).toHaveCount(0)
+  await expect(page.getByText('“start” now has the matched atom order.')).toBeVisible()
+  const nodes = (await (await page.request.get('/api/nodes')).json()) as { label: string; xyz: string }[]
+  const start = nodes.find((n) => n.label === 'start')!
+  const rows = start.xyz.trim().split('\n').slice(2).map((line) => line.trim().split(/\s+/))
+  expect(rows.map((r) => r[0])).toEqual(reversed.map(([e]) => e))
+  // Its own coordinates: the last glycerol atom comes first now.
+  expect(Number(rows[0][1])).toBeCloseTo(GLYCEROL[13][1], 3)
 })
