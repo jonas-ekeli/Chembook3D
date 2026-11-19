@@ -1,5 +1,5 @@
 """Atom matching between two ends numbered differently (D113, A59; T-MAT-01…04), and saving the
-end renumbered (D242, A176; T-MAT-05)."""
+end renumbered (D243, A176; T-MAT-05)."""
 
 from pathlib import Path
 
@@ -178,7 +178,7 @@ def _rows(client, node_id: str) -> list[list]:
 
 
 def test_reordering_finds_the_same_atoms_in_another_order():
-    # D242: rows read back from 8-decimal xyz text are still the same atoms.
+    # D243: rows read back from 8-decimal xyz text are still the same atoms.
     start = frames(FIXTURES / "sterics" / "3.xyz")[0]
     order = list(reversed(range(len(start))))
     back = xyz.parse_xyz(xyz.format_xyz([xyz.Atom(*start[j]) for j in order]))
@@ -190,7 +190,7 @@ def test_reordering_finds_the_same_atoms_in_another_order():
 
 
 def test_saving_a_renumbered_node_in_place(open_client):
-    # T-MAT-05, D242: a node with no calculations takes the start's numbering at its own
+    # T-MAT-05, D243: a node with no calculations takes the start's numbering at its own
     # coordinates; its alignment and steric atoms follow, an up-to-date steric result stays so,
     # and restoring the old coordinates from the history takes the atoms back.
     start = frames(FIXTURES / "sterics" / "3.xyz")[0]
@@ -240,7 +240,7 @@ def test_saving_a_renumbered_node_in_place(open_client):
 
 
 def test_saving_a_renumbered_node_with_calculations_derives_one(open_client):
-    # T-MAT-05, D242, ID-5: the node and its calculations stay; a new node has the new order.
+    # T-MAT-05, D243, ID-5: the node and its calculations stay; a new node has the new order.
     start = frames(FIXTURES / "crest" / "crest_conformers.xyz")[0]
     end, truth = scrambled(start, seed=3)
     a = node(open_client, label="start", xyz=xyz_text(start))

@@ -816,7 +816,7 @@ TOOLS: list[ToolSpec] = [
         "POST",
         "/api/atom-match/save",
         "Save the end node with its atoms in the start node's numbering, as match_atoms matched "
-        "them with the same pairs (D242): the end keeps its own coordinates, only the order of "
+        "them with the same pairs (D243): the end keeps its own coordinates, only the order of "
         "its atoms changes. An end with no calculations is changed in place (its atoms in "
         "alignment sets and steric profiles follow); one with calculations keeps them and a new "
         "derived node is made (the answer says which, ID-5). Check match_atoms' doubts first.",

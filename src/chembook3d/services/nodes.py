@@ -42,7 +42,7 @@ EDITABLE_FIELDS = (
 # Canvas positions and the saved 3D orientation: how a node is shown, not recorded in history.
 LAYOUT_FIELDS = ("pos_x", "pos_y", "view_rotation")
 DERIVED_NODE_OFFSET = 60.0
-# D242: how far apart two coordinates may be and still be the same atom moved to another line
+# D243: how far apart two coordinates may be and still be the same atom moved to another line
 # (the xyz text keeps 8 decimals).
 SAME_ATOM = 1e-5
 
@@ -293,7 +293,7 @@ def set_geometry(
 
 def edit_in_place(session: Session, node: Node, geometry: list[list[Any]]) -> None:
     """ID-4: new coordinates on a node with no calculations, in the history. When they are the
-    same atoms in another order (D242: renumbered by Match atoms, or that change restored from
+    same atoms in another order (D243: renumbered by Match atoms, or that change restored from
     the history), the node's atoms in alignment sets and steric profiles follow them."""
     if node.geometry == geometry:
         return
@@ -307,7 +307,7 @@ def edit_in_place(session: Session, node: Node, geometry: list[list[Any]]) -> No
 
 
 def reordering(old: list[list[Any]] | None, new: list[list[Any]]) -> list[int] | None:
-    """D242: for each atom of `new` (0-based) the atom of `old` it is, when `new` is `old`'s
+    """D243: for each atom of `new` (0-based) the atom of `old` it is, when `new` is `old`'s
     atoms in another order (same element, coordinates within SAME_ATOM); otherwise None."""
     if not old or len(old) != len(new):
         return None
@@ -335,7 +335,7 @@ def reordering(old: list[list[Any]] | None, new: list[list[Any]]) -> list[int] |
 def _renumber_atom_lists(
     session: Session, node: Node, geometry: list[list[Any]], order: list[int]
 ) -> None:
-    """D242: the node takes `geometry`, its atoms in another order, and its 1-based atom numbers
+    """D243: the node takes `geometry`, its atoms in another order, and its 1-based atom numbers
     in alignment sets (D80) and steric profiles (D81) move with the atoms. Neither list is in
     the history (A31, A32). A steric result that was up to date stays so: the same atoms bury
     the same volume, whatever their numbers."""

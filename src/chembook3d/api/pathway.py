@@ -747,24 +747,31 @@ def delete_group(group_id: str, session: DbSession) -> dict[str, int]:
 
 @router.get("/calculations/{calculation_id}/modes", response_model=ModesOut)
 def calculation_modes(calculation_id: str, session: DbSession):
-    """Normal modes for animation, on the geometry the frequencies were computed for."""
+    """Normal modes for animation, on the geometry the frequencies were computed for. D242: a
+    calculation without frequencies whose mode check (a TS guess's) has a mode gives that one
+    mode, with the check's first imaginary wavenumber."""
     calculation = session.get(Calculation, calculation_id)
     if calculation is None:
         raise HTTPException(404, "Calculation not found")
     result = calculation.result
-    if result is None or not result.frequencies or not result.normal_modes:
+    if result is not None and not result.frequencies and (result.mode_check or {}).get("mode"):
+        frequencies = [float(result.mode_check["imaginary"][0])]
+        modes = [result.mode_check["mode"]]
+    elif result is None or not result.frequencies or not result.normal_modes:
         raise HTTPException(404, "This calculation has no normal modes")
+    else:
+        frequencies = [float(f) for f in result.frequencies]
+        modes = result.normal_modes
     rows = calculation.geometry or calculation.node.geometry
-    if not rows or len(result.normal_modes[0]) != len(rows):
+    if not rows or len(modes[0]) != len(rows):
         raise HTTPException(422, "The normal modes do not match the geometry")
     atoms = [xyz.Atom(e, x, y, z) for e, x, y, z in rows]
-    frequencies = [float(f) for f in result.frequencies]
     order = sorted(range(len(frequencies)), key=lambda i: (frequencies[i] >= 0, i))
     return ModesOut(
         xyz=xyz.format_xyz(atoms, comment=calculation.node.label),
         frequencies=frequencies,
         order=order,
-        modes=result.normal_modes,
+        modes=modes,
     )
 
 
@@ -938,7 +945,7 @@ def atom_match(body: AtomMatchIn, session: DbSession):
 
 @router.post("/atom-match/save", response_model=GeometryOut)
 def save_atom_match(body: AtomMatchIn, session: DbSession):
-    """D242: the end saved in the start's numbering, in place or as a new derived node."""
+    """D243: the end saved in the start's numbering, in place or as a new derived node."""
     node, derived = atom_matching.save_renumbered(session, body.start_id, body.end_id, body.pairs)
     return GeometryOut(node=_node_out(session, node), derived=derived)
 

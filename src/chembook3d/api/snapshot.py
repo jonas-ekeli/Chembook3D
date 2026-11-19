@@ -169,7 +169,8 @@ def snapshot_data(request: Request, session: Session, body: SnapshotIn) -> dict[
         if ordered:
             calculations[record.id] = [_calculation(request, c) for c in ordered]
         for c in ordered:
-            if c.type != CalculationType.FREQUENCY:
+            checked = c.result is not None and (c.result.mode_check or {}).get("mode")
+            if c.type != CalculationType.FREQUENCY and not checked:  # D242: a TS guess's mode
                 continue
             try:
                 out = pathway_api.calculation_modes(c.id, session)

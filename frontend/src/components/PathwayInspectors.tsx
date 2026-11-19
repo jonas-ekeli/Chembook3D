@@ -1122,7 +1122,7 @@ export function SelectionInspector({
   groups: Group[]
   canvas: Canvas
   onChanged: () => void
-  /** D242: a node saved in another's atom numbering by Match atoms, and whether it is new */
+  /** D243: a node saved in another's atom numbering by Match atoms, and whether it is new */
   onRenumbered?: (node: Node, derived: boolean) => void
   /** D238: a TS guess started on this computer */
   onTsGuess?: (job: LocalJob) => void

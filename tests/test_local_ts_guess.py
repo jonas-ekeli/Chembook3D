@@ -122,6 +122,23 @@ def test_ts_guess_between_two_minima(open_client):
     assert calcs and "stub-saddle" in json.dumps(calcs[0])
     reactant = open_client.get(f"/api/nodes/{start_id}/calculations").json()
     assert reactant == []  # the ends are not changed
+    assert_mode_check_kept(open_client, calcs, found["mode_check"])
+
+
+def assert_mode_check_kept(client, calcs, check):
+    """T-LOC-43: the saddle's check is on the TS guess's calculation (D242): its imaginary
+    wavenumbers and region, its mode to animate, and no frequencies, so no frequency job, ZPE
+    or G comes from it."""
+    assert len(calcs) == 1 and calcs[0]["type"] != "frequency"
+    result = calcs[0]["result"]
+    assert result["frequencies"] == [] and result["imaginary_count"] is None
+    assert result["zpe"] is None and result["g"] is None
+    found = result["mode_check"]
+    assert found["imaginary"] == check["imaginary"] and found["region"] == check["region"]
+    assert found["has_mode"] and found["on_reacting"] is True and "mode" not in found
+    modes = client.get(f"/api/calculations/{calcs[0]['id']}/modes").json()
+    assert modes["frequencies"] == [check["imaginary"][0]] and modes["order"] == [0]
+    assert modes["modes"] == [check["mode"]]
 
 
 def test_forming_bond_follows_the_mode():
@@ -183,6 +200,10 @@ def test_corrected_ts_guess_is_a_second_node(open_client):
     assert np.linalg.norm(xyz[0] - xyz[1]) == pytest.approx(values[-1], abs=1e-3)
     calcs = open_client.get(f"/api/nodes/{node['id']}/calculations").json()
     assert "constrained" in json.dumps(calcs[0])
+    # D242: the check stays with the raw saddle; the held frame has none
+    assert calcs[0]["result"]["mode_check"] is None and "mode check" in node["notes"]
+    raw_calcs = open_client.get(f"/api/nodes/{raw['id']}/calculations").json()
+    assert raw_calcs[0]["result"]["mode_check"]["imaginary"]
     again = open_client.get(f"/api/local/jobs/{job['id']}").json()
     assert again["imported"]["node_id"] == raw["id"]
 

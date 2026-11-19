@@ -2,6 +2,7 @@
 `npm run build`; here a small stand-in page with the same marks takes the data, and the UI
 test frontend/e2e/snapshot.spec.ts opens the real one from disk (T-SHARE-01)."""
 
+import json
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -223,3 +224,41 @@ def test_page_and_file_name():
     name = snapshot.file_name('Ru: "CAAC"/cycle\' α?', when)
     assert name == "Ru_ _CAAC__cycle' α_ read-only 2026-09-30.html"
     assert snapshot.file_name("...", when) == "investigation read-only 2026-09-30.html"
+
+
+def test_copy_carries_a_ts_guess_mode(open_client, page, tmp_path):
+    """T-LOC-43 (D242): a TS guess's mode check is in the copy as its calculation's one mode."""
+    check = {
+        "imaginary": [-202.4],
+        "lowest": [-202.4, 310.2],
+        "region": [0, 1, 2],
+        "partial": True,
+        "on_reacting": True,
+        "mode": [[0.0, -0.1, 0.05], [0.0, 0.98, -0.1], [0.0, 0.02, 0.01]],
+    }
+    result = {
+        "format": "chembook3d-local-result",
+        "program": "MACE",
+        "method": "mace-omol",
+        "level": "MACE MACE-OMOL-0",
+        "state": "converged",
+        "transition": True,
+        "charge": 0,
+        "multiplicity": 1,
+        "elements": ["O", "H", "H"],
+        "frames": [[[0, 0, 0.1173], [0, 1.4, -0.7], [0, -0.7572, -0.4692]]],
+        "energies": [-76.3],
+        "energy": -76.3,
+        "ts_guess": {"mode_check": check},
+    }
+    source = tmp_path / "ts-guess.json"
+    source.write_text(json.dumps(result, indent=1), encoding="utf-8")
+    response = open_client.post("/api/imports/from-path", json={"path": str(source)})
+    assert response.status_code == 200, response.text
+    plan = response.json()
+    node_id = commit(open_client, plan, **named(plan))["node_id"]
+    calc = open_client.get(f"/api/nodes/{node_id}/calculations").json()[0]
+    assert calc["result"]["mode_check"]["has_mode"] and calc["result"]["frequencies"] == []
+    modes = data_of(export(open_client))["modes"][calc["id"]]
+    assert modes["frequencies"] == [-202.4] and modes["order"] == [0]
+    assert modes["modes"][0][1] == [0.0, 0.98, -0.1]

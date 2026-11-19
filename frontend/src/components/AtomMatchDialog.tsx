@@ -31,7 +31,7 @@ export function AtomMatchReview({
   match: AtomMatch
   startName: string
   endName: string
-  /** The two views' headings, when not "Start" and "End" (D242's standalone window). */
+  /** The two views' headings, when not "Start" and "End" (D243's standalone window). */
   titles?: [string, string]
   /** The pairs to keep, [start atom, end atom], 1-based. */
   onFix: (pairs: [number, number][]) => void
@@ -153,7 +153,7 @@ export function AtomMatchReview({
 }
 
 /** D113, A59: match the atoms of two selected structures, review the match side by side and fix
- * pairs by hand. D242, A176: which one is renumbered is chosen by name; Save gives it the other's
+ * pairs by hand. D243, A176: which one is renumbered is chosen by name; Save gives it the other's
  * numbering at its own coordinates (in place without calculations, else as a new derived node,
  * ID-4, ID-5), and the download gives it placed on the other. */
 export function AtomMatchDialog({
@@ -163,7 +163,7 @@ export function AtomMatchDialog({
 }: {
   nodes: [Node, Node]
   onClose: () => void
-  /** D242: the node saved in the new numbering, and whether it is a new node. */
+  /** D243: the node saved in the new numbering, and whether it is a new node. */
   onSaved?: (node: Node, derived: boolean) => void
 }) {
   // The first keeps its numbering (the reference); the second is renumbered.
@@ -173,7 +173,7 @@ export function AtomMatchDialog({
   const [answer, setAnswer] = useState<{ key: string; match: AtomMatch | null; error: string | null } | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  // A doubtful match is saved by a second click (D242).
+  // A doubtful match is saved by a second click (D243).
   const [confirming, setConfirming] = useState(false)
   const key = JSON.stringify([start.id, end.id, pairs])
   const busy = answer?.key !== key

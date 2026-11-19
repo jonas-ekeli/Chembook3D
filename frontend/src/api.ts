@@ -1486,6 +1486,18 @@ export type CalculationResult = {
   optimization_converged: boolean | null
   geometry_count: number
   printed: Record<string, string>
+  /** D242: a TS guess's check of its saddle, a Hessian over the reacting region only (no ZPE or G). */
+  mode_check?: SavedModeCheck | null
+}
+
+export type SavedModeCheck = {
+  level: string | null
+  imaginary: number[]
+  lowest: number[]
+  region: number[]
+  partial: boolean
+  on_reacting: boolean | null
+  has_mode: boolean
 }
 
 export type Calculation = {
@@ -3080,7 +3092,7 @@ export const api = {
   importLocalJob: (id: string) => request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/import`),
   atomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>
     request<AtomMatch>('POST', '/atom-match', { start_id: startId, end_id: endId, pairs }),
-  /** D242: the end saved in the start's numbering, in place or as a new derived node. */
+  /** D243: the end saved in the start's numbering, in place or as a new derived node. */
   saveAtomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>
     request<{ node: Node; derived: boolean }>('POST', '/atom-match/save', { start_id: startId, end_id: endId, pairs }),
   energyProfiles: () => request<EnergyProfile[]>('GET', '/energy-profiles'),

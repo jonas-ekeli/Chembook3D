@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 import { newInvestigation, canvasNode } from './helpers.ts'
 
 // T-UI-17, D113: two structures of the same atoms numbered differently are matched, reviewed
-// side by side, and the end is downloaded in the start's order. T-UI-109, D242: either one can be
+// side by side, and the end is downloaded in the start's order. T-UI-110, D243: either one can be
 // renumbered, and Save gives it the other's order in the notebook.
 
 // Glycerol, the first conformer of the CREST fixture.

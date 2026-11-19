@@ -1944,6 +1944,7 @@ def _create_calculation(
         reduced_masses=step.reduced_masses,
         normal_modes=step.normal_modes,
         imaginary_count=step.imaginary_count if step.frequencies else None,
+        mode_check=step.mode_check,  # D242
         optimization_converged=step.optimization_converged,
         geometry_count=len(step.geometries),
         # D153: which printed total the energy is, for a correlated method.

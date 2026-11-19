@@ -466,7 +466,7 @@ def match_nodes(
 def save_renumbered(
     session: Session, start_id: str, end_id: str, fixed: list[list[int]] | None = None
 ) -> tuple[Node, bool]:
-    """D242: the end node in the start's numbering, at its own coordinates (only the order of its
+    """D243: the end node in the start's numbering, at its own coordinates (only the order of its
     atoms changes). A node with no calculations changes in place (ID-4, its alignment and steric
     atoms following); one with calculations keeps them and a new node is derived (ID-5). The
     match is made again from the same pairs, so what is saved is what was reviewed. Returns the
