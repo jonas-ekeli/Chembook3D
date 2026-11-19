@@ -33,6 +33,10 @@ D240: a single point's result (`single_point`: the level as method, dispersion a
 as one single-point step at the job's structure, so its import onto the node gives it the
 node's optimization as its geometry level (FR-CALC-04), e.g. `Psi4 PBE-D3M(BJ)/def2-TZVP // MACE
 MACE-OMOL-0`.
+
+D242: a TS guess's result (D238) carries the check of its saddle, a Hessian over the reacting
+region only. It is read onto the optimization step as `mode_check`, never as a frequency step:
+a partial Hessian gives no ZPE or G.
 """
 
 import json
@@ -96,6 +100,28 @@ def rotor(atoms: list[Atom]) -> tuple[float, list[float]]:
     if moments[0] < LINEAR_INERTIA:
         moments = moments[1:2]
     return float(masses.sum()), [round(ROTATIONAL / m, 5) for m in moments if m > 0]
+
+
+def mode_check_of(data: dict, atoms: int) -> dict | None:
+    """D242: a TS guess's check of its saddle (D238 (b)), a Hessian over the reacting atoms and
+    their neighbours with the rest held: its imaginary wavenumbers, the lowest ones, the region,
+    whether the first mode is on the bonds that change, and that mode to animate when it has
+    one entry per atom. None for any other result."""
+    check = (data.get("ts_guess") or {}).get("mode_check")
+    if not isinstance(check, dict) or not isinstance(check.get("imaginary"), list):
+        return None
+    out: dict = {
+        "level": data.get("level") or data.get("method"),
+        "imaginary": [float(f) for f in check["imaginary"]],
+        "lowest": [float(f) for f in check.get("lowest") or []],
+        "region": [int(a) for a in check.get("region") or []],
+        "partial": bool(check.get("partial", True)),
+        "on_reacting": check.get("on_reacting"),
+    }
+    mode = check.get("mode")
+    if out["imaginary"] and isinstance(mode, list) and len(mode) == atoms:
+        out["mode"] = [[float(v) for v in atom] for atom in mode]
+    return out
 
 
 def frequency_step(data: dict, final: list[Atom], index: int) -> ParsedStep:
@@ -316,6 +342,7 @@ def parse_data(data: object) -> ParsedFile:
     step.termination = "normal" if state in ("converged", "not_converged") else "abnormal"
     for description in constraints_of(data.get("constraints")):
         add_constraint(step, description)
+    step.mode_check = mode_check_of(data, len(elements))
     missing = []
     if not geometries:
         missing.append("geometry")

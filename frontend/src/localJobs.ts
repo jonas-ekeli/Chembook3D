@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, type LocalConstraints, type LocalJob, type LocalScan } from './api'
+import { api, type LocalConstraints, type LocalJob, type LocalScan, type SavedModeCheck } from './api'
 import { measure, parseAtomList, type Atom } from './chem'
 import { errorText } from './util'
 
@@ -296,4 +296,14 @@ export function tsCheckText(job: LocalJob): string | null {
     return `${head}, moving atoms ${atoms}.`
   }
   return end.on_reacting ? `${head}, on the reacting atoms.` : `${head}, but its mode is mostly away from the reacting atoms.`
+}
+
+/** D242: a TS guess's check of its saddle, in a sentence. */
+export function modeCheckText(check: SavedModeCheck): string {
+  const where = check.partial ? `a Hessian of ${check.region.length} atoms around the reacting ones, the rest held` : 'a Hessian of the whole molecule'
+  const n = check.imaginary.length
+  const found = n === 0 ? 'no imaginary mode' : `${n === 1 ? 'one imaginary mode' : `${n} imaginary modes`} (${check.imaginary.map((f) => `${Math.abs(f).toFixed(0)}i`).join(', ')} cm⁻¹)`
+  const on = n === 0 || check.on_reacting === null ? '' : check.on_reacting ? ', on the bonds that change' : ', not on the bonds that change'
+  const show = check.has_mode ? ' Its mode is under Vibrations in 3D.' : ''
+  return `${check.level ?? 'Local'} ${where}: ${found}${on}. A check of the guess only, so no ZPE or G comes from it.${show}`
 }

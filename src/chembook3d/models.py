@@ -350,6 +350,11 @@ class CalculationResult(Base):
         default=list, deferred=True
     )  # [mode][atom][xyz]
     imaginary_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    # D242: a TS guess's check of its saddle, a Hessian over the reacting region only: its
+    # imaginary wavenumbers (cm⁻¹, negative), the region (0-based atoms), the level and the
+    # first imaginary mode [atom][xyz] (zero outside the region). Kept apart from `frequencies`
+    # so it never gives a ZPE or G and never counts as a frequency job (EN-4).
+    mode_check: Mapped[dict[str, Any] | None] = mapped_column(default=None)
     optimization_converged: Mapped[bool | None] = mapped_column(default=None)
     geometry_count: Mapped[int] = mapped_column(Integer, default=0)
     printed: Mapped[dict[str, Any]] = mapped_column(default=dict)

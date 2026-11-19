@@ -152,6 +152,9 @@ class ParsedStep:
     reduced_masses: list[float] = field(default_factory=list)
     normal_modes: list[list[list[float]]] = field(default_factory=list)  # [mode][atom][xyz]
     thermo: dict[str, Any] = field(default_factory=dict)
+    # D242: a local TS guess's check of its saddle over the reacting region (see
+    # CalculationResult.mode_check); None for any other step.
+    mode_check: dict[str, Any] | None = None
     printed: dict[str, str] = field(default_factory=dict)  # thermochemistry lines verbatim
     missing: list[str] = field(default_factory=list)
     # Filled in by carrying the basis forward (CHKBASIS reads it from the checkpoint).

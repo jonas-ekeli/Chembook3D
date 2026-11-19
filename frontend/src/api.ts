@@ -1486,6 +1486,18 @@ export type CalculationResult = {
   optimization_converged: boolean | null
   geometry_count: number
   printed: Record<string, string>
+  /** D242: a TS guess's check of its saddle, a Hessian over the reacting region only (no ZPE or G). */
+  mode_check?: SavedModeCheck | null
+}
+
+export type SavedModeCheck = {
+  level: string | null
+  imaginary: number[]
+  lowest: number[]
+  region: number[]
+  partial: boolean
+  on_reacting: boolean | null
+  has_mode: boolean
 }
 
 export type Calculation = {

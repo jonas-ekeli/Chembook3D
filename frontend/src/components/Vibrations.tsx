@@ -3,7 +3,7 @@ import { api, type Calculation, type Modes } from '../api'
 import { errorText, withDisplacements } from '../util'
 
 /** Pick a vibrational mode of one of the node's frequency calculations; imaginary modes are
- * listed first (FR-3D-03). */
+ * listed first (FR-3D-03). D242: a TS guess's calculation offers its mode check's mode. */
 export function Vibrations({
   nodeId,
   refreshKey,
@@ -22,7 +22,9 @@ export function Vibrations({
   useEffect(() => {
     api.calculations(nodeId).then(
       (all) => {
-        const found = all.filter((c) => c.type === 'frequency' && c.result && c.result.frequencies.length > 0)
+        const found = all.filter(
+          (c) => (c.type === 'frequency' && c.result && c.result.frequencies.length > 0) || c.result?.mode_check?.has_mode,
+        )
         setFrequencyCalcs(found)
         setCalcId(found.length ? found[found.length - 1].id : '')
       },
@@ -48,6 +50,7 @@ export function Vibrations({
           {frequencyCalcs.map((c) => (
             <option key={c.id} value={c.id}>
               {c.composite_label}
+              {c.type !== 'frequency' && ', mode check'}
             </option>
           ))}
         </select>
