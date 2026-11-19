@@ -131,11 +131,12 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 - The header carries an ASCII `filename` and the real name in `filename*`.
 - `tests/fixtures/file-names.json` holds shared examples (text and the expected name), read by both `tests/test_downloads.py` and `frontend/tests/util.test.mjs`, so the two copies of the rule cannot drift apart. Add a case there, not to one side only.
 
-## Atom matching (D113, A59)
+## Atom matching (D113, A59, D242, A176)
 
 - `services/atom_matching.py` matches the end's atoms to the start's numbering: bond graphs by the 3D view's rule, unique-surroundings anchors, growth bond by bond, Hungarian pairing by position for the rest, several starting orientations, handedness of centres; scipy.
 - `POST /api/atom-match` in `api/pathway.py` (MCP read tool `match_atoms`), nothing stored.
-- `components/AtomMatchDialog.tsx` is the side-by-side review (`AtomMatchReview`, hand-fixed pairs), opened by the selection inspector's "Match atoms…". `Viewer3D`'s `marks` draws its numbers and dashed bond changes.
+- Saving (D242, A176): `POST /api/atom-match/save` (MCP write tool `renumber_atoms`) is `atom_matching.save_renumbered`: the end's own rows in the match's order, through `nodes.edit_in_place` (no calculations) or `nodes.derive` with the label “end (numbered as start)”. `nodes.edit_in_place` (also every in-place `set_geometry`, so Restore old value too) uses `nodes.reordering` to spot the same atoms in another order and `_renumber_atom_lists` to move the node's `AlignmentSetAtoms` and `StericProfileAtoms` numbers, keeping a current steric result current (`sterics.inputs`).
+- `components/AtomMatchDialog.tsx` is the side-by-side review (`AtomMatchReview`, hand-fixed pairs, `titles` for the views' headings) and the window (`AtomMatchDialog`: the direction radios, Save with "Save anyway" for doubts, the download), opened by the selection inspector's "Match atoms…" (`onRenumbered` in App selects the saved node). `Viewer3D`'s `marks` draws its numbers and dashed bond changes.
 
 ## Pathway structure (D53, D66, D76, D88, D89, D192)
 

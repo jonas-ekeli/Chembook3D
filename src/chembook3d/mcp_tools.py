@@ -811,6 +811,18 @@ TOOLS: list[ToolSpec] = [
         exclude=("xyz", "kind", "view_rotation", "canvas_id", "build_id"),
     ),
     T(
+        "renumber_atoms",
+        "write",
+        "POST",
+        "/api/atom-match/save",
+        "Save the end node with its atoms in the start node's numbering, as match_atoms matched "
+        "them with the same pairs (D242): the end keeps its own coordinates, only the order of "
+        "its atoms changes. An end with no calculations is changed in place (its atoms in "
+        "alignment sets and steric profiles follow); one with calculations keeps them and a new "
+        "derived node is made (the answer says which, ID-5). Check match_atoms' doubts first.",
+        help={"pairs": "Pairs fixed by hand, [start atom, end atom], 1-based, as for match_atoms."},
+    ),
+    T(
         "set_coordinates",
         "write",
         "PUT",

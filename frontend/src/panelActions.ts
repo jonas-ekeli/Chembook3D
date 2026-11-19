@@ -82,7 +82,7 @@ export function selectionActions(nodes: Node[], groups: Group[], canvas: Canvas)
       key: 'match',
       label: 'Match atoms…',
       disabled: nodes.length !== 2 || groups.length > 0 || nodes.some((n) => !n.xyz),
-      title: "Match the second structure's atoms to the first one's numbering (D113)",
+      title: "Match one structure's atoms to the other's numbering, review it and save it renumbered (D113, D242)",
     },
     {
       key: 'scan-path',

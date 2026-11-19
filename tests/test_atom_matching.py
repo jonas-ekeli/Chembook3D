@@ -1,4 +1,5 @@
-"""Atom matching between two ends numbered differently (D113, A59; T-MAT-01…04)."""
+"""Atom matching between two ends numbered differently (D113, A59; T-MAT-01…04), and saving the
+end renumbered (D242, A176; T-MAT-05)."""
 
 from pathlib import Path
 
@@ -6,10 +7,11 @@ import numpy as np
 import pytest
 
 from chembook3d import xyz
-from chembook3d.services import atom_matching
+from chembook3d.models import Calculation
+from chembook3d.services import atom_matching, nodes
 from chembook3d.services.records import RecordError
 from tests.test_overlay import xyz_text
-from tests.test_pathway import node
+from tests.test_pathway import get, history, node, post
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -168,3 +170,95 @@ def test_atom_match_route(open_client):
     empty = node(open_client, label="empty")
     refused = open_client.post("/api/atom-match", json={"start_id": a["id"], "end_id": empty["id"]})
     assert refused.status_code == 422 and "no coordinates" in refused.text
+
+
+def _rows(client, node_id: str) -> list[list]:
+    text = get(client, f"/nodes/{node_id}")["xyz"]
+    return [[a.element, a.x, a.y, a.z] for a in xyz.parse_xyz(text)]
+
+
+def test_reordering_finds_the_same_atoms_in_another_order():
+    # D242: rows read back from 8-decimal xyz text are still the same atoms.
+    start = frames(FIXTURES / "sterics" / "3.xyz")[0]
+    order = list(reversed(range(len(start))))
+    back = xyz.parse_xyz(xyz.format_xyz([xyz.Atom(*start[j]) for j in order]))
+    assert nodes.reordering(start, [[a.element, a.x, a.y, a.z] for a in back]) == order
+    assert nodes.reordering(start, start) is None  # the same order is no reordering
+    moved = [list(r) for r in start]
+    moved[0][1] += 0.01
+    assert nodes.reordering(start, moved) is None  # an atom moved: an edit, not a renumbering
+
+
+def test_saving_a_renumbered_node_in_place(open_client):
+    # T-MAT-05, D242: a node with no calculations takes the start's numbering at its own
+    # coordinates; its alignment and steric atoms follow, an up-to-date steric result stays so,
+    # and restoring the old coordinates from the history takes the atoms back.
+    start = frames(FIXTURES / "sterics" / "3.xyz")[0]
+    end, truth = scrambled(start, seed=5)
+    a = node(open_client, label="start", xyz=xyz_text(start))
+    b = node(open_client, label="end", xyz=xyz_text(end))
+    first = [truth[i] + 1 for i in range(3)]  # b's numbers of the start's atoms 1, 2 and 3
+    aligned = post(open_client, "/alignment-sets", {"name": "core", "atoms": {b["id"]: first}})
+    steric = post(
+        open_client,
+        "/steric-profiles",
+        {"name": "pocket", "atoms": {b["id"]: {"centre": [truth[0] + 1], "excluded": first[1:]}}},
+    )
+    (before,) = post(
+        open_client,
+        f"/steric-profiles/{steric['id']}/compute",
+        {"node_ids": [b["id"]]},
+        status=200,
+    )
+    old_xyz = get(open_client, f"/nodes/{b['id']}")["xyz"]
+
+    saved = post(
+        open_client, "/atom-match/save", {"start_id": a["id"], "end_id": b["id"]}, status=200
+    )
+    assert saved["derived"] is False and saved["node"]["id"] == b["id"]
+    rows = _rows(open_client, b["id"])
+    assert [r[0] for r in rows] == [r[0] for r in start]
+    assert np.allclose([r[1:] for r in rows], [end[j][1:] for j in truth], atol=1e-6)
+    assert get(open_client, "/alignment-sets")[0]["atoms"][b["id"]] == [1, 2, 3]
+    (profile,) = get(open_client, "/steric-profiles")
+    assert profile["atoms"][b["id"]]["centre"] == [1]
+    assert profile["atoms"][b["id"]]["excluded"] == [2, 3]
+    result = profile["results"][b["id"]]
+    assert result["stale"] is None
+    assert result["values"]["buried_percent"] == before["values"]["buried_percent"]
+    (entry,) = [e for e in history(open_client, b["id"]) if e["field"] == "geometry"][:1]
+    assert entry["action"] == "update"
+
+    again = open_client.post("/api/atom-match/save", json={"start_id": a["id"], "end_id": b["id"]})
+    assert again.status_code == 422 and "already numbered" in again.text
+
+    # "Restore old value" in the history puts the old order back, and the atoms with it.
+    restored = open_client.put(f"/api/nodes/{b['id']}/geometry", json={"xyz": old_xyz})
+    assert restored.status_code == 200 and restored.json()["derived"] is False
+    assert get(open_client, "/alignment-sets")[0]["atoms"][b["id"]] == first
+    assert aligned["id"] == get(open_client, "/alignment-sets")[0]["id"]
+
+
+def test_saving_a_renumbered_node_with_calculations_derives_one(open_client):
+    # T-MAT-05, D242, ID-5: the node and its calculations stay; a new node has the new order.
+    start = frames(FIXTURES / "crest" / "crest_conformers.xyz")[0]
+    end, truth = scrambled(start, seed=3)
+    a = node(open_client, label="start", xyz=xyz_text(start))
+    b = node(open_client, label="end", xyz=xyz_text(end))
+    with open_client.app.state.investigation.sessions.begin() as session:
+        session.add(Calculation(node_id=b["id"], type="single_point", program="Gaussian"))
+    pairs = [[1, truth[0] + 1]]
+    saved = post(
+        open_client,
+        "/atom-match/save",
+        {"start_id": a["id"], "end_id": b["id"], "pairs": pairs},
+        status=200,
+    )
+    made = saved["node"]
+    assert saved["derived"] is True and made["id"] != b["id"]
+    assert made["label"] == "end (numbered as start)"
+    assert made["derived_from_id"] == b["id"] and made["status"] == "planned"
+    assert [r[0] for r in _rows(open_client, made["id"])] == [r[0] for r in start]
+    assert np.allclose(
+        [r[1:] for r in _rows(open_client, b["id"])], [r[1:] for r in end], atol=1e-6
+    )

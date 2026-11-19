@@ -139,7 +139,10 @@ Selecting a node shows its structure in the inspector (Space opens it larger). T
 measures distances, angles and dihedrals, plays an optimization, scan or IRC step by step,
 animates normal modes, and can be popped out into its own window. **Overlay in 3D** on a selection of
 2 to 12 nodes aligns them in one view; **Save as new set…** keeps the alignment. **Match atoms…**
-on two selected nodes finds which atom in one is which atom in the other.
+on two selected nodes finds which atom in one is which atom in the other. Choose which one is
+renumbered to match the other, check the match side by side (click an atom in each view to fix a
+pair), then **Save** it: a node without calculations takes the new atom order in place, and one
+with calculations stays as it is while a new node gets the new order.
 
 **Editing a structure.** Coordinates can be edited as text, copied (**Copy xyz**) or saved
 (**Save .xyz**). **Edit structure in 3D…** opens the structure editor: change distances, angles

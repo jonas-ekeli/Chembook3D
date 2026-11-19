@@ -1115,12 +1115,15 @@ export function SelectionInspector({
   onTsGuess,
   onSinglePoint,
   onSettings,
+  onRenumbered,
   asked,
 }: {
   nodes: Node[]
   groups: Group[]
   canvas: Canvas
   onChanged: () => void
+  /** D242: a node saved in another's atom numbering by Match atoms, and whether it is new */
+  onRenumbered?: (node: Node, derived: boolean) => void
   /** D238: a TS guess started on this computer */
   onTsGuess?: (job: LocalJob) => void
   /** D240: single points of these nodes on this computer */
@@ -1282,7 +1285,9 @@ export function SelectionInspector({
           }
         />
       )}
-      {matching && nodes.length === 2 && <AtomMatchDialog nodes={[nodes[0], nodes[1]]} onClose={() => setMatching(false)} />}
+      {matching && nodes.length === 2 && (
+        <AtomMatchDialog nodes={[nodes[0], nodes[1]]} onClose={() => setMatching(false)} onSaved={onRenumbered} />
+      )}
       {sterics && (
         <CompareStericsDialog nodes={nodes.filter((n) => n.xyz)} title={describeSelection(nodes, [])} onClose={() => setSterics(false)} />
       )}
