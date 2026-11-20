@@ -633,7 +633,11 @@ SADDLE_FMAX = 0.01  # eV/Å: the saddle point
 SADDLE_STEPS = 300
 HUMP_KCAL = 1.0  # a second maximum of the band counts when it stands this far above its valleys
 WAVENUMBER = 5140.4872  # cm-1 per sqrt(Hartree / (Bohr² amu))
-SPURIOUS_CM = 50.0  # a smaller imaginary wavenumber is noise of a partial Hessian, not a mode
+# D244: a smaller imaginary wavenumber is noise of a partial Hessian, not a mode. It was 50; a
+# Ru=C rotation TS (DFT -36 cm-1) has a real MACE mode of -16 cm-1, and five Ru saddles checked
+# with no cut-off showed no spurious mode.
+SPURIOUS_CM = 10.0
+REGION_BONDS = 2  # D244: the mode check's region, in bonds out from the reacting atoms
 BOND_SCALE = 1.25  # bonded: closer than this times the sum of covalent radii
 
 
@@ -685,6 +689,17 @@ def bonded(symbols, coords) -> list[tuple[int, int]]:
             if np.linalg.norm(x[i] - x[j]) < BOND_SCALE * (radii[i] + radii[j]):
                 out.append((i, j))
     return out
+
+
+def changed_bonds(symbols, before, after) -> list[str]:
+    """D244: the bonds (by `bonded`) that `after` has and `before` lacks (+) or the reverse (-),
+    as "+C1–C2" with atoms counted from 1."""
+    old, new = set(bonded(symbols, before)), set(bonded(symbols, after))
+    return [
+        f"{sign}{symbols[i]}{i + 1}–{symbols[j]}{j + 1}"
+        for sign, pairs in (("+", new - old), ("-", old - new))
+        for i, j in sorted(pairs)
+    ]
 
 
 def humps(energies, least: float = HUMP_KCAL) -> list[int]:
@@ -819,6 +834,24 @@ def ts_guess(job, calculate, symbols, folder: Path, progress, cancelled, record)
         }
         if not done:
             warnings.append(f"The {which} did not reach a minimum in {SADDLE_STEPS} steps.")
+        changed = changed_bonds(symbols, coords, atoms.positions)
+        if changed:
+            # D244: the method does not keep this end as a minimum (a pi-complex closing to the
+            # metallacycle): the band and saddle would join the wrong structures, so the
+            # node's own structure stands for this end.
+            warnings.append(
+                f"The {which}'s {spec['method_label']} minimum changed its bonds "
+                f"({', '.join(changed)}): the method does not keep this structure as a minimum, so "
+                "the node's own structure is used for this end. Check the guess against it."
+            )
+            atoms.positions = np.asarray(coords, float)
+            ends[which].update(
+                coordinates=np.asarray(atoms.positions).round(6).tolist(),
+                energy=float(atoms.get_potential_energy()) * EV_TO_HARTREE,
+                rmsd_from_node=0.0,
+                kept_node=True,
+                changed_bonds=changed,
+            )
         (folder / f"{which}-minimum.xyz").write_text(
             xyz_frame(symbols, atoms.positions, f"{which} minimum, {spec['method_label']}"),
             encoding="utf-8",
@@ -869,9 +902,8 @@ def ts_guess(job, calculate, symbols, folder: Path, progress, cancelled, record)
     reacting = [int(a) for a in spec.get("reacting") or []]
     pairs = bonded(symbols, x)
     region = set(reacting)
-    for i, j in pairs:
-        if i in reacting or j in reacting:
-            region |= {i, j}
+    for _ in range(REGION_BONDS):  # D244: two bonds out (was one)
+        region |= {k for i, j in pairs if i in region or j in region for k in (i, j)}
     out["mode_check"] = partial_mode_check(
         symbols, x / BOHR_TO_ANGSTROM, calculate, sorted(region), reacting, progress
     )
@@ -917,6 +949,7 @@ CORRECT_FRAMES = 6  # the saddle's own length and five more toward the longer en
 CORRECT_FMAX = 0.03  # eV/Å: each frame's minimum with the bond held
 CORRECT_STEPS = 200
 FLAT_KCAL = 0.5  # single points spanning less than this are too flat to pick a maximum from
+CLEAR_KCAL = 0.3  # D244: the picked frame must stand this far above both neighbours
 CORRECT_LEVEL = "PBE-D3M(BJ)/def2-SVP"
 STUB_PEAK = 0.2  # Å past the saddle: where the tests' stand-in single points peak
 
@@ -1074,6 +1107,20 @@ def ts_correction(
                 "coordinates": previous.round(6).tolist(),
             }
         )
+    picked = pick_frame(frames, warnings)
+    out["picked"] = picked
+    out["coordinates"] = frames[picked]["coordinates"]
+    out["energy"] = frames[picked]["energy"]
+    out["frames"] = [{k: v for k, v in f.items() if k != "coordinates"} for f in frames]
+    progress.update(phase=None)
+    return out
+
+
+def pick_frame(frames: list[dict], warnings: list[str]) -> int:
+    """D239: the frame with the highest single point (each frame given its `kcal` from the
+    lowest), with a warning when it is no clear maximum: the single points too flat, the highest
+    at either end, or (D244) standing less than CLEAR_KCAL above a neighbour; or its minimum did
+    not converge."""
     lowest = min(f["single_point"] for f in frames)
     for f in frames:
         f["kcal"] = round((f["single_point"] - lowest) * HARTREE_TO_KCAL, 2)
@@ -1084,24 +1131,34 @@ def ts_correction(
             f"The single points span only {span:.1f} kcal/mol along the bond: too flat to place "
             "the barrier; the highest is kept anyway."
         )
-    elif len(frames) > 1 and picked == len(frames) - 1:
+    elif picked == len(frames) - 1:
         warnings.append(
             f"The highest single point is the last frame ({frames[picked]['value']:.2f} Å): the "
             "barrier may lie further along the bond."
         )
-    elif len(frames) > 1 and picked == 0:
+    elif picked == 0:
         warnings.append(
             "The highest single point is at the saddle's own bond length: the correction does "
             "not move it, and the barrier may lie at a shorter bond."
         )
+    else:
+        # D244: a plateau spans more than FLAT_KCAL yet has no maximum to pick; on five Ru TSs
+        # the picked frame stood 0.10-0.22 kcal/mol above its neighbours and moved the bond
+        # away from DFT in three
+        rise = min(
+            frames[picked]["single_point"] - frames[k]["single_point"]
+            for k in (picked - 1, picked + 1)
+        )
+        rise *= HARTREE_TO_KCAL
+        if rise < CLEAR_KCAL:
+            warnings.append(
+                f"The highest single point stands only {rise:.2f} kcal/mol above a neighbouring "
+                "frame: the maximum is not resolved along the bond, and the raw guess is the "
+                "better start."
+            )
     if not frames[picked]["converged"]:
         warnings.append(f"The picked frame's minimum did not converge in {CORRECT_STEPS} steps.")
-    out["picked"] = picked
-    out["coordinates"] = frames[picked]["coordinates"]
-    out["energy"] = frames[picked]["energy"]
-    out["frames"] = [{k: v for k, v in f.items() if k != "coordinates"} for f in frames]
-    progress.update(phase=None)
-    return out
+    return picked
 
 
 def run(folder: Path, lock: Path | None) -> int:
