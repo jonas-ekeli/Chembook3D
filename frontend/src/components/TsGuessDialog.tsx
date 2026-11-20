@@ -168,9 +168,10 @@ export function TsGuessDialog({
             Correct the saddle with PBE single points
           </label>
           <p className="muted small" aria-label="Correction">
-            MACE-OMOL-0 may place the TS at a forming bond that is too short (on a Ru [2+2] test, 2.18 Å against DFT's 2.56 Å). This holds that bond at six
-            lengths 0.1 Å apart from the saddle toward the separated end, minimizes each with MACE-OMOL-0, and keeps the one with
-            the highest PBE-D3M(BJ)/def2-SVP energy as a second TS node; the raw guess stays.
+            Experimental. This holds the forming bond at six lengths 0.1 Å apart from the saddle toward the separated end, minimizes
+            each with MACE-OMOL-0, and keeps the one with the highest PBE-D3M(BJ)/def2-SVP energy as a second TS node; the raw
+            guess stays. On five Ru [2+2] TSs it moved the bond toward the DFT TS in two and away in three, so the raw guess is
+            usually the better start.
             {tools?.ts_guess && ` About ${duration(tools.ts_guess.correction_seconds)} more.`}
           </p>
           {(['start', 'end'] as const).map(

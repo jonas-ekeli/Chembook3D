@@ -1076,7 +1076,7 @@ TS_GUESS_TEST_METHODS = {"stub-saddle"}
 # A143-style estimate: two minima, the band, the saddle search and the mode check on about this
 # many region atoms, each counted in gradients of the method.
 TS_GUESS_STEPS = {"ends": 2 * 60, "band": 10, "saddle": 60}
-TS_GUESS_REGION = 16
+TS_GUESS_REGION = 30  # D244: the region reaches two bonds out (about 16 atoms at one)
 TS_GUESS_OFFSET = 0.5  # the guess's node sits halfway between its ends (as D115's path)
 # D239: the correction's frames (a held-bond minimum and a single point each), and a single
 # point's seconds for 70 atoms on 4 cores (PBE-D3M(BJ)/def2-SVP on a 73-atom Ru complex: 1 to 4

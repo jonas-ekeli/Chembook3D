@@ -141,6 +141,88 @@ def assert_mode_check_kept(client, calcs, check):
     assert modes["modes"] == [check["mode"]]
 
 
+class _Quiet:
+    def update(self, **_):
+        pass
+
+
+# Sella's internal coordinates make an empty ASE Atoms, which sets an array's shape: NumPy 2.5
+# deprecates that (ASE's code, not ours; the worker runs it outside pytest's -W error)
+@pytest.mark.filterwarnings("ignore:Setting the shape on a NumPy array:DeprecationWarning")
+def test_an_end_whose_bonds_change_keeps_the_node(tmp_path):
+    """T-LOC-44: an end the method does not keep as a minimum (here its O–H bond pulled to
+    1.6 Å, no longer a bond) is flagged with the bond that changed, and the node's own structure
+    stands for that end; an end that keeps its bonds is optimized as before (D244)."""
+    target = 1.6 / BOHR
+    water = np.array([[0.0, 0.0, 0.0], [0.958, 0.0, 0.0], [-0.24, 0.927, 0.0]])
+    other = float(np.linalg.norm(water[2])) / BOHR
+
+    def engine(x):
+        x = np.asarray(x, float).reshape(-1, 3)
+        e, g = 0.0, np.zeros_like(x)
+        for j, r0 in ((1, target), (2, other)):
+            d = x[j] - x[0]
+            r = float(np.linalg.norm(d))
+            e += 0.5 * (r - r0) ** 2
+            g[j] += (r - r0) * d / r
+            g[0] -= (r - r0) * d / r
+        return e, g
+
+    stretched = water.copy()
+    stretched[1, 0] = 1.6
+    job = {
+        "coordinates": water.tolist(),
+        "ts_guess": {
+            "end": stretched.tolist(),
+            "method_label": "test",
+            "formed": [],
+            "broken": [[0, 1]],
+            "reacting": [0, 1],
+        },
+    }
+    found = local_worker.ts_guess(
+        job, engine, ["O", "H", "H"], tmp_path, _Quiet(), lambda: False, lambda *_: None
+    )
+    start, end = found["ends"]["start"], found["ends"]["end"]
+    assert start["kept_node"] and start["changed_bonds"] == ["-O1–H2"]
+    assert np.allclose(start["coordinates"], water) and start["rmsd_from_node"] == 0.0
+    assert "kept_node" not in end
+    assert any("start's test minimum changed its bonds (-O1–H2)" in w for w in found["warnings"])
+    assert found["bonds"][0]["start"] == pytest.approx(0.958, abs=1e-3)
+
+
+def test_changed_bonds_are_named():
+    """T-LOC-44: bonds gained and lost between two structures, atoms counted from 1."""
+    water = [[0.0, 0.0, 0.0], [0.958, 0.0, 0.0], [-0.24, 0.927, 0.0]]
+    apart = [[0.0, 0.0, 0.0], [2.5, 0.0, 0.0], [-0.24, 0.927, 0.0]]
+    symbols = ["O", "H", "H"]
+    assert local_worker.changed_bonds(symbols, water, water) == []
+    assert local_worker.changed_bonds(symbols, water, apart) == ["-O1–H2"]
+    assert local_worker.changed_bonds(symbols, apart, water) == ["+O1–H2"]
+
+
+def test_a_plateau_is_no_maximum():
+    """T-LOC-45: the corrected frame needs a maximum that stands CLEAR_KCAL above both
+    neighbours; a plateau that spans more than FLAT_KCAL gets the warning (D244)."""
+    kcal = 1 / local_worker.HARTREE_TO_KCAL
+
+    def frames(values):
+        return [
+            {"value": 2.0 + 0.1 * k, "converged": True, "single_point": v * kcal}
+            for k, v in enumerate(values)
+        ]
+
+    warnings: list[str] = []
+    assert local_worker.pick_frame(frames([0, 0.9, 1.2, 1.08, 1.0]), warnings) == 2
+    assert len(warnings) == 1 and "only 0.12 kcal/mol" in warnings[0]
+    warnings = []
+    assert local_worker.pick_frame(frames([0, 0.6, 1.3, 0.7, 0.2]), warnings) == 2
+    assert warnings == []
+    warnings = []
+    local_worker.pick_frame(frames([0, 0.1, 0.2]), warnings)
+    assert "too flat" in warnings[0]
+
+
 def test_forming_bond_follows_the_mode():
     """T-LOC-37: of the bonds that change, the correction holds the one the saddle's mode
     stretches most, else the one that changes most between the ends (D239)."""
