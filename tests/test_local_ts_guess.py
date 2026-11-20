@@ -146,6 +146,9 @@ class _Quiet:
         pass
 
 
+# Sella's internal coordinates make an empty ASE Atoms, which sets an array's shape: NumPy 2.5
+# deprecates that (ASE's code, not ours; the worker runs it outside pytest's -W error)
+@pytest.mark.filterwarnings("ignore:Setting the shape on a NumPy array:DeprecationWarning")
 def test_an_end_whose_bonds_change_keeps_the_node(tmp_path):
     """T-LOC-44: an end the method does not keep as a minimum (here its O–H bond pulled to
     1.6 Å, no longer a bond) is flagged with the bond that changed, and the node's own structure
