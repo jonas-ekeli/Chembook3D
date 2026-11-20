@@ -19,6 +19,8 @@
 - Printed G at an explicit source pressure other than 1 atm is unavailable (W-PRESSURE):
   D57/D95/D160's standard-state handling assumes a 1 atm source. G_qh recomputes translation
   at 1 atm independently, so it needs no source-pressure correction.
+- W-ML-THERMO (D245): H, G and G_qh whose thermal correction is from a MACE-OMOL-0 frequency
+  job are noted in the value's check as approximate; the value is unchanged.
 - A group node's value is its representative's; with none, it has no value (EN-7).
 - D161: a counterpoise job's stored energy is its corrected total; here it counts as the
   complex's uncorrected energy (that total minus its BSSE), like every other calculation at its
@@ -285,6 +287,26 @@ def printed_g_pressure_issue(pressure: float | None) -> dict[str, str] | None:
     }
 
 
+# D245: frequency programs whose thermal corrections are approximate, with what was measured.
+MACHINE_LEARNED_THERMO = {
+    "MACE": "2.5 kcal/mol off DFT's on a tested Ru TS and metallacyclobutane pair",
+}
+
+
+def machine_learned_thermo_issue(thermo: Calculation | None) -> dict[str, str] | None:
+    """D245: H, G and G_qh whose thermal correction is from a machine-learned potential's
+    frequency job (MACE-OMOL-0) are approximate; noted on the value's check, never changing the
+    value or any status (D19)."""
+    level = thermo.level if thermo is not None else None
+    if level is None or level.program not in MACHINE_LEARNED_THERMO:
+        return None
+    return {
+        "code": "W-ML-THERMO",
+        "message": f"approximate: the thermal correction is from {level.method or level.program} "
+        f"frequencies ({MACHINE_LEARNED_THERMO[level.program]})",
+    }
+
+
 class NodeEnergies:
     """Every energy one node has, by composite level."""
 
@@ -492,7 +514,13 @@ class NodeEnergies:
 
     def value(self, key: LevelKey, energy_type: str) -> Value:
         found = self._value(key, energy_type)
-        found.check = self.check(key, energy_type)
+        check = self.check(key, energy_type)
+        if energy_type != "E" and found.value is not None:
+            # D245: after the check's other issues, and only on a value there is.
+            note = machine_learned_thermo_issue(self.thermo_source(key))
+            if note is not None:
+                check = check_of([*(check["issues"] if check else []), note])
+        found.check = check
         return found
 
     def _value(self, key: LevelKey, energy_type: str) -> Value:
