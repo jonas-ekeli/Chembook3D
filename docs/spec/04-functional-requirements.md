@@ -177,6 +177,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-EN-26 | A pathway follows an edge into a group to the group itself, valued by its representative, and walks on from it, whether it was started from a node or added for a branch; where it stops, the edge offers the group (D228). |
 | FR-EN-27 | Each step of a pathway in the energy drawer has a menu: swap it for another node or group that the transitions join to its neighbours (another conformer of its group, the group, a parallel node), branch off a new pathway that ends at it, start or end the pathway at it (on a closed cycle: start the cycle at it), and move it along the axis (D228). |
 | FR-EN-28 | A pathway grows at its start as at its end: the nodes with an arrow in to its first node are offered as "Start before" and one taken is followed back while one arrow leads in; the first and the last step also offer the arrows drawn the other way, one node at a time (D228). |
+| FR-EN-29 | H, G and G_qh whose thermal correction comes from a MACE-OMOL-0 frequency job say in their check that they are approximate, wherever they are shown, with the value unchanged (D245). |
 
 **AC:**
 - Nodes X and Y have G at level L1, and Y also at L2. With L2 selected, the edge X→Y shows "n/a".

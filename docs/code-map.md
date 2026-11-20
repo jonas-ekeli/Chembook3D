@@ -301,12 +301,13 @@ Routes for all of these are in `api/pathway.py`.
 - `components/ThermoSettings.tsx`'s `thermoSection` is its section of `components/SettingsDialog.tsx`, the two-pane Settings dialog of D183: sections under This computer and This investigation, a scope badge on each, a search, one row per setting with `NumberSetting`'s unit inside the field.
 - `NodeEnergies` adds `thermochem.standard_state_correction` to G and G_qh, and the results name it (`standard_state`) so the labels can.
 
-### Checks and W-* warnings (D154, D158, D162)
+### Checks and W-* warnings (D154, D158, D162, D245)
 
 - Every `Value` carries `check` (D154): `NodeEnergies.check` judges the frequency job at the geometry level against the node's role (`frequency_issues`). Issues are listed in `check.issues`; profiles, the table's "Check" column, selectivities and turnovers pass it on.
 - D158 W-FREQ-NONSTAT (`not_stationary`): the criteria Gaussian's table after a frequency job did not meet, kept in the result's `printed` under `parsers.common.NOT_STATIONARY`. Repair `frequency_stationary` for older imports.
 - Also W-OPT-INC and W-TERM.
 - D162 W-SPIN: the parsers keep ⟨S²⟩ in `printed` under `parsers.common.S2`, `S2_AFTER`, `S2_IDEAL`. `services/spin.py` judges it against S(S+1), also for the calculation's own warning and the import preview. `CalculationOut.spin` shows it. Repair `spin_values`.
+- D245 W-ML-THERMO: `NodeEnergies.value` adds `machine_learned_thermo_issue` last to the check of an H, G or G_qh value (not n/a) whose `thermo_source` is at a level whose program is in `MACHINE_LEARNED_THERMO` (MACE). Not in the node's own warnings. Tests: `tests/test_ml_thermo.py`.
 - `warnings.node_warnings` checks the latest frequency job at each composite level (`NodeEnergies.frequency_jobs`), naming the level.
 - `Canvas.tsx`'s group head shows its members' warnings (`memberWarnings`).
 
