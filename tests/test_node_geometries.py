@@ -1,4 +1,4 @@
-"""Lower levels beside a node's geometry (D246, FR-CALC-08, FR-SPC-08): T-IMP-64..T-IMP-67, T-LOC-46.
+"""Lower levels beside a node's geometry (D246, FR-CALC-08, FR-SPC-08): T-IMP-64..67, T-LOC-46.
 
 A free species optimized with DFT should also hold a MACE or xTB geometry, with local single
 points on it, so relative energies at those composite levels balance with one free species."""
