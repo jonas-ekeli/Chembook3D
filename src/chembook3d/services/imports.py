@@ -262,6 +262,9 @@ class ImportOptions:
     duplicate_action: str | None = None  # "attach" or "new" when a possible duplicate exists
     duplicate_node_id: str | None = None
     create_derived: bool = True
+    # D246: add an optimization at another level beside the node's geometry (True), or
+    # continue it / make a derived node (False); None takes the plan's default.
+    beside: bool | None = None
     basis_names: dict[str, str] = field(default_factory=dict)  # definition key → name
     dispersion_names: dict[str, str] = field(default_factory=dict)
     # D104: the basis set for steps whose file names none (ChkBasis from another job's
@@ -369,6 +372,10 @@ class Plan:
     # D100: the node's lower-level optimization this file continues from; the node's geometry
     # becomes the file's result and that optimization is kept as a pre-optimization.
     continues_from: dict[str, Any] | None = None
+    # D246: an optimization at a level the node does not have, which can be added beside the
+    # node's geometry: {step, level_label, default, chosen, alternative ("continue" or
+    # "derived": what happens without it)}.
+    beside: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -637,6 +644,80 @@ def continued_optimization(
     return None
 
 
+def _beside(
+    session: Session,
+    target: Node,
+    chosen: ParsedStep,
+    steps: list[ParsedStep],
+    resolved: dict[int, _Resolved],
+    chosen_rows: list[Any],
+    continues_from: dict[str, Any] | None,
+    options: ImportOptions,
+    tolerance: float,
+) -> dict[str, Any] | None:
+    """D246: whether the file's optimization, ending on the chosen geometry at a level the node
+    has no optimization at, can be added beside the node's geometry. One that starts from the
+    node's geometry (which D100 would let continue it) is added beside by default when its
+    method ranks lower than the optimization the node's geometry came from (a MACE or xTB
+    optimization from a DFT geometry); a held pre-optimization is always continued (D165). A
+    free species also takes one that started elsewhere, with the same atoms, charge and
+    multiplicity, instead of a derived free species."""
+    step = next(
+        (
+            s
+            for s in reversed(steps)
+            if s.job_type in OPTIMIZATION_TYPES
+            and not s.constrained
+            and geometry.matches(_rows(s.final_geometry), chosen_rows, tolerance)
+        ),
+        None,
+    )
+    if step is None:
+        return None
+    identity = resolved[step.index].identity
+    if identity is None or identity in [
+        levels.fields_of(c.level) for c in levels.optimizations(target)
+    ]:
+        return None
+    if continues_from is not None:
+        previous = session.get(Calculation, continues_from["calculation_id"])
+        if previous is None or previous.constraints:
+            return None
+        default = levels.method_rank(identity) < levels.method_rank(
+            levels.fields_of(previous.level)
+        )
+        alternative = "continue"
+    elif target.kind == NodeKind.SPECIES and _same_molecule(target, chosen, chosen_rows):
+        default, alternative = True, "derived"
+    else:
+        return None
+    return {
+        "step": step.index,
+        "level_label": _level_label(resolved[step.index].fields, step),
+        "default": default,
+        "chosen": default if options.beside is None else options.beside,
+        "alternative": alternative,
+    }
+
+
+def _levels_on(target: Node) -> list[dict[str, str] | None]:
+    """The levels of the node's free optimizations (D157)."""
+    return [levels.fields_of(c.level) for c in levels.optimizations(target)]
+
+
+def _same_molecule(target: Node, step: ParsedStep, rows: list[Any]) -> bool:
+    """D246: the same atoms, charge and multiplicity as the node (where both say)."""
+    if not target.geometry or sorted(r[0] for r in rows) != sorted(r[0] for r in target.geometry):
+        return False
+    return all(
+        mine is None or theirs is None or mine == theirs
+        for mine, theirs in (
+            (target.charge, step.charge),
+            (target.multiplicity, step.multiplicity),
+        )
+    )
+
+
 def continues(
     session: Session, staged: StagedFile, target: Node, options: ImportOptions, tolerance: float
 ) -> bool:
@@ -824,8 +905,49 @@ def _plan_steps(
     tolerance = settings.geometry_tolerance
     resolved = {s.index: _resolve_level(session, staged.parsed.program, s, options) for s in steps}
     continues_from = None
-    if mode == "onto" and chosen_rows and not geometry.matches(chosen_rows, node_rows, tolerance):
+    beside = None
+    # D246: the node's other geometries, where its optimizations at other levels ended (added
+    # beside its geometry, or its pre-optimizations); steps on any of them attach to the node.
+    others = (
+        [c.geometry for c in levels.optimizations(target) if c.geometry] if mode == "onto" else []
+    )
+    elsewhere = bool(
+        mode == "onto"
+        and chosen_rows
+        and not geometry.matches(chosen_rows, node_rows, tolerance)
+        and not any(geometry.matches(chosen_rows, other, tolerance) for other in others)
+    )
+    if elsewhere:
         continues_from = continued_optimization(target, steps, resolved, chosen_rows, tolerance)
+        beside = _beside(
+            session,
+            target,
+            chosen,
+            steps,
+            resolved,
+            chosen_rows,
+            continues_from,
+            options,
+            tolerance,
+        )
+        if beside is not None and beside["chosen"]:
+            continues_from = None
+            others.append(chosen_rows)
+            warnings.append(
+                {
+                    "code": "BESIDE",
+                    "message": (
+                        f"Step {beside['step']} at {beside['level_label']} is added to "
+                        f"'{target.label}' beside its geometry, which the node keeps: its "
+                        "energies are at that level's own geometry (D246)."
+                    ),
+                }
+            )
+        elif continues_from is not None and resolved[continues_from["step"]].identity in _levels_on(
+            target
+        ):
+            # D246: the node already has this level at another geometry: a derived node.
+            continues_from = None
     if continues_from is not None:
         node_rows = chosen_rows
         warnings.append(
@@ -840,7 +962,9 @@ def _plan_steps(
             }
         )
     derived_offered = bool(
-        mode == "onto" and chosen_rows and not geometry.matches(chosen_rows, node_rows, tolerance)
+        elsewhere
+        and not geometry.matches(chosen_rows, node_rows, tolerance)
+        and not (beside is not None and beside["chosen"])
     )
     if derived_offered:
         warnings.append(
@@ -861,7 +985,10 @@ def _plan_steps(
     step_plans: list[StepPlan] = []
     for step in steps:
         rows = _rows(step.final_geometry)
-        if rows and geometry.matches(rows, node_rows, tolerance):
+        if rows and (
+            geometry.matches(rows, node_rows, tolerance)
+            or any(geometry.matches(rows, other, tolerance) for other in others)
+        ):
             assignment = "node"
         elif no_coordinates and not rows:
             assignment = "node"
@@ -1097,6 +1224,7 @@ def _plan_steps(
         origin=origin,
         blockers=blockers,
         continues_from=continues_from,
+        beside=beside,
     )
 
 

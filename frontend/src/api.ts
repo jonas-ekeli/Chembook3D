@@ -2104,6 +2104,25 @@ export type ImportPlan = {
   ensemble: EnsemblePlan | null
   /** D134: an IRC file planned as an ordinary import: the TS nodes it starts from, nearest first. */
   irc_targets?: { node_id: string; label: string; rmsd: number }[] | null
+  /** D246: an optimization at a level the node lacks that can be added beside the node's
+   * geometry; without it, it continues the node's optimization or goes to a derived node. */
+  beside?: BesidePlan | null
+}
+
+export type BesidePlan = {
+  step: number
+  level_label: string
+  default: boolean
+  chosen: boolean
+  alternative: 'continue' | 'derived'
+}
+
+/** D246: one of the optimized geometries a node holds. */
+export type NodeGeometry = {
+  calculation_id: string
+  level_label: string | null
+  node_geometry: boolean
+  pre_optimization: boolean
 }
 
 export type EnsembleConformer = {
@@ -2132,6 +2151,8 @@ export type ImportOptions = {
   duplicate_action?: 'attach' | 'new' | null
   duplicate_node_id?: string | null
   create_derived?: boolean
+  /** D246: add the optimization beside the node's geometry; unset takes the plan's default. */
+  beside?: boolean | null
   basis_names?: Record<string, string>
   dispersion_names?: Record<string, string>
   label?: string | null
@@ -2892,6 +2913,8 @@ export const api = {
   cancelBatch: (token: string) => request<void>('DELETE', `/batch-imports/${token}`),
 
   calculations: (nodeId: string) => request<Calculation[]>('GET', `/nodes/${nodeId}/calculations`),
+  /** D246: the optimized geometries a node holds, its own first. */
+  nodeGeometries: (nodeId: string) => request<NodeGeometry[]>('GET', `/nodes/${nodeId}/geometries`),
   updateCalculation: (
     id: string,
     fields: Partial<LevelFields> & { geometry_level_id?: string | null; notes?: string },
@@ -3067,7 +3090,7 @@ export const api = {
     correct?: boolean
   }) => request<LocalJob>('POST', '/local/ts-guess', body),
   /** D240: a single point of each node's structure on this computer, one job per node */
-  startSinglePoints: (body: { node_ids: string[]; level: string }) =>
+  startSinglePoints: (body: { node_ids: string[]; level: string; geometry_of?: Record<string, string> }) =>
     request<LocalJob[]>('POST', '/local/single-points', body),
   startRefine: (body: {
     node_id: string

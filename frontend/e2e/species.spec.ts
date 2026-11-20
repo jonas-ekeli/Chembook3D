@@ -82,3 +82,20 @@ test('free species join or leave on an edge and balance its atoms', async ({ pag
   await expect(list.getByRole('listitem')).toHaveCount(3)
   expect((await (await page.request.get(`/api/nodes/${loose.id}`)).json()).kind).toBe('species')
 })
+
+test('a free species opens Refine geometry and Single point from its menu', async ({ page }) => {
+  // T-UI-111, D246: the dialogs looked for the node on the canvas only, so nothing opened.
+  await newInvestigation(page, 'Species refine')
+  await page.request.post('/api/nodes', { data: { label: 'ethene', kind: 'species', xyz: xyz('C', 'C', 'H', 'H', 'H', 'H') } })
+  await page.reload()
+  await page.getByRole('list', { name: 'Free species list' }).getByRole('button', { name: /ethene/ }).click()
+  const inspector = page.getByLabel('Node inspector')
+  await inspector.getByRole('button', { name: 'More species actions' }).click()
+  await page.getByRole('menuitem', { name: 'Refine geometry…' }).click()
+  const refine = page.getByRole('dialog', { name: 'Refine geometry of “ethene”' })
+  await expect(refine).toBeVisible()
+  await refine.getByRole('button', { name: 'Cancel' }).click()
+  await inspector.getByRole('button', { name: 'More species actions' }).click()
+  await page.getByRole('menuitem', { name: 'Single point on this computer…' }).click()
+  await expect(page.getByRole('dialog', { name: 'Single point of “ethene”' })).toBeVisible()
+})

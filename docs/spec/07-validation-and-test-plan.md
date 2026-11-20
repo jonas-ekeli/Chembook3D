@@ -213,6 +213,10 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-IMP-61 | Import an optimization whose routes set D3M(BJ) parameters by IOp without EmpiricalDispersion, one without the IOps, and one with EmpiricalDispersion=GD3BJ and the IOps | No name asked for the first; the first two at one level without dispersion; the third asks for the dispersion's name | FR-CALC-07 |
 | T-IMP-62 | Open an investigation an earlier version saved with a level whose dispersion is a named IOp set without a model, used by calculations, a selectivity and the remembered view | Every calculation and saved key at the level without dispersion, one history entry per change, the name and the old level gone | FR-CALC-07 |
 | T-IMP-63 | Import a frequency-only job as a new node and a single point onto it; again with a frequency job whose stationary-point check failed; and on a node with an optimization | The single point at SP // the frequency job's level, with G; with the failed check the same, its values marked W-FREQ-NONSTAT; with an optimization, at the optimization's level | FR-CALC-04 |
+| T-IMP-64 | A free species with a DFT optimization; import an xTB optimization from its geometry (D246) | Added beside: the node keeps the DFT geometry, the DFT optimization is no pre-optimization, the preview says BESIDE, and the node lists both geometries |
+| T-IMP-65 | Then a single point at the DFT geometry and one at the xTB geometry | Both attach to the node, at SP // DFT and SP // xTB |
+| T-IMP-66 | The xTB optimization with beside switched off; a same-rank DFT optimization from the DFT geometry, switched on | The first continues the node (DFT a pre-optimization, node at the xTB geometry); the second keeps the node's geometry |
+| T-IMP-67 | A free species: an xTB optimization from a built structure; again at the same level; with another charge; on a canvas node | Only the first is added to the free species; the others offer a derived node |
 
 ## 6. Energy tests
 
@@ -455,6 +459,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-LOC-43 | A TS guess imported onto its node, raw and with the PBE correction (D242) | The raw guess's calculation has the check's imaginary wavenumbers, region and mode (its modes route gives that one mode), no frequencies, imaginary count, ZPE or G; the corrected node's calculation has no check and its notes say why |
 | T-LOC-44 | A TS guess whose start's minimum with the method loses its O–H bond; bonds gained and lost between two structures (D244) | The start is flagged with "-O1–H2" and keeps the node's coordinates (RMSD 0), the end is optimized as before, and the bond table starts from the node; the changed bonds are named with atoms counted from 1 |
 | T-LOC-45 | Correction frames with a plateau, a clear maximum and a flat profile (D244) | The plateau's maximum (0.12 kcal/mol above a neighbour) gets the "not resolved" warning, the clear one none, the flat one "too flat" |
+| T-LOC-46 | A local refine of a free species with a DFT optimization, then a local single point with geometry_of its refined geometry, and one with an unknown id (D246) | The refine is added beside and the node keeps the DFT geometry; the single point is at level // the refine's level; the unknown id is refused |
 | T-PATH-01 | Plan a scan path from the GoodVibes amination TS pushed down its imaginary mode and shuffled, to the TS (D114) | The match finds every atom; the held distances are ticked and the first is the distance the mode changes most, with its values at both ends; solvent THF from the TS's SMD level; charge and multiplicity from the TS |
 | T-PATH-02 | Plan a scan path to a TS made by hand; without an edge; with other charges, no charge, other atom counts; send without ticking | The guess's partial bond is suggested unticked; each refusal says why; sending without a held coordinate is refused |
 | T-PATH-03 | Plan a scan path to a group joined by an edge; choose another member; select a member alone | The group stands for its representative, then the member chosen; a member reaches the edge through its group |
@@ -598,6 +603,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-108 | Single point on this computer… on a node's menu, then Single points on this computer… for two selected nodes (D240, FR-LOC-15) | The dialog offers PBE-D3M(BJ)/def2-TZVP by default, r2SCAN-3c with its note, the node's atoms, charge and multiplicity; for two nodes the estimate in all and Start 2; both jobs end and are imported by themselves |
 | T-UI-109 | A TS guess's result with its mode check imported from a file; the calculation's record opened (D242, FR-LOC-16) | The record says the check is a Hessian of 3 atoms with one imaginary mode on the bonds that change and gives no ZPE or G; Animate mode offers 202.4i cm⁻¹ and animates it without an error |
 | T-UI-110 | Match atoms saves (D243) | In the T-UI-17 window, "Renumber “start” to match “end”" and "Save “start” renumbered": the window closes, a notice says “start” now has the matched atom order, and its coordinates list the end's elements in order, the last glycerol atom first |
+| T-UI-111 | A free species' ⋯ menu: Refine geometry… and Single point on this computer… (D246g) | Each opens its dialog |
 
 ### Sub-investigations (D193)
 

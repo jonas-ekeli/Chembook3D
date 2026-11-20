@@ -1569,7 +1569,19 @@ TOOLS: list[ToolSpec] = [
         "pbe-tzvp (the default), pbe-svp, r2scan-3c (lost the barrier of a Ru [2+2] step), "
         "b97-3c and pbe0-tzvp (a hybrid, about twice PBE's time). List a group's members one by "
         "one. Minutes each for a 70-atom complex: only start them when the user asked, and "
-        "say the estimate and ask first when the lot is over an hour.",
+        "say the estimate and ask first when the lot is over an hour. D246: geometry_of "
+        "{node_id: optimization id} runs a node's single point at another of its optimized "
+        "geometries (get_node_geometries), e.g. its MACE geometry beside a DFT one.",
+    ),
+    T(
+        "get_node_geometries",
+        "read",
+        "GET",
+        "/api/nodes/{node_id}/geometries",
+        "The optimized geometries a node holds (D246), its own first, each by the optimization "
+        "that ended on it and that optimization's level: a node, and above all a free species, "
+        "can keep a geometry at a lower level (MACE, xTB) beside its DFT one, with energies at "
+        "each. A pre_optimization one is where the node's own optimization started from.",
     ),
     T(
         "check_local_core",

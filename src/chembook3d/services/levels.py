@@ -74,6 +74,31 @@ def needs_basis(program: str, method: str) -> bool:
     return program not in ("xTB", "CREST") and not _BUILT_IN_BASIS.search(method or "")
 
 
+# D246: how far a method is from a full electronic-structure calculation, so a lower-ranked
+# optimization run from a node's geometry is added beside it rather than continuing it. Force
+# fields rank lowest, then machine-learned potentials, then semi-empirical and tight-binding
+# methods; HF, DFT (the "3c" composites too), wavefunction methods and ONIOM rank highest.
+_FORCE_FIELD = re.compile(r"^(UFF|MMFF|GAFF|AMBER|OPLS|DREIDING|GFN-?FF)", re.IGNORECASE)
+_MACHINE_LEARNED = re.compile(r"^(MACE|ANI|AIMNET|UMA|ORB|MACE-STUB)", re.IGNORECASE)
+_SEMI_EMPIRICAL = re.compile(
+    r"^(GFN|G-?XTB|XTB|DFTB|PM[3-7]|AM1|MNDO|RM1|ZINDO|INDO|CNDO|STUB)", re.IGNORECASE
+)
+FORCE_FIELD, MACHINE_LEARNED, SEMI_EMPIRICAL, ELECTRONIC = 0, 1, 2, 3
+
+
+def method_rank(fields: dict[str, str] | None) -> int:
+    """D246: FORCE_FIELD < MACHINE_LEARNED < SEMI_EMPIRICAL < ELECTRONIC for a level's method
+    (the test-only "stub" ranks as semi-empirical)."""
+    method = ((fields or {}).get("method") or "").strip()
+    if _FORCE_FIELD.match(method):
+        return FORCE_FIELD
+    if _MACHINE_LEARNED.match(method):
+        return MACHINE_LEARNED
+    if _SEMI_EMPIRICAL.match(method) or (fields or {}).get("program") in ("xTB", "CREST"):
+        return SEMI_EMPIRICAL
+    return ELECTRONIC
+
+
 def get_or_create(session: Session, fields: dict[str, str]) -> LevelOfTheory:
     values = {key: (fields.get(key) or "").strip() for key in LEVEL_FIELDS}
     query = select(LevelOfTheory).filter_by(**values)
@@ -201,6 +226,10 @@ def continued_by(calculation: Calculation, tolerance: float | None = None) -> Ca
         return None
     if tolerance is None:
         tolerance = app_settings.load().geometry_tolerance
+    # D246: an optimization added beside the node's geometry continues nothing.
+    line = node_line(node, tolerance)
+    if line is not None:
+        following = [c for c in following if c.id in line]
     return next(
         (
             c
@@ -209,6 +238,28 @@ def continued_by(calculation: Calculation, tolerance: float | None = None) -> Ca
         ),
         None,
     )
+
+
+def node_line(node: Node, tolerance: float) -> set[str] | None:
+    """D246: the free optimizations the node's geometry came through: the one that ended on
+    it and, going back, each that ended where one of them started (its pre-optimizations,
+    D100). An optimization outside it was added beside the node's geometry, at another level.
+    None for a node whose geometry no optimization ended on (records made before D100)."""
+    free = [c for c in node.calculations if is_geometry_source(c) and c.geometry]
+    line = {c.id for c in free if geometry.matches(c.geometry, node.geometry, tolerance)}
+    if not line:
+        return None
+    grown = True
+    while grown:
+        starts = [c.start_geometry for c in free if c.id in line and c.start_geometry]
+        added = {
+            c.id
+            for c in free
+            if c.id not in line and any(geometry.matches(c.geometry, s, tolerance) for s in starts)
+        }
+        line |= added
+        grown = bool(added)
+    return line
 
 
 def node_geometry_optimization(
@@ -223,6 +274,23 @@ def node_geometry_optimization(
     return optimization_at(node, node.geometry, tolerance) or next(
         reversed(geometry_sources(node)), None
     )
+
+
+def node_geometries(node: Node, tolerance: float | None = None) -> list[Calculation]:
+    """D246: the optimized geometries a node holds, one optimization each (the latest of those
+    that ended on the same geometry): the node's own first, then those added beside it or its
+    pre-optimizations, oldest first. A single point can be run at any of them."""
+    if tolerance is None:
+        tolerance = app_settings.load().geometry_tolerance
+    found: list[Calculation] = []
+    for calculation in reversed(optimizations(node)):
+        if calculation.geometry and not any(
+            geometry.matches(calculation.geometry, kept.geometry, tolerance) for kept in found
+        ):
+            found.append(calculation)
+    found.reverse()
+    found.sort(key=lambda c: not geometry.matches(c.geometry, node.geometry, tolerance))
+    return found
 
 
 def node_geometry_level(node: Node | None, tolerance: float | None = None) -> LevelOfTheory | None:

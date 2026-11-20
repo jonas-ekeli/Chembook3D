@@ -97,6 +97,13 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 - An optimization starting where the node's optimization at another level ended continues it (`imports.continued_optimization`, PRE-OPT): the node takes its result, no derived node.
 - A single point's geometry level is the optimization ending on its geometry. D204: `levels.geometry_sources`; on a node without optimizations, its frequency jobs, W-FREQ-NONSTAT marking one whose check failed.
 
+### Geometries at several levels (D246)
+
+- `levels.method_rank`: force field < machine-learned < semi-empirical < electronic structure. `imports._beside` decides whether an optimization at a level the node lacks goes beside the node's geometry (`Plan.beside`, BESIDE, `ImportOptions.beside` from the preview's choice): from the node's geometry when it ranks lower than the node's optimization, or on a free species from elsewhere with the same atoms (`_same_molecule`).
+- Steps on any of the node's optimized geometries attach to it (`others` in `_plan_steps`).
+- Nothing is stored for "beside": `levels.node_line` is the chain the node's geometry came through, and `levels.continued_by` (pre-optimization) only counts optimizations on it.
+- `levels.node_geometries` and `GET /api/nodes/{id}/geometries` (MCP `get_node_geometries`) list them; `local_jobs.create_single_points(geometry_of=)` runs a single point at one (`SinglePointDialog`'s "At the geometry of"). `App.tsx`'s `nodeOrSpecies` finds a free species for the Refine and Single point dialogs.
+
 ### Dispersion IOps (D203)
 
 - `gaussian.dispersion_iops(iops, dispersion)` keeps IOp(3/174–179) only with a dispersion model (EmpiricalDispersion or IOp(3/124)).
@@ -186,6 +193,7 @@ Routes for all of these are in `api/pathway.py`.
 - `services/species.py` holds the rules: attach, kind changes, the balance added along a pathway, W-BALANCE. `pathways.profiles` and the energy view use it.
 - D221, W-COMPARE: `species.mismatch` says how a pathway point's atoms or charge, with its balance, differ from the reference's. `pathways.prepare` keeps it per point (`Prepared.mismatches`); `pathways.profiles` then gives the point `mismatch` and no `relative`, and the note `_compare_note`; the table's Check column and a turnover's message repeat it. `ProfileChart` shows it as the "n/a" label's tooltip.
 - `balances_from` gives each node's balance along the route from the reference (D72), for node cards (the energy view's `relative`) and for pathways that miss the reference.
+- D246: one free species holds every level of its molecule (see "Geometries at several levels"), so a pathway at a local composite level balances with it.
 
 ## Resume overview (D191)
 

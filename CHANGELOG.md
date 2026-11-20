@@ -6,6 +6,11 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Lower levels beside a node's geometry (D246): a MACE or xTB optimization from a DFT geometry
+  is added beside it (the node keeps its geometry), a free species also takes a new level from
+  a built structure, and a local single point can be run at any of the node's geometries, so one
+  free species holds every level of its molecule. Refine geometry and Single point now open on a
+  free species.
 - TS guess correction (D239): optionally, the TS guess's forming bond is held at six lengths
   and the frame with the highest PBE-D3M(BJ)/def2-SVP single point becomes a second TS node.
 - TS guess on this computer (D238): two structures joined by an edge give a starting structure
