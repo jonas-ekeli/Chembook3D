@@ -198,7 +198,7 @@ Routes for all of these are in `api/pathway.py`.
 - `services/view_state.py` cleans what is saved and drops deleted records when it is read.
 - `GET`/`PUT /api/view-state` (quiet in `live.QUIET`, not an MCP tool).
 - `App.tsx` restores it once per investigation shown (`shown`) and saves every change after that. The drawer's tab and profile id live in `App`'s `drawerView` (type `DrawerView` in `EnergyDrawer.tsx`, `ViewState['drawer']` without `open`), and the drawer starts from them (`saved`).
-- Until the restore has answered (`viewRestored === shown`) the canvas bar and the work area are not drawn, so nothing chosen before it arrives is overwritten (`e2e/view-state.spec.ts`, "what is opened before the saved view arrives is kept").
+- Until the restore has answered (`viewRestored === shown`) and the canvas has arrived (`canvasIn`), together `workReady`, the canvas bar and the work area are not drawn, so nothing chosen before the saved view arrives is overwritten, and a saved profile is never checked against the empty canvas, which listed every pathway as one that lost a node (`e2e/view-state.spec.ts`, "what is opened before the saved view arrives is kept" and "a pathway is not shown as lost while the canvas is still on its way").
 - Switching notebooks (`resetInvestigation`): see "Notebook identity and ownership".
 
 ## Frontend main pieces
@@ -727,6 +727,7 @@ Routes for all of these are in `api/pathway.py`.
   - `chembook3d-settings.json` pre-approving `mcp_tools.PANEL_ALLOWED` (its tools of kind "read", and `write_server_file`, whose go-ahead is a switch in the app, D126) and `WebSearch` (D230; `WebFetch` is left to ask per site, and is pre-approved only while Claude works on its own), and denying shell and editing tools;
   - a CLAUDE.md with the notebook's rules.
 - It runs only `claude` in a pseudo-terminal (`pty` on Linux, pywinpty on Windows).
+  - On Linux the terminal is made the controlling terminal by a few lines of Python run as the program (`_TAKE_TERMINAL`, which then `execv`s it), never by a `preexec_fn`: Python run between fork and exec can deadlock in the threaded server, and JAX warns on every such fork (`tests/test_claude_panel.py`).
 - `api/claude.py` hands out one-time tokens and serves the terminal WebSocket, refusing anything not local (bind address, client, Host, Origin).
 - `components/ClaudePanel.tsx` is the xterm.js panel, the Claude tab of the side panel (`SidePanel.tsx`) docked right in `.app-body`, kept mounted while hidden.
 - Tests use `tests/fake_claude.py` through `CHEMBOOK3D_CLAUDE`.

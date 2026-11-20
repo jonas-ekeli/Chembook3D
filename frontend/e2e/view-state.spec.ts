@@ -76,3 +76,35 @@ test('what is opened before the saved view arrives is kept', async ({ page }) =>
   await expect(b).toBeVisible()
   await expect(b).toContainText('T-S0 → B-S1')
 })
+
+test('a pathway is not shown as lost while the canvas is still on its way', async ({ page }) => {
+  // D221: a pathway is "lost" when a node on it is not on the canvas. After a reload the saved
+  // profile can arrive before the canvas does, and every pathway then looked lost for a moment
+  // (three "lost" pathways in energy-drawer.spec, T-UI-91, on slow runners).
+  await openDemo(page)
+  await page.getByRole('button', { name: 'Profile and table' }).click()
+  const drawer = page.getByLabel('Energy drawer')
+  await drawer.getByLabel('Add branch pathway').selectOption({ label: 'B' })
+  await expect(drawer.getByRole('group', { name: 'Pathway B' })).toContainText('T-S0 → B-S1')
+  await expect.poll(async () => (await (await page.request.get('/api/view-state')).json()).drawer.open).toBe(true)
+  // Whether a lost pathway is ever drawn, however briefly, from the first moment of the page.
+  await page.addInitScript(() => {
+    const seen = window as unknown as { lostSeen: boolean }
+    seen.lostSeen = false
+    new MutationObserver(() => {
+      if (document.querySelector('[aria-label="Pathway that lost a node"]')) seen.lostSeen = true
+    }).observe(document, { childList: true, subtree: true })
+  })
+  await page.route('**/api/canvas', async (route) => {
+    await new Promise((done) => setTimeout(done, 1500))
+    await route.continue()
+  })
+  const profiles = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/energy-profiles')
+  const canvas = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/canvas')
+  await page.reload()
+  // The profiles are in well before the held-back canvas.
+  await (await profiles).finished()
+  await (await canvas).finished()
+  await expect(page.getByLabel('Energy drawer').getByRole('group', { name: 'Pathway B' })).toContainText('T-S0 → B-S1')
+  expect(await page.evaluate(() => (window as unknown as { lostSeen: boolean }).lostSeen)).toBe(false)
+})

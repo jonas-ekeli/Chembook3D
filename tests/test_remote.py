@@ -526,10 +526,11 @@ def test_x11_windows_reach_the_x_server_on_this_computer(local, saga):
 
 
 def test_no_x_server_is_reported(local, saga):
-    _point_at(local, saga, x11=True, x11_display=free_display())
-    assert _log_in(local, saga)["kind"] == "connected"
-    status = _status(local)
-    assert status["shell"] == "running" and status["x11_ready"] is False
+    with free_display() as display:
+        _point_at(local, saga, x11=True, x11_display=display)
+        assert _log_in(local, saga)["kind"] == "connected"
+        status = _status(local)
+        assert status["shell"] == "running" and status["x11_ready"] is False
 
 
 def test_a_server_refusing_x11_still_gives_a_shell(local, tmp_path):

@@ -98,6 +98,9 @@ test('Claude is given a playground first, and playgrounds are discarded', async 
   expect(existsSync(join(folder, 'backups'))).toBe(false)
   // In the playground the warning offers no playground, and says none is needed.
   await panel.getByRole('button', { name: 'Stop and turn off' }).click()
+  // The switch is off once the server has answered; ticked before that, the click turns it
+  // off again instead of asking.
+  await expect(panel.getByRole('checkbox', { name: 'Work on its own' })).not.toBeChecked()
   await panel.getByRole('checkbox', { name: 'Work on its own' }).click()
   await expect(warning).toContainText('changes this playground without asking you first')
   await expect(warning).toContainText('no backup is made')
