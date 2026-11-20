@@ -46,6 +46,7 @@ from chembook3d.services import (
     basis_sets,
     concentrations,
     energies,
+    geometry,
     history,
     import_undo,
     imports,
@@ -398,6 +399,7 @@ class ImportOptionsIn(BaseModel):
     duplicate_action: str | None = None
     duplicate_node_id: str | None = None
     create_derived: bool = True
+    beside: bool | None = None  # D246
     basis_names: dict[str, str] = Field(default_factory=dict)
     dispersion_names: dict[str, str] = Field(default_factory=dict)
     label: str | None = None
@@ -1472,6 +1474,30 @@ def node_calculations(node_id: str, request: Request, session: DbSession):
     node = _get_node(session, node_id)
     ordered = sorted(node.calculations, key=lambda c: (c.created_at, c.step_index or 0))
     return [_calculation_out(request, c) for c in ordered]
+
+
+class NodeGeometryOut(BaseModel):
+    calculation_id: str
+    level_label: str | None
+    node_geometry: bool  # the node's own geometry
+    pre_optimization: bool
+
+
+@router.get("/nodes/{node_id}/geometries", response_model=list[NodeGeometryOut])
+def node_geometries(node_id: str, session: DbSession):
+    """D246: the optimized geometries the node holds, its own first, each by the optimization
+    that ended on it; a local single point can be run at any of them."""
+    node = _get_node(session, node_id)
+    tolerance = app_settings.load().geometry_tolerance
+    return [
+        NodeGeometryOut(
+            calculation_id=c.id,
+            level_label=levels.label(c.level),
+            node_geometry=geometry.matches(c.geometry, node.geometry, tolerance),
+            pre_optimization=levels.continued_by(c, tolerance) is not None,
+        )
+        for c in levels.node_geometries(node, tolerance)
+    ]
 
 
 def _get_calculation(session: Session, calculation_id: str) -> Calculation:

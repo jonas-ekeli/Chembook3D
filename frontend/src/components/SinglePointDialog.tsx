@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, type LocalJob, type LocalTools, type Node } from '../api'
+import { api, type LocalJob, type LocalTools, type Node, type NodeGeometry } from '../api'
 import { duration } from '../localJobs'
 import { Modal } from './Modal'
 import { errorText } from '../util'
@@ -30,6 +30,22 @@ export function SinglePointDialog({
   const [level, setLevel] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // D246: a node can hold geometries at several levels; one node's single point picks one.
+  const only = structures.length === 1 ? structures[0].id : null
+  const [geometries, setGeometries] = useState<NodeGeometry[]>([])
+  const [at, setAt] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!only) return
+    let cancelled = false
+    api.nodeGeometries(only).then(
+      (found) => !cancelled && setGeometries(found),
+      () => !cancelled && setGeometries([]),
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [only])
 
   useEffect(() => {
     let cancelled = false
@@ -53,7 +69,9 @@ export function SinglePointDialog({
     if (!chosen) return
     setBusy(true)
     setError(null)
-    api.startSinglePoints({ node_ids: structures.map((n) => n.id), level: chosen.value }).then(
+    const other = geometries.find((g) => g.calculation_id === at && !g.node_geometry)
+    const geometry_of = only && other ? { [only]: other.calculation_id } : undefined
+    api.startSinglePoints({ node_ids: structures.map((n) => n.id), level: chosen.value, geometry_of }).then(
       (jobs) => {
         setBusy(false)
         onStarted(jobs)
@@ -124,6 +142,20 @@ export function SinglePointDialog({
             </small>
           )}
         </label>
+        {geometries.length > 1 && (
+          <label className="field">
+            <span>At the geometry of</span>
+            <select aria-label="At the geometry of" value={at ?? geometries[0].calculation_id} onChange={(event) => setAt(event.target.value)}>
+              {geometries.map((g) => (
+                <option key={g.calculation_id} value={g.calculation_id}>
+                  {g.level_label ?? 'Unknown level'}
+                  {g.node_geometry ? ' (the node’s geometry)' : g.pre_optimization ? ' (pre-optimization)' : ''}
+                </option>
+              ))}
+            </select>
+            <small className="muted">The optimization whose structure the single point is run at; its level becomes the geometry level (D246).</small>
+          </label>
+        )}
       </div>
       <ul className="plain small" aria-label="Structures">
         {structures.map((n) => (

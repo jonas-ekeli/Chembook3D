@@ -713,6 +713,9 @@ function App() {
 
   // D91: what this tab shows, for Claude's get_selection ("this node"). The tab used last wins.
   const groupIds = useMemo(() => new Set(canvas.groups.map((g) => g.id)), [canvas.groups])
+  // A free species is kept off the canvas (D69), so the Refine and Single point dialogs look there too.
+  const nodeOrSpecies = (id: string) =>
+    canvas.nodes.find((n) => n.id === id) ?? canvas.species.find((n) => n.id === id)
   useEffect(() => {
     if (!investigation) return
     const many = multi.length >= 2
@@ -1368,7 +1371,7 @@ function App() {
       )}
       {singlePoint && investigation && (
         <SinglePointDialog
-          nodes={singlePoint.map((id) => canvas.nodes.find((n) => n.id === id)).filter((n): n is Node => !!n)}
+          nodes={singlePoint.map((id) => nodeOrSpecies(id)).filter((n): n is Node => !!n)}
           onClose={() => setSinglePoint(null)}
           onStarted={(jobs) => {
             localJobs.refresh()
@@ -1384,10 +1387,10 @@ function App() {
           }}
         />
       )}
-      {refineNode && investigation && canvas.nodes.some((n) => n.id === refineNode) && (
+      {refineNode && investigation && nodeOrSpecies(refineNode) && (
         <RefineDialog
           key={refineNode}
-          node={canvas.nodes.find((n) => n.id === refineNode)!}
+          node={nodeOrSpecies(refineNode)!}
           onClose={() => setRefineNode(null)}
           onStarted={(job) => {
             localJobs.refresh()

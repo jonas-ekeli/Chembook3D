@@ -700,6 +700,30 @@ export function ImportDialog({
                 </p>
               )}
 
+              {plan.beside && (
+                <fieldset aria-label="Another level">
+                  <legend>
+                    Step {plan.beside.step} at {plan.beside.level_label}
+                  </legend>
+                  <label className="check">
+                    <input type="radio" name="beside" checked={plan.beside.chosen} onChange={() => change({ beside: true })} />
+                    <span>
+                      Add it beside the node’s geometry, which the node keeps
+                      {plan.beside.default ? ' (suggested: its method ranks lower)' : ''}
+                    </span>
+                  </label>
+                  <label className="check">
+                    <input type="radio" name="beside" checked={!plan.beside.chosen} onChange={() => change({ beside: false })} />
+                    <span>
+                      {plan.beside.alternative === 'continue'
+                        ? 'Make it the node’s geometry; the earlier optimization becomes its pre-optimization'
+                        : 'Keep it apart, on a derived node'}
+                      {plan.beside.default ? '' : ' (suggested)'}
+                    </span>
+                  </label>
+                </fieldset>
+              )}
+
               {plan.derived_offered && (
                 <label className="check">
                   <input

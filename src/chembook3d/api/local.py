@@ -425,6 +425,12 @@ class SinglePointsIn(BaseModel):
     )
     charge: int | None = Field(None, description="Default: each node's charge, else 0")
     multiplicity: int | None = Field(None, ge=1, description="Default: each node's, else 1")
+    geometry_of: dict[str, str] | None = Field(
+        None,
+        description="D246: node id -> the id of the node's optimization whose geometry its "
+        "single point is run at, from GET /api/nodes/{id}/geometries (a node can hold "
+        "geometries optimized at several levels); default the node's own geometry",
+    )
 
 
 @router.post("/single-points")
@@ -445,6 +451,7 @@ def start_single_points(
             body.charge,
             body.multiplicity,
             _claude_limit(request, folder),
+            body.geometry_of,
         )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc

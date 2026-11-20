@@ -41,11 +41,11 @@ from typing import Any
 import numpy as np
 from sqlalchemy.orm import Session
 
-from chembook3d import local_tools
+from chembook3d import local_tools, xyz
 from chembook3d.local_worker import CRITERIA, METHOD_LABELS, SCAN_POINTS, grid_cells
 from chembook3d.models import Node
 from chembook3d.parsers import local_result
-from chembook3d.services import history, imports, oniom
+from chembook3d.services import history, imports, levels, oniom
 from chembook3d.services import nodes as node_service
 from chembook3d.services.records import RecordError
 
@@ -1526,11 +1526,13 @@ def create_single_points(
     charge: int | None = None,
     multiplicity: int | None = None,
     limit: int | None = None,
+    geometry_of: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """D240: a single point of each node's structure as it is, one job per node; the jobs wait
     for each other through the tools folder's lock, so they run one after another. Charge and
     multiplicity are each node's own unless given. `limit` (seconds, D223) refuses the lot when
-    their estimates add up to more."""
+    their estimates add up to more. D246: `geometry_of` maps a node to the optimization whose
+    geometry its single point is run at (one of `levels.node_geometries`), else the node's."""
     offered = sp_levels()
     if level not in offered:
         raise LocalJobError(f"Unknown level {level!r}; offered: {', '.join(offered)}")
@@ -1548,6 +1550,15 @@ def create_single_points(
     structures = []
     for node in nodes:
         atoms = node_service.atoms_of(node)
+        chosen = (geometry_of or {}).get(node.id)
+        if chosen:
+            found = next((c for c in levels.node_geometries(node) if c.id == chosen), None)
+            if found is None:
+                raise LocalJobError(
+                    f'"{node.label}" has no optimized geometry from calculation {chosen}; '
+                    "its geometries are listed by GET /api/nodes/{id}/geometries"
+                )
+            atoms = [xyz.Atom(e, x, y, z) for e, x, y, z in found.geometry]
         if not atoms:
             raise LocalJobError(f'Node "{node.label}" has no coordinates')
         structures.append((node, atoms))

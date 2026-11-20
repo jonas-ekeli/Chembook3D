@@ -63,6 +63,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-CALC-05 | The user can edit a calculation's level-of-theory fields and geometry level. Edits are recorded in history, and the original parsed values stay viewable. | D29, P13 | 2 |
 | FR-CALC-06 | The user can inspect each saved custom basis set (elements, contraction, ECP, every exponent and coefficient, the calculations using it) and download it, or chosen elements, as a Gaussian basis file. | D94, A41 | after 5 |
 | FR-CALC-07 | Dispersion parameters set by IOp (IOp(3/174–179)) are part of the level only when the route names a dispersion model (EmpiricalDispersion or IOp(3/124)); without one Gaussian adds no dispersion and the level has none. Levels stored the other way by an earlier version are repaired when the investigation is opened. | D203 | 2 |
+| FR-CALC-08 | A node can hold optimized geometries at several levels. An optimization at another level from the node's geometry that ranks lower is added beside it (the node keeps its geometry), a free species takes a new level from elsewhere, and calculations at any of those geometries attach to the node with that geometry level; a local single point can be run at any of them. | D246 | after 5 |
 
 **AC:**
 - Two calculations differing only in solvent are different levels.
@@ -197,6 +198,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-SPC-05 | The import dialog can create a free species instead of a node. A node derived from a species is a species. | D69 | after 5 |
 | FR-SPC-06 | Profiles, the energy table, node cards in energy mode (along the route in D72) and ΔX on edges add the energy of leaving species and subtract that of joining species along the pathway from the reference (EN-3, EN-8). The table has a "Free species" column. A species without a value at the selected level makes the point, card or edge "n/a" with the reason. | D69, D72 | after 5 |
 | FR-SPC-07 | W-BALANCE flags a transition whose atoms or total charge do not balance. | D69 | after 5 |
+| FR-SPC-08 | One free species holds every level of theory of its molecule (D246), so pathways at a lower composite level balance with the same free species. | D246 | after 5 |
 
 **AC:**
 - A → B with "+ propene": B's profile value is X(B) − X(A) − X(propene).
