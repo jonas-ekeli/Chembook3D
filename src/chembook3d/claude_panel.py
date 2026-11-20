@@ -11,6 +11,7 @@ the app stores no credentials.
 """
 
 import codecs
+import errno
 import hashlib
 import json
 import os
@@ -542,20 +543,27 @@ class _PosixBackend(_Backend):
     def __init__(self, argv: list[str], cwd: Path, rows: int, cols: int):
         import pty
 
+        env = environment()
+        # Found here, so a missing program is an OSError from this call as with Popen itself.
+        program = shutil.which(argv[0], path=env.get("PATH"))
+        if program is None:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), argv[0])
         master, slave = pty.openpty()
         _set_size(slave, rows, cols)
         try:
             # A session of its own with the terminal as controlling terminal, so Ctrl+C and
-            # resizing reach the program as they would in a real terminal.
+            # resizing reach the program as they would in a real terminal. The terminal is taken
+            # by a small Python that then becomes the program, not by a preexec_fn: Python code
+            # run between fork and exec can deadlock in a process with threads (the server has
+            # several), and libraries that start threads (JAX) warn on every such fork.
             self._process = subprocess.Popen(
-                argv,
+                [sys.executable, "-I", "-S", "-c", _TAKE_TERMINAL, program, *argv],
                 cwd=cwd,
-                env=environment(),
+                env=env,
                 stdin=slave,
                 stdout=slave,
                 stderr=slave,
                 start_new_session=True,
-                preexec_fn=_take_terminal,
                 close_fds=True,
             )
         except BaseException:
@@ -619,11 +627,13 @@ class _PosixBackend(_Backend):
         return code
 
 
-def _take_terminal() -> None:  # runs in the child, after setsid
-    import fcntl
-    import termios
-
-    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+# Run in the new session: its terminal (stdin) becomes the controlling terminal, then the
+# program replaces this Python, keeping its process ID, so stopping the process stops it.
+_TAKE_TERMINAL = (
+    "import fcntl, os, sys, termios\n"
+    "fcntl.ioctl(0, termios.TIOCSCTTY, 0)\n"
+    "os.execv(sys.argv[1], sys.argv[2:])\n"
+)
 
 
 def _set_size(fd: int, rows: int, cols: int) -> None:

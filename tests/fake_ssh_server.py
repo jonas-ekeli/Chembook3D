@@ -21,6 +21,7 @@ import socket
 import socketserver
 import sys
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -362,13 +363,24 @@ class FakeXServer:
         self._server.server_close()
 
 
-def free_display() -> str:
-    """A display nothing answers on."""
+@contextlib.contextmanager
+def free_display() -> Iterator[str]:
+    """A display nothing answers on, kept that way while in use: its port is bound but not
+    listening, so connecting is refused and no FakeXServer (in another pytest-xdist worker)
+    can start listening on it in the meantime."""
     for display in range(40, 100):
-        with socket.socket() as probe:
-            if probe.connect_ex(("127.0.0.1", 6000 + display)) != 0:
-                return f"127.0.0.1:{display}.0"
-    raise OSError("every X11 display port answers")
+        hold = socket.socket()
+        try:
+            hold.bind(("127.0.0.1", 6000 + display))
+        except OSError:
+            hold.close()
+            continue
+        try:
+            yield f"127.0.0.1:{display}.0"
+        finally:
+            hold.close()
+        return
+    raise OSError("every X11 display port is taken")
 
 
 async def _real(process: asyncssh.SSHServerProcess) -> None:

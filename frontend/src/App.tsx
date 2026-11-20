@@ -248,6 +248,10 @@ function App() {
   // D83, D86: the selectivity or turnover to show when the Analyses view opens
   const [openAnalysis, setOpenAnalysis] = useState<string | null>(null)
   const [canvas, setCanvas] = useState<Canvas>(EMPTY_CANVAS)
+  // Whether the open investigation's canvas has arrived. Until it has, the canvas and the drawer
+  // are not drawn: against the empty canvas, every pathway of a saved profile that arrived first
+  // would be listed as one that lost a node (D221).
+  const [canvasIn, setCanvasIn] = useState(false)
   const [selection, setSelection] = useState<InspectorSelection>(null)
   const [multi, setMulti] = useState<string[]>([])
   // One thing is shown in the inspector; choosing it ends any multi-selection.
@@ -366,6 +370,8 @@ function App() {
   // are not drawn, so nothing clicked or chosen before the saved view arrives is overwritten
   // by it (a slow answer used to close the drawer just opened and drop its new pathway).
   const [viewRestored, setViewRestored] = useState(0)
+  // The canvas and the drawer are drawn once the saved view and the canvas are both in.
+  const workReady = viewRestored === shown && canvasIn
   const restored = useRef<number | null>(null)
   // What was saved last; null until the restored view has been seen, which is not saved again.
   // Opening an investigation must not change its database (D71: nothing new to sync).
@@ -465,7 +471,17 @@ function App() {
         if (n === fetched.current && version === identityVersion.current) set(value)
       }
     const failed = (err: unknown) => n === fetched.current && version === identityVersion.current && setError(errorText(err))
-    api.canvas().then(latest(setCanvas), failed)
+    api.canvas().then(
+      latest((found: Canvas) => {
+        setCanvas(found)
+        setCanvasIn(true)
+      }),
+      (err: unknown) => {
+        failed(err)
+        // The error is shown; the work area is drawn with what there is rather than left blank.
+        if (n === fetched.current && version === identityVersion.current) setCanvasIn(true)
+      },
+    )
     api.energyOptions().then(latest(setEnergyOptions), failed)
     // The energy view is fetched beside them, not after the options arrive: with the level
     // unchanged, fetching it again then would only repeat this (the first answer was dropped).
@@ -524,6 +540,7 @@ function App() {
     setLinking(false)
     setConflict(null)
     setCanvas(EMPTY_CANVAS)
+    setCanvasIn(false)
     setHistory([])
     setEnergyOptions(null)
     setEnergyLevel(null)
@@ -2942,7 +2959,7 @@ function App() {
             onDiscarded={() => discarded(true)}
           />
         )}
-        {view === 'canvas' && viewRestored === shown && (
+        {view === 'canvas' && workReady && (
           // D180: the canvas's own controls, in one row under the app bar.
           <div className="canvasbar">
             {openCanvas !== null && (
@@ -3064,7 +3081,7 @@ function App() {
           </div>
         )}
         <div className="app-body">
-        {viewRestored !== shown ? (
+        {!workReady ? (
           <div className="work-column" aria-busy="true" />
         ) : view === 'canvas' ? (
           <div className="work-column">

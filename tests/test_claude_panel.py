@@ -3,6 +3,7 @@
 
 import json
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -221,6 +222,68 @@ def test_terminal_stops_on_close(fake_claude, tmp_path):
     terminal.close()
     assert ended.wait(20)
     terminal.write("ignored after closing\r")
+
+
+def _run_until(terminal_output: list[str], text: str, seconds: float = 20) -> bool:
+    deadline = time.monotonic() + seconds
+    while text not in "".join(terminal_output) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return text in "".join(terminal_output)
+
+
+POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="the Linux and macOS terminal")
+
+
+@POSIX_ONLY
+def test_ctrl_c_reaches_the_program(tmp_path):
+    """The terminal is the program's controlling terminal: Ctrl+C typed there interrupts it."""
+    output: list[str] = []
+    script = "trap 'echo interrupted; exit 3' INT; echo ready; while :; do sleep 0.1; done"
+    terminal = claude_panel.Terminal(
+        ["sh", "-c", script], tmp_path, 24, 80, lambda text: text and output.append(text)
+    )
+    try:
+        assert _run_until(output, "ready")
+        terminal.write("\x03")
+        assert _run_until(output, "interrupted")
+    finally:
+        terminal.close()
+
+
+@POSIX_ONLY
+def test_a_missing_program_is_an_os_error(tmp_path):
+    """Found before the terminal starts, so the caller's OSError handling still applies."""
+    with pytest.raises(OSError):
+        claude_panel.Terminal(
+            [str(tmp_path / "no-such-program")], tmp_path, 24, 80, lambda text: None
+        )
+
+
+@POSIX_ONLY
+def test_starting_runs_no_python_between_fork_and_exec(tmp_path):
+    """No preexec_fn: Python code run in the child of a process with threads can deadlock, and
+    a library with threads (JAX, once Sella has run in the same process, as in the TS-guess
+    tests) warns at every such fork, which -W error turns into a failed test."""
+    check = (
+        "import os, sys, time\n"
+        "from pathlib import Path\n"
+        "from chembook3d import claude_panel\n"
+        "forks = []\n"
+        "os.register_at_fork(before=lambda: forks.append(1))\n"
+        "out = []\n"
+        "t = claude_panel.Terminal(['sh', '-c', 'echo started'], Path(sys.argv[1]), 24, 80,\n"
+        "                          lambda text: text and out.append(text))\n"
+        "deadline = time.monotonic() + 20\n"
+        "while 'started' not in ''.join(out) and time.monotonic() < deadline:\n"
+        "    time.sleep(0.05)\n"
+        "t.close()\n"
+        "print('started' in ''.join(out), len(forks))\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", check, str(tmp_path)], capture_output=True, text=True, timeout=60
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.split() == ["True", "0"]
 
 
 def test_notebook_tools_when_the_server_exists(monkeypatch, tmp_path):
