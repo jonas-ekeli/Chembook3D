@@ -1916,10 +1916,21 @@ export type EnergyView = {
   /** D161: each node's counterpoise BSSE at the level was added ("With BSSE"). */
   bsse?: boolean
   values: Record<string, EnergyValue>
-  edges: Record<string, { delta: number | null; direct: boolean; message?: string | null }>
+  /** D249: `check`, what the calculations of the free species joining or leaving there say. */
+  edges: Record<string, { delta: number | null; direct: boolean; message?: string | null; check?: string | null }>
   reference_id: string | null
   /** ΔX of each node and group from the reference, with the species that balance it (D72). */
-  relative: Record<string, { value: number | null; species: SpeciesCount[]; message: string | null; joined: boolean }>
+  relative: Record<
+    string,
+    {
+      value: number | null
+      species: SpeciesCount[]
+      message: string | null
+      joined: boolean
+      /** D249: what the calculations of the free species balancing it say. */
+      check?: string | null
+    }
+  >
   notes?: EnergyNote[]
   /** D197: by group id, for the groups that show their members' populations. */
   populations?: Record<string, GroupPopulation>

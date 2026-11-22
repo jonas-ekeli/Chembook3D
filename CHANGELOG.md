@@ -6,6 +6,9 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- A free species' warnings (an imaginary frequency, spin contamination, MACE thermochemistry
+  and the others) now show wherever its energy is added: profiles, the energy table, edges,
+  cards, selectivities and equilibria (D249).
 - Lower levels beside a node's geometry (D246): a MACE or xTB optimization from a DFT geometry
   is added beside it (the node keeps its geometry), a free species also takes a new level from
   a built structure, and a local single point can be run at any of the node's geometries, so one

@@ -520,6 +520,13 @@ def _next_step(
             if message is not None:
                 row["message"] = message
                 continue
+            # D249: what the free species' calculations say, once per species and issue.
+            for issue in species_service.issues(
+                session, energies, balance, key, equilibrium.energy_type, ("W-TEMP",)
+            ):
+                note = f"{issue['message'][0].upper()}{issue['message'][1:]}."
+                if note not in notes:
+                    notes.append(note)
             row["value"] = value.value + added
             row["barrier"] = row["value"] - base
             balances.append(balance)
