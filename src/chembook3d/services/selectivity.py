@@ -32,7 +32,6 @@ from chembook3d import settings as app_settings
 from chembook3d import xyz
 from chembook3d.models import (
     GroupNode,
-    LevelOfTheory,
     Node,
     NodeKind,
     Role,
@@ -50,6 +49,7 @@ from chembook3d.services.energies import (
     check_text,
     distinct_temperatures,
     key_label,
+    level_gone,
     same_temperature,
     temperatures_text,
 )
@@ -527,10 +527,9 @@ def result(
     if selectivity.level is None:
         return stop("incomplete", "Choose a level of theory.")
     key = LevelKey.decode(selectivity.level)
-    if session.get(LevelOfTheory, key.level_id) is None or (
-        key.geometry_level_id and session.get(LevelOfTheory, key.geometry_level_id) is None
-    ):
-        return stop("n/a", "This level of theory is no longer in the investigation.")
+    gone = level_gone(session, key)  # D251: also a level no calculation is at any more
+    if gone is not None:
+        return stop("n/a", gone)
     found["level_label"] = key_label(session, key)
 
     # S3, S4: one level and type, no fallback; G_qh at this selectivity's temperature.

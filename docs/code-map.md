@@ -297,6 +297,7 @@ Routes for all of these are in `api/pathway.py`.
 
 - `thermochem.py` computes quasi-harmonic G from stored frequency results. It mirrors the reference script; tests compare both. A linear molecule gets the linear rigid rotor (`_linear`, D164), checked against Gaussian on `HCN_singlet.out` and `gaussian_text.co2_freq`.
 - `services/energies.py` resolves E/H/G/G_qh at a composite level key `levelId~geometryLevelId`.
+- D251: `energies.LEVEL_KEY_TABLES`/`LEVEL_KEY_MODELS` list the records that keep a level key (selectivities, turnovers, conformer equilibria) and `rekey_saved` moves them and the remembered view; repairs, `playground_merge` and its undo use them. `routes._follow_level` moves them after a level override that leaves the old level empty; `level_gone` gives each analysis its note.
 - `services/pathways.py` builds pathways (also across edges drawn to or from a group: `_sides`, `_onward`, D108), profiles and the energy table (values pre-formatted, CSV uses the same strings, T-EN-08).
 - Routes in `api/energies.py`.
 - A node's energies come only from calculations for its own charge and multiplicity (D155, `NodeEnergies.other_state`); two states at one level give n/a, never the latest.

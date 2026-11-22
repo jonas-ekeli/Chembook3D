@@ -49,7 +49,7 @@ from chembook3d.investigation import (
     acquire_ownership,
 )
 from chembook3d.models import Base, HistoryEntry
-from chembook3d.services import history
+from chembook3d.services import energies, history
 from chembook3d.services.notes import images_in
 from chembook3d.services.playground_merge import (
     BY_TYPE,
@@ -527,9 +527,9 @@ def _uses(merge: _Merge, plan: _Plan, projected: Rows) -> set[tuple[str, Key]]:
                     targets.append((target, (row[column],)))
             for ids in _json_refs(table, row).values():
                 targets.extend((t, (i,)) for i in ids for t in JSON_TARGETS)
-            if table in ("selectivities", "turnovers", "conformer_equilibria") and row.get("level"):
-                parts = str(row["level"]).split("~")
-                targets.extend(("levels_of_theory", (p,)) for p in parts if p)
+            if table in energies.LEVEL_KEY_TABLES and row.get("level"):  # D251
+                ids = energies.key_level_ids(row["level"])
+                targets.extend(("levels_of_theory", (p,)) for p in ids)
             if table == "node_notes":
                 targets.extend(("note_images", (i,)) for i in images_in(row.get("body") or ""))
             for target, target_key in targets:

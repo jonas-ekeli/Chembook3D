@@ -6,6 +6,9 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- A level override that leaves no calculation at the old level now moves the saved selectivities,
+  turnovers and conformer equilibria on it, and the energy view, to the new level, in the
+  history (D251); an analysis left at an empty level says so instead of "No G at this level".
 - Normal modes take about an eighth of the room (D247): they move to a table of their own,
   compressed, with every number kept, and the upgrade shrinks the database file (a real
   investigation: 43 MB to about 15 MB). Sync now warns when a synced file, the database above
