@@ -3,8 +3,10 @@ the migrations (an investigation saved by an earlier version) must be the same. 
 every revision keeps the rows it finds, a failed one changes nothing (NFR-DATA-03), and every
 revision can be undone."""
 
+import json
 import shutil
 import sqlite3
+import zlib
 
 import pytest
 from alembic.autogenerate import compare_metadata
@@ -134,6 +136,8 @@ SEED_VALUES = {
     "transition_species": {"direction": "joins"},  # direction_known
     "selectivity_members": {"group_id": None},  # one_member
     "investigation_info": {"view_state": '{"reference_id": "energy_profiles.id"}'},  # 0031
+    "calculation_results": {"normal_modes": "[[[0.1, -0.2, 0.3]]]"},  # 0035 moves them
+    "normal_modes": {"data": zlib.compress(b"[[[0.1,-0.2,0.3]]]")},  # 0035 down: JSON again
 }
 
 
@@ -319,3 +323,33 @@ def test_every_revision_can_be_undone_and_redone(start, tmp_path, at_revision, n
         inv.command.upgrade(inv._alembic_config(connection), "head")
     engine.dispose()
     assert schema(path) == schema(new_database)
+
+
+def test_normal_modes_move_to_their_own_table_unchanged_and_the_file_shrinks(tmp_path, at_revision):
+    # D247 (0035): every number kept, the results row without them, and the space they took
+    # given back to the disk (investigation._give_back_space), so sync pushes the smaller file.
+    path = shutil.copy(at_revision["0034"], tmp_path / inv.DB_NAME)
+    seed(path)
+    modes = [
+        [[round(0.01 * (m + a + k) - 0.5, 5) for k in range(3)] for a in range(90)]
+        for m in range(264)
+    ]
+    db = sqlite3.connect(path)
+    db.execute("UPDATE calculation_results SET normal_modes = ?", (json.dumps(modes),))
+    db.commit()
+    db.close()
+    before = path.stat().st_size
+    engine = inv._make_engine(path)
+    try:
+        inv._migrate(engine, path)
+    finally:
+        engine.dispose()
+    db = sqlite3.connect(path)
+    try:
+        columns = [row[1] for row in db.execute("PRAGMA table_info('calculation_results')")]
+        assert "normal_modes" not in columns
+        (data,) = db.execute("SELECT data FROM normal_modes").fetchone()
+    finally:
+        db.close()
+    assert json.loads(zlib.decompress(data)) == modes
+    assert path.stat().st_size < before / 2

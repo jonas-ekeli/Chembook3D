@@ -61,8 +61,12 @@ export function SyncChip({
   const state = status?.state
   return (
     <button
-      className={`sync-chip${state ? ` ${state}` : ''}`}
-      title={status ? `${status.message}${status.remote ? ` (${status.remote})` : ''}` : 'Commit and push now'}
+      className={`sync-chip${state ? ` ${state}` : ''}${status?.size_warning ? ' size-warning' : ''}`}
+      title={
+        status
+          ? `${status.message}${status.remote ? ` (${status.remote})` : ''}${status.size_warning ? `. ${status.size_warning}` : ''}`
+          : 'Commit and push now'
+      }
       aria-label="Sync with GitHub"
       disabled={busy}
       onClick={onSync}
