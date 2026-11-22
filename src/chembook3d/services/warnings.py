@@ -71,9 +71,17 @@ def calculation_warnings(
         # D162: ⟨S²⟩ far from S(S+1) of the calculation's multiplicity.
         found.append(Finding("W-SPIN", spin.message(contaminated), calculation.id))
     if calculation.geometry and node.geometry and not continued:
-        if not geometry.matches(calculation.geometry, node.geometry, tolerance):
+        # D246: a node holds the geometries its optimizations at other levels ended on too, so
+        # a calculation at a geometry added beside the node's (a MACE optimization, its
+        # frequencies and single points) is on the node.
+        held = [node.geometry] + [c.geometry for c in levels.optimizations(node) if c.geometry]
+        if not any(geometry.matches(calculation.geometry, rows, tolerance) for rows in held):
             found.append(
-                Finding("W-GEOM", "geometry does not match the node's geometry", calculation.id)
+                Finding(
+                    "W-GEOM",
+                    "geometry matches none of the node's optimized geometries",
+                    calculation.id,
+                )
             )
     return found
 

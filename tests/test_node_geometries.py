@@ -221,3 +221,15 @@ def test_node_geometries_lists_each_geometry_once(open_client):
     geometries = open_client.get(f"/api/nodes/{species}/geometries").json()
     assert len(geometries) == 2
     assert rows(DFT_END) and geometries[0]["node_geometry"]
+
+
+def test_calculations_at_a_geometry_beside_the_node_give_no_geometry_warning(open_client):
+    """T-IMP-68: an optimization added beside the node's geometry, and a single point at it,
+    are on the node, so W-GEOM does not flag them (it did for every free species after D246)."""
+    species = dft_node(open_client)
+    onto(open_client, upload(open_client, "S_xtb.json", low_result(), species))
+    route = "#P B3LYP/def2SVP SP"
+    onto(open_client, upload(open_client, "S_sp.log", g.single_point(LOW_END, route), species))
+    assert [w["code"] for w in node(open_client, species)["warnings"]] == []
+    for calculation in calculations(open_client, species):
+        assert "W-GEOM" not in [w["code"] for w in calculation["warnings"]]

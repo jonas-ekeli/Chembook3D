@@ -217,6 +217,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-IMP-65 | Then a single point at the DFT geometry and one at the xTB geometry | Both attach to the node, at SP // DFT and SP // xTB |
 | T-IMP-66 | The xTB optimization with beside switched off; a same-rank DFT optimization from the DFT geometry, switched on | The first continues the node (DFT a pre-optimization, node at the xTB geometry); the second keeps the node's geometry |
 | T-IMP-67 | A free species: an xTB optimization from a built structure; again at the same level; with another charge; on a canvas node | Only the first is added to the free species; the others offer a derived node |
+| T-IMP-68 | A free species with an xTB optimization beside its DFT geometry and a single point at the xTB geometry (D246h) | No W-GEOM on the node or on any of its calculations |
 
 ## 6. Energy tests
 
