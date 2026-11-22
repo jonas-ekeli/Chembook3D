@@ -100,7 +100,7 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 ### Geometries at several levels (D246)
 
 - `levels.method_rank`: force field < machine-learned < semi-empirical < electronic structure. `imports._beside` decides whether an optimization at a level the node lacks goes beside the node's geometry (`Plan.beside`, BESIDE, `ImportOptions.beside` from the preview's choice): from the node's geometry when it ranks lower than the node's optimization, or on a free species from elsewhere with the same atoms (`_same_molecule`).
-- Steps on any of the node's optimized geometries attach to it (`others` in `_plan_steps`).
+- Steps on any of the node's optimized geometries attach to it (`others` in `_plan_steps`); `warnings.calculation_warnings` gives W-GEOM only to one at none of them (D246h).
 - Nothing is stored for "beside": `levels.node_line` is the chain the node's geometry came through, and `levels.continued_by` (pre-optimization) only counts optimizations on it.
 - `levels.node_geometries` and `GET /api/nodes/{id}/geometries` (MCP `get_node_geometries`) list them; `local_jobs.create_single_points(geometry_of=)` runs a single point at one (`SinglePointDialog`'s "At the geometry of"). `App.tsx`'s `nodeOrSpecies` finds a free species for the Refine and Single point dialogs.
 
