@@ -852,6 +852,11 @@ button.recent-row {
 .sync-chip.no_git i {
   background: var(--danger);
 }
+/* FR-SYNC-10 (D247): a synced file near or over GitHub's 100 MB limit. */
+.sync-chip.size-warning i {
+  background: var(--warn-dot);
+  box-shadow: 0 0 0 2px var(--danger);
+}
 .canvasbar {
   display: flex;
   align-items: center;

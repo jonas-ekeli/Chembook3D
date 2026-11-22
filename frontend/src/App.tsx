@@ -9,6 +9,7 @@ import {
   STATUS_LABEL,
   STATUSES,
   SYNC_PROBLEMS,
+  syncMessage,
   type Canvas,
   type EnergyOptions,
   type EnergyType,
@@ -568,7 +569,8 @@ function App() {
     if (inv.sync) setSync(inv.sync)
     else if (!inv.linked) setSync(null)
     // Opened, but the pull did not get through (FR-SYNC-04): say why.
-    const syncProblem = inv.sync && SYNC_PROBLEMS.includes(inv.sync.state) ? `Sync: ${inv.sync.message}` : null
+    const syncProblem =
+      inv.sync && (SYNC_PROBLEMS.includes(inv.sync.state) || inv.sync.size_warning) ? syncMessage(inv.sync) : null
     // Opening the investigation already shown keeps the canvas and selection: resetting them when
     // the answer arrives would drop whatever was clicked in the meantime.
     if (!fresh && identity.current === inv.folder) {
@@ -893,8 +895,8 @@ function App() {
         setSyncing(false)
         setSync(status)
         if (status.state === 'diverged') setConflict({ ...status, folder: investigation.folder })
-        else if (SYNC_PROBLEMS.includes(status.state)) setError(`Sync: ${status.message}`)
-        else setNotice(`Sync: ${status.message}`)
+        else if (SYNC_PROBLEMS.includes(status.state)) setError(syncMessage(status))
+        else setNotice(syncMessage(status))
       },
       (err: unknown) => {
         setSyncing(false)
@@ -937,7 +939,7 @@ function App() {
       if (version === identityVersion.current) closed()
       // Closing pushes a linked investigation (FR-SYNC-05).
       if (status && folder && status.state === 'diverged') setConflict({ ...status, folder })
-      else if (status && SYNC_PROBLEMS.includes(status.state)) setError(`Sync: ${status.message}`)
+      else if (status && SYNC_PROBLEMS.includes(status.state)) setError(syncMessage(status))
     }, (err: unknown) => setError(errorText(err)))
   }
 
@@ -1287,7 +1289,7 @@ function App() {
             setLinking(false)
             setSync(status)
             if (investigation) setInvestigation({ ...investigation, linked: true, sync: status })
-            setNotice(`Sync: ${status.message}`)
+            setNotice(syncMessage(status))
           }}
         />
       )}

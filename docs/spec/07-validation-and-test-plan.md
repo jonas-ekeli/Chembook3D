@@ -326,6 +326,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-SYNC-05 | Clone with `core.autocrlf=true` | Copied output files are byte for byte identical (D71) |
 | T-SYNC-06 | Remote unreachable | Opens anyway and reports it; the next sync pushes (FR-SYNC-04) |
 | T-SYNC-07 | Open a linked investigation from an older schema | Asks before upgrading (FR-SYNC-07) |
+| T-SYNC-08 | A linked investigation whose database, then a copied file, passes the (scaled-down) limits; backups and local jobs as large | The status names the database, then the larger file first with a count of the others; what sync leaves out is never named (FR-SYNC-10) |
 | T-SHARE-01 | Export the demo, open the file from disk with no server | Canvas, node details, calculations and a profile show; changing level and type works; no request leaves the page (FR-SHARE-01–03) |
 | T-SHARE-02 | Search the exported file for the investigation folder and the original paths of imported files | Not found (FR-SHARE-04) |
 | T-SHARE-03 | Export with a node view, level, energy type, filters, expanded groups and drawer chosen, then with none sent | The copy holds that view, without deleted records and unknown values; with none sent, the investigation's remembered view (D105); each copy has its own `copy_id` (FR-SHARE-05, D128) |

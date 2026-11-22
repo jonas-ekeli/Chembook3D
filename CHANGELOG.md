@@ -8,6 +8,10 @@ artifacts and publishes nothing.
 
 - The database is backed up before a one-off repair runs, also when no upgrade is needed
   (D248); a repair that keeps failing is backed up once.
+- Normal modes take about an eighth of the room (D247): they move to a table of their own,
+  compressed, with every number kept, and the upgrade shrinks the database file (a real
+  investigation: 43 MB to about 15 MB). Sync now warns when a synced file, the database above
+  all, reaches 80 MB, before GitHub's 100 MB limit refuses the push (FR-SYNC-10).
 - Lower levels beside a node's geometry (D246): a MACE or xTB optimization from a DFT geometry
   is added beside it (the node keeps its geometry), a free species also takes a new level from
   a built structure, and a local single point can be run at any of the node's geometries, so one

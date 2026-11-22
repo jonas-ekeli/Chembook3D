@@ -87,6 +87,7 @@ class SyncOut(BaseModel):
     remote: str | None = None
     local: CommitOut | None = None
     upstream: CommitOut | None = None
+    size_warning: str | None = None  # FR-SYNC-10 (D247)
 
 
 class PlaygroundOut(BaseModel):
