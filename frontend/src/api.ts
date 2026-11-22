@@ -40,9 +40,17 @@ export type SyncStatus = {
   remote: string | null
   local: { when: string; summary: string } | null
   upstream: { when: string; summary: string } | null
+  /** FR-SYNC-10 (D247): a synced file, the database above all, near or over GitHub's 100 MB. */
+  size_warning?: string | null
 }
 
 export type SyncConflict = SyncStatus & { folder: string }
+
+/** What a sync answered, as the app's notice or error line says it, with the FR-SYNC-10 size
+ * warning (D247) after it when a synced file nears or passes GitHub's 100 MB limit. */
+export function syncMessage(status: SyncStatus): string {
+  return `Sync: ${status.message}${status.size_warning ? `. ${status.size_warning}` : ''}`
+}
 
 /** States in which a sync did not get through; the app says why. */
 export const SYNC_PROBLEMS: SyncState[] = ['no_git', 'unreachable', 'error']

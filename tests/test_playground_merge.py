@@ -281,6 +281,14 @@ def test_preview_changes_nothing_and_merge_applies_only_the_ticked(page, tmp_pat
     source = calcs[ids["hcn_play"]]["source_file_id"]
     stored = next((original / "files" / source).iterdir())
     assert os.path.samefile(stored, playground / "files" / source / stored.name)
+    # D247: the frequency job's normal modes, a table of their own, come with it.
+    modes = _rows(
+        original,
+        "SELECT m.data FROM normal_modes m JOIN calculations c ON c.id = m.calculation_id "
+        "WHERE c.node_id = ?",
+        (ids["hcn_play"],),
+    )
+    assert len(modes) == 1 and modes[0]["data"]
     profile = _rows(original, "SELECT name FROM energy_profiles WHERE id = ?", (ids["profile"],))
     assert profile[0]["name"] == "Cycle"
     info = _rows(original, "SELECT qh_temperature FROM investigation_info")[0]

@@ -54,6 +54,7 @@ ATTRIBUTES = ["* -text", f"{DB_NAME} binary"]
 NETWORK_TIMEOUT = 300  # seconds; the first sign-in may wait for the browser
 LOCAL_TIMEOUT = 120
 LARGE_FILE = 100 * 1024 * 1024  # GitHub refuses larger files (FR-SYNC-09)
+NEAR_LARGE = 80 * 1024 * 1024  # FR-SYNC-10: a synced file this big is reported (A179)
 SET_ASIDE = "set-aside"
 
 NO_GIT = (
@@ -89,6 +90,7 @@ class SyncStatus:
     remote: str | None = None
     local: Commit | None = None
     upstream: Commit | None = None
+    size_warning: str | None = None  # FR-SYNC-10: a synced file near or over LARGE_FILE
 
 
 def git_available() -> bool:
@@ -309,7 +311,7 @@ def status(folder: Path, fetch: bool = True, timeout: float = NETWORK_TIMEOUT) -
     local = _commit(folder, "HEAD")
     if error:
         state = "unreachable" if error.startswith(NOT_REACHED) else "error"
-        return SyncStatus(state, error, shown, local)
+        return SyncStatus(state, error, shown, local, size_warning=size_warning(folder))
     dirty = bool(_git(folder, "status", "--porcelain").strip())
     upstream = _upstream(folder)
     if upstream is None:
@@ -326,7 +328,58 @@ def status(folder: Path, fetch: bool = True, timeout: float = NETWORK_TIMEOUT) -
     else:
         state = "up_to_date"
     upstream_commit = _commit(folder, upstream) if upstream else None
-    return SyncStatus(state, MESSAGES[state], shown, local, upstream_commit)
+    return SyncStatus(state, MESSAGES[state], shown, local, upstream_commit, size_warning(folder))
+
+
+def _mb(size: int) -> str:
+    return f"{size / (1024 * 1024):.0f} MB"
+
+
+def large_files(folder: Path) -> list[tuple[str, int]]:
+    """FR-SYNC-10: the files sync would push that are NEAR_LARGE or bigger, largest first, as
+    (path relative to the folder with /, size in bytes). What sync leaves out (IGNORED, .git)
+    is left out here too."""
+    folder = Path(folder)
+    skipped_dirs = {".git"} | {name.rstrip("/") for name in IGNORED if name.endswith("/")}
+    skipped_files = {name for name in IGNORED if not name.endswith("/")}
+    found = []
+    for root, dirs, files in os.walk(folder):
+        here = Path(root)
+        if here == folder:
+            dirs[:] = [d for d in dirs if d not in skipped_dirs]
+        for name in files:
+            if here == folder and name in skipped_files:
+                continue
+            try:
+                size = (here / name).stat().st_size
+            except OSError:
+                continue
+            if size >= NEAR_LARGE:
+                found.append(((here / name).relative_to(folder).as_posix(), size))
+    return sorted(found, key=lambda item: (-item[1], item[0]))
+
+
+def size_warning(folder: Path) -> str | None:
+    """FR-SYNC-10 (D247): what to say when a synced file nears or passes GitHub's 100 MB limit,
+    the database above all, since every sync pushes it whole. None when nothing is that big."""
+    found = large_files(folder)
+    if not found:
+        return None
+    path, size = found[0]
+    what = "The database" if path == DB_NAME else path
+    if size > LARGE_FILE:
+        text = (
+            f"{what} is {_mb(size)}, over GitHub's 100 MB limit for one file, so GitHub "
+            "refuses the push."
+        )
+    else:
+        text = (
+            f"{what} is {_mb(size)}; GitHub refuses files over 100 MB, so sync will stop "
+            "when it gets there."
+        )
+    if len(found) > 1:
+        text += f" {len(found) - 1} more synced file(s) are over {_mb(NEAR_LARGE)}."
+    return text
 
 
 def _push_now(folder: Path, timeout: float) -> SyncStatus:
