@@ -6,6 +6,8 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The node panel's imaginary-frequency count is now from the frequency job the shown value
+  was checked against, also for E, rather than the node's latest frequency job (D250).
 - Lower levels beside a node's geometry (D246): a MACE or xTB optimization from a DFT geometry
   is added beside it (the node keeps its geometry), a free species also takes a new level from
   a built structure, and a local single point can be run at any of the node's geometries, so one

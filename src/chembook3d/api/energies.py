@@ -72,6 +72,7 @@ class ValueOut(BaseModel):
     # D154: what the frequency job at the geometry level says against the node's role; D158:
     # also a frequency job not at a stationary point, an unfinished optimization, W-TERM
     check: EnergyCheckOut | None = None
+    check_calculation_id: str | None = None  # D250: the frequency job `check` judged it by
 
 
 class EdgeValueOut(BaseModel):

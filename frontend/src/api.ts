@@ -1897,6 +1897,8 @@ export type EnergyValue = {
   details: Record<string, unknown>
   /** D154: what the frequency job at the geometry level says against the node's role. */
   check?: EnergyCheck | null
+  /** D250: the frequency job `check` judged the value by, for E too; null when none. */
+  check_calculation_id?: string | null
 }
 
 /** D154: a transition state without exactly one imaginary frequency (or without a frequency

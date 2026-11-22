@@ -243,7 +243,7 @@ Routes for all of these are in `api/pathway.py`.
 ### Outline and side panel
 
 - `Outline.tsx`: the steps, branches and search beside the canvas (D178: heads that fold, kept in localStorage; a step's actions on hover or focus, Alt+↑/↓ and drag by the grip; one-line node rows from `NodeRow.tsx`, shared with the read-only copy).
-- `NodeInspector.tsx` and `PathwayInspectors.tsx`: the side panel. The node panel's sticky header (D179): stat strip with the card's ΔX from `cardEnergy.ts` (which `Canvas.tsx` uses too), the ⋯ `MoreMenu.tsx`, the jump bar over one scroll.
+- `NodeInspector.tsx` and `PathwayInspectors.tsx`: the side panel. The node panel's sticky header (D179): stat strip with the card's ΔX from `cardEnergy.ts` (which `Canvas.tsx` uses too) and the imaginary count of the value's `check_calculation_id` (D250, `energies.Value`), the ⋯ `MoreMenu.tsx`, the jump bar over one scroll.
 - In the node panel: `components/CalculationList.tsx` lists the node's calculations and results (`ResultValues`), `components/HistoryList.tsx` the history (also the History view), `components/Vibrations.tsx` picks a vibrational mode, imaginary first.
 
 ### 3D view and structures
