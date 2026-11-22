@@ -7,8 +7,10 @@ import socket
 import pytest
 from sqlalchemy import text
 
+from chembook3d import autonomy
 from chembook3d import investigation as inv
-from chembook3d.models import Calculation, Node, Transition
+from chembook3d.models import Calculation, InvestigationInfo, Node, Transition
+from chembook3d.services import repairs
 from tests.conftest import WATER
 
 
@@ -444,3 +446,76 @@ def test_demo_script_builds_a_usable_investigation(tmp_path, client):
     canvas = client.get("/api/canvas").json()
     assert [b["name"] for b in canvas["branches"]] == ["T", "A", "B"]
     assert len(canvas["steps"]) == 4
+
+
+def _forget_repair(folder, name: str) -> None:
+    investigation = inv.open_investigation(folder)
+    with investigation.sessions.begin() as session:
+        info = session.get(InvestigationInfo, 1)
+        info.repairs = [r for r in info.repairs if r != name]
+    investigation.close()
+
+
+def _repair_backups(folder) -> list:
+    found = (folder / inv.BACKUP_DIR).glob(f"{inv.DB_NAME}.repair-*.bak")
+    return sorted(p.name for p in found)
+
+
+def test_a_repair_without_a_migration_backs_up_the_database_first(tmp_path, monkeypatch):
+    # T-OPS-19, D248: a repair can ship without a schema revision, so nothing else backs up.
+    folder = tmp_path / "study"
+    investigation = inv.create_investigation(folder, "Study")
+    with investigation.sessions.begin() as session:
+        session.add(Node(label="keep me"))
+    investigation.close()
+    assert _repair_backups(folder) == []  # every repair is done in a new investigation
+
+    seen = []
+    name = next(iter(repairs.REPAIRS))
+    real = repairs.REPAIRS[name]
+
+    def watched(session, where):
+        # the copy exists before the repair changes anything
+        seen.append(len(_repair_backups(where)))
+        return real(session, where)
+
+    monkeypatch.setitem(repairs.REPAIRS, name, watched)
+    _forget_repair(folder, name)
+    inv.open_investigation(folder).close()  # runs it, after a backup
+    assert seen == [1]
+    backups = _repair_backups(folder)
+    assert len(backups) == 1 and b"keep me" in (folder / inv.BACKUP_DIR / backups[0]).read_bytes()
+    inv.open_investigation(folder).close()  # nothing pending: no copy
+    assert len(_repair_backups(folder)) == 1
+
+
+def test_a_failing_repair_is_backed_up_for_once(tmp_path, monkeypatch):
+    # D248: tried again at every open, but its set of repairs has one backup.
+    folder = tmp_path / "study"
+    inv.create_investigation(folder, "Study").close()
+
+    def broken(session, where):
+        raise RuntimeError("a bug in this repair")
+
+    monkeypatch.setitem(repairs.REPAIRS, "broken", broken)
+    for _ in range(3):
+        inv.open_investigation(folder).close()
+    assert len(_repair_backups(folder)) == 1
+
+
+def test_a_failed_backup_leaves_the_repairs_for_the_next_open(tmp_path, monkeypatch):
+    folder = tmp_path / "study"
+    inv.create_investigation(folder, "Study").close()
+    ran = []
+    monkeypatch.setitem(repairs.REPAIRS, "later", lambda session, where: ran.append(1))
+
+    def full_disk(folder, label):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(autonomy, "backup_database", full_disk)
+    inv.open_investigation(folder).close()
+    assert ran == []
+    monkeypatch.undo()
+    monkeypatch.setitem(repairs.REPAIRS, "later", lambda session, where: ran.append(1))
+    inv.open_investigation(folder).close()
+    assert ran == [1] and len(_repair_backups(folder)) == 1

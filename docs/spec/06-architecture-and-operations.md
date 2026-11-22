@@ -69,7 +69,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Confirmed items are marked
 | NFR-PORT-02 | The app installs and runs on current Windows 10/11 and a mainstream Linux distribution without admin rights (P25). | D10 |
 | NFR-DATA-01 | No write leaves the database inconsistent: each user action runs in one transaction. | D21 |
 | NFR-DATA-02 | Copied source files are never modified after import. | D16 |
-| NFR-DATA-03 | Before a schema migration, the database file is backed up inside the folder. | P21 |
+| NFR-DATA-03 | Before a schema migration or a one-off repair (D248), the database file is backed up inside the folder. | P21, D248 |
 | NFR-DATA-04 | Crashes or kills during import leave no partial records. Orphaned copied files are cleaned up on next open. | P26 |
 | NFR-SEC-01 | The backend listens on the loopback interface only and has no remote access. | D42 |
 | NFR-SEC-02 | Imported files are parsed as data only. Nothing in them is executed. | — |

@@ -6,6 +6,8 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The database is backed up before a one-off repair runs, also when no upgrade is needed
+  (D248); a repair that keeps failing is backed up once.
 - Lower levels beside a node's geometry (D246): a MACE or xTB optimization from a DFT geometry
   is added beside it (the node keeps its geometry), a free species also takes a new level from
   a built structure, and a local single point can be run at any of the node's geometries, so one
