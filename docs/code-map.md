@@ -25,6 +25,7 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 - One-off repairs of records an earlier version got wrong: `services/repairs.py`, run once per investigation when it is opened and remembered in `InvestigationInfo.repairs`.
 - `investigation.py` refuses a database from a newer app (`InvestigationTooNew`) and, on request, asks before upgrading (`NeedsUpgrade`).
 - Records in `models.py`, Alembic revisions in `migrations/`, rules in `services/`.
+- Normal modes (D247): `models.NormalModes`, one row per frequency job, zlib-compressed JSON (`pack_modes`, `unpack_modes`); `CalculationResult.normal_modes` reads and writes it. `_migrate` ends with `_give_back_space` (VACUUM when a quarter of the file is free).
 - Who owns the open folder (lock, `_OwnedSession`): see "Notebook identity and ownership".
 - A new, empty database gets its schema from the models in one commit and is stamped at the latest revision (`_create_schema`); only an existing one runs the migrations (`_migrate`, after its backup). `tests/test_migrations.py` checks that both give the same schema, so a migration that adds a column with a server default needs the same `server_default` on the model.
 - `_migrate` runs every pending revision and the foreign key check in one transaction (an explicit `BEGIN`, since Python's sqlite3 module would commit each DDL statement on its own), so a failed upgrade leaves the database exactly as its backup. `tests/test_migrations.py` seeds a row in every table at every revision and upgrades it, checks that a failed upgrade changes no byte, and walks every `downgrade()` back to the base and up again. A downgrade drops a foreign key by name only when the model names it too (a database created from the models has the others unnamed); dropping the column drops its key.
@@ -764,6 +765,7 @@ Routes for all of these are in `api/pathway.py`.
 - `sync.py` runs the installed `git`: link, pull on open, push on close or Sync, keep one copy on a conflict, clone. The app stores no credentials.
 - Routes in `api/routes.py`. `components/SyncDialogs.tsx` holds the dialogs.
 - Ownership during pull, push, link and resolve: see "Notebook identity and ownership".
+- Size warning (FR-SYNC-10, D247): `sync.large_files` and `sync.size_warning` (from `NEAR_LARGE`, 80 MB), carried as `SyncStatus.size_warning` / `SyncOut.size_warning`; the frontend says it through `syncMessage` in `SyncDialogs.tsx` and rings the chip's dot (`.sync-chip.size-warning`).
 - `tests/test_sync.py` uses a local bare repository as the remote.
 
 ## Read-only copy to share (D79, A30)

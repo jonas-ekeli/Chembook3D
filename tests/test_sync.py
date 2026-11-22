@@ -320,3 +320,32 @@ def test_api_link_sync_and_conflict(tmp_path, remote, client):
     assert client.post("/api/investigations/open", json={"folder": str(a)}).is_success
     nodes = client.get("/api/nodes").json()
     assert sorted(n["label"] for n in nodes) == ["from a", "from b"]
+
+
+def test_a_synced_file_near_githubs_limit_is_reported(tmp_path, remote, monkeypatch):
+    # T-SYNC-08, FR-SYNC-10 (D247): the database above all, since every sync pushes it whole;
+    # what sync leaves out (backups, local jobs, .git) is never reported.
+    folder = linked(tmp_path, remote)
+    assert sync.status(folder).size_warning is None
+    (folder / inv.BACKUP_DIR).mkdir()
+    (folder / inv.BACKUP_DIR / "old.bak").write_bytes(b"x" * 9_000)
+    (folder / "local-jobs").mkdir()
+    (folder / "local-jobs" / "run.log").write_bytes(b"x" * 9_000)
+    # Limits scaled down to the size of this small database.
+    monkeypatch.setattr(sync, "NEAR_LARGE", (folder / inv.DB_NAME).stat().st_size)
+    monkeypatch.setattr(sync, "LARGE_FILE", sync.NEAR_LARGE * 2)
+    assert [path for path, _ in sync.large_files(folder)] == [inv.DB_NAME]
+    status = sync.status(folder)
+    assert status.state == "up_to_date"
+    assert status.size_warning.startswith("The database is ")
+    assert "sync will stop" in status.size_warning
+
+    (folder / "files" / "abc").mkdir(parents=True)
+    (folder / "files" / "abc" / "big.out").write_bytes(b"x" * (sync.LARGE_FILE + 1))
+    assert [path for path, _ in sync.large_files(folder)] == ["files/abc/big.out", inv.DB_NAME]
+    warning = sync.size_warning(folder)
+    assert warning.startswith("files/abc/big.out is ")
+    assert "refuses the push" in warning and "1 more synced file" in warning
+
+    monkeypatch.setattr(sync, "NEAR_LARGE", 10 * sync.LARGE_FILE)
+    assert sync.size_warning(folder) is None

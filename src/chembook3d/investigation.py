@@ -30,7 +30,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Engine, create_engine, event, func, select
+from sqlalchemy import Connection, Engine, create_engine, event, func, select
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -500,7 +500,22 @@ def _migrate(engine: Engine, db_path: Path, allow_upgrade: bool = True) -> str |
         finally:
             connection.exec_driver_sql("PRAGMA foreign_keys=ON")
             connection.commit()
+        _give_back_space(connection)
     return str(backup) if backup else None
+
+
+def _give_back_space(connection: Connection) -> None:
+    """D247: a migration that moved or shrank much data (0035 compresses the normal modes)
+    leaves the freed pages inside the file, and sync would still push its old size. When a
+    quarter or more of the file is free, VACUUM writes it again without them. A failure here
+    leaves a database that is correct, only larger."""
+    pages = connection.exec_driver_sql("PRAGMA page_count").scalar() or 0
+    free = connection.exec_driver_sql("PRAGMA freelist_count").scalar() or 0
+    if pages and free * 4 >= pages:
+        try:
+            connection.exec_driver_sql("VACUUM")
+        except Exception:  # noqa: BLE001 (a full disk or a busy file: keep the larger file)
+            log.warning("could not compact %s after migrating", connection.engine.url)
 
 
 def _remove_orphaned_copies(folder: Path, engine: Engine) -> None:
