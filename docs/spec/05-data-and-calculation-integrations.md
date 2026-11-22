@@ -8,7 +8,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. This document covers recor
 |---|---|
 | Node | id, label, role, charge, multiplicity, status, tags, notes, branch_id, step_id, group_id, derived_from_id, canvas position, geometry (elements, coordinates Å) |
 | Calculation | id, node_id, type, program, program version, level_of_theory_id, geometry_level_id (for single points), job step index, termination (normal / abnormal / unknown), notes, parse warnings |
-| Results | per calculation: E_scf (hartree), ZPE, H_corr, G_corr, H, G, T (K), P (atm), frequencies (cm⁻¹, with normal-mode displacements), imaginary count, final geometry, rotational constants, symmetry number (if printed), multiplicity, masses, and the job's printed values kept verbatim for reference |
+| Results | per calculation: E_scf (hartree), ZPE, H_corr, G_corr, H, G, T (K), P (atm), frequencies (cm⁻¹, with normal-mode displacements, kept compressed in a table of their own, D247), imaginary count, final geometry, rotational constants, symmetry number (if printed), multiplicity, masses, and the job's printed values kept verbatim for reference |
 | LevelOfTheory | id, program, method, basis (or custom basis name), dispersion, solvation model, solvent |
 | CustomBasis | name, description, optional raw definition text |
 | SourceFile | id, calculation_id, stored relative path, original file name, origin device, origin path, import time, checksum (SHA-256), size |

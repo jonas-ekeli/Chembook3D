@@ -31,6 +31,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-SYNC-07 | Before a schema upgrade of a linked investigation, the app asks for confirmation. | D71 | after 5 |
 | FR-SYNC-08 | Sign-in is left to git's credential helper; the app stores no credentials, and a missing sign-in fails at once with a message saying how to sign in. | D71 | after 5 |
 | FR-SYNC-09 | The import preview warns when a file over 100 MB is imported into a linked investigation. | D71 | after 5 |
+| FR-SYNC-10 | Every sync status names a synced file of 80 MB or more, the database first, and says whether GitHub's 100 MB limit stops the push now or will stop it. | D247 | after 5 |
 
 **AC:** link an investigation to an empty bare repository, clone it into a second folder, change it there and sync, then open the first copy: it shows the change. Change both copies and sync: nothing is merged, the chosen copy is kept, and the other is saved.
 

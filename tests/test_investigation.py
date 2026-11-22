@@ -85,6 +85,7 @@ def test_schema_upgrade_backs_up_the_database_first(tmp_path, monkeypatch):
         session.add(Node(label="keep me"))
     investigation.close()
 
+    head = inv._scripts().get_current_head()
     upgrades = []
     monkeypatch.setattr(inv.ScriptDirectory, "get_current_head", lambda self: "9999")
     monkeypatch.setattr(inv.command, "upgrade", lambda config, rev: upgrades.append(rev))
@@ -92,7 +93,7 @@ def test_schema_upgrade_backs_up_the_database_first(tmp_path, monkeypatch):
 
     assert upgrades == ["head"]
     backups = list((folder / inv.BACKUP_DIR).iterdir())
-    assert len(backups) == 1 and backups[0].name.startswith("investigation.sqlite.0034.")
+    assert len(backups) == 1 and backups[0].name.startswith(f"investigation.sqlite.{head}.")
     assert b"keep me" in backups[0].read_bytes()
 
 

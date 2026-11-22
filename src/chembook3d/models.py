@@ -2,7 +2,9 @@
 levels of theory, results and copied source files, named custom basis sets and dispersions,
 reaction steps, branches, transitions and group nodes, and the change history."""
 
+import json
 import uuid
+import zlib
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -20,7 +22,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, foreign, mapped_column, relationship
 
 
 def new_id() -> str:
@@ -346,9 +348,6 @@ class CalculationResult(Base):
     frequencies: Mapped[list[Any]] = mapped_column(default=list)  # cm⁻¹, imaginary negative
     # Large; loaded only when used (the 3D mode animation in phase 3).
     reduced_masses: Mapped[list[Any]] = mapped_column(default=list, deferred=True)
-    normal_modes: Mapped[list[Any]] = mapped_column(
-        default=list, deferred=True
-    )  # [mode][atom][xyz]
     imaginary_count: Mapped[int | None] = mapped_column(Integer, default=None)
     # D242: a TS guess's check of its saddle, a Hessian over the reacting region only: its
     # imaginary wavenumbers (cm⁻¹, negative), the region (0-based atoms), the level and the
@@ -360,6 +359,53 @@ class CalculationResult(Base):
     printed: Mapped[dict[str, Any]] = mapped_column(default=dict)
 
     calculation: Mapped[Calculation] = relationship(back_populates="result")
+    # D247: the normal modes, [mode][atom][xyz], live in a table of their own, compressed;
+    # loaded only when `normal_modes` is read (the 3D mode animation, a TS's imaginary mode).
+    modes: Mapped["NormalModes | None"] = relationship(
+        primaryjoin=lambda: CalculationResult.calculation_id == foreign(NormalModes.calculation_id),
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
+
+    @property
+    def normal_modes(self) -> list[Any]:
+        return [] if self.modes is None else self.modes.value
+
+    @normal_modes.setter
+    def normal_modes(self, value: list[Any] | None) -> None:
+        self.modes = NormalModes.of(value) if value else None
+
+
+class NormalModes(Base):
+    """D247: a frequency job's normal modes, [mode][atom][xyz] as the file prints them, kept
+    as zlib-compressed JSON. They are three quarters of a database stored as plain JSON on
+    the results row (0.3 to 0.5 MB for a 90-atom job), about eight times smaller this way,
+    and read only when a mode is shown or a TS's imaginary mode is followed."""
+
+    __tablename__ = "normal_modes"
+
+    calculation_id: Mapped[str] = mapped_column(
+        ForeignKey("calculations.id", ondelete="CASCADE"), primary_key=True
+    )
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+
+    @classmethod
+    def of(cls, modes: list[Any]) -> "NormalModes":
+        return cls(data=pack_modes(modes))
+
+    @property
+    def value(self) -> list[Any]:
+        return unpack_modes(self.data)
+
+
+def pack_modes(modes: list[Any]) -> bytes:
+    """D247: normal modes as stored, zlib-compressed compact JSON. No number is rounded."""
+    return zlib.compress(json.dumps(modes, separators=(",", ":")).encode(), 9)
+
+
+def unpack_modes(data: bytes) -> list[Any]:
+    return json.loads(zlib.decompress(data))
 
 
 class ReactionStep(Base):

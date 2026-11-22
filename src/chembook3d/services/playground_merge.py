@@ -125,7 +125,10 @@ KINDS = (
         "calculations",
         "node",
         "Calculation",
-        (Child("calculation_results", "calculation_id", "results"),),
+        (
+            Child("calculation_results", "calculation_id", "results"),
+            Child("normal_modes", "calculation_id", "modes"),  # D247
+        ),
     ),
     Kind("note", "node_notes", "node", "Note"),
     Kind(
