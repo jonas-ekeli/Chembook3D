@@ -260,6 +260,10 @@ def calculation_key(
         return None
     if calculation.type in levels.OPTIMIZATION_TYPES:
         return LevelKey(calculation.level_id, calculation.level_id)
+    # D255: the calculation it is stored as being at, whose level follows an override (Q80).
+    linked = levels.linked_source(calculation)
+    if linked is not None:
+        return LevelKey(calculation.level_id, linked.level_id)
     geometry = calculation.geometry_level_id
     node = calculation.node
     if geometry is None and node is not None:

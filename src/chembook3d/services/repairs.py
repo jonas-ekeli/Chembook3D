@@ -436,6 +436,32 @@ def dispersion_without_model(session: Session, folder: Path) -> dict[str, int]:
     return counts
 
 
+def geometry_links(session: Session, folder: Path) -> dict[str, int]:
+    """D255: every single point and frequency job stores the calculation it is at, chosen by
+    the rule it was read with until now (D253), so no value moves: a single point with a
+    stored geometry level is at the latest calculation at that level on its coordinates (none
+    when nothing there fits, and its stored level still counts); any other at what the rule
+    gives. A geometry level cleared by hand stays unknown."""
+    tolerance = thermo_settings.tolerance(session)
+    cleared = _set_by_hand(session)
+    counts = {"linked": 0, "unlinked": 0}
+    query = select(Calculation).where(
+        Calculation.type.in_(levels.LINKED_TYPES), Calculation.level_id.is_not(None)
+    )
+    for calculation in session.scalars(query):
+        if calculation.geometry_source_id is not None or calculation.irc_part is not None:
+            continue
+        if calculation.type == CalculationType.SINGLE_POINT and calculation.geometry_level_id:
+            found = levels.source_at_level(calculation, calculation.geometry_level_id, tolerance)
+        elif calculation.type == CalculationType.SINGLE_POINT and calculation.id in cleared:
+            found = None
+        else:
+            found = levels.rule_source(calculation, tolerance)
+        calculation.geometry_source = found
+        counts["linked" if found is not None else "unlinked"] += 1
+    return counts
+
+
 REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     # D252: first, so the repairs after it match geometries with the investigation's tolerance.
     "geometry_tolerance": geometry_tolerance,
@@ -450,6 +476,7 @@ REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "start_geometries": start_geometries,
     "energy_profiles": drawer_profiles,
     "dispersion_without_model": dispersion_without_model,
+    "geometry_links": geometry_links,  # D255: last, on the levels the repairs above leave
 }
 
 

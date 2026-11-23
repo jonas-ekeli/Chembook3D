@@ -208,6 +208,7 @@ def test_local_refine_and_single_point_on_a_free_species(open_client):
     last = calculations(open_client, species)[-1]
     assert last["type"] == "single_point"
     assert last["composite_label"].endswith(f"// {geometries[1]['level_label']}")
+    assert last["geometry_source_id"] == low  # D255: the chosen one, kept to the import
 
     wrong = {"node_ids": [species], "level": "stub", "geometry_of": {species: "nope"}}
     refused = open_client.post("/api/local/single-points", json=wrong)

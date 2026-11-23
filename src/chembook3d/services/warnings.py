@@ -85,7 +85,47 @@ def calculation_warnings(
                     calculation.id,
                 )
             )
+    found += _link_warnings(calculation, tolerance)
     return found
+
+
+def _link_warnings(calculation: Calculation, tolerance: float) -> list[Finding]:
+    """D255, Q80, W-LINK: a single point or frequency job whose stored geometry no longer fits
+    its coordinates (the calculation it is at ended elsewhere), or whose geometry level was set
+    by hand to a level none of whose calculations ended on its coordinates. Nothing is matched
+    again; the warning says the link should be looked at."""
+    if calculation.type not in levels.LINKED_TYPES or not calculation.geometry:
+        return []
+    linked = levels.linked_source(calculation)
+    if linked is not None:
+        if linked.geometry and not geometry.matches(
+            calculation.geometry, linked.geometry, tolerance
+        ):
+            where = levels.label(linked.level) or "another level"
+            return [
+                Finding(
+                    "W-LINK",
+                    f"it is taken at the geometry of the {str(linked.type).replace('_', ' ')} "
+                    f"at {where}, but its coordinates are not that geometry",
+                    calculation.id,
+                )
+            ]
+        return []
+    if calculation.geometry_level is None or calculation.node is None:
+        return []
+    # Set by hand to a level while its coordinates are another of the node's geometries.
+    actual = levels.Sources(calculation.node, lambda c: c).at(calculation.geometry, tolerance)
+    if actual is None or actual.level_id == calculation.geometry_level_id:
+        return []
+    where = levels.label(calculation.geometry_level)
+    return [
+        Finding(
+            "W-LINK",
+            f"its geometry level is set to {where}, but its coordinates are the geometry of "
+            f"the {str(actual.type).replace('_', ' ')} at {levels.label(actual.level)}",
+            calculation.id,
+        )
+    ]
 
 
 def _frequency_jobs(

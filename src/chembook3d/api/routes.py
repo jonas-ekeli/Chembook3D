@@ -353,8 +353,11 @@ class CalculationOut(BaseModel):
     program: str
     program_version: str
     level: LevelOut | None
+    # D255: the level of the calculation it is at when it is linked to one, else the stored one
     geometry_level: LevelOut | None
     composite_label: str
+    # D255: the calculation a single point or frequency job is at
+    geometry_source_id: str | None = None
     parsed_level: dict[str, Any] | None
     level_edited: bool
     route: str
@@ -1445,6 +1448,9 @@ def _calculation_out(request: Request, calculation: Calculation) -> CalculationO
     edited = bool(
         expected and current and any(expected.get(k, "") != v for k, v in current.items())
     )
+    # D255: a frequency job shows the geometry level it is read at too, as energies key it
+    linked = levels.linked_source(calculation) if calculation.type in levels.LINKED_TYPES else None
+    shown = linked.level if linked is not None else calculation.geometry_level
     return CalculationOut(
         id=calculation.id,
         node_id=calculation.node_id,
@@ -1452,8 +1458,9 @@ def _calculation_out(request: Request, calculation: Calculation) -> CalculationO
         program=calculation.program,
         program_version=calculation.program_version,
         level=_level_out(calculation.level),
-        geometry_level=_level_out(calculation.geometry_level),
-        composite_label=levels.composite_label(calculation.level, calculation.geometry_level),
+        geometry_level=_level_out(shown),
+        composite_label=levels.composite_label(calculation.level, shown),
+        geometry_source_id=linked.id if linked is not None else None,
         parsed_level=parsed,
         level_edited=edited,
         route=calculation.route,
@@ -1552,6 +1559,7 @@ def update_calculation(
                 levels.label(level),
             )
             calculation.level_id = level.id
+            _follow_source(session, calculation, level)
     if "geometry_level_id" in changes and changes["geometry_level_id"] != (
         calculation.geometry_level_id
     ):
@@ -1570,6 +1578,13 @@ def update_calculation(
             levels.label(new_level),
         )
         calculation.geometry_level_id = new_level.id if new_level else None
+        # D255: the calculation at that level it is at, when one there fits its coordinates;
+        # else none, and the level set by hand counts (W-LINK says it fits no geometry).
+        calculation.geometry_source = (
+            levels.source_at_level(calculation, new_level.id)
+            if new_level is not None and calculation.type in levels.LINKED_TYPES
+            else None
+        )
     if (
         "notes" in changes
         and changes["notes"] is not None
@@ -1589,6 +1604,30 @@ def update_calculation(
     _follow_level(session, before, (calculation.level_id, calculation.geometry_level_id))
     session.expire(calculation)
     return _calculation_out(request, _get_calculation(session, calculation_id))
+
+
+def _follow_source(session: Session, source: Calculation, level: LevelOfTheory) -> None:
+    """D255, Q80: the single points at this calculation keep their link, and their stored
+    geometry level follows its new level, each in the history; nothing is matched again."""
+    linked = session.scalars(
+        select(Calculation).where(
+            Calculation.geometry_source_id == source.id,
+            Calculation.type == CalculationType.SINGLE_POINT,
+            Calculation.geometry_level_id.is_not(None),
+            Calculation.geometry_level_id != level.id,
+        )
+    )
+    for calculation in linked:
+        history.record(
+            session,
+            "calculation",
+            calculation.id,
+            "update",
+            "geometry_level",
+            levels.label(calculation.geometry_level),
+            levels.label(level),
+        )
+        calculation.geometry_level_id = level.id
 
 
 def _follow_level(

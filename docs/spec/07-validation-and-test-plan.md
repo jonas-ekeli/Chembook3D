@@ -226,6 +226,10 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-IMP-69 | A node with only a frequency job (its optimization run elsewhere); preview a single point at its geometry at another level | The preview names the frequency job's level as the geometry level, the one the commit stores; a second frequency job at another level there is at its own level, with no FREQ-LEVEL (D204, D253) |
 | T-IMP-70 | The shared rule on records: a D204 frequency job, then an optimization added; a node with its own optimization and a later one beside it; a frequency job and a single point whose coordinates match none, and a single point with none | The frequency job drops out once an optimization is added; the frequency job is at the node's own optimization (A11), the single point at an unknown geometry, the one without coordinates at the node's own (D253) |
 | T-IMP-71 | Undo the import of a D204 frequency job a later single point takes its geometry level from; undo an optimization a later frequency job at another level takes its geometry level from | Both are blocked, naming the later file; once the frequency job's import is undone, the optimization's can be (D253) |
+| T-IMP-72 | Import an optimization with its frequency job, then a single point at its geometry | Both store the optimization as their geometry source; the single point's label ends with the optimization's (D255) |
+| T-IMP-73 | Override the basis of an optimization a single point and frequency job are linked to | The links stay; both geometry levels are the new level, the single point's change in the history; no W-LINK (D255, Q80) |
+| T-IMP-74 | A single point at the xTB geometry of a DFT node, its geometry level then set to the DFT level by hand | Linked to the xTB optimization at import; after the edit unlinked, the DFT level counts, W-LINK names the xTB geometry (D255) |
+| T-IMP-75 | Open an investigation saved before D255 | The repair links each single point and frequency job once as the rule read it; no label or energy changes (D255) |
 
 ## 6. Energy tests
 

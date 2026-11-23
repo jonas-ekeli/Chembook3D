@@ -100,6 +100,7 @@ Notes:
 | W-QH | G_qh cannot be computed at the chosen temperature or cutoff (A14) |
 | W-CHG | Calculations on one node disagree on charge or multiplicity; those for another state than the node's give none of its energies (D155) |
 | W-GEOM | A calculation's geometry does not match its node's geometry; never on a pre-optimization a later free optimization on the node started from (D168) |
+| W-LINK | A single point or frequency job is linked to a calculation whose geometry its coordinates are not, or its geometry level was set by hand to a level while its coordinates are another of the node's geometries (D255) |
 | W-PARSE | A file was only partly parsed; the missing fields are listed |
 | W-CONSTRAINED | A calculation is a scan or an optimization held by frozen coordinates or atoms; what held it is listed, and it gives no geometry level (D157); a held pre-optimization that a free optimization continued shows it on its own row, not on the node (D168) |
 | W-SPIN | A calculation's ⟨S²⟩ (Gaussian's before annihilation) is further from S(S+1) of its multiplicity than 10 % of S(S+1); for a singlet, above 0.1 (D162) |

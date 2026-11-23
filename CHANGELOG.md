@@ -6,6 +6,11 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- A single point or frequency job now remembers which calculation's geometry it is at (D255), so a
+  later optimization or a level override no longer moves it to another geometry: a corrected
+  optimization level carries its single points with it, and a geometry level set by hand against
+  the coordinates gets a warning. Older investigations are linked once when opened, with no value
+  changing.
 - Duplicate TSs and conformers are now found at the analysis's level of theory (D254): two nodes
   whose MACE geometries agree count once at MACE//MACE even when their DFT geometries differ. A
   card no longer shows a relative energy across other atoms than the reference's, as profiles
