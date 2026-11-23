@@ -6,9 +6,12 @@ import math
 import pytest
 
 from chembook3d import thermochem
+from chembook3d.models import InvestigationInfo
+from chembook3d.services import levels
 from chembook3d.units import GAS_CONSTANT, J_PER_MOL_HARTREE
 from tests import gaussian_text as g
 from tests.test_energies import add_energies, import_file, level_key, settings
+from tests.test_import import calculations
 from tests.test_pathway import get, history, node, patch, post
 from tests.test_species import COMPLEX, ETHYLENE, PROPENE, RU_CH2, RU_CHCH3, put, xyz
 
@@ -431,3 +434,47 @@ def test_a_reference_balances_each_transition_state_by_its_free_species(open_cli
     open_client.delete(f"/api/nodes/{ids['A']}")
     found = result(open_client, created["id"])
     assert found["status"] == "n/a" and "reference is no longer" in found["message"]
+
+
+def saved_level(client, selectivity_id: str) -> str:
+    return next(x["level"] for x in get(client, "/selectivities") if x["id"] == selectivity_id)
+
+
+def test_a_level_override_moves_saved_analyses_once_the_old_level_is_empty(open_client):
+    # T-SEL-13, D251: correcting the level of every calculation at a level carries the saved
+    # selectivity (and the remembered view) along, in the history; before the last one, it
+    # stays where it was.
+    r = ts(open_client, "TS-R", 0.0, 0.0)
+    s = ts(open_client, "TS-S", 1.0, 0.05)
+    created = selectivity(open_client, {"R": [r], "S": [s]})
+    old_key = created["level"]
+    with open_client.app.state.investigation.sessions.begin() as session:
+        session.get(InvestigationInfo, 1).view_state = {"level": old_key}
+    every = [c["id"] for n in (r, s) for c in calculations(open_client, n)]
+    for calculation_id in every[:-1]:
+        patch(open_client, f"/calculations/{calculation_id}", {"basis": "6-31G(d,p)"})
+        assert saved_level(open_client, created["id"]) == old_key
+    patch(open_client, f"/calculations/{every[-1]}", {"basis": "6-31G(d,p)"})
+    moved = {"level": saved_level(open_client, created["id"])}
+    assert moved["level"] != old_key
+    found = result(open_client, created["id"])
+    assert found["status"] == "ok" and found["level_label"] == "Gaussian B3LYP/6-31G(d,p)"
+    entries = [e for e in history(open_client) if e["record_id"] == created["id"]]
+    assert entries[0]["field"] == "level" and entries[0]["new_value"] == moved["level"]
+    with open_client.app.state.investigation.sessions() as session:
+        assert session.get(InvestigationInfo, 1).view_state["level"] == moved["level"]
+
+
+def test_a_level_no_calculation_is_at_says_so(open_client):
+    # T-SEL-14, D251: a saved key whose level is still a record but holds no calculation (its last
+    # calculations were removed or moved) says why there is no value.
+    r = ts(open_client, "TS-R", 0.0, 0.0)
+    s = ts(open_client, "TS-S", 1.0, 0.05)
+    with open_client.app.state.investigation.sessions.begin() as session:
+        empty = levels.get_or_create(
+            session, {"program": "Gaussian", "method": "B3LYP", "basis": "def2TZVP"}
+        ).id
+    created = selectivity(open_client, {"R": [r], "S": [s]}, level=f"{empty}~{empty}")
+    found = result(open_client, created["id"])
+    assert found["status"] == "n/a"
+    assert found["message"].startswith("No calculation is at this level any more")

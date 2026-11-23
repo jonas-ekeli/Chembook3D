@@ -16,14 +16,11 @@ from chembook3d import settings as app_settings
 from chembook3d.models import (
     Calculation,
     CalculationType,
-    ConformerEquilibrium,
     CustomDispersion,
     HistoryEntry,
     InvestigationInfo,
     LevelOfTheory,
     Node,
-    Selectivity,
-    Turnover,
 )
 from chembook3d.parsers.common import (
     BSSE,
@@ -33,6 +30,7 @@ from chembook3d.parsers.common import (
     THERMO_MODEL_KEYS,
 )
 from chembook3d.services import (
+    energies,
     energy_profiles,
     geometry,
     history,
@@ -377,13 +375,6 @@ def drawer_profiles(session: Session, folder: Path) -> int:
     return energy_profiles.from_drawer(session)
 
 
-def _rekeyed(key: str | None, moved: dict[str, str]) -> str | None:
-    """A composite level key `levelId~geometryLevelId` with moved levels replaced."""
-    if not key:
-        return key
-    return "~".join(moved.get(part, part) for part in key.split("~"))
-
-
 def dispersion_without_model(session: Session, folder: Path) -> dict[str, int]:
     """D203: a Gaussian route with dispersion parameters set by IOp(3/174–179) but no
     dispersion model (no EmpiricalDispersion and no IOp(3/124)) adds no dispersion, yet the
@@ -429,12 +420,7 @@ def dispersion_without_model(session: Session, folder: Path) -> dict[str, int]:
             )
             setattr(calculation, f"{field}_id", new.id)
         counts["calculations"] += 1
-    for model in (Selectivity, Turnover, ConformerEquilibrium):
-        for record in session.scalars(select(model)):
-            record.level = _rekeyed(record.level, moved)
-    info = session.get(InvestigationInfo, 1)
-    if info is not None and isinstance(info.view_state, dict) and info.view_state.get("level"):
-        info.view_state = {**info.view_state, "level": _rekeyed(info.view_state["level"], moved)}
+    energies.rekey_saved(session, moved)  # D251
     session.flush()
     for level_id in moved:
         level = session.get(LevelOfTheory, level_id)

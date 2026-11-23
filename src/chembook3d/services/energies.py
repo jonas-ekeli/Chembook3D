@@ -42,16 +42,27 @@ from chembook3d import thermochem
 from chembook3d.models import (
     Calculation,
     CalculationType,
+    ConformerEquilibrium,
     GroupNode,
+    InvestigationInfo,
     LevelOfTheory,
     Node,
     NodeKind,
     Role,
+    Selectivity,
     Transition,
+    Turnover,
 )
 from chembook3d.parsers import joined
 from chembook3d.parsers.common import BSSE, NOT_STATIONARY
-from chembook3d.services import concentrations, levels, spin, thermo_model, thermo_settings
+from chembook3d.services import (
+    concentrations,
+    history,
+    levels,
+    spin,
+    thermo_model,
+    thermo_settings,
+)
 from chembook3d.services import transitions as transition_service
 from chembook3d.services.records import RecordError
 
@@ -107,6 +118,94 @@ class LevelKey:
         return cls(level_id, geometry or None)
 
 
+# D251: the records that keep a composite level key, each in its `level` column, and the
+# remembered view (`InvestigationInfo.view_state["level"]`). Whatever moves or removes a level
+# (repairs, a level override, a playground merge and its undo) uses this one list.
+LEVEL_KEY_TABLES = ("selectivities", "turnovers", "conformer_equilibria")
+# Each model with the record type its history entries use.
+LEVEL_KEY_MODELS = (
+    (Selectivity, "selectivity"),
+    (Turnover, "turnover"),
+    (ConformerEquilibrium, "equilibrium"),
+)
+
+
+def key_level_ids(text: str | None) -> list[str]:
+    """The level ids a stored composite key names (the geometry level's when there is one)."""
+    if not text:
+        return []
+    return [part for part in str(text).split(KEY_SEPARATOR) if part]
+
+
+def rekeyed(text: str | None, moved: dict[str, str]) -> str | None:
+    """A stored composite key with the levels in `moved` replaced; the separator kept."""
+    if not text:
+        return text
+    return KEY_SEPARATOR.join(moved.get(part, part) for part in str(text).split(KEY_SEPARATOR))
+
+
+def rekey_saved(
+    session: Session, moved: dict[str, str], source: str | None = None
+) -> list[tuple[str, str]]:
+    """D251: every saved selectivity, turnover and conformer equilibrium, and the remembered
+    view, moved from the levels in `moved` to their replacements. With `source`, each record
+    changed is in the history (the view is not a record). Returns (record type, id) of each."""
+    changed: list[tuple[str, str]] = []
+    for model, record_type in LEVEL_KEY_MODELS:
+        for record in session.scalars(select(model)):
+            new = rekeyed(record.level, moved)
+            if new == record.level:
+                continue
+            if source is not None:
+                history.record(
+                    session,
+                    record_type,
+                    record.id,
+                    "update",
+                    "level",
+                    record.level,
+                    new,
+                    source=source,
+                )
+            record.level = new
+            changed.append((model.__tablename__, record.id))
+    info = session.get(InvestigationInfo, 1)
+    if info is not None and isinstance(info.view_state, dict) and info.view_state.get("level"):
+        new = rekeyed(info.view_state["level"], moved)
+        if new != info.view_state["level"]:
+            info.view_state = {**info.view_state, "level": new}
+    return changed
+
+
+def unused_levels(session: Session, ids: list[str]) -> list[str]:
+    """The levels among `ids` that no calculation is at, as its level or geometry level."""
+    found = []
+    for level_id in ids:
+        used = session.scalar(
+            select(Calculation.id)
+            .where((Calculation.level_id == level_id) | (Calculation.geometry_level_id == level_id))
+            .limit(1)
+        )
+        if used is None:
+            found.append(level_id)
+    return found
+
+
+def level_gone(session: Session, key: LevelKey) -> str | None:
+    """Why a saved analysis's level has no values, when the level itself is the reason: it
+    is no longer in the investigation, or D251 no calculation is at it any more (a level
+    override gave them another level), which otherwise reads as a quiet "No G at this level"."""
+    ids = [key.level_id, *([key.geometry_level_id] if key.geometry_level_id else [])]
+    if any(session.get(LevelOfTheory, level_id) is None for level_id in ids):
+        return "This level of theory is no longer in the investigation."
+    if unused_levels(session, ids):
+        return (
+            "No calculation is at this level any more: its calculations were given another "
+            "level. Choose the level again."
+        )
+    return None
+
+
 def key_label(session: Session, key: LevelKey) -> str:
     level = session.get(LevelOfTheory, key.level_id)
     if key.geometry_level_id is None:
@@ -131,6 +230,9 @@ class Value:
     # the geometry level unfinished, a calculation ended abnormally. As {"code", "message",
     # "issues"}; None when nothing.
     check: dict[str, Any] | None = None
+    # D250: the frequency job `check` judged the value by (`frequency_at`), also for E, which
+    # has no thermo calculation; None when the node has none. The node panel shows its count.
+    check_calculation_id: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -141,6 +243,7 @@ class Value:
             "thermo_calculation_id": self.thermo_calculation_id,
             "details": self.details,
             "check": self.check,
+            "check_calculation_id": self.check_calculation_id,
         }
 
 
@@ -521,6 +624,8 @@ class NodeEnergies:
             if note is not None:
                 check = check_of([*(check["issues"] if check else []), note])
         found.check = check
+        frequency = self.frequency_at(key)
+        found.check_calculation_id = frequency.id if frequency is not None else None
         return found
 
     def _value(self, key: LevelKey, energy_type: str) -> Value:

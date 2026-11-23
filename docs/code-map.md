@@ -195,6 +195,7 @@ Routes for all of these are in `api/pathway.py`.
 - D221, W-COMPARE: `species.mismatch` says how a pathway point's atoms or charge, with its balance, differ from the reference's. `pathways.prepare` keeps it per point (`Prepared.mismatches`); `pathways.profiles` then gives the point `mismatch` and no `relative`, and the note `_compare_note`; the table's Check column and a turnover's message repeat it. `ProfileChart` shows it as the "n/a" label's tooltip.
 - `balances_from` gives each node's balance along the route from the reference (D72), for node cards (the energy view's `relative`) and for pathways that miss the reference.
 - D246: one free species holds every level of its molecule (see "Geometries at several levels"), so a pathway at a local composite level balances with it.
+- D249: `species.issues` gives the checks of the species a balance adds, each naming its species. `pathways.profiles` adds them to the point's `check`; `api/energies.py` `_species_check` gives `EdgeValueOut.check` and `RelativeOut.check` (said in the edge's and card's tooltips: `Canvas.tsx` `edgeEnergy`, `cardEnergy.ts`); `selectivity.py` and `equilibrium.py` note each once.
 
 ## Resume overview (D191)
 
@@ -244,7 +245,7 @@ Routes for all of these are in `api/pathway.py`.
 ### Outline and side panel
 
 - `Outline.tsx`: the steps, branches and search beside the canvas (D178: heads that fold, kept in localStorage; a step's actions on hover or focus, Alt+↑/↓ and drag by the grip; one-line node rows from `NodeRow.tsx`, shared with the read-only copy).
-- `NodeInspector.tsx` and `PathwayInspectors.tsx`: the side panel. The node panel's sticky header (D179): stat strip with the card's ΔX from `cardEnergy.ts` (which `Canvas.tsx` uses too), the ⋯ `MoreMenu.tsx`, the jump bar over one scroll.
+- `NodeInspector.tsx` and `PathwayInspectors.tsx`: the side panel. The node panel's sticky header (D179): stat strip with the card's ΔX from `cardEnergy.ts` (which `Canvas.tsx` uses too) and the imaginary count of the value's `check_calculation_id` (D250, `energies.Value`), the ⋯ `MoreMenu.tsx`, the jump bar over one scroll.
 - In the node panel: `components/CalculationList.tsx` lists the node's calculations and results (`ResultValues`), `components/HistoryList.tsx` the history (also the History view), `components/Vibrations.tsx` picks a vibrational mode, imaginary first.
 
 ### 3D view and structures
@@ -297,6 +298,7 @@ Routes for all of these are in `api/pathway.py`.
 
 - `thermochem.py` computes quasi-harmonic G from stored frequency results. It mirrors the reference script; tests compare both. A linear molecule gets the linear rigid rotor (`_linear`, D164), checked against Gaussian on `HCN_singlet.out` and `gaussian_text.co2_freq`.
 - `services/energies.py` resolves E/H/G/G_qh at a composite level key `levelId~geometryLevelId`.
+- D251: `energies.LEVEL_KEY_TABLES`/`LEVEL_KEY_MODELS` list the records that keep a level key (selectivities, turnovers, conformer equilibria) and `rekey_saved` moves them and the remembered view; repairs, `playground_merge` and its undo use them. `routes._follow_level` moves them after a level override that leaves the old level empty; `level_gone` gives each analysis its note.
 - `services/pathways.py` builds pathways (also across edges drawn to or from a group: `_sides`, `_onward`, D108), profiles and the energy table (values pre-formatted, CSV uses the same strings, T-EN-08).
 - Routes in `api/energies.py`.
 - A node's energies come only from calculations for its own charge and multiplicity (D155, `NodeEnergies.other_state`); two states at one level give n/a, never the latest.

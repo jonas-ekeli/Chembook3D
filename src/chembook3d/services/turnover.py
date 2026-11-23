@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from chembook3d import settings as app_settings
-from chembook3d.models import GroupNode, LevelOfTheory, Node, NodeKind, Role, Turnover
+from chembook3d.models import GroupNode, Node, NodeKind, Role, Turnover
 from chembook3d.services import history, pathways, thermo_settings
 from chembook3d.services import species as species_service
 from chembook3d.services import transitions as transition_service
@@ -35,6 +35,7 @@ from chembook3d.services.energies import (
     check_text,
     distinct_temperatures,
     key_label,
+    level_gone,
     same_temperature,
     temperatures_text,
 )
@@ -314,10 +315,9 @@ def result(
     if turnover.level is None:
         return stop("incomplete", "Choose a level of theory.")
     key = LevelKey.decode(turnover.level)
-    if session.get(LevelOfTheory, key.level_id) is None or (
-        key.geometry_level_id and session.get(LevelOfTheory, key.geometry_level_id) is None
-    ):
-        return stop("n/a", "This level of theory is no longer in the investigation.")
+    gone = level_gone(session, key)  # D251: also a level no calculation is at any more
+    if gone is not None:
+        return stop("n/a", gone)
     found["level_label"] = key_label(session, key)
 
     # T1: one level and type, no fallback, relative to the cycle's first node and balanced

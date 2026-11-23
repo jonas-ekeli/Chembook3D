@@ -1373,7 +1373,8 @@ function CanvasView({
             type,
             // D175, D176: a real minus sign, as on the cards.
             value: formatDelta(found.delta, energy.settings).replace(/^-/, '−'),
-            title: (energy.settings?.energy_unit ?? 'kcal/mol') + note,
+            // D249: what the free species joining or leaving here say of their calculations.
+            title: (energy.settings?.energy_unit ?? 'kcal/mol') + note + (found.check ? `. ⚠ ${found.check}` : ''),
             barrier,
           }
     }

@@ -200,6 +200,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-SPC-06 | Profiles, the energy table, node cards in energy mode (along the route in D72) and ΔX on edges add the energy of leaving species and subtract that of joining species along the pathway from the reference (EN-3, EN-8). The table has a "Free species" column. A species without a value at the selected level makes the point, card or edge "n/a" with the reason. | D69, D72 | after 5 |
 | FR-SPC-07 | W-BALANCE flags a transition whose atoms or total charge do not balance. | D69 | after 5 |
 | FR-SPC-08 | One free species holds every level of theory of its molecule (D246), so pathways at a lower composite level balance with the same free species. | D246 | after 5 |
+| FR-SPC-09 | The checks of a free species whose energy is added (D154, D158, D162, D163, D245) go with that value, naming the species: on profile points, the energy table, edge and card values, selectivities, equilibria and turnovers. | D249 | after 5 |
 
 **AC:**
 - A → B with "+ propene": B's profile value is X(B) − X(A) − X(propene).

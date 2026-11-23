@@ -1521,6 +1521,7 @@ def update_calculation(
     in parsed_level and every change is in the history (P13)."""
     calculation = _get_calculation(session, calculation_id)
     changes = body.model_dump(exclude_unset=True)
+    before = (calculation.level_id, calculation.geometry_level_id)
     level_changes = {k: v for k, v in changes.items() if k in levels.LEVEL_FIELDS}
     if level_changes:
         fields = levels.fields_of(calculation.level) or {
@@ -1574,8 +1575,26 @@ def update_calculation(
         )
         calculation.notes = changes["notes"]
     session.flush()
+    _follow_level(session, before, (calculation.level_id, calculation.geometry_level_id))
     session.expire(calculation)
     return _calculation_out(request, _get_calculation(session, calculation_id))
+
+
+def _follow_level(
+    session: Session, before: tuple[str | None, str | None], after: tuple[str | None, str | None]
+) -> None:
+    """D251: once a level override leaves the old level with no calculation, the saved
+    selectivities, turnovers and conformer equilibria and the remembered view on it move to
+    the new one, each in the history, rather than showing a quiet "No G at this level"."""
+    moved = {
+        old: new
+        for old, new in zip(before, after, strict=True)
+        if old is not None and new is not None and old != new
+    }
+    moved = {old: new for old, new in moved.items() if energies.unused_levels(session, [old])}
+    if moved:
+        energies.rekey_saved(session, moved, source="manual")
+        session.flush()
 
 
 @router.get("/levels", response_model=list[LevelOut])

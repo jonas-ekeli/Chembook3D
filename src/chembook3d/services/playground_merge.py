@@ -60,7 +60,7 @@ from chembook3d.investigation import (
     acquire_ownership,
 )
 from chembook3d.models import Base, HistoryEntry, utcnow
-from chembook3d.services import history, levels
+from chembook3d.services import energies, history, levels
 from chembook3d.services.notes import images_in
 
 Key = tuple
@@ -1105,7 +1105,7 @@ class _Writer:
                     values[column] = self.level(values[column])
             if "source_file_id" in values:
                 self.source(values["source_file_id"])
-        if table in ("selectivities", "turnovers", "conformer_equilibria") and "level" in values:
+        if table in energies.LEVEL_KEY_TABLES and "level" in values:  # D251
             values["level"] = self.composite(values["level"])
         if table == "node_notes" and "body" in values:
             self.pictures(values["body"])
