@@ -5,11 +5,9 @@ calculation comes from any more are removed only once the transaction has commit
 from typing import Any
 
 from fastapi import APIRouter, Request
-from sqlalchemy import event
-from sqlalchemy.orm import Session
 
-from chembook3d.api.routes import DbSession, _investigation
-from chembook3d.services import calculation_removal, import_undo
+from chembook3d.api.routes import DbSession, _investigation, remove_after_commit
+from chembook3d.services import calculation_removal
 
 router = APIRouter(prefix="/api")
 
@@ -28,11 +26,5 @@ def remove_calculation(calculation_id: str, request: Request, session: DbSession
     removal = calculation_removal.plan(session, calculation_id)
     summary = removal.as_dict()
     stored = calculation_removal.apply(session, removal)
-    folder = _investigation(request).folder
-
-    def remove_copies(_session: Session) -> None:
-        for path in stored:
-            import_undo.remove_copy(folder, path)
-
-    event.listen(session, "after_commit", remove_copies, once=True)
+    remove_after_commit(session, _investigation(request).folder, stored)
     return summary

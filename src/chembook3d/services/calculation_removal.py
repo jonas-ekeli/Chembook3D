@@ -71,9 +71,15 @@ def plan(session: Session, calculation_id: str) -> Removal:
         raise RemovalError(
             "This is one direction of an IRC; undo the import of its file instead (D102)"
         )
-    linked: list[Calculation] = []
-    seen = {calculation.id}
-    frontier = [calculation.id]
+    return plan_many(session, [calculation])
+
+
+def plan_many(session: Session, calculations: list[Calculation]) -> Removal:
+    """D260: what removing these calculations of one node takes with them, the first as the
+    one named. Changes nothing."""
+    linked: list[Calculation] = list(calculations[1:])
+    seen = {c.id for c in calculations}
+    frontier = list(seen)
     while frontier:
         found = list(
             session.scalars(
@@ -86,12 +92,11 @@ def plan(session: Session, calculation_id: str) -> Removal:
         seen.update(c.id for c in found)
         linked.extend(found)
         frontier = [c.id for c in found]
-    removal = Removal(calculation, linked)
-    gone = {c.id for c in removal.all}
+    removal = Removal(calculations[0], linked)
     for source_id in dict.fromkeys(c.source_file_id for c in removal.all if c.source_file_id):
         others = session.scalars(
             select(Calculation.id).where(
-                Calculation.source_file_id == source_id, Calculation.id.not_in(gone)
+                Calculation.source_file_id == source_id, Calculation.id.not_in(seen)
             )
         ).first()
         source = session.get(SourceFile, source_id)

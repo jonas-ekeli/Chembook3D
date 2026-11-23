@@ -606,3 +606,46 @@ test('a calculation is removed with those sitting on it', async ({ page }) => {
   const history = await (await page.request.get('/api/history', { params: { record_id: id } })).json()
   expect(history.some((e: { action: string }) => e.action === 'remove_calculations')).toBeTruthy()
 })
+
+// T-UI-114, D260: a refine started with "offer to replace" whose result ends elsewhere at the
+// node's level waits in Local jobs; Replace… lists what goes and moves the node's coordinates.
+test('a local result replaces the node’s geometry at its level after a confirm', async ({ page }) => {
+  test.slow()
+  await newInvestigation(page, 'Replace a geometry')
+  expect((await page.request.put('/api/settings', { data: { geometry_tolerance: 1e-5 } })).ok()).toBeTruthy()
+  const made = await page.request.post('/api/nodes', { data: { label: 'water', xyz: WATER, charge: 0, multiplicity: 1 } })
+  const id = (await made.json()).id
+  const first = (await (await page.request.post('/api/local/jobs', { data: { node_id: id, method: 'stub' } })).json()).id
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/local/jobs/${first}`)).json()).status, { timeout: 60_000 })
+    .toBe('converged')
+  expect((await page.request.post(`/api/local/jobs/${first}/import`)).ok()).toBeTruthy()
+  const before = (await (await page.request.get(`/api/nodes/${id}`)).json()).xyz
+  await page.reload()
+
+  await canvasNode(page, 'water').click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Refine geometry…' }).click()
+  const refine = page.getByRole('dialog', { name: 'Refine geometry of “water”' })
+  await refine.getByLabel('Method', { exact: true }).selectOption('stub')
+  await refine.getByLabel('Start from').selectOption('xyz')
+  await refine.getByLabel('Start structure').fill('O 0 0 0.30\nH 0 0.90 -0.40\nH 0 -0.60 -0.60\n')
+  await refine.getByLabel('Offer to replace the geometry at this level').check()
+  await refine.getByRole('button', { name: 'Start' }).click()
+  await expect(page.getByText(/choose in Local jobs/)).toBeVisible({ timeout: 60_000 })
+
+  await page.getByRole('button', { name: /^Local jobs/ }).click()
+  const jobs = page.getByRole('dialog', { name: 'Local jobs' })
+  const row = jobs.getByRole('table', { name: 'Local jobs' }).getByRole('row').nth(1)
+  await expect(row.getByLabel('Replace or derive')).toContainText('which “water” already has')
+  await row.getByRole('button', { name: 'Replace…' }).click()
+  const confirm = page.getByRole('dialog', { name: /^Replace the .* geometry\?$/ })
+  await expect(confirm.getByRole('list', { name: 'Calculations replaced' }).getByRole('listitem')).toHaveCount(1)
+  await expect(confirm).toContainText('The node’s coordinates move to the result.')
+  await confirm.getByRole('button', { name: 'Replace', exact: true }).click()
+  await expect(confirm).toHaveCount(0)
+  await expect(row).toContainText('Converged, imported')
+  const after = await (await page.request.get(`/api/nodes/${id}`)).json()
+  expect(after.xyz).not.toEqual(before)
+  const calculations = await (await page.request.get(`/api/nodes/${id}/calculations`)).json()
+  expect(calculations).toHaveLength(1)
+})

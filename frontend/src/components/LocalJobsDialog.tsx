@@ -35,6 +35,7 @@ export function LocalJobsDialog({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showMode, setShowMode] = useState<string | null>(null) // D217: the job whose mode is shown
+  const [replacing, setReplacing] = useState<LocalJob | null>(null) // D260: the Replace being confirmed
   // Read the jobs again on opening: one Claude started is not known yet.
   useEffect(() => onChanged(), [onChanged])
 
@@ -67,6 +68,24 @@ export function LocalJobsDialog({
         >
           Show node
         </button>
+      )
+    if (job.awaiting_choice)
+      return (
+        <>
+          <button disabled={disabled} onClick={() => setReplacing(job)}>
+            Replace…
+          </button>
+          <button
+            disabled={disabled}
+            onClick={() =>
+              act(`import:${job.id}`, async () => {
+                onImported(await api.importLocalJob(job.id, true))
+              })
+            }
+          >
+            Derived node
+          </button>
+        </>
       )
     if (job.importable)
       return (
@@ -197,6 +216,12 @@ export function LocalJobsDialog({
                             {scanned}
                           </div>
                         )}
+                        {job.awaiting_choice && job.replace_offer && (
+                          <div className="small" aria-label="Replace or derive">
+                            The result ends elsewhere at {job.replace_offer.level_label}, which “{job.node_label}” already has:
+                            replace that geometry, or import it onto a derived node.
+                          </div>
+                        )}
                         {problem && <div className="small cloud-job-problem">{problem}</div>}
                       </td>
                       <td className="cloud-job-actions">
@@ -231,6 +256,54 @@ export function LocalJobsDialog({
           </table>
         </>
       )}
+      {replacing?.replace_offer && (
+        <ReplaceConfirm
+          job={replacing}
+          onCancel={() => setReplacing(null)}
+          onReplace={() => {
+            const job = replacing
+            setReplacing(null)
+            act(`replace:${job.id}`, async () => {
+              onImported(await api.replaceWithLocalJob(job.id))
+            })
+          }}
+        />
+      )}
+    </Modal>
+  )
+}
+
+/** D260: what replacing the node's geometry at the job's level removes, for the user's confirm. */
+function ReplaceConfirm({ job, onCancel, onReplace }: { job: LocalJob; onCancel: () => void; onReplace: () => void }) {
+  const offer = job.replace_offer!
+  return (
+    <Modal
+      title={`Replace the ${offer.level_label} geometry?`}
+      onClose={onCancel}
+      actions={
+        <>
+          <button onClick={onCancel}>Cancel</button>
+          <button className="danger" disabled={offer.blockers.length > 0} onClick={onReplace}>
+            Replace
+          </button>
+        </>
+      }
+    >
+      <p>The result of this job takes the place of these on “{job.node_label}”, which are removed for good:</p>
+      <ul aria-label="Calculations replaced">
+        {offer.removes.map((c) => (
+          <li key={c.id}>
+            the {c.type.replace('_', ' ')} at {c.level ?? 'an unknown level'}
+            {c.file && <span className="muted"> ({c.file})</span>}
+          </li>
+        ))}
+      </ul>
+      {offer.node_geometry && <p>The node’s coordinates move to the result.</p>}
+      {offer.blockers.map((b) => (
+        <p key={b} role="alert">
+          {b}
+        </p>
+      ))}
     </Modal>
   )
 }

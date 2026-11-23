@@ -140,6 +140,7 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 - `services/calculation_removal.py`: `plan` follows `geometry_source_id` (D255) from the calculation to everything sitting on it and finds the files nothing else comes from; `apply` deletes them, writes one `remove_calculations` entry on the node and returns the copies to remove after the commit.
 - Routes in `api/calculation_removal.py`: `GET /api/calculations/{id}/removal` (preview) and `DELETE /api/calculations/{id}`; the MCP confirm action `remove_calculation` (`api/live.py`).
 - `CalculationList.tsx` `RemoveCalculation` (Remove… in the record), `HistoryList.tsx` `describeRemoval`.
+- D260 Replace: `imports._replace` (the plan's `replace`, `ImportOptions.replace`), applied first in `imports.commit` with `calculation_removal.plan_many`; `CommitResult.removed_copies` go after the commit (`routes.remove_after_commit`, `local_jobs._remove_after_commit`). A local job's `replace` makes `_import_result` store `replace_offer` and wait (`awaiting_choice`); `POST /api/local/jobs/{id}/replace` and the confirm action `replace_with_local_result`; `ImportDialog`'s Same level choice, `RefineDialog`'s offer box, `LocalJobsDialog`'s `ReplaceConfirm`.
 
 ## Download file names
 

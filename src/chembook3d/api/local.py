@@ -261,6 +261,14 @@ class RefineIn(BaseModel):
         None,
         description="D258: start from a build_structure answer instead (as xyz)",
     )
+    replace: bool = Field(
+        False,
+        description="D260: when the result ends elsewhere at a level the node already has, "
+        "offer to replace the node's geometry at that level (its optimizations there and what "
+        "sits on them are removed) instead of making a derived node. The result then waits: "
+        "the user picks in Local jobs, or you ask with replace_with_local_result, which the "
+        "user confirms in the app",
+    )
     name: str | None = None
 
 
@@ -385,6 +393,7 @@ def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[s
             _scan(body.scan, atoms),
             _claude_limit(request, folder),
             start,
+            body.replace,
         )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc
@@ -595,11 +604,37 @@ def cancel_job(job_id: str, request: Request) -> dict[str, Any]:
         raise _refused(exc) from exc
 
 
+class ImportJobIn(BaseModel):
+    derived: bool = Field(
+        False,
+        description="D260: for a job waiting with a replace_offer, import onto a derived node "
+        "instead (replacing is replace_with_local_result, which the user confirms)",
+    )
+
+
 @router.post("/jobs/{job_id}/import")
-def import_result(job_id: str, request: Request, session: DbSession) -> dict[str, Any]:
+def import_result(
+    job_id: str, request: Request, session: DbSession, body: ImportJobIn | None = None
+) -> dict[str, Any]:
     """Import a finished job's result onto its node (the open app does this by itself)."""
     _local_page_only(request)
     try:
-        return local_jobs.import_result(session, _investigation(request).folder, job_id)
+        return local_jobs.import_result(
+            session,
+            _investigation(request).folder,
+            job_id,
+            False if body and body.derived else None,
+        )
+    except local_jobs.LocalJobError as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/jobs/{job_id}/replace")
+def replace_with_result(job_id: str, request: Request, session: DbSession) -> dict[str, Any]:
+    """D260: import the result replacing the node's geometry at the job's level, after the
+    user's confirm (the page's dialog, or Claude's confirm tool)."""
+    _local_page_only(request)
+    try:
+        return local_jobs.import_result(session, _investigation(request).folder, job_id, True)
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc

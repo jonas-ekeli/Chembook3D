@@ -640,6 +640,13 @@ function App() {
   // D213: a refine run on this computer is imported onto its node when it is done.
   const localImported = (job: LocalJob) => {
     reload()
+    if (job.awaiting_choice && !job.imported) {
+      // D260: its result would replace the node's geometry at its level: the user picks.
+      setNotice(
+        `The ${job.level} refine of “${job.node_label}” is done. Its result can replace the node’s ${job.replace_offer?.level_label ?? ''} geometry or go to a derived node: choose in Local jobs.`,
+      )
+      return
+    }
     const where = job.imported?.derived ? 'a node derived from' : ''
     if (job.kind === 'ts_guess') {
       // D238: a TS guess comes in as a new TS node between its two ends.
@@ -666,7 +673,7 @@ function App() {
       return
     }
     setNotice(
-      `The ${job.level} ${job.transition ? 'TS search' : 'refine'} of “${job.node_label}” is done and imported onto ${where ? `${where} ` : ''}it (it can be undone in History).` +
+      `The ${job.level} ${job.transition ? 'TS search' : 'refine'} of “${job.node_label}” is done and imported onto ${where ? `${where} ` : ''}it${job.imported?.replaced ? `, replacing its ${job.level} geometry` : ''} (it can be undone in History).` +
         (tsCheckText(job) ? ` ${tsCheckText(job)}` : ''),
     )
   }

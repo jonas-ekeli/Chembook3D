@@ -1152,6 +1152,10 @@ export type LocalJob = {
   reacting?: number[] | null
   /** D218: a relaxed scan, imported as a node of its own */
   scan?: LocalScan | null
+  /** D260: a result that would replace the node's geometry at its level waits for a choice */
+  replace?: boolean
+  replace_offer?: ReplacePlan | null
+  awaiting_choice?: boolean
   /** D258: the structure the job started from, when not the node's coordinates */
   start?: { from: 'geometry' | 'structure'; calculation_id?: string; label: string | null } | null
   status:
@@ -1207,6 +1211,8 @@ export type LocalJob = {
     present?: boolean
     /** D239: the corrected TS guess's own node */
     corrected_node_id?: string
+    /** D260: it replaced the node's geometry at its level */
+    replaced?: boolean
   } | null
   import_error?: string | null
 }
@@ -2133,6 +2139,8 @@ export type ImportPlan = {
   /** D246: an optimization at a level the node lacks that can be added beside the node's
    * geometry; without it, it continues the node's optimization or goes to a derived node. */
   beside?: BesidePlan | null
+  /** D260: the file's optimization can replace the node's geometry at its level */
+  replace?: ReplacePlan | null
 }
 
 export type BesidePlan = {
@@ -2141,6 +2149,18 @@ export type BesidePlan = {
   default: boolean
   chosen: boolean
   alternative: 'continue' | 'derived'
+}
+
+/** D260: what replacing the node's geometry at a level removes, and what blocks it. */
+export type ReplacePlan = {
+  step: number
+  level_label: string
+  calculation_ids: string[]
+  removes: RemovedCalculation[]
+  files: string[]
+  node_geometry: boolean
+  blockers: string[]
+  chosen: boolean
 }
 
 /** D259: a calculation to remove, with those sitting on it and the files that go with them. */
@@ -2189,6 +2209,8 @@ export type ImportOptions = {
   create_derived?: boolean
   /** D246: add the optimization beside the node's geometry; unset takes the plan's default. */
   beside?: boolean | null
+  /** D260: replace the node's geometry at the file's level instead of a derived node */
+  replace?: boolean
   basis_names?: Record<string, string>
   dispersion_names?: Record<string, string>
   label?: string | null
@@ -3145,6 +3167,8 @@ export const api = {
     /** D258: start from another of the node's geometries, or from XYZ text */
     start_geometry_of?: string | null
     xyz?: string | null
+    /** D260: offer to replace the node's geometry at the job's level */
+    replace?: boolean
   }) => request<LocalJob>('POST', '/local/jobs', body),
   localCore: (body: {
     node_id: string
@@ -3154,7 +3178,10 @@ export const api = {
     multiplicity?: number | null
   }) => request<LocalCore>('POST', '/local/core', body),
   cancelLocalJob: (id: string) => request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/cancel`),
-  importLocalJob: (id: string) => request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/import`),
+  importLocalJob: (id: string, derived = false) =>
+    request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/import`, derived ? { derived } : undefined),
+  /** D260: import replacing the node's geometry at the job's level (after the user's confirm) */
+  replaceWithLocalJob: (id: string) => request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/replace`),
   atomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>
     request<AtomMatch>('POST', '/atom-match', { start_id: startId, end_id: endId, pairs }),
   /** D243: the end saved in the start's numbering, in place or as a new derived node. */
