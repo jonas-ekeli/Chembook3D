@@ -360,6 +360,26 @@ def node_geometry_optimization(
     return Sources(node, _itself).node_source(node.geometry, tolerance)
 
 
+def geometry_at_level(
+    node: Node, geometry_level_id: str | None, tolerance: float | None = None
+) -> list[Any] | None:
+    """D254: the node's geometry its values at this geometry level are computed on: the node's
+    own when that came from this level (or no level is given, or none of its geometries is at
+    it), else the latest of its geometries at the level (one added beside it, D246)."""
+    if geometry_level_id is None or not node.geometry:
+        return node.geometry
+    if tolerance is None:
+        tolerance = thermo_settings.tolerance(object_session(node))
+    at_level = [
+        rows
+        for rows, value in Sources(node, _itself).entries
+        if rows and value.level_id == geometry_level_id
+    ]
+    if not at_level or any(geometry.matches(rows, node.geometry, tolerance) for rows in at_level):
+        return node.geometry
+    return at_level[-1]
+
+
 def node_geometries(node: Node, tolerance: float | None = None) -> list[Calculation]:
     """D246: the optimized geometries a node holds, one optimization each (the latest of those
     that ended on the same geometry): the node's own first, then those added beside it or its

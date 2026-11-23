@@ -369,6 +369,23 @@ def test_overview_does_not_count_species_as_loose_nodes(open_client, cycle):
 # ---------- D221, W-COMPARE: points that cannot be compared with the reference ----------
 
 
+def test_a_card_with_other_atoms_than_the_reference_has_no_relative_energy(open_client, cycle):
+    # T-EN-58, D254: a card follows the profile's D221 rule: balanced, it has a value; with a
+    # free species missing on its route it has none, and says why.
+    client = open_client
+    cycle.energies()
+    url = f"/energies/view?level={svp(client)}&type=E&reference={cycle.ids['A']}"
+    relative = get(client, url)["relative"]
+    assert all(relative[cycle.ids[n]]["value"] is not None for n in ("A", "B", "TS", "C"))
+    delete(client, f"/transitions/{cycle.edges[('A', 'B')]}/species/{cycle.ids['propene']}")
+    relative = get(client, url)["relative"]
+    assert relative[cycle.ids["A"]]["value"] == 0.0
+    for name in ("B", "TS", "C"):
+        card = relative[cycle.ids[name]]
+        assert card["value"] is None
+        assert card["message"] == "not the reference's atoms or charge: C3H6 more"
+
+
 def test_a_point_with_other_atoms_than_the_reference_has_no_relative_energy(open_client, cycle):
     # T-EN-52: balanced by its free species, every point has the reference's atoms and a value.
     client = open_client

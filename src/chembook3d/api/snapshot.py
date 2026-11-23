@@ -212,7 +212,7 @@ def snapshot_data(request: Request, session: Session, body: SnapshotIn) -> dict[
                 "populations": {
                     k: v.model_dump(mode="json")
                     for k, v in energy_api.view_populations(
-                        session, energies, values, energy_type
+                        session, energies, values, energy_type, key
                     ).items()
                 },
                 "relative": {

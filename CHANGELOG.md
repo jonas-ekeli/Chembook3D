@@ -6,6 +6,10 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Duplicate TSs and conformers are now found at the analysis's level of theory (D254): two nodes
+  whose MACE geometries agree count once at MACE//MACE even when their DFT geometries differ. A
+  card no longer shows a relative energy across other atoms than the reference's, as profiles
+  already did (D221).
 - Which geometry a calculation is at is decided by one rule everywhere (D253): the import preview
   now agrees with what is stored and with energies (a node whose optimization ran elsewhere, a
   frequency job whose coordinates match none), and undoing an import is blocked while a later

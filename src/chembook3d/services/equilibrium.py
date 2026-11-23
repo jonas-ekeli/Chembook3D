@@ -40,7 +40,7 @@ from chembook3d.models import (
     NodeKind,
     Role,
 )
-from chembook3d.services import geometry, history, thermo_settings
+from chembook3d.services import geometry, history, levels, thermo_settings
 from chembook3d.services import species as species_service
 from chembook3d.services import transitions as transition_service
 from chembook3d.services.energies import (
@@ -387,10 +387,20 @@ def check_atoms(nodes: list[Node]) -> str | None:
     return None
 
 
-def drop_duplicates(rows: list[dict[str, Any]], nodes: dict[str, Node], tolerance: float):
+def drop_duplicates(
+    rows: list[dict[str, Any]],
+    nodes: dict[str, Node],
+    tolerance: float,
+    geometry_level_id: str | None = None,
+):
     """As D156: a member with the same charge and multiplicity as an earlier one of its kind,
     within the duplicate tolerance in geometry and 0.1 kcal/mol in value, is the same structure
-    counted twice. Returns the rows kept, {dropped id: kept id} and the notes."""
+    counted twice. D254: the geometries compared are those at the geometry level of the values
+    (`levels.geometry_at_level`). Returns the rows kept, {dropped id: kept id} and the notes."""
+    at_level = {
+        node_id: levels.geometry_at_level(node, geometry_level_id)
+        for node_id, node in nodes.items()
+    }
     kept: list[dict[str, Any]] = []
     twins: dict[str, str] = {}
     notes = []
@@ -405,7 +415,7 @@ def drop_duplicates(rows: list[dict[str, Any]], nodes: dict[str, Node], toleranc
                 or abs(other_row["value"] - row["value"]) > SAME_ENERGY
             ):
                 continue
-            rmsd = geometry.aligned_rmsd(node.geometry, other.geometry)
+            rmsd = geometry.aligned_rmsd(at_level[row["id"]], at_level[other_row["id"]])
             if rmsd is not None and rmsd <= tolerance:
                 twin = (other_row, rmsd)
                 break
@@ -666,7 +676,9 @@ def result(
     if missing:
         return stop("n/a", f"No {equilibrium.energy_type} at this level for {', '.join(missing)}.")
     nodes = {n.id: n for n, _ in members}
-    rows, twins, dropped = drop_duplicates(rows, nodes, settings.duplicate_tolerance)
+    rows, twins, dropped = drop_duplicates(
+        rows, nodes, settings.duplicate_tolerance, key.geometry_level_id
+    )
     notes.extend(dropped)
     if equilibrium.energy_type == "E":
         notes.append("E is the electronic energy, with no thermal correction.")

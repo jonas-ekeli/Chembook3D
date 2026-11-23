@@ -287,11 +287,13 @@ def view_notes(
 
 
 def view_populations(
-    session, energies: Energies, values: dict[str, ValueOut], type: str
+    session, energies: Energies, values: dict[str, ValueOut], type: str, key: LevelKey
 ) -> dict[str, GroupPopulationOut]:
     """D197: the members' populations of every group that shows them."""
     settings = thermo_settings.settings(session)
-    found = group_populations.of_groups(session, energies, values, type, settings)
+    found = group_populations.of_groups(
+        session, energies, values, type, settings, key.geometry_level_id
+    )
     return {group_id: GroupPopulationOut(**shares) for group_id, shares in found.items()}
 
 
@@ -323,6 +325,12 @@ def relative_values(
             message = "the reference is no longer on the canvas"
         elif base is None:
             message = "the reference has no value at this level"
+        elif record_id in balances and record_id != reference:
+            # D221, D254: as on a profile, no relative energy across other atoms or another
+            # charge than the reference's, balanced by the free species on the route.
+            different = species_service.mismatch(session, record_id, balance, reference)
+            if different is not None:
+                message = f"not the reference's atoms or charge: {different}"
         known = message is None
         relative[record_id] = RelativeOut(
             value=own.value + added - base if known else None,
@@ -359,7 +367,7 @@ def energy_view(
         reference_id=reference,
         relative=relative,
         notes=view_notes(session, energies, values, key, type),
-        populations=view_populations(session, energies, values, type),
+        populations=view_populations(session, energies, values, type, key),
     )
 
 
