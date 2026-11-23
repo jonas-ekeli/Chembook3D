@@ -22,7 +22,7 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 ## Investigation folder, records and migrations
 
 - `src/chembook3d/investigation.py`: the investigation folder: database, `files/`, lock file, migrations with backup, clean-up of copies left by an interrupted import.
-- One-off repairs of records an earlier version got wrong: `services/repairs.py`, run once per investigation when it is opened and remembered in `InvestigationInfo.repairs`.
+- One-off repairs of records an earlier version got wrong: `services/repairs.py`, run once per investigation when it is opened and remembered in `InvestigationInfo.repairs`. Before they run, `investigation._run_repairs` backs the database up (`_back_up_for_repairs`, one `repair-<set>` copy per set of pending repairs, D248) unless the migration just did.
 - `investigation.py` refuses a database from a newer app (`InvestigationTooNew`) and, on request, asks before upgrading (`NeedsUpgrade`).
 - Records in `models.py`, Alembic revisions in `migrations/`, rules in `services/`.
 - Normal modes (D247): `models.NormalModes`, one row per frequency job, zlib-compressed JSON (`pack_modes`, `unpack_modes`); `CalculationResult.normal_modes` reads and writes it. `_migrate` ends with `_give_back_space` (VACUUM when a quarter of the file is free).
