@@ -222,18 +222,14 @@ def _number(value: Any) -> float | None:
     return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
 
 
-def _top(steps: trajectory.Steps) -> float | None:
+def _top(folder: Path, calculation: Calculation) -> float | None:
     """The chip's top: a scan path's D117 barrier; for a program's scan (D200) the highest
-    top over its converged points (`xtb.representative`, as a path's) above the first."""
-    if steps.trim is not None:
-        return steps.trim.barrier
-    energies = [f.energy for f in steps.frames if f.converged]
-    if len(energies) < 2 or None in energies:
-        return None
-    high = energies[xtb.representative(energies)]
-    low = energies[0]
-    assert high is not None and low is not None
-    return high - low
+    top over its converged points (`xtb.representative`, as a path's) above the first. From
+    the kept scan points (D256), not the parsed file."""
+    points = trajectory.points_of(folder, calculation)
+    if trajectory.is_scan_path(calculation):
+        return trajectory.path_barrier(points, calculation.removed_points or [])
+    return trajectory.scan_top(points)
 
 
 def describe(session: Session, folder: Path | None, node: Node, path: dict[str, Any]) -> PathOnEdge:
@@ -242,7 +238,7 @@ def describe(session: Session, folder: Path | None, node: Node, path: dict[str, 
     top = None
     if calculation is not None and folder is not None:
         try:
-            top = _top(trajectory.read_steps(folder, calculation))
+            top = _top(folder, calculation)
         except trajectory.StepsUnavailable:
             top = None
     gate = path.get("gate") if path.get("gate") in ("passed", "missed") else None

@@ -16,6 +16,9 @@ touched, the calculation lists the points it leaves out (`removed_points`), and 
 is chosen again over the points kept, with each cut's jump measured as `pathtools.py` does.
 """
 
+import threading
+from collections import OrderedDict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -165,6 +168,69 @@ def read_steps(folder: Path, calculation: Calculation) -> Steps:
     if is_scan_path(calculation):
         steps.trim = trim_of(frames, calculation.removed_points or [], calculation.geometry)
     return steps
+
+
+@dataclass(frozen=True)
+class Point:
+    """D256: what an edge's chip needs of one frame of a scan: no structure."""
+
+    energy: float | None  # hartree
+    point: int | None
+    converged: bool
+
+
+POINTS_KEPT = 4096  # files; a few hundred bytes each, so far more than any canvas shows
+_points: OrderedDict[tuple[str, int, int, int], tuple[Point, ...]] = OrderedDict()
+_points_lock = threading.Lock()
+
+
+def points_of(folder: Path, calculation: Calculation) -> tuple[Point, ...]:
+    """D256: the scan points of a calculation's step, kept after the first read (the key
+    changes when the copy does), so the canvas does not read every scan on an edge again
+    on each load past the parsed-file cache (`_read`). Raises StepsUnavailable as
+    `read_steps` does."""
+    source = calculation.source_file
+    if source is None or calculation.step_index is None:
+        raise StepsUnavailable("This calculation was not imported from an output file")
+    path = file_service.absolute_path(folder, source)
+    try:
+        stat = path.stat()
+    except OSError as exc:
+        raise StepsUnavailable(f"The copy of {source.original_name} cannot be read") from exc
+    key = (str(path), stat.st_mtime_ns, stat.st_size, calculation.step_index)
+    with _points_lock:
+        if (kept := _points.get(key)) is not None:
+            _points.move_to_end(key)
+            return kept
+    frames = read_steps(folder, calculation).frames
+    kept = tuple(Point(f.energy, f.point, f.converged) for f in frames)
+    with _points_lock:
+        _points[key] = kept
+        while len(_points) > POINTS_KEPT:
+            _points.popitem(last=False)
+    return kept
+
+
+def path_barrier(points: Sequence[Point], removed: list[int]) -> float | None:
+    """D117: a scan path's top above its first kept point, as `trim_of` gives it."""
+    gone = set(removed)
+    kept = [p for p in points if p.point not in gone]
+    if not kept:
+        return None
+    high = kept[xtb.representative([p.energy for p in kept])].energy
+    low = kept[0].energy
+    return high - low if high is not None and low is not None else None
+
+
+def scan_top(points: Sequence[Point]) -> float | None:
+    """D200: a program's scan's top over its converged points above the first."""
+    energies = [p.energy for p in points if p.converged]
+    if len(energies) < 2 or None in energies:
+        return None
+    high = energies[xtb.representative(energies)]
+    low = energies[0]
+    assert high is not None and low is not None
+    return high - low
 
 
 def _jump(a: list[list[Any]], b: list[list[Any]]) -> float | None:
