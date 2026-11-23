@@ -8,6 +8,9 @@ artifacts and publishes nothing.
 
 - The node panel's imaginary-frequency count is now from the frequency job the shown value
   was checked against, also for E, rather than the node's latest frequency job (D250).
+- A free species' warnings (an imaginary frequency, spin contamination, MACE thermochemistry
+  and the others) now show wherever its energy is added: profiles, the energy table, edges,
+  cards, selectivities and equilibria (D249).
 - The database is backed up before a one-off repair runs, also when no upgrade is needed
   (D248); a repair that keeps failing is backed up once.
 - Normal modes take about an eighth of the room (D247): they move to a table of their own,

@@ -195,6 +195,7 @@ Routes for all of these are in `api/pathway.py`.
 - D221, W-COMPARE: `species.mismatch` says how a pathway point's atoms or charge, with its balance, differ from the reference's. `pathways.prepare` keeps it per point (`Prepared.mismatches`); `pathways.profiles` then gives the point `mismatch` and no `relative`, and the note `_compare_note`; the table's Check column and a turnover's message repeat it. `ProfileChart` shows it as the "n/a" label's tooltip.
 - `balances_from` gives each node's balance along the route from the reference (D72), for node cards (the energy view's `relative`) and for pathways that miss the reference.
 - D246: one free species holds every level of its molecule (see "Geometries at several levels"), so a pathway at a local composite level balances with it.
+- D249: `species.issues` gives the checks of the species a balance adds, each naming its species. `pathways.profiles` adds them to the point's `check`; `api/energies.py` `_species_check` gives `EdgeValueOut.check` and `RelativeOut.check` (said in the edge's and card's tooltips: `Canvas.tsx` `edgeEnergy`, `cardEnergy.ts`); `selectivity.py` and `equilibrium.py` note each once.
 
 ## Resume overview (D191)
 
