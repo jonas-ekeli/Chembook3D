@@ -600,14 +600,6 @@ def _finished(step: ParsedStep) -> bool:
     return step.termination == "normal" and step.optimization_converged is not False
 
 
-def ended_on(ended: list[tuple[Any, Any]], rows: list[Any] | None, tolerance: float) -> Any:
-    """The value paired with the latest geometry in `ended` that `rows` matches (D100)."""
-    for ended_rows, value in reversed(ended):
-        if geometry.matches(ended_rows, rows, tolerance):
-            return value
-    return None
-
-
 def continued_optimization(
     target: Node,
     steps: list[ParsedStep],
@@ -908,9 +900,8 @@ def _plan_steps(
     beside = None
     # D246: the node's other geometries, where its optimizations at other levels ended (added
     # beside its geometry, or its pre-optimizations); steps on any of them attach to the node.
-    others = (
-        [c.geometry for c in levels.optimizations(target) if c.geometry] if mode == "onto" else []
-    )
+    # D253: by the shared rule, so on a node without optimizations its frequency jobs' (D204).
+    others = levels.Sources(target, lambda c: c).geometries() if mode == "onto" else []
     elsewhere = bool(
         mode == "onto"
         and chosen_rows
@@ -1042,16 +1033,15 @@ def _plan_steps(
                 "import one of the scan's own output files first, which names it"
             )
 
-    # D100: a single point or frequency job takes the level of the optimization that ended on
-    # its geometry, among the node's own and those in this file before it; never a constrained
-    # one (D157).
+    # D100, D253: a single point or frequency job takes the level of the optimization that
+    # ended on its geometry, among the node's own and those in this file before it (never a
+    # constrained one, D157; the node's frequency jobs on a node with none, D204), by the rule
+    # the commit and energies use (levels.Sources).
     for destination in ("node", "derived"):
-        ended: list[tuple[list[Any] | None, tuple[Any, str]]] = []
-        if destination == "node" and mode == "onto":
-            ended = [
-                (c.geometry, (levels.fields_of(c.level), levels.label(c.level)))
-                for c in levels.optimizations(target)
-            ]
+        sources: levels.Sources[tuple[Any, str]] = levels.Sources(
+            target if destination == "node" and mode == "onto" else None,
+            lambda c: (levels.fields_of(c.level), levels.label(c.level)),
+        )
         for step, step_plan in zip(steps, step_plans, strict=True):
             if step_plan.assignment != destination:
                 continue
@@ -1059,14 +1049,11 @@ def _plan_steps(
             rows = _rows(step.final_geometry)
             if step.job_type in OPTIMIZATION_TYPES:
                 if not step.constrained:
-                    ended.append((rows, (identity, step_plan.level_label)))
+                    sources.add(rows, (identity, step_plan.level_label))
                 continue
-            if rows:
-                source = ended_on(ended, rows, tolerance)
-            else:  # no coordinates printed (A15): at the node's geometry
-                source = ended_on(ended, node_rows, tolerance) or (ended[-1][1] if ended else None)
+            source = sources.source(step.job_type, rows, node_rows, tolerance)
             if step.job_type == CalculationType.SINGLE_POINT:
-                if source is None and ended:
+                if source is None and sources.entries:
                     warnings.append(
                         {
                             "code": "SP-GEOM",
@@ -1080,7 +1067,6 @@ def _plan_steps(
                 elif source is not None and source[0] != identity:
                     step_plan.geometry_level_label = source[1]
             elif step.job_type == CalculationType.FREQUENCY:
-                source = source or (ended[-1][1] if ended else None)  # A11
                 if source is not None and source[0] != identity:
                     warnings.append(
                         {
@@ -1951,25 +1937,27 @@ def commit(
         for destination, owner in (("node", node), ("derived", derived)):
             if owner is None:
                 continue
-            # D100: a single point's geometry level is the optimization that ended on its
-            # geometry; one that prints no coordinates is at the node's geometry (A15).
-            ended: list[tuple[Any, levels.LevelOfTheory | None]] = []
-            if owner is target:
-                ended = [(c.geometry, c.level) for c in levels.geometry_sources(owner)]
+            # D100, D253: a single point's geometry level is the optimization that ended on
+            # its geometry; one that prints no coordinates is at the node's geometry (A15). The
+            # rule is the preview's and energies' (levels.Sources).
+            sources: levels.Sources[levels.LevelOfTheory | None] = levels.Sources(
+                owner if owner is target else None, lambda c: c.level
+            )
             for step_plan in plan_.steps:
                 if step_plan.assignment != destination:
                     continue
                 step = steps[step_plan.index]
-                rows = _rows(step.final_geometry) or owner.geometry
-                geometry_level = ended_on(ended, rows, tolerance) or (
-                    None if step.final_geometry or not ended else ended[-1][1]
-                )
+                geometry_level = None
+                if step.job_type not in OPTIMIZATION_TYPES:
+                    geometry_level = sources.source(
+                        step.job_type, _rows(step.final_geometry), owner.geometry, tolerance
+                    )
                 calculation = _create_calculation(
                     session, owner, step, step_plan, staged, source, geometry_level
                 )
                 calculation_ids.append(calculation.id)
                 if calculation.type in OPTIMIZATION_TYPES and not calculation.constraints:
-                    ended.append((calculation.geometry, calculation.level))  # D157
+                    sources.add(calculation.geometry, calculation.level)  # D157
                 if step.optimization_converged is False:
                     _add_tag(session, owner, OPTIMIZATION_INCOMPLETE)
         session.flush()

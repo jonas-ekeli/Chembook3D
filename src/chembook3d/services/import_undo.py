@@ -425,41 +425,51 @@ def _depends_on_created(
 
 
 def _single_points_on(session: Session, records: ImportRecords, node: Node) -> list[str]:
-    """D100: a single point imported later whose geometry level is one of this import's
-    optimizations, with no other optimization at that level ending on its geometry."""
-    ours = {c.id for c in records.calculations}
-    removed = [
-        c
-        for c in records.calculations
-        if c.node_id == node.id and levels.is_geometry_source(c)  # D157
-    ]
-    if not removed:
+    """D100, D253: a single point or frequency job imported later whose geometry level is one
+    of this import's calculations (an optimization, or on a node without one its frequency job,
+    D204), with nothing else at that level ending on its geometry once they are gone. The
+    geometry levels are worked out by the shared rule (levels.Sources)."""
+    ours = {c.id for c in records.calculations if c.node_id == node.id}
+    before = levels.Sources(node, lambda c: c)
+    if not any(value.id in ours for _rows, value in before.entries):
         return []
-    remaining = [c for c in levels.optimizations(node) if c.id not in ours]
+    after = levels.Sources(node, lambda c: c, leave_out=ours)
     tolerance = thermo_settings.tolerance(object_session(node))  # D252
 
-    def ends_on(optimizations: list[Calculation], level_id: str, rows: Any) -> bool:
-        return any(
-            o.level_id == level_id
-            and (rows is None or geometry.matches(o.geometry, rows, tolerance))
-            for o in optimizations
-        )
+    def ends_on(sources: levels.Sources[Calculation], level_id: str, rows: Any) -> list[str]:
+        return [
+            value.id
+            for ended, value in sources.entries
+            if value.level_id == level_id
+            and (rows is None or geometry.matches(ended, rows, tolerance))
+        ]
 
     blockers = []
     for calculation in node.calculations:
-        if (
-            calculation.id in ours
-            or calculation.type != CalculationType.SINGLE_POINT
-            or calculation.geometry_level_id is None
-        ):
+        if calculation.id in ours:
             continue
-        level, rows = calculation.geometry_level_id, calculation.geometry
-        if ends_on(removed, level, rows) and not ends_on(remaining, level, rows):
-            name = calculation.source_file.original_name if calculation.source_file else ""
-            blockers.append(
-                f"The single point{f' from {name}' if name else ''} on {_label(node)} takes "
-                f"its geometry level from this import's optimization"
-            )
+        rows = calculation.geometry
+        if calculation.type == CalculationType.SINGLE_POINT and calculation.geometry_level_id:
+            level = calculation.geometry_level_id
+            mine = set(ends_on(before, level, rows)) & ours
+            if not mine or ends_on(after, level, rows):
+                continue
+            what = "single point"
+        elif calculation.type == CalculationType.FREQUENCY and not calculation.constraints:
+            then = before.source(calculation.type, rows, node.geometry, tolerance)
+            if then is None or then.id not in ours:
+                continue
+            later = after.source(calculation.type, rows, node.geometry, tolerance)
+            if later is not None and later.level_id == then.level_id:
+                continue
+            what = "frequency job"
+        else:
+            continue
+        name = calculation.source_file.original_name if calculation.source_file else ""
+        blockers.append(
+            f"The {what}{f' from {name}' if name else ''} on {_label(node)} takes "
+            f"its geometry level from this import's calculations"
+        )
     return blockers
 
 

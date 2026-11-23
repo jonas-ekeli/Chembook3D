@@ -8,7 +8,8 @@ their parsed definition, so equality uses the name.
 import hashlib
 import json
 import re
-from typing import Any
+from collections.abc import Callable, Container
+from typing import Any, Generic, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session
@@ -22,6 +23,14 @@ from chembook3d.models import (
     Node,
 )
 from chembook3d.services import geometry, history, thermo_settings
+
+T = TypeVar("T")
+_UNSET: Any = object()
+
+
+def _itself(calculation: Calculation) -> Calculation:
+    return calculation
+
 
 LEVEL_FIELDS = ("program", "method", "basis", "dispersion", "solvation_model", "solvent")
 OPTIMIZATION_TYPES = (CalculationType.OPTIMIZATION, CalculationType.TS_OPTIMIZATION)
@@ -177,6 +186,83 @@ def geometry_sources(node: Node) -> list[Calculation]:
     return sorted(found, key=lambda c: (c.created_at, c.step_index or 0))
 
 
+class Sources(Generic[T]):
+    """D253: the one rule for which geometry a calculation is at, shared by the import preview,
+    the commit and energies. The geometries a node's calculations can be at are its free
+    optimizations (D100, D157), with the free ones written or planned before it in the same
+    file added in order; on a node with none, its frequency jobs that were not held (D204),
+    which drop out once an optimization is added. Each entry carries a value: the calculation,
+    or whatever the caller pairs with a step it has not written yet."""
+
+    def __init__(
+        self,
+        node: Node | None,
+        value: Callable[[Calculation], T],
+        leave_out: Container[str] = (),
+    ):
+        """`leave_out`: calculations taken as gone (an import being undone)."""
+        self._free: list[tuple[Any, T]] = []
+        self._frequencies: list[tuple[Any, T]] = []
+        if node is None:
+            return
+        self._free = [(c.geometry, value(c)) for c in optimizations(node) if c.id not in leave_out]
+        found = sorted(
+            (c for c in node.calculations if _unheld_frequency(c) and c.id not in leave_out),
+            key=lambda c: (c.created_at, c.step_index or 0),
+        )
+        self._frequencies = [(c.geometry, value(c)) for c in found]
+
+    def add(self, rows: Any, value: T) -> None:
+        """A free optimization written (or planned) after the node's own."""
+        self._free.append((rows, value))
+
+    @property
+    def entries(self) -> list[tuple[Any, T]]:
+        return self._free or self._frequencies
+
+    def geometries(self) -> list[Any]:
+        """Where the entries ended: the geometries a node holds besides its own (D246)."""
+        return [rows for rows, _ in self.entries if rows]
+
+    def at(self, rows: Any, tolerance: float) -> T | None:
+        """The latest entry whose geometry `rows` match (D100)."""
+        if not rows:
+            return None
+        for ended, value in reversed(self.entries):
+            if geometry.matches(ended, rows, tolerance):
+                return value
+        return None
+
+    def node_source(self, node_rows: Any, tolerance: float) -> T | None:
+        """FR-CALC-04: the one the node's geometry came from; the latest when the node's
+        geometry matches none (records made before D100)."""
+        found = self.at(node_rows, tolerance)
+        if found is not None:
+            return found
+        return self.entries[-1][1] if self.entries else None
+
+    def source(
+        self,
+        kind: CalculationType,
+        rows: Any,
+        node_rows: Any,
+        tolerance: float,
+        node_source: Any = _UNSET,
+    ) -> T | None:
+        """The entry a single point or frequency job is at: the latest that ended on its own
+        coordinates. A single point whose coordinates match none is at an unknown geometry
+        (D100, SP-GEOM, set by hand). One that printed no coordinates is at the node's
+        geometry (A15), and so is a frequency job whose coordinates match none (A11): the one
+        the node's geometry came from (`node_source`, worked out here unless given)."""
+        if rows:
+            found = self.at(rows, tolerance)
+            if found is not None or kind == CalculationType.SINGLE_POINT:
+                return found
+        if node_source is _UNSET:
+            return self.node_source(node_rows, tolerance)
+        return node_source
+
+
 def optimization_at(
     node: Node | None, rows: list[Any] | None, tolerance: float | None = None
 ) -> Calculation | None:
@@ -187,8 +273,7 @@ def optimization_at(
         return None
     if tolerance is None:
         tolerance = thermo_settings.tolerance(object_session(node))
-    matching = [c for c in geometry_sources(node) if geometry.matches(c.geometry, rows, tolerance)]
-    return matching[-1] if matching else None
+    return Sources(node, _itself).at(rows, tolerance)
 
 
 def pre_optimization_at(node: Node, rows: list[Any] | None, tolerance: float) -> Calculation | None:
@@ -270,9 +355,9 @@ def node_geometry_optimization(
     made before D100) falls back on its latest optimization."""
     if node is None:
         return None
-    return optimization_at(node, node.geometry, tolerance) or next(
-        reversed(geometry_sources(node)), None
-    )
+    if tolerance is None:
+        tolerance = thermo_settings.tolerance(object_session(node))
+    return Sources(node, _itself).node_source(node.geometry, tolerance)
 
 
 def node_geometries(node: Node, tolerance: float | None = None) -> list[Calculation]:

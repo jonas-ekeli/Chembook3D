@@ -6,6 +6,10 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Which geometry a calculation is at is decided by one rule everywhere (D253): the import preview
+  now agrees with what is stored and with energies (a node whose optimization ran elsewhere, a
+  frequency job whose coordinates match none), and undoing an import is blocked while a later
+  single point or frequency job takes its geometry level from it.
 - The geometry tolerance (Same geometry) is now kept in each investigation (D252), so a folder
   matches calculations to geometries the same way on every computer; an existing one takes the
   app's current value once when it is opened, and each change is in its history.
