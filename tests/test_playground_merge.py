@@ -116,6 +116,7 @@ def _set_up(page, tmp_path):
     _ok(page.delete(f"/api/nodes/{ids['R']}"))
     _ok(page.patch(f"/api/energy-profiles/{ids['profile']}", json={"name": "Cycle"}))
     _ok(page.put("/api/thermochemistry", json={"qh_temperature": 350.0}))
+    _ok(page.put("/api/settings", json={"geometry_tolerance": 0.002}))  # D252
     _ok(page.put("/api/positions", json={"positions": {ids["Moved"]: {"x": 500, "y": 600}}}))
     _ok(page.post("/api/investigations/close"))
 
@@ -291,8 +292,9 @@ def test_preview_changes_nothing_and_merge_applies_only_the_ticked(page, tmp_pat
     assert len(modes) == 1 and modes[0]["data"]
     profile = _rows(original, "SELECT name FROM energy_profiles WHERE id = ?", (ids["profile"],))
     assert profile[0]["name"] == "Cycle"
-    info = _rows(original, "SELECT qh_temperature FROM investigation_info")[0]
+    info = _rows(original, "SELECT qh_temperature, geometry_tolerance FROM investigation_info")[0]
     assert info["qh_temperature"] == 350.0
+    assert info["geometry_tolerance"] == 0.002  # D252: merged with the thermochemistry
     moved = _rows(original, "SELECT pos_x, pos_y FROM nodes WHERE id = ?", (ids["Moved"],))[0]
     assert (moved["pos_x"], moved["pos_y"]) == (500, 600)
 

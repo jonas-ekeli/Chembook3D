@@ -83,6 +83,10 @@ class InvestigationInfo(Base):
     qh_temperature: Mapped[float | None] = mapped_column(default=None)
     qh_cutoff: Mapped[float | None] = mapped_column(default=None)
     standard_state: Mapped[str | None] = mapped_column(String(16), default=None)
+    # D252: the RMSD (Å) within which a calculation is at a geometry (ID-7), the investigation's
+    # own so matching is the same on every computer; None until set from the app's settings
+    # (at creation, or by the repair `geometry_tolerance`).
+    geometry_tolerance: Mapped[float | None] = mapped_column(default=None)
     # D235: the investigation's own id, apart from its folder (a playground merges only into the
     # investigation whose id it holds). Set by migration 0032 for older investigations.
     uuid: Mapped[str | None] = mapped_column(String(32), default=new_id)

@@ -549,8 +549,9 @@ def create_investigation(folder: Path, name: str) -> Investigation:
         sessions = _session_factory(engine, ownership)
         from chembook3d.services import repairs, thermo_settings  # services import this module
 
-        # D159: a new investigation starts with the app's thermochemistry settings.
-        defaults = thermo_settings.values(None)
+        # D159, D252: a new investigation starts with the app's thermochemistry settings and
+        # geometry tolerance.
+        defaults = thermo_settings.new_values()
         with sessions.begin() as session:
             session.add(
                 InvestigationInfo(id=1, name=name, repairs=list(repairs.REPAIRS), **defaults)

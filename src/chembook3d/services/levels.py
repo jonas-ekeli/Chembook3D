@@ -11,9 +11,8 @@ import re
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
-from chembook3d import settings as app_settings
 from chembook3d.models import (
     Calculation,
     CalculationType,
@@ -22,7 +21,7 @@ from chembook3d.models import (
     LevelOfTheory,
     Node,
 )
-from chembook3d.services import geometry, history
+from chembook3d.services import geometry, history, thermo_settings
 
 LEVEL_FIELDS = ("program", "method", "basis", "dispersion", "solvation_model", "solvent")
 OPTIMIZATION_TYPES = (CalculationType.OPTIMIZATION, CalculationType.TS_OPTIMIZATION)
@@ -187,7 +186,7 @@ def optimization_at(
     if node is None or not rows:
         return None
     if tolerance is None:
-        tolerance = app_settings.load().geometry_tolerance
+        tolerance = thermo_settings.tolerance(object_session(node))
     matching = [c for c in geometry_sources(node) if geometry.matches(c.geometry, rows, tolerance)]
     return matching[-1] if matching else None
 
@@ -225,7 +224,7 @@ def continued_by(calculation: Calculation, tolerance: float | None = None) -> Ca
     if not following:
         return None
     if tolerance is None:
-        tolerance = app_settings.load().geometry_tolerance
+        tolerance = thermo_settings.tolerance(object_session(node))
     # D246: an optimization added beside the node's geometry continues nothing.
     line = node_line(node, tolerance)
     if line is not None:
@@ -281,7 +280,7 @@ def node_geometries(node: Node, tolerance: float | None = None) -> list[Calculat
     that ended on the same geometry): the node's own first, then those added beside it or its
     pre-optimizations, oldest first. A single point can be run at any of them."""
     if tolerance is None:
-        tolerance = app_settings.load().geometry_tolerance
+        tolerance = thermo_settings.tolerance(object_session(node))
     found: list[Calculation] = []
     for calculation in reversed(optimizations(node)):
         if calculation.geometry and not any(

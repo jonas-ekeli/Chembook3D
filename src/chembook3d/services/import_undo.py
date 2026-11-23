@@ -26,9 +26,8 @@ from pathlib import Path, PurePath
 from typing import Any
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
-from chembook3d import settings as app_settings
 from chembook3d.investigation import FILES_DIR
 from chembook3d.models import (
     AlignmentSetAtoms,
@@ -46,7 +45,7 @@ from chembook3d.models import (
     TransitionSpecies,
     Turnover,
 )
-from chembook3d.services import geometry, history, levels
+from chembook3d.services import geometry, history, levels, thermo_settings
 from chembook3d.services import groups as group_service
 from chembook3d.services import nodes as node_service
 from chembook3d.services import transitions as transition_service
@@ -437,7 +436,7 @@ def _single_points_on(session: Session, records: ImportRecords, node: Node) -> l
     if not removed:
         return []
     remaining = [c for c in levels.optimizations(node) if c.id not in ours]
-    tolerance = app_settings.load().geometry_tolerance
+    tolerance = thermo_settings.tolerance(object_session(node))  # D252
 
     def ends_on(optimizations: list[Calculation], level_id: str, rows: Any) -> bool:
         return any(
@@ -512,7 +511,7 @@ def _on_its_coordinates(records: ImportRecords, node: Node) -> list[str]:
     old, new = records.changes[(node.id, "geometry")]
     ours = {c.id for c in records.calculations}
     since = max((c.created_at for c in records.calculations), default=None)
-    tolerance = app_settings.load().geometry_tolerance
+    tolerance = thermo_settings.tolerance(object_session(node))  # D252
     files = set()
     for calculation in node.calculations:
         if calculation.id in ours:

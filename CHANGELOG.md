@@ -6,6 +6,9 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The geometry tolerance (Same geometry) is now kept in each investigation (D252), so a folder
+  matches calculations to geometries the same way on every computer; an existing one takes the
+  app's current value once when it is opened, and each change is in its history.
 - A level override that leaves no calculation at the old level now moves the saved selectivities,
   turnovers and conformer equilibria on it, and the energy view, to the new level, in the
   history (D251); an analysis left at an empty level says so instead of "No G at this level".

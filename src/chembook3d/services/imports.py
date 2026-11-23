@@ -51,7 +51,7 @@ from chembook3d.models import (
 )
 from chembook3d.parsers import cml, crest, gaussian, joined, local_result, orca, xtb
 from chembook3d.parsers.common import NOT_STATIONARY, ParsedFile, ParsedStep
-from chembook3d.services import geometry, history, levels, spin
+from chembook3d.services import geometry, history, levels, spin, thermo_settings
 from chembook3d.services import groups as group_service
 from chembook3d.services import nodes as node_service
 from chembook3d.services.warnings import OPTIMIZATION_INCOMPLETE
@@ -787,7 +787,7 @@ def _names(
 def plan(
     session: Session, staged: StagedFile, options: ImportOptions, store_names: bool = False
 ) -> Plan:
-    settings = app_settings.load()
+    settings = thermo_settings.settings(session)  # D252: the investigation's tolerance
     if options.irc_part is not None:
         return _plan_irc(session, staged, options, settings, store_names)
     if isinstance(staged.parsed, crest.Ensemble):
@@ -1947,7 +1947,7 @@ def commit(
             derived = _new_node(session, fields, chosen_rows, chosen, target)
 
         calculation_ids = []
-        tolerance = app_settings.load().geometry_tolerance
+        tolerance = thermo_settings.tolerance(session)  # D252
         for destination, owner in (("node", node), ("derived", derived)):
             if owner is None:
                 continue

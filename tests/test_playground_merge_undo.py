@@ -82,7 +82,7 @@ def test_undo_puts_the_original_back(page, tmp_path):
     assert "TS1" in shown["restored"] and "Edge INT1-P → TS1" in shown["restored"]
     put_back = {p["label"]: p["fields"] for p in shown["put_back"]}
     assert set(put_back["INT1-P"]) == {"label", "status"}
-    assert put_back["Thermochemistry settings"] == ["qh_temperature"]
+    assert put_back["Thermochemistry settings"] == ["qh_temperature", "geometry_tolerance"]  # D252
     assert put_back["Moved"] == ["position"]
     assert shown["kept"] == [] and shown["playground_back"] is True
     assert shown["backup"] is None and shown["history_id"] is None
