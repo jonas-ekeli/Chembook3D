@@ -230,6 +230,9 @@ class Value:
     # the geometry level unfinished, a calculation ended abnormally. As {"code", "message",
     # "issues"}; None when nothing.
     check: dict[str, Any] | None = None
+    # D250: the frequency job `check` judged the value by (`frequency_at`), also for E, which
+    # has no thermo calculation; None when the node has none. The node panel shows its count.
+    check_calculation_id: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -240,6 +243,7 @@ class Value:
             "thermo_calculation_id": self.thermo_calculation_id,
             "details": self.details,
             "check": self.check,
+            "check_calculation_id": self.check_calculation_id,
         }
 
 
@@ -620,6 +624,8 @@ class NodeEnergies:
             if note is not None:
                 check = check_of([*(check["issues"] if check else []), note])
         found.check = check
+        frequency = self.frequency_at(key)
+        found.check_calculation_id = frequency.id if frequency is not None else None
         return found
 
     def _value(self, key: LevelKey, energy_type: str) -> Value:

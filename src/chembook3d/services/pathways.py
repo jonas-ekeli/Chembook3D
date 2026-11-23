@@ -43,6 +43,7 @@ from chembook3d.services.energies import (
     ENERGY_TYPES,
     Energies,
     LevelKey,
+    check_of,
     distinct_temperatures,
     key_label,
 )
@@ -587,6 +588,10 @@ def profiles(
             if value is not None and energy_type in ("H", "G"):
                 temperatures.add(point["details"].get("job_temperature"))
             added, missing = species_service.energy(session, energies, held, key, energy_type)
+            # D249: the free species' checks come with the point's own.
+            extra = species_service.issues(session, energies, held, key, energy_type)
+            if extra:
+                point["check"] = check_of([*((point["check"] or {}).get("issues") or []), *extra])
             point["species"] = described
             point["species_message"] = missing
             # D221: other atoms or another charge than the reference's: no relative energy.

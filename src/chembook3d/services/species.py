@@ -205,6 +205,32 @@ def energy(
     return total, None
 
 
+def issues(
+    session: Session,
+    energies: Energies,
+    balance: Balance,
+    key: LevelKey,
+    energy_type: str,
+    leave_out: tuple[str, ...] = (),
+) -> list[dict[str, str]]:
+    """D249: the checks (D154, D158, D162, D163, D245) of the free species a balance adds, each
+    message naming its species, so a profile, an edge, a card or an analysis says them as it
+    says its own nodes'. Only species with a value: a missing one is already the reason there
+    is no number. `leave_out`: codes the caller notes once for everything (W-TEMP)."""
+    found: list[dict[str, str]] = []
+    for species_id in balance:
+        value = energies.value(species_id, key, energy_type)
+        if value.value is None or not value.check:
+            continue
+        name = label(session.get(Node, species_id))
+        for issue in value.check.get("issues") or []:
+            if issue["code"] not in leave_out:
+                found.append(
+                    {"code": issue["code"], "message": f"free species “{name}”: {issue['message']}"}
+                )
+    return found
+
+
 def balances_from(session: Session, reference_id: str) -> dict[str, Balance]:
     """D72: the balance of every node and group joined to the reference, whatever its
     distance. Following transitions forward is preferred to walking them backwards, so in a

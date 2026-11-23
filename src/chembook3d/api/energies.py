@@ -72,12 +72,15 @@ class ValueOut(BaseModel):
     # D154: what the frequency job at the geometry level says against the node's role; D158:
     # also a frequency job not at a stationary point, an unfinished optimization, W-TERM
     check: EnergyCheckOut | None = None
+    check_calculation_id: str | None = None  # D250: the frequency job `check` judged it by
 
 
 class EdgeValueOut(BaseModel):
     delta: float | None
     direct: bool
     message: str | None = None  # why delta is missing, when a free species has no value
+    # D249: what the calculations of the free species joining or leaving here say (D154).
+    check: str | None = None
 
 
 class SpeciesCountOut(BaseModel):
@@ -95,6 +98,8 @@ class RelativeOut(BaseModel):
     species: list[SpeciesCountOut]
     message: str | None  # why value is missing
     joined: bool  # joined to the reference by transitions; if not, no species are counted
+    # D249: what the calculations of the free species balancing it say (D154).
+    check: str | None = None
 
 
 class PopulationOut(BaseModel):
@@ -233,6 +238,12 @@ def set_thermochemistry(body: ThermochemistryIn, session: DbSession):
         raise HTTPException(422, str(exc)) from exc
 
 
+def _species_check(session, energies: Energies, balance, key: LevelKey, type: str) -> str | None:
+    """D249: the free species' checks as one line, None when they have none."""
+    found = species_service.issues(session, energies, balance, key, type)
+    return "; ".join(i["message"] for i in found) or None
+
+
 def view_values(
     session, energies: Energies, key: LevelKey, type: str
 ) -> tuple[dict[str, ValueOut], dict[str, EdgeValueOut]]:
@@ -246,14 +257,14 @@ def view_values(
         source = values[transition.source_id].value
         target = values[transition.target_id].value
         # D69: the free species that join or leave on the edge keep the atoms equal.
-        added, message = species_service.energy(
-            session, energies, species_service.change(transition, forward=True), key, type
-        )
+        change = species_service.change(transition, forward=True)
+        added, message = species_service.energy(session, energies, change, key, type)
         known = source is not None and target is not None and added is not None
         edges[transition.id] = EdgeValueOut(
             delta=target - source + added if known else None,
             direct=transition_service.describe(session, transition)["direct"],
             message=message,
+            check=_species_check(session, energies, change, key, type) if known else None,
         )
     return values, edges
 
@@ -312,11 +323,13 @@ def relative_values(
             message = "the reference is no longer on the canvas"
         elif base is None:
             message = "the reference has no value at this level"
+        known = message is None
         relative[record_id] = RelativeOut(
-            value=own.value + added - base if message is None else None,
+            value=own.value + added - base if known else None,
             species=[SpeciesCountOut(**s) for s in species_service.describe(session, balance)],
             message=message,
             joined=record_id in balances,
+            check=_species_check(session, energies, balance, key, type) if known else None,
         )
     return relative
 

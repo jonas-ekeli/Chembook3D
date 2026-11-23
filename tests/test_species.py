@@ -10,7 +10,9 @@ W-BALANCE atom check. The example is a small propene metathesis at a Ru methylid
 """
 
 import pytest
+from sqlalchemy import select
 
+from chembook3d.models import Calculation
 from tests import gaussian_text as g
 from tests.test_energies import KCAL, SVP, add_energies, level_key, view
 from tests.test_import import commit, upload
@@ -419,3 +421,54 @@ def test_a_point_with_other_atoms_than_the_reference_has_no_relative_energy(open
     assert [p["mismatch"] for p in second] == ["Os more, Ru fewer", "charge 1 against 0", None]
     assert [p["relative"] is None for p in second] == [True, True, False]
     assert "Os (Os more, Ru fewer); A+ (charge 1 against 0)" in found["notes"][0]["message"]
+
+
+def test_a_free_species_check_reaches_profiles_edges_cards_and_analyses(open_client, cycle):
+    # T-SPC-07, D249: what a free species' calculations say goes wherever its energy is added,
+    # as a node's own check does; the numbers do not change (D19). Here: propene's frequency
+    # job has one imaginary frequency (W-IMAG-MIN).
+    cycle.energies()
+    patch(open_client, f"/nodes/{cycle.ids['propene']}", {"role": "minimum"})
+    with open_client.app.state.investigation.sessions.begin() as session:
+        frequency = session.scalars(
+            select(Calculation).where(
+                Calculation.node_id == cycle.ids["propene"], Calculation.type == "frequency"
+            )
+        ).one()
+        frequency.result.frequencies = [-85.0, 800.0, 1600.0]
+        frequency.result.imaginary_count = 1
+        ts_frequency = session.scalars(
+            select(Calculation).where(
+                Calculation.node_id == cycle.ids["TS"], Calculation.type == "frequency"
+            )
+        ).one()
+        ts_frequency.result.imaginary_count = 0
+    expected = "free species “propene”: 1 imaginary frequency at the geometry level (-85.0 cm⁻¹)"
+    key = svp(open_client)
+    points = profile(open_client, [cycle.path("A", "B", "TS", "C")], cycle.ids["A"])
+    points = points["profiles"][0]["points"]
+    assert points[0]["check"] is None  # the reference adds no species
+    assert points[1]["relative"] == pytest.approx(E["B"] - E["A"] - E["propene"])
+    assert [i["message"] for i in points[1]["check"]["issues"]] == [expected]
+    ts = points[2]["check"]["issues"]  # the TS's own check first, then the species'
+    assert [i["code"] for i in ts] == ["W-IMAG-TS", "W-IMAG-MIN"]
+    assert ts[1]["message"] == expected
+    body = {"paths": [cycle.path("A", "B")], "reference_id": cycle.ids["A"], "level": key}
+    rows = post(open_client, "/energies/table", {**body, "type": "E"}, status=200)["rows"]
+    assert rows[1][-1] == expected
+
+    found = get(open_client, f"/energies/view?level={key}&type=E&reference={cycle.ids['A']}")
+    assert found["edges"][cycle.edges[("A", "B")]]["check"] == expected
+    assert found["edges"][cycle.edges[("B", "TS")]]["check"] is None
+    assert found["relative"][cycle.ids["B"]]["check"] == expected
+    assert found["relative"][cycle.ids["A"]]["check"] is None
+
+    # A selectivity says it once among its notes.
+    outcomes = [
+        {"name": "R", "members": [cycle.ids["TS"]]},
+        {"name": "S", "members": [cycle.ids["B"]]},
+    ]
+    body = {"name": "Sides", "level": key, "outcomes": outcomes, "reference_id": cycle.ids["A"]}
+    created = post(open_client, "/selectivities", body)
+    found = get(open_client, f"/selectivities/{created['id']}/result")
+    assert found["notes"].count(f"F{expected[1:]}.") == 1, found["notes"]

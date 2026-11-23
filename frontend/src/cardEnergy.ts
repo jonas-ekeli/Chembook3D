@@ -30,7 +30,9 @@ export function cardEnergy(energy: CanvasEnergy | null, id: string): CardEnergy 
     : own.joined
       ? unit
       : `${unit}; not joined to the reference by transitions, so no free species are counted`
-  return { type, value: formatDelta(own.value, energy.settings), title }
+  // D249: what the free species' own calculations say, as their nodes' checks are said.
+  const checked = own.check ? `${title}. ⚠ ${own.check}` : title
+  return { type, value: formatDelta(own.value, energy.settings), title: checked }
 }
 
 /** A number as shown: a real minus sign (D175). */

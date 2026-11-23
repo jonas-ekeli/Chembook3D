@@ -327,12 +327,14 @@ export function NodeInspector({
   const outgoing = canvas.transitions.filter((t) => t.source_id === node.id)
   const carriedBy = canvas.transitions.filter((t) => t.species.some((s) => s.species_id === node.id))
 
-  // D179: the stat strip. The frequency job is the one the energy view's value comes from, else
-  // the node's latest; whether its count is wrong for the role is the backend's warning on it
-  // (W-IMAG-TS, W-IMAG-MIN, D154, D158), or W-TS-NOFREQ when there is none.
+  // D179: the stat strip. D250: the frequency job is the one the energy view's value was checked
+  // by (for E too, which has no thermo calculation), else the node's latest; whether its count
+  // is wrong for the role is the backend's warning on it (W-IMAG-TS, W-IMAG-MIN, D154, D158), or
+  // W-TS-NOFREQ when there is none.
   const value = energy.view?.values[node.id] ?? null
+  const checkedBy = value ? (value.check_calculation_id ?? value.thermo_calculation_id) : null
   const frequencyJob = calculations
-    ? (calculations.find((c) => c.id === value?.thermo_calculation_id && c.result?.imaginary_count != null) ??
+    ? (calculations.find((c) => c.id === checkedBy && c.result?.imaginary_count != null) ??
       calculations.findLast((c) => c.type === 'frequency' && c.result?.imaginary_count != null) ??
       null)
     : null

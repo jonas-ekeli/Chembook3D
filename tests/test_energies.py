@@ -532,6 +532,17 @@ def test_frequency_at_another_level_is_not_used_for_free_energy(open_client):
     at_tzvp = view(open_client, level_key(open_client, composite), "G")["values"][node_id]
     assert at_tzvp["value"] == pytest.approx(-76.46 + 0.0034)
     assert at_tzvp["thermo_calculation_id"] != tzvp_freq["id"]
+    # D250: E names the frequency job its check used too, the one at the geometry level, not
+    # the node's latest (the TZVP one), so the node panel shows that job's imaginary count.
+    own_freq = next(
+        c
+        for c in calculations(open_client, node_id)
+        if c["type"] == "frequency" and c["id"] != tzvp_freq["id"]
+    )
+    for key in ("Gaussian B3LYP/6-31G(D)", composite):
+        for energy_type in ("E", "G"):
+            value = view(open_client, level_key(open_client, key), energy_type)["values"][node_id]
+            assert value["check_calculation_id"] == own_freq["id"], (key, energy_type)
 
 
 def test_energies_come_only_from_calculation_results(open_client):

@@ -560,7 +560,15 @@ def result(
                 member["value"] = None
                 member["message"] = message
                 missing.append(f"“{member['label']}” ({message})")
-            elif balance:
+                continue
+            # D249: what the free species' calculations say, once per species and issue.
+            for issue in species_service.issues(
+                session, energies, balance, key, selectivity.energy_type, ("W-TEMP",)
+            ):
+                note = f"{issue['message'][0].upper()}{issue['message'][1:]}."
+                if note not in notes:
+                    notes.append(note)
+            if balance:
                 member["species_value"] = added
                 member["value"] = value.value + added
     if selectivity.energy_type in ("H", "G"):
