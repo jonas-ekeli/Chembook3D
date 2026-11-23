@@ -6,6 +6,9 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- One calculation can be removed from its node (D259): Remove… in its record, after a confirm that
+  lists the frequency jobs and single points sitting on it, which go with it. Claude asks for it with
+  `remove_calculation`.
 - A local refine can start from another structure (D258): one of the node's other geometries, pasted XYZ
   text or a built structure, with the node's atoms in its order; the result is imported onto the node
   by the usual rules, so a free species takes a level it lacks beside its geometry.

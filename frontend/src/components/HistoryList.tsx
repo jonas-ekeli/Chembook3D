@@ -185,6 +185,23 @@ const CALCULATION_FIELDS: Record<string, string> = {
 
 const energy = (value: unknown) => (typeof value === 'number' ? hartree(value) : show(null, value))
 
+/** D259: calculations removed from a node, with those sitting on them. */
+function describeRemoval(entry: HistoryEntry): string | null {
+  if (entry.action !== 'remove_calculations') return null
+  const value = entry.old_value as {
+    calculation?: { type: string; level: string | null }
+    linked?: unknown[]
+    files?: string[]
+  } | null
+  const one = value?.calculation
+  const type = one ? (CALCULATION_TYPES[one.type] ?? one.type) : 'calculation'
+  let text = `Removed the ${type.startsWith('TS') ? type : type.toLowerCase()}${one?.level ? ` at ${one.level}` : ''}`
+  const linked = value?.linked?.length ?? 0
+  if (linked) text += ` with ${linked} calculation${linked === 1 ? '' : 's'} sitting on it`
+  if (value?.files?.length) text += `; the copy of ${value.files.join(', ')} removed`
+  return text
+}
+
 function describeOther(entry: HistoryEntry): string | null {
   const value = entry.new_value as Record<string, unknown> | null
   if (entry.record_type === 'calculation') {
@@ -340,6 +357,7 @@ function describe(entry: HistoryEntry, names: Names): string {
   const other =
     describeMerge(entry) ??
     describeUndo(entry) ??
+    describeRemoval(entry) ??
     describeNote(entry) ??
     describeThermo(entry) ??
     describeOther(entry) ??

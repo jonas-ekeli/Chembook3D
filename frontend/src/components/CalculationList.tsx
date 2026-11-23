@@ -3,6 +3,7 @@ import {
   api,
   CALCULATION_TYPES,
   type Calculation,
+  type CalculationRemoval,
   type CustomBasisSummary,
   type Level,
   type LevelFields,
@@ -13,6 +14,7 @@ import {
 import { errorText, hartree } from '../util'
 import { modeCheckText } from '../localJobs'
 import { BasisSetsDialog } from './BasisSets'
+import { Modal } from './Modal'
 
 const LEVEL_FIELDS: { key: keyof LevelFields; label: string }[] = [
   { key: 'method', label: 'Method' },
@@ -360,7 +362,76 @@ function Details({
       <LevelEditor key={calculation.level?.id ?? 'none'} calculation={calculation} levels={levels} onSaved={onSaved} />
       <CustomBasisLinks calculation={calculation} bases={bases} />
       {calculation.source_file && <SourceFileBox source={calculation.source_file} onChanged={onChanged} />}
+      <RemoveCalculation calculation={calculation} onRemoved={onChanged} />
     </div>
+  )
+}
+
+/** D259: remove this calculation, with those stored as sitting on it, after a confirm that
+ * lists them. */
+function RemoveCalculation({ calculation, onRemoved }: { calculation: Calculation; onRemoved: () => void }) {
+  const [asked, setAsked] = useState<CalculationRemoval | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const typeOf = (type: string) => (CALCULATION_TYPES[type] ?? type).toLowerCase()
+  const remove = () => {
+    setBusy(true)
+    api
+      .removeCalculation(calculation.id)
+      .then(
+        () => {
+          setAsked(null)
+          onRemoved()
+        },
+        (err: unknown) => setError(errorText(err)),
+      )
+      .finally(() => setBusy(false))
+  }
+  return (
+    <>
+      <div className="buttons">
+        <button
+          className="danger"
+          onClick={() => api.calculationRemoval(calculation.id).then(setAsked, (err: unknown) => setError(errorText(err)))}
+        >
+          Remove…
+        </button>
+      </div>
+      {asked && (
+        <Modal
+          title="Remove calculation?"
+          onClose={() => setAsked(null)}
+          actions={
+            <>
+              <button onClick={() => setAsked(null)}>Cancel</button>
+              <button className="danger" disabled={busy} onClick={remove}>
+                Remove
+              </button>
+            </>
+          }
+        >
+          <p>This removes from “{asked.node_label}”, for good:</p>
+          <ul aria-label="Calculations removed">
+            {[asked.calculation, ...asked.linked].map((c, n) => (
+              <li key={c.id}>
+                the {typeOf(c.type)} at {c.level ?? 'an unknown level'}
+                {c.file && <span className="muted"> ({c.file})</span>}
+                {n === 0 && asked.linked.length > 0 && ', and what sits on its geometry:'}
+              </li>
+            ))}
+          </ul>
+          {asked.files.length > 0 && (
+            <p>
+              No other calculation comes from {asked.files.join(', ')}, so {asked.files.length === 1 ? 'its copy goes' : 'their copies go'}{' '}
+              too.
+            </p>
+          )}
+          <p className="muted small">The node keeps its coordinates and its other calculations.</p>
+          {error && <p role="alert">{error}</p>}
+        </Modal>
+      )}
+      {error && !asked && <p role="alert">{error}</p>}
+    </>
   )
 }
 

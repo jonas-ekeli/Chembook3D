@@ -50,8 +50,8 @@ from chembook3d.models import (
     Turnover,
 )
 from chembook3d.services import branches as branch_service
+from chembook3d.services import calculation_removal, history, import_undo
 from chembook3d.services import groups as group_service
-from chembook3d.services import history, import_undo
 from chembook3d.services import nodes as node_service
 from chembook3d.services import species as species_service
 from chembook3d.services import sub_investigations as sub_service
@@ -773,6 +773,29 @@ def _own_branch(session: Session, params: dict[str, Any], made: Autonomy) -> boo
     return made.owns(params["branch_id"], *(n.id for n in members))
 
 
+def _describe_removal(session: Session, params: dict[str, Any]) -> str:
+    """D259: the calculation and those sitting on it, which go with it."""
+    found = calculation_removal.plan(session, params["calculation_id"])
+
+    def one(c: dict[str, Any]) -> str:
+        return f"{c['type'].replace('_', ' ')} at {c['level'] or 'an unknown level'}"
+
+    text = (
+        f"Remove the {one(found.as_dict()['calculation'])} from “{_label(found.calculation.node)}”"
+    )
+    linked = found.as_dict()["linked"]
+    if linked:
+        text += ", with " + _listing([one(c) for c in linked]) + " sitting on it"
+    if found.files:
+        text += "; the copy of " + _listing([f.original_name for f in found.files]) + " goes too"
+    return text
+
+
+def _own_removal(session: Session, params: dict[str, Any], made: Autonomy) -> bool:
+    found = calculation_removal.plan(session, params["calculation_id"])
+    return made.owns(*(c.id for c in found.all))
+
+
 def _own(param: str) -> Callable[[Session, dict[str, Any], Autonomy], bool]:
     """A record that takes nothing else with it."""
     return lambda _session, params, made: made.owns(params[param])
@@ -847,6 +870,9 @@ ACTIONS: dict[str, Action] = {
         _describe_named(EnergyProfile, "Energy profile", "energy_profile_id"),
     ),
     "undo_import": Action("POST", "/api/history/{entry_id}/undo", _describe_undo, own=_own_undo),
+    "remove_calculation": Action(
+        "DELETE", "/api/calculations/{calculation_id}", _describe_removal, own=_own_removal
+    ),
     "delete_alignment_set": Action(
         "DELETE",
         "/api/alignment-sets/{set_id}",

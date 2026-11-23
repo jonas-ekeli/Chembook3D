@@ -1848,6 +1848,11 @@ CONFIRM_DESCRIPTIONS = {
     "'calculation' and action 'create' whose `undo` is 'import'. Its calculations, the nodes it "
     "made and the stored copy go, and what it changed on its node is put back. Refused, with "
     "what depends on it, when later work builds on the import.",
+    "remove_calculation": "Remove one calculation from its node (D259), with the calculations "
+    "stored as sitting on it: removing an optimization also removes the frequency jobs and "
+    "single points run at its geometry. The node keeps its coordinates and its other "
+    "calculations; a copied file nothing else comes from goes too. Permanent, like "
+    "delete_node; to take back a whole imported file, use undo_import.",
     "delete_note": "Delete a note pinned to a node.",
     "delete_selectivity": "Delete a saved selectivity.",
     "delete_turnover": "Delete a saved turnover.",
