@@ -6,6 +6,8 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The canvas no longer reads every scan shown on an edge from its file on each load (D256): with
+  more than 32 such scans every load took seconds; each scan is now read once.
 - A single point or frequency job now remembers which calculation's geometry it is at (D255), so a
   later optimization or a level override no longer moves it to another geometry: a corrected
   optimization level carries its single points with it, and a geometry level set by hand against

@@ -298,3 +298,43 @@ def test_a_gaussian_or_orca_scan_is_shown_on_an_edge(open_client):
     held_node = commit(client, upload(client, "held.log", held))["node_id"]
     assert node_of(client, held_node)["scan_path"] is False
     assert "Only a node with a scan" in link(client, held_node, edge, status=422)["detail"]
+
+
+def test_the_chip_keeps_its_points_and_reads_no_file_again(open_client, monkeypatch):
+    # T-PATH-34 (D256): an edge's chip is worked out from the scan points kept after the
+    # first read, so later canvas loads read no file even past the parsed-file cache; a trim
+    # still moves the top, and a changed copy is read again.
+    from chembook3d.services import imports, trajectory
+
+    client = open_client
+    _, _, edge = ends(client)
+    node_id, calc = scan_path(client)
+    link(client, node_id, edge)
+    energies = [e for e, _ in frames_of(scan_text())]
+    assert edge_of(client, edge)["scan_paths"][0]["top"] == pytest.approx(
+        energies[TOP] - energies[0]
+    )
+
+    reads = []
+    real = imports.read_file
+    monkeypatch.setattr(imports, "read_file", lambda *a, **k: reads.append(a[1]) or real(*a, **k))
+    trajectory._read.cache_clear()  # as when more than 32 scans are shown
+    for _ in range(3):
+        assert edge_of(client, edge)["scan_paths"][0]["top"] == pytest.approx(
+            energies[TOP] - energies[0]
+        )
+    assert reads == []
+
+    trim(client, calc["id"], remove=[1, 2])  # the trim window reads the file itself
+    reads.clear()
+    assert edge_of(client, edge)["scan_paths"][0]["top"] == pytest.approx(
+        energies[TOP] - energies[2]
+    )
+    assert reads == []
+
+    with client.app.state.investigation.sessions() as session:
+        source = session.get(Node, node_id).calculations[0].source_file
+        path = client.app.state.investigation.folder / source.stored_path
+    path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    edge_of(client, edge)
+    assert reads == ["path.xyz"]

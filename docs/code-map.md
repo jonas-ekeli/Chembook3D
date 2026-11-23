@@ -665,8 +665,8 @@ Routes for all of these are in `api/pathway.py`.
   - `on_edge`: the box is off the canvas: set, linked, still `changes_in_place`, no edges or group of its own;
   - `release` (called by `transitions.remove`): unlink, box back halfway;
   - `after_import`: a calculation that is not a scan path brings the box back;
-  - `on_edges`: each edge's `scan_paths` (the top is `Trim.barrier`, the gate and RMSDs from the job's result.json) in `TransitionOut`, which never feed an energy.
-- D200, A134: a Gaussian or ORCA scan imported as its own node (`trajectory.is_held_scan`/`names_scan` read D157's constraints) is linked the same way. `scan_edges.is_path` and `paths_only` take the place of `is_scan_path` and `changes_in_place` there, and `_top` measures its chip over its converged points (it has no `Trim`).
+  - `on_edges`: each edge's `scan_paths` (the top is `Trim.barrier`, the gate and RMSDs from the job's result.json) in `TransitionOut`, which never feed an energy. D256: the top comes from `trajectory.points_of` (each frame's energy, point and converged mark, kept per copy in `_points`) through `path_barrier` or `scan_top`, so a canvas load reads no file once a scan has been read.
+- D200, A134: a Gaussian or ORCA scan imported as its own node (`trajectory.is_held_scan`/`names_scan` read D157's constraints) is linked the same way. `scan_edges.is_path` and `paths_only` take the place of `is_scan_path` and `changes_in_place` there, and `_top` measures its chip over its converged points (`trajectory.scan_top`; it has no `Trim`).
 - Frontend: `pathChip` in `api.ts` is the chip `Canvas.tsx` draws (clicks go through the `PathChipClick` context: select the edge, or in the read-only copy open the path node). `components/ScanPathsOnEdge.tsx` holds the edge panel's "Scan paths" (a `StepMovie` started on `calculationId`) and the node panel's "Shown on an edge".
 
 ## SSH servers such as Saga (D122, A69)
