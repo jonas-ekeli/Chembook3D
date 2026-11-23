@@ -46,7 +46,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Confirmed items are marked
 | Database | One SQLite file per investigation, inside its folder (C4, C5). P20: SQLite with foreign keys on and WAL mode off, so the folder is a single consistent unit when zipped or synced. |
 | Schema access | P21: SQLAlchemy 2.x with Alembic migrations, and a schema version stored in the database. Opening an older investigation migrates it after making a backup copy of the database file. |
 | Files | `files/<calculation-id>/<original-name>`, with relative paths only (FR-INV-03). |
-| Settings | App-wide settings (unit, N, tolerance, device name) in a user config file. Investigation-specific values in the database. |
+| Settings | App-wide settings (unit, N, duplicate tolerance, device name) in a user config file. Investigation-specific values in the database: the thermochemistry (D159) and the geometry tolerance (D252). |
 
 **Risk:** SQLite files in cloud-synced folders (Dropbox, OneDrive) can be corrupted if two machines open the investigation at once. Mitigation (P22): a lock file in the folder while it is open, with a warning when opening an investigation that is locked elsewhere.
 

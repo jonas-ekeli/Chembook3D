@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, object_session, selectinload
 
 from chembook3d import settings as app_settings
 from chembook3d import thermochem
@@ -430,7 +430,7 @@ class NodeEnergies:
         # D160: a free species' own concentration, whatever the standard state.
         self.concentration = node.concentration if node.kind == NodeKind.SPECIES else None
         if tolerance is None:
-            tolerance = app_settings.load().geometry_tolerance
+            tolerance = thermo_settings.tolerance(object_session(node))  # D252
         geometry = levels.node_geometry_level(node, tolerance)
         self.by_key: dict[LevelKey, list[Calculation]] = {}
         # D155: calculations for another charge or multiplicity than the node's are another

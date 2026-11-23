@@ -108,6 +108,40 @@ export function SettingsDialog({
     onSaved: onThermoSaved,
   })
   const local = useLocalToolsSection() // D213
+  // D252: the geometry tolerance is the open investigation's, like its thermochemistry; with
+  // none open it is what a new investigation starts with.
+  const ownTolerance = settings.thermo_scope === 'investigation'
+  const sameGeometry: SettingRow = {
+    name: 'Same geometry',
+    help: ownTolerance
+      ? 'RMSD after alignment within which a calculation is at a geometry of a node (ID-7). Saved in this investigation, so every computer matches the same way.'
+      : 'RMSD after alignment within which a calculation is at a geometry of a node (ID-7). A new investigation starts with this and keeps its own.',
+    control: (
+      <NumberSetting
+        key={`${settings.thermo_scope}:${investigation?.folder ?? ''}:tolerance`}
+        label="Same geometry"
+        unit="Å"
+        value={settings.geometry_tolerance}
+        onSave={(geometry_tolerance) =>
+          api.saveSettings({ geometry_tolerance }).then(ownTolerance ? onThermoSaved : onSettings)
+        }
+      />
+    ),
+  }
+  const tolerance: SettingSection = {
+    id: 'tolerance',
+    title: 'Geometry tolerance',
+    icon: 'target',
+    scope: 'investigation',
+    badge: `Saved in ${investigation?.name ?? 'the open investigation'}`,
+    note: (
+      <>
+        The geometry tolerance is saved in <strong>{investigation?.name ?? 'the open investigation'}</strong> and
+        synced with it; each change is recorded in its History.
+      </>
+    ),
+    rows: [sameGeometry],
+  }
   const computer: SettingSection[] = [
     {
       id: 'general',
@@ -160,18 +194,7 @@ export function SettingsDialog({
       scope: 'computer',
       badge: 'All investigations',
       rows: [
-        {
-          name: 'Same geometry',
-          help: 'RMSD after alignment within which a job step’s results attach to a node (ID-7).',
-          control: (
-            <NumberSetting
-              label="Same geometry"
-              unit="Å"
-              value={settings.geometry_tolerance}
-              onSave={(geometry_tolerance) => save({ geometry_tolerance })}
-            />
-          ),
-        },
+        ...(ownTolerance ? [] : [sameGeometry]),
         {
           name: 'Possible duplicate',
           help: 'An import within this RMSD of another node is flagged as a possible duplicate (ID-8).',
@@ -279,7 +302,7 @@ export function SettingsDialog({
   const groups: { name: string; sections: SettingSection[] }[] = own
     ? [
         { name: 'This computer', sections: computer },
-        { name: 'This investigation', sections: [thermo] },
+        { name: 'This investigation', sections: [thermo, tolerance] },
       ]
     : [{ name: 'This computer', sections: [...computer, thermo] }]
 

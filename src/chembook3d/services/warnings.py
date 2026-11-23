@@ -30,7 +30,7 @@ def calculation_warnings(
     (D168: the W-CONSTRAINED of a held pre-optimization a free optimization continued)."""
     found = []
     if tolerance is None:
-        tolerance = app_settings.load().geometry_tolerance
+        tolerance = thermo_settings.tolerance(object_session(calculation))  # D252
     # D168: a pre-optimization ended where a later optimization started, not on the node.
     continued = levels.continued_by(calculation, tolerance) is not None
     if calculation.termination == "abnormal":
@@ -157,7 +157,7 @@ def node_warnings(node: Node, settings: app_settings.Settings | None = None) -> 
 
     tolerance = None
     if calculations:
-        tolerance = (settings or app_settings.load()).geometry_tolerance
+        tolerance = (settings or thermo_settings.settings(object_session(node))).geometry_tolerance
     for calculation in calculations:
         found += calculation_warnings(calculation, node, tolerance, on_node=True)
     return found

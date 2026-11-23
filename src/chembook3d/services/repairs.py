@@ -12,7 +12,6 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from chembook3d import settings as app_settings
 from chembook3d.models import (
     Calculation,
     CalculationType,
@@ -126,7 +125,7 @@ def geometry_levels(session: Session, folder: Path) -> dict[str, int]:
     latest optimization rather than the one that ended on its geometry (DFT//xTB instead of
     SP//DFT). Fix both; a geometry level set by hand is kept, and a single point that no
     optimization of its node ended on is left for the user to set."""
-    tolerance = app_settings.load().geometry_tolerance
+    tolerance = thermo_settings.tolerance(session)
     by_hand = _set_by_hand(session)
     nodes = session.scalars(
         select(Node).options(
@@ -187,7 +186,7 @@ def constrained_steps(session: Session, folder: Path) -> dict[str, int]:
     calculation's copied file again for what held it, and set again the geometry level of the
     single points on the nodes that had one (not those set by hand). The node's role is left
     as it is; W-CONSTRAINED now shows on the calculation."""
-    tolerance = app_settings.load().geometry_tolerance
+    tolerance = thermo_settings.tolerance(session)
     calculations = session.scalars(
         select(Calculation).options(selectinload(Calculation.source_file))
     ).all()
@@ -292,6 +291,12 @@ def spin_values(session: Session, folder: Path) -> dict[str, int]:
     return counts
 
 
+def geometry_tolerance(session: Session, folder: Path) -> bool:
+    """D252: an investigation saved before it kept its own geometry tolerance takes the app's
+    value once, recorded in its history, so no calculation moves to another geometry."""
+    return thermo_settings.seed(session, source=SOURCE)
+
+
 def thermochemistry(session: Session, folder: Path) -> bool:
     """D159: an investigation saved before it kept its own G_qh temperature, cutoff and
     standard state takes the app's settings once, recorded in its history, so nothing shifts."""
@@ -345,7 +350,7 @@ def start_geometries(session: Session, folder: Path) -> dict[str, int]:
     """D168: optimizations imported before they kept their start geometry. It matters only on
     a node with an optimization that did not end on the node's geometry (a pre-optimization a
     later optimization may have continued), so only those nodes' files are read again."""
-    tolerance = app_settings.load().geometry_tolerance
+    tolerance = thermo_settings.tolerance(session)
     nodes = session.scalars(
         select(Node).options(selectinload(Node.calculations).selectinload(Calculation.source_file))
     ).all()
@@ -432,6 +437,8 @@ def dispersion_without_model(session: Session, folder: Path) -> dict[str, int]:
 
 
 REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
+    # D252: first, so the repairs after it match geometries with the investigation's tolerance.
+    "geometry_tolerance": geometry_tolerance,
     "geometry_levels": geometry_levels,
     "scan_path_edges": scan_path_edges,
     "constrained_steps": constrained_steps,

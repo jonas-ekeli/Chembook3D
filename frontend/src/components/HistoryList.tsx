@@ -261,11 +261,14 @@ const THERMO_FIELDS: Record<string, string> = {
   qh_cutoff: 'G_qh cutoff',
   standard_state: 'Standard state of G and G_qh',
 }
+/** D252: kept in the same record as the thermochemistry. */
+const TOLERANCE_LABEL = 'Same geometry tolerance'
 
 function thermoValue(field: string, value: unknown): string {
   if (value === null || value === undefined) return '—'
   if (field === 'qh_temperature') return `${String(value)} K`
   if (field === 'qh_cutoff') return `${String(value)} cm⁻¹`
+  if (field === 'geometry_tolerance') return `${String(value)} Å`
   return String(value)
 }
 
@@ -274,11 +277,16 @@ function describeThermo(entry: HistoryEntry): string | null {
   if (entry.record_type !== 'thermochemistry') return null
   if (entry.action === 'create') {
     const value = (entry.new_value ?? {}) as Record<string, unknown>
-    const all = Object.keys(THERMO_FIELDS).map((f) => `${THERMO_FIELDS[f]} ${thermoValue(f, value[f])}`)
-    return `Thermochemistry kept in the investigation, from the app's settings: ${all.join(', ')}`
+    // D252: an investigation with its thermochemistry already takes only the tolerance.
+    const thermo = Object.keys(THERMO_FIELDS).filter((f) => f in value)
+    const all = thermo.map((f) => `${THERMO_FIELDS[f]} ${thermoValue(f, value[f])}`)
+    if ('geometry_tolerance' in value) all.push(`${TOLERANCE_LABEL} ${thermoValue('geometry_tolerance', value.geometry_tolerance)}`)
+    const what = thermo.length ? 'Thermochemistry' : TOLERANCE_LABEL
+    return `${what} kept in the investigation, from the app's settings: ${all.join(', ')}`
   }
   const field = entry.field ?? ''
-  return `${THERMO_FIELDS[field] ?? field}: ${thermoValue(field, entry.old_value)} → ${thermoValue(field, entry.new_value)}`
+  const label = field === 'geometry_tolerance' ? TOLERANCE_LABEL : THERMO_FIELDS[field]
+  return `${label ?? field}: ${thermoValue(field, entry.old_value)} → ${thermoValue(field, entry.new_value)}`
 }
 
 /** D235h, D235j, D236: a playground merged into this investigation, that merge undone, and this

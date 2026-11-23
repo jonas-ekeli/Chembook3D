@@ -41,7 +41,7 @@ from chembook3d.models import (
     new_id,
 )
 from chembook3d.parsers import cml, crest, gaussian, orca, xtb
-from chembook3d.services import geometry, history, imports
+from chembook3d.services import geometry, history, imports, thermo_settings
 from chembook3d.services import nodes as node_service
 from chembook3d.services.layout import COLUMN_WIDTH, ROW_HEIGHT
 
@@ -539,7 +539,7 @@ def run(
     names: dict[str, dict[str, Any]] = {}
     basis_names = dict(options.basis_names)
     dispersion_names = dict(options.dispersion_names)
-    tolerance = settings.geometry_tolerance
+    tolerance = thermo_settings.tolerance(session, settings)  # D252
     x0, y0 = _grid_start(session, options.canvas_id)
     slot = 0
     copied: list[str] = []

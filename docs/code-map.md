@@ -309,6 +309,7 @@ Routes for all of these are in `api/pathway.py`.
 - `services/thermo_settings.py`: `settings(session)` is the app's settings with them in place; `update` records each change in the history as record type "thermochemistry".
 - The app's values are only the default for new investigations, taken once by an older one through the repair `thermochemistry`.
 - `/api/settings` reads and writes the open investigation's; `thermo_scope` and `thermo_defaults` say which.
+- D252: the geometry tolerance is kept the same way: `InvestigationInfo.geometry_tolerance` (migration 0036), `thermo_settings.tolerance(session)` (also in `settings(session)`), seeded by the repair `geometry_tolerance`, merged with the thermochemistry (`playground_merge.THERMO_FIELDS`). Every matcher reads it there, never `app_settings.load()`. Its Settings section is `tolerance` in `SettingsDialog.tsx`.
 - `components/ThermoSettings.tsx`'s `thermoSection` is its section of `components/SettingsDialog.tsx`, the two-pane Settings dialog of D183: sections under This computer and This investigation, a scope badge on each, a search, one row per setting with `NumberSetting`'s unit inside the field.
 - `NodeEnergies` adds `thermochem.standard_state_correction` to G and G_qh, and the results name it (`standard_state`) so the labels can.
 

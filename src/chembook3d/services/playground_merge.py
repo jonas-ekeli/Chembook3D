@@ -75,7 +75,7 @@ IGNORED = {"seq", "updated_at", "pos_x", "pos_y", "view_rotation"}
 # Brought along with what uses them, never a change of their own.
 HIDDEN = {"levels_of_theory", "source_files", "note_images"}
 LEVEL_COLUMNS = ("program", "method", "basis", "dispersion", "solvation_model", "solvent")
-THERMO_FIELDS = ("qh_temperature", "qh_cutoff", "standard_state")
+THERMO_FIELDS = ("qh_temperature", "qh_cutoff", "standard_state", "geometry_tolerance")  # D252
 # A history entry's field where it is not the column's name.
 FIELD_ALIASES = {
     ("calculation", "level"): "level_id",

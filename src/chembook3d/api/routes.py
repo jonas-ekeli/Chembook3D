@@ -1179,8 +1179,17 @@ def _with_investigation(request: Request, change: Callable[[Session | None], Any
 def get_settings(request: Request):
     s = app_settings.load()
     thermo = _with_investigation(
-        request, lambda session: None if session is None else thermo_settings.values(session, s)
+        request,
+        lambda session: (
+            None
+            if session is None
+            else {
+                **thermo_settings.values(session, s),
+                "geometry_tolerance": thermo_settings.tolerance(session, s),  # D252
+            }
+        ),
     )
+    own = thermo or {}
     return SettingsOut(
         energy_unit=s.energy_unit,
         energy_units=list(app_settings.ENERGY_UNITS),
@@ -1190,10 +1199,10 @@ def get_settings(request: Request):
         recent_missing=app_settings.missing_recent(s.recent, DB_NAME),
         last_device=s.last_device,
         last_import_folder=app_settings.import_folder(s),
-        geometry_tolerance=s.geometry_tolerance,
+        geometry_tolerance=own.get("geometry_tolerance", s.geometry_tolerance),
         duplicate_tolerance=s.duplicate_tolerance,
         energy_decimals=units.DECIMALS,
-        **(thermo or {f: getattr(s, f) for f in thermo_settings.FIELDS}),
+        **{f: own.get(f, getattr(s, f)) for f in thermo_settings.FIELDS},
         standard_states=list(app_settings.STANDARD_STATES),
         thermo_scope="app" if thermo is None else "investigation",
         thermo_defaults={f: getattr(s, f) for f in thermo_settings.FIELDS},
@@ -1231,9 +1240,11 @@ def put_settings(body: SettingsIn, request: Request):
         if value is not None:
             if value <= 0:
                 raise HTTPException(422, f"{key.replace('_', ' ')} must be above zero")
-            setattr(s, key, value)
-    # D159: the thermochemistry is the open investigation's, else the app's default
-    thermo = {f: getattr(body, f) for f in thermo_settings.FIELDS}
+            if key == "duplicate_tolerance":
+                setattr(s, key, value)
+    # D159, D252: the thermochemistry and the geometry tolerance are the open investigation's,
+    # else the app's default for new ones
+    thermo = {f: getattr(body, f) for f in thermo_settings.SAVED}
 
     def change_thermo(session: Session | None) -> None:
         try:
@@ -1489,7 +1500,7 @@ def node_geometries(node_id: str, session: DbSession):
     """D246: the optimized geometries the node holds, its own first, each by the optimization
     that ended on it; a local single point can be run at any of them."""
     node = _get_node(session, node_id)
-    tolerance = app_settings.load().geometry_tolerance
+    tolerance = thermo_settings.tolerance(session)  # D252
     return [
         NodeGeometryOut(
             calculation_id=c.id,

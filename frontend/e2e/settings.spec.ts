@@ -19,6 +19,7 @@ test('settings are a two-pane page that says where each setting is kept', async 
       'Canvas',
       'Local calculations',
       'Thermochemistry',
+      'Geometry tolerance',
     ])
     await expect(nav.getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'true')
 
@@ -28,6 +29,8 @@ test('settings are a two-pane page that says where each setting is kept', async 
     await expect(dialog.locator('.modal-note')).toContainText(
       'Thermochemistry is saved in Demo investigation and synced with it',
     )
+    // D252: so is the geometry tolerance, apart from the computer's Possible duplicate.
+    await expect(dialog.getByRole('heading', { name: 'Geometry tolerance Saved in Demo investigation' })).toBeAttached()
 
     // A number is right-aligned with its unit inside the field.
     const tolerance = dialog.getByLabel('Same geometry')
@@ -71,7 +74,7 @@ test('settings are a two-pane page that says where each setting is kept', async 
     // Escape empties the search, then closes the dialog.
     await search.press('Escape')
     await expect(search).toHaveValue('')
-    await expect(nav.getByRole('button')).toHaveCount(8)
+    await expect(nav.getByRole('button')).toHaveCount(9)
 
     // A number still saves when its field loses focus.
     const conformers = dialog.getByLabel('Conformers kept on import')
