@@ -100,3 +100,17 @@ def test_undo_is_blocked_by_what_takes_its_geometry_level_from_it(open_client):
     # Undone first, the frequency job no longer holds the optimization's import back.
     open_client.post(f"/api/history/{import_entry(open_client, 'pbe.log')['id']}/undo")
     assert preview(open_client, import_entry(open_client, "opt.log"))["blockers"] == []
+
+
+def test_a_second_frequency_job_on_a_node_without_optimization_is_at_its_own_level(open_client):
+    # T-IMP-69, D204, A11: a frequency job is never at another frequency job's geometry level,
+    # in the preview as in energies.
+    node_id = import_file(open_client, "freq.log", frequency_only())["node_id"]
+    other = g.output(
+        g.step("#P PBE1PBE/def2SVP Freq Geom=Check", [END], frequencies=[1600.0, 3700.0, 3800.0])
+    )
+    plan = upload(open_client, "pbe.log", other, node_id)
+    assert "FREQ-LEVEL" not in {w["code"] for w in plan["warnings"]}
+    import_file(open_client, "pbe.log", other, node_id)
+    labels = [c["composite_label"] for c in calculations(open_client, node_id)]
+    assert labels[-1].upper() == "GAUSSIAN PBE1PBE/DEF2SVP"  # no " // ": its own level

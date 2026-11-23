@@ -255,6 +255,10 @@ class Sources(Generic[T]):
         geometry (A15), and so is a frequency job whose coordinates match none (A11): the one
         the node's geometry came from (`node_source`, worked out here unless given)."""
         if rows:
+            if kind == CalculationType.FREQUENCY and not self._free:
+                # D204: on a node without optimizations a frequency job is its own geometry
+                # source: at its own level (A11), never at another frequency job's.
+                return None
             found = self.at(rows, tolerance)
             if found is not None or kind == CalculationType.SINGLE_POINT:
                 return found
