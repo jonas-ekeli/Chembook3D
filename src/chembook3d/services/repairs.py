@@ -1,6 +1,7 @@
 """One-off corrections of records an earlier version of the app got wrong. Each repair runs
 once per investigation, when it is opened by a version that has it; its name is then kept in
-`InvestigationInfo.repairs`. The database was backed up by the migration that came with it."""
+`InvestigationInfo.repairs`. The database is backed up first: by the migration when one ran,
+else by `investigation._run_repairs` (D248)."""
 
 import logging
 import re
@@ -443,6 +444,15 @@ REPAIRS: dict[str, Callable[[Session, Path], Any]] = {
     "energy_profiles": drawer_profiles,
     "dispersion_without_model": dispersion_without_model,
 }
+
+
+def pending(session: Session) -> list[str]:
+    """The repairs this investigation has not had yet, in REPAIRS' order."""
+    info = session.get(InvestigationInfo, 1)
+    if info is None:
+        return []
+    done = set(info.repairs or [])
+    return [name for name in REPAIRS if name not in done]
 
 
 def run(session: Session, folder: Path) -> dict[str, Any]:

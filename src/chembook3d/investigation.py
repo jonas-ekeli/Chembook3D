@@ -9,6 +9,7 @@ synced between Windows and Linux (FR-INV-03, NFR-PORT-01).
 """
 
 import errno
+import hashlib
 import json
 import logging
 import os
@@ -592,11 +593,11 @@ def open_investigation(
             # Investigation. Close→sync retains it; a later open acquires a new one.
             raise InvestigationError("a closed investigation must acquire new ownership to reopen")
         engine = _make_engine(db_path)
-        _migrate(engine, db_path, allow_upgrade)
+        migrated = _migrate(engine, db_path, allow_upgrade)
         (folder / FILES_DIR).mkdir(exist_ok=True)
         _remove_orphaned_copies(folder, engine)
         sessions = _session_factory(engine, ownership)
-        _run_repairs(folder, sessions)
+        _run_repairs(folder, sessions, backed_up=migrated is not None)
         read_only = _merged(sessions)
         if read_only:
             _query_only(engine)
@@ -607,6 +608,18 @@ def open_investigation(
             engine.dispose()  # Windows keeps a file open until its connections are closed
         ownership.release()
         raise
+
+
+def _back_up_for_repairs(folder: Path, pending: list[str]) -> None:
+    """D248: one backup per set of pending repairs, named for it (`repair-<set>-<time>`), so a
+    repair that fails and is tried again at every open does not add a copy each time."""
+    from chembook3d.autonomy import backup_database  # it imports this module
+
+    tag = hashlib.sha256(" ".join(sorted(pending)).encode()).hexdigest()[:8]
+    backups = folder / BACKUP_DIR
+    if backups.is_dir() and any(backups.glob(f"{DB_NAME}.repair-{tag}-*.bak")):
+        return
+    backup_database(folder, label=f"repair-{tag}")
 
 
 def _merged(sessions: sessionmaker[Session]) -> bool:
@@ -630,11 +643,23 @@ def _query_only(engine: Engine) -> None:
     engine.dispose()
 
 
-def _run_repairs(folder: Path, sessions: sessionmaker[Session]) -> None:
+def _run_repairs(folder: Path, sessions: sessionmaker[Session], backed_up: bool = False) -> None:
     """Correct records an earlier version got wrong (D100). A repair that fails is logged and
-    tried again at the next open; it never keeps the investigation from opening."""
+    tried again at the next open; it never keeps the investigation from opening. D248: before
+    any repair runs, the database is backed up unless the migration just did, since a repair
+    can ship without a schema revision."""
     from chembook3d.services import repairs  # the services import this module
 
+    try:
+        with sessions() as session:
+            pending = repairs.pending(session)
+        if pending and not backed_up:
+            _back_up_for_repairs(folder, pending)
+    except Exception:
+        log.exception(
+            "could not back up %s before its repairs; they wait for the next open", folder
+        )
+        return
     try:
         with sessions.begin() as session:
             repairs.run(session, folder)
