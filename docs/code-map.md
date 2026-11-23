@@ -92,8 +92,9 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 - `services/basis_sets.py` reads a saved basis set back into shells and ECP terms and writes it as a Gaussian `.gbs` file (D94; routes `/api/custom-bases`, dialog `components/BasisSets.tsx`).
 - `services/warnings.py` computes W-* warnings; `units.py` holds the energy conversion factors.
 
-### Geometry levels (D100, D204)
+### Geometry levels (D100, D204, D253)
 
+- D253: `levels.Sources` is the one rule for which geometry a single point or frequency job is at (`at`, `node_source`, `source`; `add` for a file's own optimizations, `leave_out` for an undo, `geometries` for W-GEOM). `imports.plan`, `imports.commit`, `energies.calculation_key`, `levels.optimization_at`/`node_geometry_optimization`, `warnings.calculation_warnings` and `import_undo._single_points_on` all use it.
 - `levels.optimization_at`: the optimization on a node that ended on a geometry. `levels.node_geometry_optimization`: the one the node's geometry came from.
 - An optimization starting where the node's optimization at another level ended continues it (`imports.continued_optimization`, PRE-OPT): the node takes its result, no derived node.
 - A single point's geometry level is the optimization ending on its geometry. D204: `levels.geometry_sources`; on a node without optimizations, its frequency jobs, W-FREQ-NONSTAT marking one whose check failed.

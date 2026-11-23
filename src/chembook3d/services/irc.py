@@ -592,7 +592,8 @@ def make_node(
         c
         for c in found
         if c.type == CalculationType.FREQUENCY
-        and geometry.matches(c.geometry, optimization.geometry, 0.001)
+        # D253: the investigation's tolerance (D252), as `_end_point` finds the frequency job
+        and geometry.matches(c.geometry, optimization.geometry, thermo_settings.tolerance(session))
     ]
     sources = [optimization.source_file]
     if frequencies and frequencies[-1].source_file_id != optimization.source_file_id:

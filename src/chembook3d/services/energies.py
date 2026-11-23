@@ -261,14 +261,23 @@ def calculation_key(
     if calculation.type in levels.OPTIMIZATION_TYPES:
         return LevelKey(calculation.level_id, calculation.level_id)
     geometry = calculation.geometry_level_id
-    if geometry is None and calculation.geometry:
-        # D100: the optimization that ended on this calculation's geometry.
-        found = levels.optimization_at(calculation.node, calculation.geometry, tolerance)
-        geometry = found.level_id if found else None
+    node = calculation.node
+    if geometry is None and node is not None:
+        # D253: the shared rule (levels.Sources), as the import preview and commit apply it:
+        # the optimization that ended on its geometry (D100); without coordinates (A15), or a
+        # frequency job whose coordinates match none (A11), the node's geometry level.
+        if tolerance is None:
+            tolerance = thermo_settings.tolerance(object_session(node))
+        found = levels.Sources(node, lambda c: c.level_id).source(
+            calculation.type,
+            calculation.geometry,
+            node.geometry,
+            tolerance,
+            node_source=node_geometry_level_id,
+        )
+        geometry = found
         if geometry is None and calculation.type == CalculationType.SINGLE_POINT:
             return LevelKey(calculation.level_id, None)  # unknown until set by hand (D100)
-    if geometry is None:
-        geometry = node_geometry_level_id  # no coordinates printed (A15)
     if geometry is None:
         if calculation.type == CalculationType.SINGLE_POINT:
             return LevelKey(calculation.level_id, None)
@@ -537,6 +546,10 @@ class NodeEnergies:
             return None
         at_geometry = LevelKey(key.geometry_level_id, key.geometry_level_id)
         found = [c for c in self.by_key.get(at_geometry, []) if c.type in levels.OPTIMIZATION_TYPES]
+        # D253: the geometry comes from a free optimization (D157); a held one at the same
+        # level (a scan, a restrained pre-optimization) is only a fallback.
+        free = [c for c in found if levels.is_geometry_source(c)]
+        found = free or found
         return found[-1] if found else None
 
     def check(self, key: LevelKey, energy_type: str = "E") -> dict[str, Any] | None:

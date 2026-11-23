@@ -74,7 +74,9 @@ def calculation_warnings(
         # D246: a node holds the geometries its optimizations at other levels ended on too, so
         # a calculation at a geometry added beside the node's (a MACE optimization, its
         # frequencies and single points) is on the node.
-        held = [node.geometry] + [c.geometry for c in levels.optimizations(node) if c.geometry]
+        # D253: by the shared rule, so a node whose optimization ran elsewhere holds its
+        # frequency jobs' geometries (D204).
+        held = [node.geometry] + levels.Sources(node, lambda c: c).geometries()
         if not any(geometry.matches(calculation.geometry, rows, tolerance) for rows in held):
             found.append(
                 Finding(
