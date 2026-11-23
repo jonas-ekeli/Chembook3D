@@ -34,6 +34,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -280,6 +281,66 @@ def _age(stamp: str | None) -> float | None:
 # ---------- starting ----------
 
 
+@dataclass
+class Start:
+    """D258: the structure a refine starts from instead of the node's coordinates: one of the
+    node's other optimized geometries (`calculation_id`), or a structure (XYZ text or a
+    build)."""
+
+    atoms: list[xyz.Atom]
+    calculation_id: str | None = None
+    label: str | None = None
+
+    @property
+    def described(self) -> dict[str, Any]:
+        if self.calculation_id:
+            return {
+                "from": "geometry",
+                "calculation_id": self.calculation_id,
+                "label": self.label,
+            }
+        return {"from": "structure", "label": self.label}
+
+
+def start_at(node: Node, calculation_id: str) -> Start:
+    """D258: a start from one of the node's optimized geometries (levels.node_geometries)."""
+    found = next((c for c in levels.node_geometries(node) if c.id == calculation_id), None)
+    if found is None:
+        raise LocalJobError(
+            f'"{node.label}" has no optimized geometry from calculation {calculation_id}; '
+            "its geometries are listed by GET /api/nodes/{id}/geometries"
+        )
+    atoms = [xyz.Atom(e, x, y, z) for e, x, y, z in found.geometry]
+    return Start(atoms, found.id, levels.label(found.level))
+
+
+def check_start(node: Node, atoms: list[xyz.Atom], charge: int, multiplicity: int) -> None:
+    """D258: a start structure has the node's atoms in the node's order, and the job the node's
+    charge and multiplicity (where the node says), so the result belongs to this node."""
+    mine = [a.element for a in node_service.atoms_of(node)]
+    theirs = [a.element for a in atoms]
+    if len(theirs) != len(mine):
+        raise LocalJobError(
+            f'The start structure has {len(theirs)} atoms; "{node.label}" has {len(mine)}'
+        )
+    wrong = [n for n, (a, b) in enumerate(zip(mine, theirs, strict=True)) if a != b]
+    if wrong:
+        n = wrong[0]
+        raise LocalJobError(
+            f'Atom {n + 1} of the start structure is {theirs[n]}; in "{node.label}" it is '
+            f"{mine[n]}. The start structure needs the node's atoms in the node's order"
+        )
+    for name, given, own in (
+        ("charge", charge, node.charge),
+        ("multiplicity", multiplicity, node.multiplicity),
+    ):
+        if own is not None and given != own:
+            raise LocalJobError(
+                f'A job from a start structure keeps the {name} of "{node.label}" ({own}); '
+                f"{given} was given"
+            )
+
+
 def create_job(
     folder: Path,
     node: Node,
@@ -294,14 +355,21 @@ def create_job(
     frequencies: bool | None = None,
     scan: dict[str, Any] | None = None,
     limit: int | None = None,
+    start: Start | None = None,
 ) -> dict[str, Any]:
     """Start a job. `limit` (seconds, D223) refuses one whose estimate is longer: the longest
-    job Claude may start while it works on its own."""
+    job Claude may start while it works on its own. D258: `start` runs it from another
+    structure than the node's coordinates (one of its other geometries, or XYZ text or a
+    build), with the node's atoms in its order and its charge and multiplicity; the job stays
+    the node's, and its result is imported by the usual rules (D246)."""
     if method not in methods():
         raise LocalJobError(f"Unknown method {method!r}; offered: {', '.join(methods())}")
     atoms = node_service.atoms_of(node)
     if not atoms:
         raise LocalJobError(f'Node "{node.label}" has no coordinates')
+    if start is not None:
+        check_start(node, start.atoms, charge, multiplicity)
+        atoms = start.atoms
     if multiplicity < 1:
         raise LocalJobError("The multiplicity is at least 1")
     if local_tools.worker_python(method) is None:
@@ -360,6 +428,8 @@ def create_job(
             "constraints": constraints or None,
             "created": _now(),
         }
+        if start is not None:
+            job["start"] = start.described  # D258: where the job started, for the list
         if history.SOURCE.get() != "manual":
             job["started_by"] = history.SOURCE.get()  # D223: "claude"
         if layers:

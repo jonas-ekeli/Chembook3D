@@ -539,3 +539,36 @@ test('single points on this computer are added to their nodes', async ({ page })
   await expect(rows.getByText('Done, imported')).toHaveCount(2, { timeout: 60_000 })
   await expect(rows.getByText(/single point/).first()).toBeVisible()
 })
+
+// T-UI-112, D258: Refine geometry starts from a pasted structure instead of the node's
+// coordinates; a structure with the atoms in another order is refused in the dialog.
+test('a refine starts from a pasted structure', async ({ page }) => {
+  test.slow()
+  await newInvestigation(page, 'Local start structure')
+  const made = await page.request.post('/api/nodes', { data: { label: 'water', xyz: WATER, charge: 0, multiplicity: 1 } })
+  expect(made.ok()).toBeTruthy()
+  const id = (await made.json()).id
+  await page.reload()
+
+  await canvasNode(page, 'water').click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Refine geometry…' }).click()
+  const refine = page.getByRole('dialog', { name: 'Refine geometry of “water”' })
+  await refine.getByLabel('Method', { exact: true }).selectOption('stub')
+  await expect(refine.getByLabel('Start from')).toHaveValue('node')
+  await refine.getByLabel('Start from').selectOption('xyz')
+  await refine.getByLabel('Start structure').fill('H 0 0.75 -0.47\nO 0 0 0.12\nH 0 -0.75 -0.47\n')
+  await expect(refine.getByRole('alert')).toHaveText(/Atom 1 is H; in this node it is O/)
+  await expect(refine.getByRole('button', { name: 'Start' })).toBeDisabled()
+  await refine.getByLabel('Start structure').fill('O 0 0 0.15\nH 0 0.80 -0.45\nH 0 -0.70 -0.50\n')
+  await refine.getByRole('button', { name: 'Start' }).click()
+  await expect(refine).toHaveCount(0)
+
+  await page.getByRole('button', { name: /^Local jobs/ }).click()
+  const row = page.getByRole('dialog', { name: 'Local jobs' }).getByRole('table', { name: 'Local jobs' }).getByRole('row').nth(1)
+  await expect(row).toContainText('from a structure')
+  await expect(row).toContainText('Converged, imported', { timeout: 60_000 })
+  const jobs = await (await page.request.get('/api/local/jobs')).json()
+  expect(jobs[0].start).toEqual({ from: 'structure', label: 'XYZ text' })
+  const calculations = await (await page.request.get(`/api/nodes/${id}/calculations`)).json()
+  expect(calculations).toHaveLength(1)
+})

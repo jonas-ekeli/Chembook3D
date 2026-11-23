@@ -1529,7 +1529,12 @@ TOOLS: list[ToolSpec] = [
         "gxtb only). Charge and "
         "multiplicity default to the node's. Optional constraints (atoms from 0) hold atoms "
         "frozen, or distances, angles and dihedrals at their current value or at a target. "
-        "The app imports the result onto the node when it finishes. It uses the computer's "
+        "The app imports the result onto the node when it finishes. D258: start_geometry_of "
+        "(one of get_node_geometries), xyz or build_id starts it from that structure instead of "
+        "the node's coordinates (the node's atoms in its order, its charge and multiplicity), "
+        "e.g. a structure twisted off a saddle: the job stays the node's, a free species takes a "
+        "level it lacks beside its geometry, and otherwise the result goes to a derived node. "
+        "It uses the computer's "
         "cores for minutes to hours, so only start one the user asked for, and say the "
         "estimate and ask first when it is over an hour.",
     ),
