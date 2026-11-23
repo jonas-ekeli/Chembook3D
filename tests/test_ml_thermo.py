@@ -8,7 +8,7 @@ the same as with the note left out (D19).
 
 import json
 
-from chembook3d.services import energies
+from chembook3d.services import energies, energy_memo
 from tests import gaussian_text as g
 from tests.test_energies import import_file, view
 from tests.test_pathway import edge, get, patch, post
@@ -112,6 +112,8 @@ def test_values_from_mace_frequencies_are_marked_approximate(open_client, monkey
 
     # The value is the one it has without the note (D19).
     monkeypatch.setattr(energies, "MACHINE_LEARNED_THERMO", {})
+    with open_client.app.state.investigation.sessions() as session:
+        energy_memo.memo_of(session).clear()  # D257: kept values are the code's own
     for (label, energy_type), values in seen.items():
         plain = view(open_client, found[label], energy_type)["values"]
         assert plain[minimum]["check"] is None

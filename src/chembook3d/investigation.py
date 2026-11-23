@@ -547,6 +547,7 @@ def create_investigation(folder: Path, name: str) -> Investigation:
         engine = _make_engine(folder / DB_NAME)
         _migrate(engine, folder / DB_NAME)
         sessions = _session_factory(engine, ownership)
+        _keep_energies(engine, sessions)
         from chembook3d.services import repairs, thermo_settings  # services import this module
 
         # D159, D252: a new investigation starts with the app's thermochemistry settings and
@@ -599,6 +600,7 @@ def open_investigation(
         _remove_orphaned_copies(folder, engine)
         sessions = _session_factory(engine, ownership)
         _run_repairs(folder, sessions, backed_up=migrated is not None)
+        _keep_energies(engine, sessions)
         read_only = _merged(sessions)
         if read_only:
             _query_only(engine)
@@ -628,6 +630,16 @@ def _merged(sessions: sessionmaker[Session]) -> bool:
     with sessions() as session:
         info = session.get(InvestigationInfo, 1)
         return info is not None and info.playground_merged_at is not None
+
+
+def _keep_energies(engine: Engine, sessions: sessionmaker[Session]) -> None:
+    """D257: the nodes' computed energies are kept between requests until what they are made
+    of changes (`services.energy_memo`)."""
+    from chembook3d.services.energy_memo import Memo  # the services import this module
+
+    memo = Memo()
+    memo.install(engine, sessions)
+    sessions.configure(info={"energy_memo": memo})
 
 
 def _query_only(engine: Engine) -> None:

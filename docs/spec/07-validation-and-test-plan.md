@@ -293,6 +293,10 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-EN-56 | A minimum with a MACE-OMOL-0 local optimization and frequencies and a Psi4 single point at its structure; a TS the same but without an imaginary frequency; a Gaussian opt freq; a pathway minimum → TS with an imaginary frequency (D245) | At "Psi4 PBE-D3M(BJ)/def2-TZVP // MACE MACE-OMOL-0" and at the MACE level, the minimum's G_qh carries W-ML-THERMO and has the value it has without it; E, and H and G (n/a: MACE prints none), carry nothing; the TS's check has W-IMAG-TS first and W-ML-THERMO after it; the Gaussian values none; both profile points and both table rows carry it |
 | T-EN-57 | A 6-31G(d) opt freq, then a later def2-TZVP frequency job on its geometry | E and G at 6-31G(d) and at def2-TZVP // 6-31G(d) all name the 6-31G(d) frequency job as the one their check used, not the latest (D250) |
 | T-EN-58 | The olefin metathesis cycle as cards relative to A, then the propene taken off A → B | Balanced, every card has a value; without it, B, TS and C have none and say "not the reference's atoms or charge: C3H6 more", as the profile (D221, D254) |
+| T-EN-59 | After an import, a level override, a role change, a charge change, a settings change and a deleted single point, read the options and every energy view twice | Each answer equals the one computed with nothing kept (D257) |
+| T-EN-60 | Three nodes read once; then read again, after a rename, move and note, after one node's role change, and after a settings change | No node's calculations are read again, none, then only that node's, then every node's (D257) |
+| T-EN-61 | Change every energy with plain SQL, once rolled back and once committed | The rolled-back change shows nowhere; the committed one shows at once (D257) |
+| T-EN-62 | A session begins, then another commits a change, then the first reads a node's energies | The first keeps nothing; the next read has the new values (D257) |
 
 ### Free species (D69)
 

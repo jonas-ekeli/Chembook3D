@@ -31,11 +31,12 @@
   pick nodes, representatives or pathways (EN-10).
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session, object_session, selectinload
+from sqlalchemy import inspect, select
+from sqlalchemy.orm import Session, defer, object_session, selectinload, undefer
 
 from chembook3d import settings as app_settings
 from chembook3d import thermochem
@@ -57,6 +58,7 @@ from chembook3d.parsers import joined
 from chembook3d.parsers.common import BSSE, NOT_STATIONARY
 from chembook3d.services import (
     concentrations,
+    energy_memo,
     history,
     levels,
     spin,
@@ -434,6 +436,7 @@ class NodeEnergies:
         standard_state: str = "1 atm",
         bsse: bool = False,
         tolerance: float | None = None,
+        entry: energy_memo.Entry | None = None,
     ):
         self.node = node
         self.bsse = bsse  # D161: add a counterpoise job's BSSE at the level
@@ -442,13 +445,40 @@ class NodeEnergies:
         self.standard_state = standard_state
         # D160: a free species' own concentration, whatever the standard state.
         self.concentration = node.concentration if node.kind == NodeKind.SPECIES else None
+        self._tolerance = tolerance
+        # D257: what is kept of this node's energies between requests; its calculations are
+        # read (`_sorted`) only for what is not kept.
+        self._entry = entry
+        self._by_key: dict[LevelKey, list[Calculation]] | None = None
+        self._other_state: dict[LevelKey, tuple[int, int | None]] = {}
+        self._qh: dict[str, thermochem.QuasiHarmonic | thermochem.NotComputable] = {}
+        # Reads the calculations of every node lacking this kept answer (None: any) at once.
+        self.reader: Callable[[Any], None] | None = None
+
+    @property
+    def by_key(self) -> dict[LevelKey, list[Calculation]]:
+        if self._by_key is None:
+            self._sort()
+        assert self._by_key is not None
+        return self._by_key
+
+    @property
+    def other_state(self) -> dict[LevelKey, tuple[int, int | None]]:
+        """D155: calculations for another charge or multiplicity than the node's are another
+        electronic state; they stay on the node (W-CHG) but give none of its energies."""
+        if self._by_key is None:
+            self._sort()
+        return self._other_state
+
+    def _sort(self) -> None:
+        node = self.node
+        if self.reader is not None and "calculations" in inspect(node).unloaded:
+            self.reader(None)
+        tolerance = self._tolerance
         if tolerance is None:
             tolerance = thermo_settings.tolerance(object_session(node))  # D252
         geometry = levels.node_geometry_level(node, tolerance)
-        self.by_key: dict[LevelKey, list[Calculation]] = {}
-        # D155: calculations for another charge or multiplicity than the node's are another
-        # electronic state; they stay on the node (W-CHG) but give none of its energies.
-        self.other_state: dict[LevelKey, tuple[int, int | None]] = {}
+        by_key: dict[LevelKey, list[Calculation]] = {}
         own = (node.charge, node.multiplicity) if node.charge is not None else None
         for calculation in sorted(node.calculations, key=_order):
             if calculation.type == CalculationType.OTHER and calculation.route.startswith(
@@ -460,10 +490,30 @@ class NodeEnergies:
                 continue
             state = _state(calculation)
             if own is not None and state is not None and state != own:
-                self.other_state[key] = state
+                self._other_state[key] = state
                 continue
-            self.by_key.setdefault(key, []).append(calculation)
-        self._qh: dict[str, thermochem.QuasiHarmonic | thermochem.NotComputable] = {}
+            by_key.setdefault(key, []).append(calculation)
+        self._by_key = by_key
+
+    def _kept(self, name: Any, compute: Callable[[], Any]) -> Any:
+        """D257: `compute()`, or what was kept of it."""
+        if self._entry is None:
+            return compute()
+        if name in self._entry.found:
+            return energy_memo.kept(self._entry.found[name])
+        if self.reader is not None and "calculations" in inspect(self.node).unloaded:
+            self.reader(name)
+        found = compute()
+        self._entry.found[name] = energy_memo.kept(found)
+        return found
+
+    def keeps(self, name: Any) -> bool:
+        return name is not None and self._entry is not None and name in self._entry.found
+
+    @property
+    def kept(self) -> bool:
+        """D257: whether what the energy view and options read of this node is kept."""
+        return self._entry is not None and "available" in self._entry.found
 
     def energy(self, key: LevelKey) -> Calculation | None:
         """The latest calculation with an SCF energy at this composite level; none when they
@@ -623,16 +673,29 @@ class NodeEnergies:
     def thermo_of(self, key: LevelKey) -> thermo_model.Thermo | None:
         """D163: the model and scale factor of the frequency job this node's H, G and G_qh at
         this composite level are made from; None when it has no energy or no such job."""
+        return self._kept(("thermo_of", key), lambda: self._thermo_of(key))
+
+    def _thermo_of(self, key: LevelKey) -> thermo_model.Thermo | None:
         if self.energy(key) is None:
             return None
         return thermo_model.of(self.thermo_source(key))
 
     def job_temperature(self, key: LevelKey) -> float | None:
         """D160: the temperature of the frequency job H and G at this level are read from."""
+        return self._kept(("job_temperature", key), lambda: self._job_temperature(key))
+
+    def _job_temperature(self, key: LevelKey) -> float | None:
         thermo = self.thermo_source(key)
         return thermo.result.temperature if thermo is not None else None
 
+    def has_counterpoise(self, key: LevelKey) -> bool:
+        """D161: whether a counterpoise job has a BSSE at this composite level."""
+        return self._kept(("counterpoise", key), lambda: self.counterpoise(key) is not None)
+
     def value(self, key: LevelKey, energy_type: str) -> Value:
+        return self._kept(("value", key, energy_type), lambda: self._checked(key, energy_type))
+
+    def _checked(self, key: LevelKey, energy_type: str) -> Value:
         found = self._value(key, energy_type)
         check = self.check(key, energy_type)
         if energy_type != "E" and found.value is not None:
@@ -766,6 +829,9 @@ class NodeEnergies:
         return shift
 
     def available(self) -> dict[LevelKey, set[str]]:
+        return self._kept("available", self._available)
+
+    def _available(self) -> dict[LevelKey, set[str]]:
         found: dict[LevelKey, set[str]] = {}
         for key in self.by_key:
             if self.energy(key) is None:
@@ -797,20 +863,49 @@ class Energies:
         self.temperature = settings.qh_temperature if temperature is None else temperature
         self.cutoff = settings.qh_cutoff
         self.standard_state = settings.standard_state
-        query = select(Node).options(
-            selectinload(Node.calculations).selectinload(Calculation.result)
-        )
         tolerance = settings.geometry_tolerance  # read once, not once per node
-        self.nodes = {
-            n.id: NodeEnergies(
-                n, self.temperature, self.cutoff, self.standard_state, bsse, tolerance
+        # D257: the nodes' energies kept since their last change; only the other nodes'
+        # calculations are read, all in one query.
+        memo = energy_memo.memo_of(session)
+        kept = (self.temperature, self.cutoff, self.standard_state, bsse, tolerance)
+        self.nodes = {}
+        # A node's geometry is read with its calculations, only where they are read.
+        for n in session.scalars(select(Node).options(defer(Node.geometry))):
+            entry = memo.entry(session, n.id, kept) if memo is not None else None
+            self.nodes[n.id] = NodeEnergies(
+                n, self.temperature, self.cutoff, self.standard_state, bsse, tolerance, entry
             )
-            for n in session.scalars(query)
-        }
+            self.nodes[n.id].reader = self._read_rest
+        self._read_calculations([n for n in self.nodes.values() if not n.kept])
         self.groups = {g.id: g for g in session.scalars(select(GroupNode))}
         self._models: dict[LevelKey, dict[str, thermo_model.Thermo]] = {}  # D163
         self._kinds: dict[tuple[LevelKey, str], tuple[set[float], list[thermo_model.Thermo]]] = {}
         self._transitions: list[Transition] | None = None
+
+    def _read_calculations(self, nodes: list[NodeEnergies]) -> None:
+        """The nodes' calculations, results and geometries, in one query rather than one per
+        node (the identity map fills the nodes already read)."""
+        ids = [n.node.id for n in nodes]
+        for chunk in range(0, len(ids), 500):  # SQLite's limit on bound parameters
+            self.session.scalars(
+                select(Node)
+                .where(Node.id.in_(ids[chunk : chunk + 500]))
+                .options(
+                    undefer(Node.geometry),
+                    selectinload(Node.calculations).selectinload(Calculation.result),
+                )
+            ).all()
+
+    def _read_rest(self, name: Any) -> None:
+        """D257: a kept node lacks an answer (`name`, or None for anything): read the
+        calculations of every node that lacks it too, at once rather than node by node."""
+        self._read_calculations(
+            [
+                n
+                for n in self.nodes.values()
+                if "calculations" in inspect(n.node).unloaded and not n.keeps(name)
+            ]
+        )
 
     def transitions(self) -> list[Transition]:
         """Every transition with its species, listed once for the request (the energy view
@@ -828,7 +923,7 @@ class Energies:
         for node in self.nodes.values():
             for key, types in node.available().items():
                 found.setdefault(key, set()).update(types)
-                if node.counterpoise(key) is not None:
+                if node.has_counterpoise(key):
                     bsse.add(key)
                 job = node.job_temperature(key) if "G" in types or "H" in types else None
                 if job is not None:
