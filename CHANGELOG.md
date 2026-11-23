@@ -6,6 +6,8 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Energies are reused between edits (D257): after an edit the energy options and the energy view
+  recompute only the nodes the edit touched, instead of every node.
 - The canvas no longer reads every scan shown on an edge from its file on each load (D256): with
   more than 32 such scans every load took seconds; each scan is now read once.
 - A single point or frequency job now remembers which calculation's geometry it is at (D255), so a

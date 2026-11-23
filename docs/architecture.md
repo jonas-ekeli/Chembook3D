@@ -61,7 +61,7 @@ flowchart LR
 | 4. Plan / preview | `imports.plan`, `services/levels.py`, `services/geometry.py` | Level key = program, method, basis, dispersion, solvation model, solvent. Attach if Kabsch RMSD ≤ 0.001 Å; W-DUP ≤ 0.05 Å (D62; defaults in `settings.py`). |
 | 5. Commit | `imports.commit` | One transaction, fixed write order (keep `tests/test_import_undo.py` green); file to `files/<source-file-id>/<name>`. |
 | 6. Batch / undo | `services/batch_import.py`, `services/import_undo.py` | Undo replays the history in reverse. |
-| 7. Energies | `services/energies.py` (`LevelKey`, `NodeEnergies`) | Composite level `levelId~geometryLevelId` (D31); same level only, no fallback (D27); other charge/multiplicity left out (D155). |
+| 7. Energies | `services/energies.py` (`LevelKey`, `NodeEnergies`), `services/energy_memo.py` | Composite level `levelId~geometryLevelId` (D31); same level only, no fallback (D27); other charge/multiplicity left out (D155). A node's answers are kept until what they are made of changes (D257). |
 | 8. Thermo | `thermochem.py`, `services/thermo_settings.py`, `services/thermo_model.py`, `services/concentrations.py` | G_qh per investigation T/cutoff (D159); 1 M option (D95, D160). |
 | 9. Checks | `services/warnings.py`, `services/spin.py`, `services/energies.py` | W-* codes travel in each value's `check`; they never change a value or a status (D154, D19). |
 | 10. Analyses | `services/pathways.py`, `turnover.py`, `selectivity.py`, `equilibrium.py`, `group_populations.py` | Profiles, energetic span, selectivity, populations. |
