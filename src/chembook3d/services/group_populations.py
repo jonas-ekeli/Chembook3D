@@ -27,6 +27,7 @@ def of_group(
     energy_type: str,
     temperature: float,
     tolerance: float,
+    geometry_level_id: str | None = None,
 ) -> dict[str, Any]:
     """`values` are the energy view's ValueOut by id. Percentages are of the members counted;
     a member not counted has None and why."""
@@ -85,7 +86,10 @@ def of_group(
         rows.append(
             {"id": member.id, "label": _label(member), "value": own.value, "is_ts": all(ts)}
         )
-    rows, twins, notes = drop_duplicates(rows, {m.id: m for m in live}, tolerance)
+    # D254: compared at the view's geometry level
+    rows, twins, notes = drop_duplicates(
+        rows, {m.id: m for m in live}, tolerance, geometry_level_id
+    )
     found["notes"].extend(notes)
     labels = {m.id: _label(m) for m in members}
     for dropped, kept in twins.items():
@@ -119,6 +123,7 @@ def of_groups(
     values: dict[str, Any],
     energy_type: str,
     settings: app_settings.Settings,
+    geometry_level_id: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Every group that shows its members' populations, at the energy view's temperature."""
     return {
@@ -129,6 +134,7 @@ def of_groups(
             energy_type,
             energies.temperature,
             settings.duplicate_tolerance,
+            geometry_level_id,
         )
         for group in energies.groups.values()
         if group.show_populations

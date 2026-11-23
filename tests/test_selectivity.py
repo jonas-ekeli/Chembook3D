@@ -6,7 +6,7 @@ import math
 import pytest
 
 from chembook3d import thermochem
-from chembook3d.models import InvestigationInfo
+from chembook3d.models import InvestigationInfo, Node
 from chembook3d.services import levels
 from chembook3d.units import GAS_CONSTANT, J_PER_MOL_HARTREE
 from tests import gaussian_text as g
@@ -478,3 +478,23 @@ def test_a_level_no_calculation_is_at_says_so(open_client):
     found = result(open_client, created["id"])
     assert found["status"] == "n/a"
     assert found["message"].startswith("No calculation is at this level any more")
+
+
+def test_duplicates_are_judged_at_the_selectivitys_geometry_level(open_client):
+    # T-SEL-15, D254: two TSs whose own geometries differ but whose calculations at the
+    # selectivity's level ended on the same geometry, at the same energy, are one TS counted
+    # twice; the nodes' geometries alone would keep them apart.
+    r = ts(open_client, "TS-R", 0.0, 0.0)
+    again = ts(open_client, "TS-R again", 0.0, 0.0)
+    s = ts(open_client, "TS-S", 1.0, 0.05)
+    created = selectivity(open_client, {"R": [r, again], "S": [s]})
+    assert any("duplicates" in n for n in result(open_client, created["id"])["notes"])
+    with open_client.app.state.investigation.sessions.begin() as session:
+        node = session.get(Node, again)
+        first = node.geometry[0]
+        # The node's geometry came from elsewhere (another level, D246); its calculations at
+        # this level stay where they ended.
+        node.geometry = [[*first[:3], first[3] + 0.3], *node.geometry[1:]]
+    found = result(open_client, created["id"])
+    assert found["status"] == "ok"
+    assert any(n.startswith("“TS-R again” duplicates “TS-R”") for n in found["notes"])

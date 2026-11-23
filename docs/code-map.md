@@ -193,6 +193,7 @@ Routes for all of these are in `api/pathway.py`.
 
 - A `Node` with `kind == "species"` is a substrate or fragment kept off the canvas. `TransitionSpecies` lists those that join or leave on a transition.
 - `services/species.py` holds the rules: attach, kind changes, the balance added along a pathway, W-BALANCE. `pathways.profiles` and the energy view use it.
+- D254: `api/energies.relative_values` applies `species.mismatch` to a card joined to the reference too, so cards and profiles agree.
 - D221, W-COMPARE: `species.mismatch` says how a pathway point's atoms or charge, with its balance, differ from the reference's. `pathways.prepare` keeps it per point (`Prepared.mismatches`); `pathways.profiles` then gives the point `mismatch` and no `relative`, and the note `_compare_note`; the table's Check column and a turnover's message repeat it. `ProfileChart` shows it as the "n/a" label's tooltip.
 - `balances_from` gives each node's balance along the route from the reference (D72), for node cards (the energy view's `relative`) and for pathways that miss the reference.
 - D246: one free species holds every level of its molecule (see "Geometries at several levels"), so a pathway at a local composite level balances with it.
@@ -359,7 +360,7 @@ Routes for all of these are in `api/pathway.py`.
 - The result: one composite level and energy type with no fallback, the same atoms and charge, ΔΔG‡ and percentages both as a Boltzmann sum over each outcome's TSs and from its lowest TS, ee or de, the experiment.
 - With a `reference_id` (D103, migration 0017) each TS is balanced by `species.balances_from` the reference, as node cards are, and the atom check includes the species.
 - G_qh is recomputed at the selectivity's temperature (`Energies(temperature=…)`).
-- Rejected, failed and superseded members are left out, and a duplicate member (geometry and energy) counts once (D156: `LEFT_OUT`, `_drop_duplicates`).
+- Rejected, failed and superseded members are left out, and a duplicate member (geometry and energy) counts once (D156: `LEFT_OUT`, `_drop_duplicates`). D254: the geometries compared are those at the analysis's geometry level (`levels.geometry_at_level`), in `selectivity._drop_duplicates` and `equilibrium.drop_duplicates` (also used by `group_populations`).
 - Routes are in `api/selectivity.py`. `components/Analyses.tsx` is the Analyses view (a tab beside History); the selection inspector's "Selectivity…" makes one outcome per selected TS or group.
 
 ## Turnover (D86, A36)

@@ -40,7 +40,7 @@ from chembook3d.models import (
     SelectivityOutcome,
     Status,
 )
-from chembook3d.services import geometry, history, thermo_settings
+from chembook3d.services import geometry, history, levels, thermo_settings
 from chembook3d.services import species as species_service
 from chembook3d.services.energies import (
     ENERGY_TYPES,
@@ -274,35 +274,39 @@ def _members(session: Session, outcome: SelectivityOutcome) -> tuple[list, list[
     return found, notes
 
 
-def _drop_duplicates(session: Session, outcome: dict[str, Any], tolerance: float) -> list[str]:
+def _drop_duplicates(
+    session: Session, outcome: dict[str, Any], tolerance: float, geometry_level_id: str | None
+) -> list[str]:
     """D156: a member with the same atoms, charge and multiplicity as an earlier one of its
     outcome within the duplicate tolerance (D62, as W-DUP judges a new node) and the same value
-    within 0.1 kcal/mol is the same TS imported twice: it counts once."""
+    within 0.1 kcal/mol is the same TS imported twice: it counts once. D254: the geometries
+    compared are those at the selectivity's geometry level (`levels.geometry_at_level`)."""
     notes = []
-    kept: list[tuple[Node, dict[str, Any]]] = []
+    kept: list[tuple[Node, Any, dict[str, Any]]] = []
     for member in outcome["members"]:
         node = session.get(Node, member["node_id"])
+        rows = levels.geometry_at_level(node, geometry_level_id)
         twin = None
-        for other, other_member in kept:
+        for other, other_rows, other_member in kept:
             if (
-                not node.geometry
-                or not other.geometry
+                not rows
+                or not other_rows
                 or (other.charge, other.multiplicity) != (node.charge, node.multiplicity)
                 or abs(other_member["value"] - member["value"]) > SAME_ENERGY
             ):
                 continue
-            rmsd = geometry.aligned_rmsd(node.geometry, other.geometry)
+            rmsd = geometry.aligned_rmsd(rows, other_rows)
             if rmsd is not None and rmsd <= tolerance:
                 twin = (other_member, rmsd)
                 break
         if twin is None:
-            kept.append((node, member))
+            kept.append((node, rows, member))
             continue
         notes.append(
             f"“{member['label']}” duplicates “{twin[0]['label']}” (RMSD {twin[1]:.3f} Å, the "
             "same energy) and counts once."
         )
-    outcome["members"] = [member for _, member in kept]
+    outcome["members"] = [member for _, _, member in kept]
     return notes
 
 
@@ -576,7 +580,9 @@ def result(
     if missing:
         return stop("n/a", f"No {selectivity.energy_type} at this level for {', '.join(missing)}.")
     for outcome in found["outcomes"]:
-        notes.extend(_drop_duplicates(session, outcome, settings.duplicate_tolerance))
+        notes.extend(
+            _drop_duplicates(session, outcome, settings.duplicate_tolerance, key.geometry_level_id)
+        )
     # D160: free species at 1 atm in a solvation model.
     note = species_service.standard_state_note(
         session, energies, list(balances.values()), key, selectivity.energy_type
