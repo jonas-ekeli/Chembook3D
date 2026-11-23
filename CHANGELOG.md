@@ -9,6 +9,8 @@ artifacts and publishes nothing.
 - A free species' warnings (an imaginary frequency, spin contamination, MACE thermochemistry
   and the others) now show wherever its energy is added: profiles, the energy table, edges,
   cards, selectivities and equilibria (D249).
+- The database is backed up before a one-off repair runs, also when no upgrade is needed
+  (D248); a repair that keeps failing is backed up once.
 - Normal modes take about an eighth of the room (D247): they move to a table of their own,
   compressed, with every number kept, and the upgrade shrinks the database file (a real
   investigation: 43 MB to about 15 MB). Sync now warns when a synced file, the database above
