@@ -7,10 +7,17 @@ import json
 
 import pytest
 
-from chembook3d.services import levels
+from chembook3d.api import builds
+from chembook3d.services import builder, levels
 from tests import gaussian_text as g
 from tests.test_import import calculations, commit, node, upload
-from tests.test_local_jobs import finished, no_worker_left, stub_tools, wait_for  # noqa: F401
+from tests.test_local_jobs import (  # noqa: F401
+    finished,
+    folder_of,
+    no_worker_left,
+    stub_tools,
+    wait_for,
+)
 from tests.test_pre_optimization import DFT_END, GUESS, labels, option_labels, xyz
 
 DFT = "Gaussian B3LYP/6-31G(D)"
@@ -234,3 +241,90 @@ def test_calculations_at_a_geometry_beside_the_node_give_no_geometry_warning(ope
     assert [w["code"] for w in node(open_client, species)["warnings"]] == []
     for calculation in calculations(open_client, species):
         assert "W-GEOM" not in [w["code"] for w in calculation["warnings"]]
+
+
+# ---------- T-LOC-47/48: a local job from a structure (D258, FR-LOC-18) ----------
+
+
+def refine(client, node_id: str, **body):
+    return client.post("/api/local/jobs", json={"node_id": node_id, "method": "stub", **body})
+
+
+def run_and_import(client, response) -> dict:
+    assert response.status_code == 200, response.text
+    job = response.json()
+    assert wait_for(client, job["id"], finished)["status"] == "converged"
+    imported = client.post(f"/api/local/jobs/{job['id']}/import")
+    assert imported.status_code == 200, imported.text
+    return imported.json()
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_a_local_job_starts_from_a_structure_onto_the_node(open_client):
+    """T-LOC-47: a refine of a free species started from XYZ text runs from that structure and
+    is added beside the node's geometry (a level it lacks), so no derived node is made; on a
+    canvas node the same start gives a derived node (Q81)."""
+    species = dft_node(open_client)
+    response = refine(open_client, species, xyz=xyz(ELSEWHERE), frequencies=True)
+    job = response.json()
+    assert job["start"] == {"from": "structure", "label": "XYZ text"}
+    started = json.loads(
+        (folder_of(open_client) / "local-jobs" / job["id"] / "job.json").read_text()
+    )
+    assert started["coordinates"] == [list(a[2:]) for a in ELSEWHERE]
+    done = run_and_import(open_client, response)
+    assert done["imported"]["node_id"] == species and not done["imported"]["derived"]
+    assert geometry_is(open_client, species, DFT_END)  # the node keeps its geometry
+    added = [c for c in calculations(open_client, species) if c["program"] == "stub"]
+    assert [c["type"] for c in added] == ["optimization", "frequency"]
+    geometries = open_client.get(f"/api/nodes/{species}/geometries").json()
+    assert [g_["node_geometry"] for g_ in geometries] == [True, False]
+
+    canvas_node = dft_node(open_client, kind="node")
+    done = run_and_import(open_client, refine(open_client, canvas_node, xyz=xyz(ELSEWHERE)))
+    assert done["imported"]["derived"] and done["imported"]["node_id"] != canvas_node
+    assert geometry_is(open_client, canvas_node, DFT_END)
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_a_start_structure_must_be_the_node_s_molecule(open_client):
+    """T-LOC-48: a start structure with other atoms, another atom order or another charge is
+    refused; one of the node's own geometries (start_geometry_of) or a build can start it."""
+    species = dft_node(open_client)
+    cases = {
+        "has 2 atoms": {"xyz": "2\n\nO 0 0 0\nH 0 0 1\n"},
+        "Atom 1 of the start structure is H": {"xyz": xyz(ELSEWHERE[1:] + ELSEWHERE[:1])},
+        "keeps the charge": {"xyz": xyz(ELSEWHERE), "charge": 1},
+        "not valid XYZ": {"xyz": "3\n\nO 0 0\nH 0 0 1\nH 1 0 0\n"},
+        "no optimized geometry": {"start_geometry_of": "nope"},
+        "Give one of": {"xyz": xyz(ELSEWHERE), "start_geometry_of": "nope"},
+        "No build": {"build_id": "build-nope"},
+    }
+    for message, body in cases.items():
+        refused = refine(open_client, species, **body)
+        assert refused.status_code in (404, 422), (message, refused.text)
+        assert message in refused.json()["detail"], refused.json()["detail"]
+    assert not list((folder_of(open_client) / "local-jobs").glob("*"))  # nothing started
+
+    first = run_and_import(open_client, refine(open_client, species))  # the stub level, beside
+    jobs = folder_of(open_client) / "local-jobs"
+    stub_end = json.loads((jobs / first["id"] / "result.json").read_text())["frames"][-1]
+    geometries = open_client.get(f"/api/nodes/{species}/geometries").json()
+    low = geometries[1]["calculation_id"]
+    response = refine(open_client, species, start_geometry_of=low)
+    assert response.json()["start"]["from"] == "geometry"
+    assert response.json()["start"]["calculation_id"] == low
+    coordinates = json.loads((jobs / response.json()["id"] / "job.json").read_text())
+    flat = [v for row in coordinates["coordinates"] for v in row]
+    assert flat == pytest.approx([v for row in stub_end for v in row], abs=1e-5)  # not the node's
+    assert wait_for(open_client, response.json()["id"], finished)["status"] == "converged"
+
+    build = builds.Build(builder.Structure(rows(ELSEWHERE)), charge=1, multiplicity=None)
+    wrong_charge = open_client.app.state.builds.add(build)
+    refused = refine(open_client, species, build_id=wrong_charge)
+    assert refused.status_code == 422 and "build's charge is 1" in refused.json()["detail"]
+    build.charge = 0
+    response = refine(open_client, species, build_id=open_client.app.state.builds.add(build))
+    assert response.status_code == 200, response.text
+    assert response.json()["start"] == {"from": "structure", "label": "a build"}
+    assert wait_for(open_client, response.json()["id"], finished)["status"] == "converged"

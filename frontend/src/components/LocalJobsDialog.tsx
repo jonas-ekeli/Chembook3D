@@ -140,6 +140,8 @@ export function LocalJobsDialog({
                         <div className="muted small">
                           {job.level} · charge {job.charge}, multiplicity {job.multiplicity} · {job.atoms} atoms ·{' '}
                           {job.cores} core{job.cores === 1 ? '' : 's'} · {created(job)}
+                          {job.start &&
+                            ` · from ${job.start.from === 'geometry' ? `its ${job.start.label ?? 'other'} geometry` : 'a structure'}`}
                           {job.constraints && ' · with constraints'}
                           {job.transition && job.kind !== 'ts_guess' && ' · TS search'}
                           {job.kind === 'single_point' && ' · single point'}

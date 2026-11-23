@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, type LocalJob, type LocalTools, type Node } from '../api'
+import { api, type LocalJob, type LocalTools, type Node, type NodeGeometry } from '../api'
 import { formatAtomList, measure, parseAtomList, parseXyz } from '../chem'
 import {
   GRID_METHODS,
@@ -75,7 +75,24 @@ export function RefineDialog({
   const [scanRows, setScanRows] = useState<ScanRow[]>([{ atoms: '', start: '', end: '' }])
   const [scanPoints, setScanPoints] = useState('10')
   const [gridChoice, setGridChoice] = useState(false) // D219: a 2D grid of two coordinates
-  const atoms = useMemo(() => (node.xyz ? parseXyz(node.xyz) : []), [node.xyz])
+  // D258: start from the node's coordinates, another of its geometries, or a structure (XYZ).
+  const [geometries, setGeometries] = useState<NodeGeometry[]>([])
+  const [startFrom, setStartFrom] = useState('node')
+  const [startXyz, setStartXyz] = useState('')
+  const own = useMemo(() => (node.xyz ? parseXyz(node.xyz) : []), [node.xyz])
+  const fromXyz = startFrom === 'xyz'
+  const startAtoms = useMemo(() => (fromXyz ? parseXyz(startXyz) : null), [fromXyz, startXyz])
+  const startProblem = useMemo((): string | null => {
+    if (!startAtoms) return null
+    if (!startAtoms.length) return 'Paste the start structure as XYZ text.'
+    if (startAtoms.length !== own.length)
+      return `The start structure has ${startAtoms.length} atoms; this node has ${own.length}.`
+    const wrong = startAtoms.findIndex((a, n) => a.element !== own[n].element)
+    if (wrong >= 0)
+      return `Atom ${wrong + 1} is ${startAtoms[wrong].element}; in this node it is ${own[wrong].element}. Keep the node’s atom order.`
+    return null
+  }, [startAtoms, own])
+  const atoms = startAtoms && !startProblem ? startAtoms : own
 
   useEffect(() => {
     Promise.all([api.localTools(node.atom_count), api.localCore({ node_id: node.id }).catch(() => null)]).then(
@@ -105,6 +122,10 @@ export function RefineDialog({
       },
       () => undefined,
     )
+    api.nodeGeometries(node.id).then(
+      (found) => setGeometries(found.filter((g) => !g.node_geometry)),
+      () => setGeometries([]),
+    )
   }, [node.id, node.atom_count])
 
   const chargeValue = Number(charge)
@@ -131,7 +152,8 @@ export function RefineDialog({
     node.atom_count > 0 &&
     (!layered || Boolean(core?.usable)) &&
     !('error' in reactingRead) &&
-    !(scanRead && 'error' in scanRead)
+    !(scanRead && 'error' in scanRead) &&
+    !startProblem
   // D217: GFN2-xTB and g-xTB (D237: and MACE-OMOL-0) are cheap enough for a Hessian at their own level: a TS search
   // with one starts from it, and frequencies at the result are on for a TS search, offered
   // for a minimum. DFT and ONIOM searches start from, and are checked with, GFN2-xTB ones.
@@ -162,6 +184,8 @@ export function RefineDialog({
         reacting: !scanning && 'atoms' in reactingRead ? reactingRead.atoms : null,
         frequencies: ownLevel && !scanning ? frequencies : null,
         scan: scanRead && 'value' in scanRead ? scanRead.value : null,
+        start_geometry_of: startFrom !== 'node' && !fromXyz ? startFrom : null,
+        xyz: fromXyz ? startXyz : null,
       })
       .then(
         (job) => {
@@ -229,6 +253,38 @@ export function RefineDialog({
                 (chosenEstimate.measured ? ', as measured on this computer.' : ' (a first guess until a job has run here).')}
           </small>
         </label>
+        <label className="field">
+          <span>Start from</span>
+          <select aria-label="Start from" value={startFrom} onChange={(event) => setStartFrom(event.target.value)}>
+            <option value="node">The node’s geometry</option>
+            {geometries.map((g) => (
+              <option key={g.calculation_id} value={g.calculation_id}>
+                Its {g.level_label ?? 'other'} geometry{g.pre_optimization ? ' (pre-optimization)' : ''}
+              </option>
+            ))}
+            <option value="xyz">A structure (XYZ)</option>
+          </select>
+        </label>
+        {fromXyz && (
+          <label className="field">
+            <span>Start structure</span>
+            <textarea
+              aria-label="Start structure"
+              className="mono"
+              rows={6}
+              placeholder="The node’s atoms in its order, e.g. twisted off a saddle point"
+              value={startXyz}
+              onChange={(event) => setStartXyz(event.target.value)}
+            />
+            {startProblem ? (
+              <small className="cloud-job-problem" role="alert">
+                {startProblem}
+              </small>
+            ) : (
+              <small className="muted">The job is this node’s: its result is imported onto the node by the usual rules.</small>
+            )}
+          </label>
+        )}
         <div className="field-pair">
           <label className="field">
             <span>Charge</span>

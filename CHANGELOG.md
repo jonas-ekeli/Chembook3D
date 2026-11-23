@@ -6,6 +6,9 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- A local refine can start from another structure (D258): one of the node's other geometries, pasted XYZ
+  text or a built structure, with the node's atoms in its order; the result is imported onto the node
+  by the usual rules, so a free species takes a level it lacks beside its geometry.
 - Energies are reused between edits (D257): after an edit the energy options and the energy view
   recompute only the nodes the edit touched, instead of every node.
 - The canvas no longer reads every scan shown on an edge from its file on each load (D256): with

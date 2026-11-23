@@ -14,7 +14,8 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from chembook3d import local_jobs, local_tools
+from chembook3d import local_jobs, local_tools, xyz
+from chembook3d.api import builds
 from chembook3d.api.inspect import job_inspection
 from chembook3d.api.jobs import _local_page_only
 from chembook3d.api.live import AGENT, CLIENT_HEADER
@@ -243,6 +244,23 @@ class RefineIn(BaseModel):
         description="D217: frequencies at the result at the job's own level, imported as a "
         "frequency calculation (gfn2, gxtb and mace-omol only); default on for a TS search",
     )
+    start_geometry_of: str | None = Field(
+        None,
+        description="D258: start from another of the node's optimized geometries: the id of "
+        "its optimization, from GET /api/nodes/{id}/geometries; default the node's own "
+        "coordinates",
+    )
+    xyz: str | None = Field(
+        None,
+        description="D258: start from this structure (XYZ text) instead: the node's atoms in "
+        "the node's order, with its charge and multiplicity. The job stays the node's: a free "
+        "species takes a level it lacks beside its geometry, otherwise the result goes to a "
+        "derived node",
+    )
+    build_id: str | None = Field(
+        None,
+        description="D258: start from a build_structure answer instead (as xyz)",
+    )
     name: str | None = None
 
 
@@ -348,9 +366,10 @@ def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[s
     _local_page_only(request)
     folder = _investigation(request).folder
     node = get(session, Node, body.node_id, "Node")
-    atoms = node_service.atoms_of(node)
-    count = len(atoms)
     try:
+        start = _start(request, node, body)
+        atoms = start.atoms if start else node_service.atoms_of(node)
+        count = len(atoms)
         return local_jobs.create_job(
             folder,
             node,
@@ -365,9 +384,36 @@ def start_refine(body: RefineIn, request: Request, session: DbSession) -> dict[s
             body.frequencies,
             _scan(body.scan, atoms),
             _claude_limit(request, folder),
+            start,
         )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc
+
+
+def _start(request: Request, node: Node, body: RefineIn) -> local_jobs.Start | None:
+    """D258: the structure the refine starts from, when it is not the node's coordinates."""
+    given = [v for v in (body.start_geometry_of, body.xyz, body.build_id) if v is not None]
+    if len(given) > 1:
+        raise HTTPException(422, "Give one of start_geometry_of, xyz or build_id")
+    if body.start_geometry_of is not None:
+        return local_jobs.start_at(node, body.start_geometry_of)
+    if body.build_id is not None:
+        build = builds.get(request, body.build_id)
+        for name in ("charge", "multiplicity"):
+            built, own = getattr(build, name), getattr(node, name)
+            if built is not None and own is not None and built != own:
+                raise local_jobs.LocalJobError(
+                    f'The build\'s {name} is {built}; "{node.label}" has {own}'
+                )
+        atoms = [xyz.Atom(e, x, y, z) for e, x, y, z in build.structure.rows]
+        return local_jobs.Start(atoms, label="a build")
+    if body.xyz is not None:
+        try:
+            atoms = xyz.parse_xyz(body.xyz)
+        except xyz.XyzParseError as exc:
+            raise HTTPException(422, f"The start structure is not valid XYZ: {exc}") from exc
+        return local_jobs.Start(atoms, label="XYZ text")
+    return None
 
 
 class TsGuessIn(BaseModel):

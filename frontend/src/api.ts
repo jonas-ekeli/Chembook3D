@@ -1152,6 +1152,8 @@ export type LocalJob = {
   reacting?: number[] | null
   /** D218: a relaxed scan, imported as a node of its own */
   scan?: LocalScan | null
+  /** D258: the structure the job started from, when not the node's coordinates */
+  start?: { from: 'geometry' | 'structure'; calculation_id?: string; label: string | null } | null
   status:
     | 'starting'
     | 'queued'
@@ -3126,6 +3128,9 @@ export const api = {
     reacting?: number[] | null
     frequencies?: boolean | null
     scan?: LocalScan | null
+    /** D258: start from another of the node's geometries, or from XYZ text */
+    start_geometry_of?: string | null
+    xyz?: string | null
   }) => request<LocalJob>('POST', '/local/jobs', body),
   localCore: (body: {
     node_id: string
