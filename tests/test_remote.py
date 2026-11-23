@@ -443,7 +443,14 @@ def test_bash_reports_its_directory_after_each_command(local, tmp_path):
         work = tmp_path / "work dir"
         work.mkdir()
         with _terminal(local) as ws:
-            _read_until(ws, lambda text, m: any(x["type"] == "cwd" for x in m))
+            # The shell is tracked once it has said where it is: in a "cwd" message, or in the
+            # "hello" when its first prompt came before the terminal attached (no cwd follows).
+            _read_until(
+                ws,
+                lambda text, m: any(
+                    x["type"] == "cwd" or (x["type"] == "hello" and x.get("cwd")) for x in m
+                ),
+            )
             ws.send_json({"type": "input", "data": f"cd '{work}'\r"})
             _read_until(ws, lambda text, m: {"type": "cwd", "path": str(work)} in m)
             ws.send_json({"type": "input", "data": "echo $0 $-\r"})
