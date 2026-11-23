@@ -1516,6 +1516,8 @@ export type Calculation = {
   program_version: string
   level: Level | null
   geometry_level: Level | null
+  /** D255: the calculation a single point or frequency job is at, when it is linked to one. */
+  geometry_source_id?: string | null
   composite_label: string
   parsed_level: Record<string, unknown> | null
   level_edited: boolean

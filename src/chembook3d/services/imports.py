@@ -288,6 +288,8 @@ class ImportOptions:
     # D121: the edge a scan path's node was run on, and whether only its chip there shows it.
     path_edge_id: str | None = None
     on_edge_only: bool = False
+    # D255, D246e: the calculation a local single point was run at ("At the geometry of").
+    at_calculation_id: str | None = None
     # D193: the canvas a new node (or an ensemble's group) goes on: the one open in the app,
     # None for the main canvas. A derived node goes on its parent's.
     canvas_id: str | None = None
@@ -1940,24 +1942,28 @@ def commit(
             # D100, D253: a single point's geometry level is the optimization that ended on
             # its geometry; one that prints no coordinates is at the node's geometry (A15). The
             # rule is the preview's and energies' (levels.Sources).
-            sources: levels.Sources[levels.LevelOfTheory | None] = levels.Sources(
-                owner if owner is target else None, lambda c: c.level
+            # D255: the calculation it is at is stored with it (`geometry_source`).
+            sources: levels.Sources[Calculation] = levels.Sources(
+                owner if owner is target else None, lambda c: c
             )
+            chosen_source = _chosen_source(owner, options, sources, tolerance)
             for step_plan in plan_.steps:
                 if step_plan.assignment != destination:
                     continue
                 step = steps[step_plan.index]
-                geometry_level = None
-                if step.job_type not in OPTIMIZATION_TYPES:
-                    geometry_level = sources.source(
-                        step.job_type, _rows(step.final_geometry), owner.geometry, tolerance
+                at: Calculation | None = None
+                if step.job_type in levels.LINKED_TYPES:
+                    rows = _rows(step.final_geometry)
+                    at = chosen_source(rows) or sources.source(
+                        step.job_type, rows, owner.geometry, tolerance
                     )
                 calculation = _create_calculation(
-                    session, owner, step, step_plan, staged, source, geometry_level
+                    session, owner, step, step_plan, staged, source, at.level if at else None
                 )
+                calculation.geometry_source = at
                 calculation_ids.append(calculation.id)
                 if calculation.type in OPTIMIZATION_TYPES and not calculation.constraints:
-                    sources.add(calculation.geometry, calculation.level)  # D157
+                    sources.add(calculation.geometry, calculation)  # D157
                 if step.optimization_converged is False:
                     _add_tag(session, owner, OPTIMIZATION_INCOMPLETE)
         session.flush()
@@ -1977,6 +1983,22 @@ def commit(
         calculation_ids=calculation_ids,
         source_file_id=source_id,
     )
+
+
+def _chosen_source(
+    owner: Node, options: ImportOptions, sources: levels.Sources[Calculation], tolerance: float
+):
+    """D255, D246e: a local single point run "At the geometry of" a chosen calculation is at
+    that one, while it is still one of the node's geometries and the job's coordinates are
+    its geometry; otherwise the shared rule decides."""
+    chosen = next((c for _rows, c in sources.entries if c.id == options.at_calculation_id), None)
+
+    def at(rows: Any) -> Calculation | None:
+        if chosen is None or (rows and not geometry.matches(rows, chosen.geometry, tolerance)):
+            return None
+        return chosen
+
+    return at
 
 
 def _create_calculation(

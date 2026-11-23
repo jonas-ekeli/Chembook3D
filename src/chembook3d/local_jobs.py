@@ -1017,6 +1017,7 @@ def _import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any
             target_node_id=node.id,
             origin_path=str(path),
             original_name=name,
+            at_calculation_id=job.get("at_calculation_id"),
         )
     elif job.get("scan"):
         # D218: a scan is a node of its own beside the one it started from, in its step and
@@ -1561,10 +1562,12 @@ def create_single_points(
             atoms = [xyz.Atom(e, x, y, z) for e, x, y, z in found.geometry]
         if not atoms:
             raise LocalJobError(f'Node "{node.label}" has no coordinates')
-        structures.append((node, atoms))
+        structures.append((node, atoms, chosen or None))
     resources = local_tools.resources()
     if limit is not None:
-        seconds = sum(sp_estimate(level, len(a), resources.cores)["seconds"] for _, a in structures)
+        seconds = sum(
+            sp_estimate(level, len(a), resources.cores)["seconds"] for _, a, _ in structures
+        )
         if seconds > limit:
             raise LocalJobError(
                 f"{'These single points are' if len(nodes) > 1 else 'This single point is'} "
@@ -1574,7 +1577,7 @@ def create_single_points(
             )
     spec = offered[level]
     started = []
-    for node, atoms in structures:
+    for node, atoms, at_calculation in structures:
         with _records:
             job_id = _new_id(folder, f"{node.label} {spec['label']} SP")
             path = jobs_dir(folder) / job_id
@@ -1596,6 +1599,8 @@ def create_single_points(
                 "coordinates": [[a.x, a.y, a.z] for a in atoms],
                 "constraints": None,
                 "created": _now(),
+                # D255: the calculation chosen in "At the geometry of" (D246e), kept for the import
+                "at_calculation_id": at_calculation,
                 "single_point": {
                     "level": level,
                     **{k: spec[k] for k in ("label", "psi4", "basis", "method", "dispersion")},

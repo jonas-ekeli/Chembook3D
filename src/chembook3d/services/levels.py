@@ -34,6 +34,8 @@ def _itself(calculation: Calculation) -> Calculation:
 
 LEVEL_FIELDS = ("program", "method", "basis", "dispersion", "solvation_model", "solvent")
 OPTIMIZATION_TYPES = (CalculationType.OPTIMIZATION, CalculationType.TS_OPTIMIZATION)
+# D255: the calculations that store the calculation whose geometry they are at.
+LINKED_TYPES = (CalculationType.SINGLE_POINT, CalculationType.FREQUENCY)
 
 
 class NameConflict(ValueError):
@@ -265,6 +267,52 @@ class Sources(Generic[T]):
         if node_source is _UNSET:
             return self.node_source(node_rows, tolerance)
         return node_source
+
+
+def linked_source(calculation: Calculation) -> Calculation | None:
+    """D255: the calculation this single point or frequency job is stored as being at, while
+    it is on the same node (a calculation moved to another node keeps no link)."""
+    found = calculation.geometry_source
+    if found is None or found.node_id != calculation.node_id or found.level_id is None:
+        return None
+    return found
+
+
+def rule_source(calculation: Calculation, tolerance: float | None = None) -> Calculation | None:
+    """D253: the calculation the shared rule puts this single point or frequency job at."""
+    node = calculation.node
+    if node is None:
+        return None
+    if tolerance is None:
+        tolerance = thermo_settings.tolerance(object_session(node))
+    # Never itself: a D204 frequency job is a geometry source, but no link to its own row.
+    return Sources(node, _itself, leave_out={calculation.id}).source(
+        calculation.type, calculation.geometry, node.geometry, tolerance
+    )
+
+
+def source_at_level(
+    calculation: Calculation, level_id: str, tolerance: float | None = None
+) -> Calculation | None:
+    """D255: for a geometry level set by hand (or stored before D255), the calculation at that
+    level the single point is at: the latest at the level that ended on its coordinates, or
+    for one without coordinates the node's own when at that level, else the latest there."""
+    node = calculation.node
+    if node is None:
+        return None
+    if tolerance is None:
+        tolerance = thermo_settings.tolerance(object_session(node))
+    sources = Sources(node, _itself, leave_out={calculation.id})
+    at_level = [(rows, c) for rows, c in sources.entries if c.level_id == level_id]
+    if calculation.geometry:
+        matching = [
+            c for rows, c in at_level if geometry.matches(rows, calculation.geometry, tolerance)
+        ]
+        return matching[-1] if matching else None
+    own = sources.node_source(node.geometry, tolerance)
+    if own is not None and own.level_id == level_id:
+        return own
+    return at_level[-1][1] if at_level else None
 
 
 def optimization_at(

@@ -315,9 +315,23 @@ class Calculation(Base):
     irc_direction: Mapped[str | None] = mapped_column(String(16), default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
+    # D255: for a single point or frequency job, the calculation whose geometry it is at (a
+    # free optimization, or on a node without one its frequency job, D204), stored at import
+    # by the shared rule (levels.Sources) and kept when levels are overridden (Q80). None when
+    # it is at no known geometry, or the calculation was removed (then the rule applies).
+    geometry_source_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "calculations.id", ondelete="SET NULL", name="fk_calculations_geometry_source_id"
+        ),
+        default=None,
+    )
+
     node: Mapped[Node] = relationship(back_populates="calculations")
     level: Mapped[LevelOfTheory | None] = relationship(foreign_keys=[level_id])
     geometry_level: Mapped[LevelOfTheory | None] = relationship(foreign_keys=[geometry_level_id])
+    geometry_source: Mapped["Calculation | None"] = relationship(
+        remote_side=[id], foreign_keys=[geometry_source_id]
+    )
     source_file: Mapped[SourceFile | None] = relationship()
     result: Mapped["CalculationResult | None"] = relationship(
         back_populates="calculation", cascade="all, delete-orphan", passive_deletes=True
