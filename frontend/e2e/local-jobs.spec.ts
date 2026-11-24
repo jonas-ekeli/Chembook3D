@@ -649,3 +649,44 @@ test('a local result replaces the node’s geometry at its level after a confirm
   const calculations = await (await page.request.get(`/api/nodes/${id}/calculations`)).json()
   expect(calculations).toHaveLength(1)
 })
+
+// T-UI-115, D261: a minimum's local frequency job with an imaginary mode offers Fix imaginary
+// mode; the job's tries show in Local jobs, and Replace swaps in the result.
+test('an imaginary mode of a minimum is fixed by a local job', async ({ page }) => {
+  test.slow()
+  await newInvestigation(page, 'Fix an imaginary mode')
+  const made = await page.request.post('/api/nodes', { data: { label: 'water', xyz: WATER, charge: 0, multiplicity: 1 } })
+  const id = (await made.json()).id
+  const search = await page.request.post('/api/local/jobs', { data: { node_id: id, method: 'stub-saddle', transition: true } })
+  const first = (await search.json()).id
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/local/jobs/${first}`)).json()).status, { timeout: 60_000 })
+    .toBe('converged')
+  expect((await page.request.post(`/api/local/jobs/${first}/import`)).ok()).toBeTruthy()
+  expect((await page.request.patch(`/api/nodes/${id}`, { data: { role: 'minimum' } })).ok()).toBeTruthy()
+  await page.reload()
+
+  await canvasNode(page, 'water').click()
+  const list = page.getByLabel('Node inspector').getByRole('list', { name: 'Calculations' })
+  await list.getByRole('button', { name: /^Frequency/ }).click()
+  await list.getByRole('button', { name: 'Fix imaginary mode' }).click()
+  await expect(page.getByText(/Fixing the imaginary mode of “water”/)).toBeVisible()
+  await expect(page.getByText(/choose in Local jobs/)).toBeVisible({ timeout: 60_000 })
+
+  await page.getByRole('button', { name: /^Local jobs/ }).click()
+  const jobs = page.getByRole('dialog', { name: 'Local jobs' })
+  const row = jobs.getByRole('table', { name: 'Local jobs' }).getByRole('row').nth(1)
+  await expect(row).toContainText(/fix the \d+i cm⁻¹ mode/)
+  await expect(row.getByLabel('Fix imaginary mode')).toContainText('Tried +0.1 Å: no imaginary mode; -0.1 Å: no imaginary mode.')
+  await expect(row.getByLabel('Fix imaginary mode')).toContainText('the lowest without an imaginary mode')
+  await row.getByRole('button', { name: 'Replace…' }).click()
+  const confirm = page.getByRole('dialog', { name: /^Replace the .* geometry\?$/ })
+  await expect(confirm.getByRole('list', { name: 'Calculations replaced' }).getByRole('listitem')).toHaveCount(2)
+  await confirm.getByRole('button', { name: 'Replace', exact: true }).click()
+  await expect(confirm).toHaveCount(0)
+  await expect(row).toContainText('Converged, imported')
+  const calculations = await (await page.request.get(`/api/nodes/${id}/calculations`)).json()
+  const frequencies = calculations.filter((c: { type: string }) => c.type === 'frequency')
+  expect(frequencies).toHaveLength(1)
+  expect(frequencies[0].result.imaginary_count).toBe(0)
+})

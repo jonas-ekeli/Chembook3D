@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 
 from chembook3d import local_tools, xyz
 from chembook3d.local_worker import CRITERIA, METHOD_LABELS, SCAN_POINTS, grid_cells
-from chembook3d.models import Node
+from chembook3d.models import Calculation, Node, Role
 from chembook3d.parsers import local_result
 from chembook3d.services import history, imports, levels, oniom
 from chembook3d.services import nodes as node_service
@@ -357,6 +357,7 @@ def create_job(
     limit: int | None = None,
     start: Start | None = None,
     replace: bool = False,
+    fix_mode: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Start a job. `limit` (seconds, D223) refuses one whose estimate is longer: the longest
     job Claude may start while it works on its own. D258: `start` runs it from another
@@ -399,6 +400,7 @@ def create_job(
         model = len(layers["core"]) + len(layers["links"]) if layers else None
         seconds = estimate(method, len(atoms), resources.cores, model)["seconds"]
         seconds *= scan["points"] if scan else 1  # one optimization per point, at most
+        seconds *= 2 * len(fix_mode["shifts"]) if fix_mode else 1  # D261: its tries, at most
         if seconds > limit:
             raise LocalJobError(
                 f"This job is estimated at about {_duration(seconds)}, over the "
@@ -408,7 +410,7 @@ def create_job(
             )
     with _records:
         default = f"{node.label} {METHODS.get(method, method)}" + (
-            " TS" if transition else " scan" if scan else ""
+            " TS" if transition else " scan" if scan else " fix mode" if fix_mode else ""
         )
         job_id = _new_id(folder, name or default)
         path = jobs_dir(folder) / job_id
@@ -460,6 +462,8 @@ def create_job(
             job["frequencies"] = True  # D217: same-level frequencies at the result
         if scan:
             job["scan"] = scan  # D218: a relaxed scan, imported as a node of its own
+        if fix_mode and not scan and not transition:
+            job["fix_mode"] = fix_mode  # D261: tries along an imaginary mode
         if method in TEST_METHODS and os.environ.get("CHEMBOOK3D_LOCAL_STUB_DELAY"):
             job["stub_delay_s"] = float(os.environ["CHEMBOOK3D_LOCAL_STUB_DELAY"])
         _write(path / JOB_JSON, job)
@@ -484,6 +488,91 @@ def scan_name(scan: dict[str, Any]) -> str:
 MAX_SCAN_POINTS = 100
 MAX_SCAN_COORDINATES = 4
 # D219: a 2D grid runs only with the cheap methods, at most this many points a side and in all
+# ---------- D261: fix an imaginary mode of a minimum ----------
+
+FIX_SHIFTS = [0.1, 0.3]  # Å moved by the atom moving most, the second only when the first fails
+
+
+def fix_method(calculation: Calculation) -> str | None:
+    """D261: the local method a calculation was computed with, when it is one that computes
+    frequencies here (FREQUENCY_METHODS), else None."""
+    level = calculation.level
+    if level is None:
+        return None
+    for method in sorted(FREQUENCY_METHODS):
+        program, label = METHOD_LABELS.get(method, (method, method))
+        if (level.program or "").lower() == program.lower() and (
+            level.method or ""
+        ).upper() == label.upper():
+            return method
+    return None
+
+
+def create_fix_mode(
+    folder: Path, node: Node, calculation_id: str, limit: int | None = None
+) -> dict[str, Any]:
+    """D261: a job that pushes a minimum off the imaginary mode of one of its frequency jobs at
+    a local level: from that job's structure, displaced both ways along the mode (0.1 Å for the
+    atom moving most, then 0.3 Å when neither try ends without an imaginary mode), each
+    optimized and its frequencies computed at the same level; the lower try without an
+    imaginary mode is kept. It is started with Replace offered (D260): the result replaces the
+    geometry at that level once the user confirms, or goes to a derived node."""
+    calculation = next((c for c in node.calculations if c.id == calculation_id), None)
+    if calculation is None:
+        raise LocalJobError(f'"{node.label}" has no calculation {calculation_id}')
+    if node.role == Role.TRANSITION_STATE:
+        raise LocalJobError(
+            "Fix imaginary mode is for a minimum; a transition state keeps one imaginary mode"
+        )
+    result = calculation.result
+    wavenumbers = [float(f) for f in (result.frequencies if result is not None else [])]
+    if not any(f < 0 for f in wavenumbers):
+        raise LocalJobError("This calculation has no imaginary frequency to fix")
+    method = fix_method(calculation)
+    if method is None or method not in methods():
+        offered = ", ".join(METHODS[m] for m in sorted(FREQUENCY_METHODS) if m in METHODS)
+        raise LocalJobError(
+            f"Fix imaginary mode runs at the level the frequencies were computed at, on this "
+            f"computer: {offered}. {levels.label(calculation.level)} is not one; displace the "
+            "structure along the mode and run it again where it was computed"
+        )
+    modes = result.normal_modes
+    if len(modes) != len(wavenumbers):
+        raise LocalJobError("This calculation has no normal modes stored to follow")
+    lowest = min(range(len(wavenumbers)), key=wavenumbers.__getitem__)
+    source = calculation.geometry_source
+    rows = calculation.geometry or (source.geometry if source is not None else None)
+    if not rows:
+        raise LocalJobError("This calculation has no structure to start from")
+    atoms = [xyz.Atom(e, x, y, z) for e, x, y, z in rows]
+    if len(modes[lowest]) != len(atoms):
+        raise LocalJobError("The normal mode does not match the structure's atoms")
+    start = Start(atoms, (source or calculation).id, levels.label(calculation.level))
+    charge = calculation.charge if calculation.charge is not None else node.charge or 0
+    multiplicity = (
+        calculation.multiplicity if calculation.multiplicity is not None else node.multiplicity or 1
+    )
+    return create_job(
+        folder,
+        node,
+        method,
+        charge,
+        multiplicity,
+        frequencies=True,
+        limit=limit,
+        start=start,
+        replace=True,
+        fix_mode={
+            "calculation_id": calculation.id,
+            "wavenumber": wavenumbers[lowest],
+            "imaginary": [f for f in wavenumbers if f < 0],
+            "mode": [[float(v) for v in atom] for atom in modes[lowest]],
+            "shifts": list(FIX_SHIFTS),
+            "start_energy": result.energy,
+        },
+    )
+
+
 GRID_METHODS = {"gfn2", "gxtb", "stub"}
 MAX_GRID_SIDE = 30
 MAX_GRID_POINTS = 400
@@ -761,6 +850,8 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
     out.pop("elements", None)
     if job.get("ts_guess"):  # D238: its end's coordinates stay in job.json
         out["ts_guess"] = {k: v for k, v in job["ts_guess"].items() if k != "end"}
+    if job.get("fix_mode"):  # D261: the mode it follows stays in job.json
+        out["fix_mode"] = {k: v for k, v in job["fix_mode"].items() if k != "mode"}
     out["atoms"] = len(job.get("elements") or [])
     out["status"] = status
     out["active"] = status in ("starting", "queued", "running", "cancelling")
@@ -790,6 +881,7 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
                 "level",
                 "ts_check",
                 "scan",
+                "fix_mode",  # D261: its tries and the one kept
             )
         }
         found = result.get("ts_guess")

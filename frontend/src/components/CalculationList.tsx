@@ -7,6 +7,7 @@ import {
   type CustomBasisSummary,
   type Level,
   type LevelFields,
+  type LocalJob,
   scaleText,
   type SourceFile,
   type ThermoModel,
@@ -341,12 +342,16 @@ function Details({
   bases,
   onSaved,
   onChanged,
+  minimum,
+  onFixMode,
 }: {
   calculation: Calculation
   levels: Level[]
   bases: CustomBasisSummary[]
   onSaved: (c: Calculation) => void
   onChanged: () => void
+  minimum: boolean
+  onFixMode?: (job: LocalJob) => void
 }) {
   return (
     <div className="calc-details">
@@ -362,8 +367,62 @@ function Details({
       <LevelEditor key={calculation.level?.id ?? 'none'} calculation={calculation} levels={levels} onSaved={onSaved} />
       <CustomBasisLinks calculation={calculation} bases={bases} />
       {calculation.source_file && <SourceFileBox source={calculation.source_file} onChanged={onChanged} />}
+      {minimum && onFixMode && !!calculation.result?.imaginary_count && (
+        <FixImaginaryMode calculation={calculation} onStarted={onFixMode} />
+      )}
       <RemoveCalculation calculation={calculation} onRemoved={onChanged} />
     </div>
+  )
+}
+
+/** D261: a frequency job of a minimum with an imaginary mode, at a level this computer computes
+ * frequencies at, can be pushed off it: tries both ways along the mode, the lower one without
+ * an imaginary mode kept, and Replace offered when it ends. */
+function FixImaginaryMode({ calculation, onStarted }: { calculation: Calculation; onStarted: (job: LocalJob) => void }) {
+  const [levels, setLevels] = useState<{ program: string; label: string }[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [started, setStarted] = useState(false)
+  useEffect(() => {
+    api.localTools().then(
+      (tools) => setLevels(tools.fix_mode_levels ?? []),
+      () => setLevels([]),
+    )
+  }, [])
+  const level = calculation.level
+  const local = levels?.some(
+    (l) =>
+      l.program.toLowerCase() === (level?.program ?? '').toLowerCase() && l.label.toUpperCase() === (level?.method ?? '').toUpperCase(),
+  )
+  if (!local) return null
+  const lowest = Math.min(...(calculation.result?.frequencies ?? []))
+  const start = () => {
+    setBusy(true)
+    setError(null)
+    api
+      .startFixMode({ node_id: calculation.node_id, calculation_id: calculation.id })
+      .then(
+        (job) => {
+          setStarted(true)
+          onStarted(job)
+        },
+        (err: unknown) => setError(errorText(err)),
+      )
+      .finally(() => setBusy(false))
+  }
+  return (
+    <>
+      <div className="buttons">
+        <button
+          disabled={busy || started}
+          onClick={start}
+          title={`Displace the structure both ways along the ${Math.abs(lowest).toFixed(0)}i cm⁻¹ mode, optimize each with frequencies at this level and keep the lower one without an imaginary mode (D261)`}
+        >
+          {started ? 'Fix started' : 'Fix imaginary mode'}
+        </button>
+      </div>
+      {error && <p role="alert">{error}</p>}
+    </>
   )
 }
 
@@ -441,10 +500,15 @@ export function CalculationList({
   refreshKey,
   onChanged,
   onLoaded,
+  minimum = true,
+  onFixMode,
 }: {
   nodeId: string
   refreshKey: number
   onChanged: () => void
+  /** D261: the node is not a transition state, so an imaginary mode is one to fix */
+  minimum?: boolean
+  onFixMode?: (job: LocalJob) => void
   /** D179: the list as loaded, for the node panel's stat strip (imaginary frequencies). */
   onLoaded?: (calculations: Calculation[]) => void
 }) {
@@ -518,6 +582,8 @@ export function CalculationList({
               levels={levels}
               bases={bases}
               onSaved={saved}
+              minimum={minimum}
+              onFixMode={onFixMode}
               onChanged={() => {
                 api.calculations(nodeId).then(setCalculations, () => undefined)
                 onChanged()

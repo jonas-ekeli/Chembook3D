@@ -11,6 +11,7 @@ import {
   type GeometryRows,
   type HistoryEntry,
   type IrcSummary,
+  type LocalJob,
   type Node,
   type NodeDeletePreview,
   type NodeFields,
@@ -158,6 +159,7 @@ export function NodeInspector({
   servers = [],
   onIrc,
   onRefine,
+  onFixMode,
   onSinglePoint,
   onEditStructure,
   energy,
@@ -188,6 +190,8 @@ export function NodeInspector({
   onIrc?: () => void
   /** D213: Refine geometry… on this computer */
   onRefine?: () => void
+  /** D261: a "Fix imaginary mode" job started from one of the node's frequency jobs */
+  onFixMode?: (job: LocalJob) => void
   /** D240: a single point of the structure on this computer */
   onSinglePoint?: () => void
   /** D139: open the Edit structure window. */
@@ -754,7 +758,14 @@ export function NodeInspector({
             {ircLine(irc)}
           </p>
         )}
-        <CalculationList nodeId={node.id} refreshKey={refreshKey} onChanged={onRefresh} onLoaded={setCalculations} />
+        <CalculationList
+          nodeId={node.id}
+          refreshKey={refreshKey}
+          onChanged={onRefresh}
+          onLoaded={setCalculations}
+          minimum={node.role !== 'transition_state'}
+          onFixMode={onFixMode}
+        />
       </section>
 
       <div className="jump-target column" id="node-transitions" ref={target('transitions')} tabIndex={-1}>

@@ -1161,6 +1161,71 @@ def pick_frame(frames: list[dict], warnings: list[str]) -> int:
     return picked
 
 
+HARTREE_KCAL = 627.509474
+
+
+def fix_mode(fix: dict, start, optimize_from, frequencies_at, progress) -> dict:
+    """D261: the tries of a "Fix imaginary mode" job. The structure (Å) is displaced along the
+    imaginary mode so that the atom moving most moves `shifts[0]` Å, both ways; each is
+    optimized (`optimize_from`, which returns the try's frames, end and state) and, once
+    converged, its frequencies computed (`frequencies_at`, Bohr). When a shift leaves no try
+    without an imaginary mode, the next one is tried. The lowest-energy try without an
+    imaginary mode is kept, else the lowest converged one, else the last; its frames and
+    frequencies go in the result (`kept_state`)."""
+    import numpy as np
+
+    mode = np.asarray(fix["mode"], float)
+    largest = float(np.linalg.norm(mode, axis=1).max()) or 1.0
+    tries: list[dict] = []
+    states: list[dict] = []
+    for shift in fix["shifts"]:
+        for sign in (1, -1):
+            progress.update(phase=f"Try {len(tries) + 1}: {sign * shift:+g} Å along the mode")
+            x_start = np.asarray(start, float) + sign * shift * mode / largest
+            state = optimize_from(x_start)
+            done = state["converged"]
+            found = frequencies_at(state["coords"] / BOHR_TO_ANGSTROM) if done else None
+            imaginary = [w for w in found["wavenumbers"] if w < 0] if found is not None else None
+            states.append({**state, "frequencies": found})
+            tries.append(
+                {
+                    "shift": round(sign * shift, 4),
+                    "converged": done,
+                    "energy": state["energy"],
+                    "cycles": len(state["lists"][0]),
+                    "imaginary": imaginary,
+                }
+            )
+        if any(t["converged"] and t["imaginary"] == [] for t in tries):
+            break
+    progress.update(phase=None)
+
+    def pick(candidates: list[int]) -> int | None:
+        known = [i for i in candidates if tries[i]["energy"] is not None]
+        return min(known, key=lambda i: tries[i]["energy"]) if known else None
+
+    clean = [i for i, t in enumerate(tries) if t["converged"] and t["imaginary"] == []]
+    converged = [i for i, t in enumerate(tries) if t["converged"]]
+    kept = pick(clean)
+    if kept is None:
+        kept = pick(converged)
+    if kept is None:
+        kept = len(tries) - 1
+    start_energy = fix.get("start_energy")
+    energy = tries[kept]["energy"]
+    return {
+        "wavenumber": fix.get("wavenumber"),
+        "tries": tries,
+        "kept": kept,
+        "fixed": kept in clean,
+        "start_energy": start_energy,
+        "change_kcal": round((energy - start_energy) * HARTREE_KCAL, 3)
+        if energy is not None and start_energy is not None
+        else None,
+        "kept_state": states[kept],
+    }
+
+
 def run(folder: Path, lock: Path | None) -> int:
     import numpy as np
 
@@ -1407,6 +1472,56 @@ def run(folder: Path, lock: Path | None) -> int:
                     converged = converged and done
                 result["scan"] = {**scan, "points": points}
                 progress.update(phase=None)
+            elif job.get("fix_mode") and frequency_engine is not None:
+                # D261: displaced both ways along the imaginary mode, each optimized and its
+                # frequencies computed; the lower result without an imaginary mode is kept.
+                lists = (frames, energies, criteria, frame_points)
+
+                def optimize_from(x_start) -> dict:
+                    for kept in lists:
+                        kept.clear()
+                    traj.write_text("", encoding="utf-8")  # the Inspect window shows this try
+                    judged.write_text("", encoding="utf-8")
+                    last["coords"], last["energy"] = x_start, None
+                    molecule.xyzs = [x_start.copy()]
+                    options["customengine"] = Engine(molecule)
+                    done = True
+                    try:
+                        geometric.optimize.run_optimizer(**options)
+                    except geometric.errors.GeomOptNotConvergedError:
+                        done = False
+                    finally:
+                        _close_geometric_logs()
+                    return {
+                        "converged": done,
+                        "lists": [list(values) for values in lists],
+                        "coords": np.asarray(last["coords"], float).copy(),
+                        "energy": last["energy"],
+                        "files": [traj.read_text(encoding="utf-8"), judged.read_text("utf-8")],
+                    }
+
+                def frequencies_at(x):
+                    final = numerical_hessian(frequency_engine, x, progress, "Frequencies")
+                    freqs, modes = harmonic(symbols, x, final)
+                    return {
+                        "level": result["level"],
+                        "energy": last["energy"],
+                        "wavenumbers": freqs.round(2).tolist(),
+                        "modes": modes.round(5).tolist(),
+                    }
+
+                found = fix_mode(job["fix_mode"], start, optimize_from, frequencies_at, progress)
+                kept = found.pop("kept_state")
+                for target, values in zip(lists, kept["lists"], strict=True):
+                    target[:] = values
+                traj.write_text(kept["files"][0], encoding="utf-8")
+                judged.write_text(kept["files"][1], encoding="utf-8")
+                last["coords"], last["energy"] = kept["coords"], kept["energy"]
+                converged = kept["converged"]
+                if kept["frequencies"] is not None:
+                    result["frequencies"] = kept["frequencies"]
+                result["fix_mode"] = found
+                frequency_engine = None  # the kept try's frequencies are in already
             else:
                 try:
                     geometric.optimize.run_optimizer(**options)

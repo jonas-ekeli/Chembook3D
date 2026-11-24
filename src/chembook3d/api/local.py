@@ -88,6 +88,13 @@ def _status(request: Request, atoms: int | None = None, model: int | None = None
     out["ts_guess"] = None
     if atoms and offered:
         out["ts_guess"] = local_jobs.ts_guess_estimate("mace-omol", atoms, out["cores"])
+    # D261: the levels "Fix imaginary mode" runs at (program and method as a calculation has)
+    out["fix_mode_levels"] = [
+        {"method": key, "program": program, "label": label}
+        for key in sorted(local_jobs.FREQUENCY_METHODS)
+        if key in local_jobs.methods()
+        for program, label in [local_jobs.METHOD_LABELS.get(key, (key, key))]
+    ]
     # D240: the single point levels, each with its estimate for `atoms`
     out["single_point_levels"] = local_jobs.sp_levels_status(atoms, out["cores"])
     return out
@@ -460,6 +467,30 @@ def start_ts_guess(body: TsGuessIn, request: Request, session: DbSession) -> dic
             body.end_member_id,
             _claude_limit(request, folder),
             body.correct,
+        )
+    except local_jobs.LocalJobError as exc:
+        raise _refused(exc) from exc
+
+
+class FixModeIn(BaseModel):
+    node_id: str
+    calculation_id: str = Field(
+        description="The node's frequency calculation with the imaginary mode, at a local level "
+        "with frequencies (GFN2-xTB, g-xTB or MACE-OMOL-0)"
+    )
+
+
+@router.post("/fix-mode")
+def start_fix_mode(body: FixModeIn, request: Request, session: DbSession) -> dict[str, Any]:
+    """D261: push a minimum off an imaginary mode: the frequency job's structure displaced both
+    ways along its mode, each optimized with frequencies at the same level, the lower try
+    without an imaginary mode kept. Started with Replace offered (D260)."""
+    _local_page_only(request)
+    folder = _investigation(request).folder
+    node = get(session, Node, body.node_id, "Node")
+    try:
+        return local_jobs.create_fix_mode(
+            folder, node, body.calculation_id, _claude_limit(request, folder)
         )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc
