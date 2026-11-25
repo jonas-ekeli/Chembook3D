@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 
 START = re.compile(r"^Starting job ([0-9]+) on (\S+) on Saga at (.+)$", re.MULTILINE)
+CANCELLATION = re.compile(r"\*\*\* JOB ([0-9]+) ON \S+ CANCELLED AT ")
 
 
 @dataclass
@@ -57,7 +58,6 @@ def parse(text: str, job_id: str, log_path: str) -> JobReport:
     valid_name = name and name not in {".", ".."} and name == posixpath.basename(name)
     if valid_name:
         report.job_name = name
-    cancel = re.compile(rf"\*\*\* JOB {job_id} ON \S+ CANCELLED AT ")
     output = f"{name}.out"
     for index, line in enumerate(lines):
         if line.startswith("Work space: ") and valid_name:
@@ -80,9 +80,11 @@ def parse(text: str, job_id: str, log_path: str) -> JobReport:
             report.copy_announced = True
         if line.strip() == f"File './{output}' could not be copied back home!":
             report.copy_announced = False
-        if cancel.search(line) and "DUE TO TIME LIMIT" in line.upper():
+        marker = CANCELLATION.search(line)
+        cancelled = marker is not None and marker[1] == job_id
+        if cancelled and "DUE TO TIME LIMIT" in line.upper():
             report.state, report.evidence = "timed_out", line
-        elif (cancel.search(line) or line == "Job was cancelled.") and report.state != "timed_out":
+        elif (cancelled or line == "Job was cancelled.") and report.state != "timed_out":
             report.state, report.evidence = "cancelled", line
         elif line == "Job exited normally." and report.state == "started":
             report.state, report.evidence = "completed", line
