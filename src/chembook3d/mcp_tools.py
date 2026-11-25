@@ -683,6 +683,23 @@ TOOLS: list[ToolSpec] = [
         "ones below it can be read; the user moves it with cd. You cannot log in.",
     ),
     T(
+        "check_server_job",
+        "read",
+        "GET",
+        "/api/server-files/{server_id}/jobs/{job_id}",
+        "Check a Saga Gaussian job by its Slurm receipt ID using the logged-in server's "
+        "readable files. Returns the last wrapper evidence and, when available, Gaussian "
+        "step results. An unknown state may mean the job has not started. A started "
+        "record is historical evidence, not a live scheduler query. Never resubmit on "
+        "an unknown result. For a cancelled job report any partial results as partial.",
+        help={
+            "server_id": "Server from list_servers.",
+            "job_id": "Numeric Slurm ID from Submitted batch job.",
+            "path": "Submission directory or the exact wrapper .log; defaults to the "
+            "terminal's current directory. Reads use the existing server file scope.",
+        },
+    ),
+    T(
         "list_server_files",
         "read",
         "GET",

@@ -4,6 +4,7 @@ in for Saga; the keeper runs as the separate process it is in the app."""
 
 import asyncio
 import json
+import os
 import re
 import sys
 import tempfile
@@ -1115,6 +1116,7 @@ def test_what_claude_cannot_read(at_work, saga, monkeypatch):
 def test_claudes_tools_read_the_server_and_are_allowed_without_asking(at_work):
     tools = {
         "list_servers",
+        "check_server_job",
         "list_server_files",
         "read_server_file",
         "summarize_server_file",
@@ -1140,6 +1142,80 @@ def test_claudes_tools_read_the_server_and_are_allowed_without_asking(at_work):
             )
 
     anyio.run(run)
+
+
+def test_check_server_job_through_mcp(at_work, saga):
+    # D266: synthetic wrapper records for two separate attempts with the same name.
+    work = saga.root / WORK.lstrip("/")
+    url = "/api/server-files/saga/jobs/"
+    copied = work / "trial.out"
+    copied.write_bytes((FIXTURES / TS).read_bytes())
+    log = work / "trial.log"
+
+    def start(job_id):
+        return (
+            f"Starting job {job_id} on test-node on Saga at Mon Jan 01 12:00:00 CET 2024\n"
+            f"JobName: trial\nWork space: {WORK}/{job_id}-trial\n"
+            "Looking for formatted checkpoint files (*.fchk) ...\n"
+            "Running command: g16 < trial.inp > trial.out\n"
+        )
+
+    assert at_work.get(url + "301").json()["state"] == "unknown"
+    log.write_text(
+        start("301")
+        + "Checking normal termination:\n -> trial.out \n    normally terminated\n"
+        + "Copying './trial.out' to submission folder...\nJobState=RUNNING\n"
+        + "Job exited normally.\nJob 301 completed at noon\n",
+        encoding="utf-8",
+    )
+
+    async def check():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            result = await Bridge(APP, http=http).call(
+                "check_server_job", {"server_id": "saga", "job_id": "301"}
+            )
+            assert not result.is_error, result.content
+            return json.loads(result.content[0].text)
+
+    completed = anyio.run(check)
+    assert completed["state"] == "completed" and completed["wrapper_termination"] == "normal"
+    assert completed["output_path"] == f"{WORK}/trial.out"
+    assert completed["steps"][0]["optimization_converged"]
+    assert completed["steps"][1]["imaginary_frequencies_cm1"][0] < 0
+    os.utime(copied, (1, 1))
+    stale = at_work.get(url + "301").json()
+    assert stale["steps"] is None and "modification time" in stale["output_note"]
+    assert at_work.get(url + "302").json()["state"] == "unknown"
+    log.write_text(start("302"), encoding="utf-8")
+    assert at_work.get(url + "302").json()["steps"] is None
+    log.write_text(
+        start("302")
+        + "[12:01] error: *** JOB 302 ON test-node CANCELLED AT noon DUE to SIGNAL Terminated ***\n"
+        + "Job was cancelled.\n302  40  72s  0\n302.batch Signal 15\nJob 302 completed at noon\n",
+        encoding="utf-8",
+    )
+    cancelled = at_work.get(url + "302").json()
+    assert cancelled["state"] == "cancelled" and cancelled["steps"] is None
+    assert not cancelled["copy_announced"] and cancelled["output_path"] is None
+    assert cancelled["run_directory"] == f"{WORK}/302-trial"
+    run = work / "302-trial"
+    run.mkdir()
+    (run / "trial.out").write_bytes(copied.read_bytes())
+    assert at_work.get(url + "302").json()["output_path"] == f"{WORK}/302-trial/trial.out"
+    assert at_work.get(url + "301", params={"path": "trial.log"}).json()["state"] == "unknown"
+    assert at_work.get(url + "302", params={"path": ".."}).status_code == 409
+    assert at_work.get(url + "302", headers={"origin": "https://other.test"}).status_code == 403
+
+    assert at_work.post("/api/remote/servers/saga/logout", headers=ORIGIN).is_success
+    assert at_work.get(url + "302").status_code == 409
+    assert _log_in(at_work, saga)["kind"] == "connected"
+    with _terminal(at_work) as ws:
+        _read_until(ws, lambda text, m: "$ " in text)
+        ws.send_json({"type": "input", "data": f"cd {WORK}\r"})
+        _read_until(ws, lambda text, m: {"type": "cwd", "path": WORK} in m)
+    assert at_work.get(url + "302").json()["state"] == "cancelled"
 
 
 # ---------- T-SSH-23 Claude imports outputs from the terminal's directory (D225) ----------

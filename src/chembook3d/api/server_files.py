@@ -40,7 +40,7 @@ from pydantic import BaseModel
 from chembook3d import xyz
 from chembook3d.api.remote import _check, _saved
 from chembook3d.api.routes import _investigation, _staging
-from chembook3d.parsers import orca
+from chembook3d.parsers import orca, saga_job
 from chembook3d.remote import client, keeper, servers
 from chembook3d.services import batch_import, imports, inspection
 
@@ -81,10 +81,10 @@ class Copies:
     """Files copied down for Claude, by server and full path, the most recently used last."""
 
     def __init__(self) -> None:
-        self.kept: OrderedDict[tuple[str, str], _Copy] = OrderedDict()
+        self.kept: OrderedDict[tuple[str, str, str | None], _Copy] = OrderedDict()
         self.lock = asyncio.Lock()
 
-    def drop(self, key: tuple[str, str]) -> None:
+    def drop(self, key: tuple[str, str, str | None]) -> None:
         found = self.kept.pop(key, None)
         if found is not None:
             shutil.rmtree(found.folder, ignore_errors=True)
@@ -97,9 +97,11 @@ class Copies:
         for key in list(self.kept):
             self.drop(key)
 
-    async def get(self, server: servers.Server, path: str, size: int, modified) -> _Copy:
+    async def get(
+        self, server: servers.Server, path: str, size: int, modified, job_id: str | None = None
+    ) -> _Copy:
         """A copy of the file as it is now (`size` and `modified` as just read)."""
-        key = (server.id, path)
+        key = (server.id, path, job_id)
         async with self.lock:
             found = self.kept.get(key)
             if found is not None and (found.size, found.modified) == (size, modified):
@@ -506,15 +508,17 @@ def _search(
 # ---------- an output read as the Inspect window reads it (D123c) ----------
 
 
-async def _inspected(request: Request, server: servers.Server, path: str):
-    meta = await _meta(server, path)
+async def _inspected(
+    request: Request, server: servers.Server, path: str | _Meta, *, job_id: str | None = None
+):
+    meta = await _meta(server, path) if isinstance(path, str) else path
     if meta.size > inspection.MAX_SIZE:
         raise HTTPException(
             422,
             f"{meta.path} is {meta.size / 1e6:.0f} MB, more than the Inspect window reads; "
             "use read_server_file with search or tail.",
         )
-    copy = await copies(request.app).get(server, meta.path, meta.size, meta.modified)
+    copy = await copies(request.app).get(server, meta.path, meta.size, meta.modified, job_id)
     if copy.read is None:
         try:
             copy.read = await asyncio.to_thread(inspection.read_path, copy.local, copy.name)
@@ -588,6 +592,113 @@ class ServerFileSummary(BaseModel):
     warnings: list[str]
     units: str
     steps: list[dict]
+
+
+async def _job_output(
+    request: Request, server: servers.Server, report: saga_job.JobReport, log: _Meta
+):
+    """Inspect only this attempt's scratch file, or its explicitly copied-back result."""
+    candidates = []
+    if report.run_directory:
+        candidates.append(posixpath.join(report.run_directory, f"{report.job_name}.out"))
+    copied = posixpath.splitext(log.path)[0] + ".out"
+    if report.copy_announced and report.state in {"completed", "ended"}:
+        candidates.append(copied)
+    notes = []
+    for path in candidates:
+        try:
+            meta = await _meta(server, path)
+            if meta.path != path:
+                notes.append(f"{path} resolves to another location.")
+                continue
+            if not meta.size:
+                notes.append(f"{path} is empty.")
+                continue
+            if path == copied:
+                start = report.start_timestamp()
+                if (
+                    start is None
+                    or meta.modified is None
+                    or log.modified is None
+                    or not start <= meta.modified <= log.modified
+                ):
+                    notes.append(f"Cannot attribute the modification time of {path} to this job.")
+                    continue
+            report.output_path = path
+            _, read = await _inspected(request, server, meta, job_id=report.job_id)
+            if read.program.lower() != "gaussian":
+                notes.append(f"{path} was not recognized as Gaussian output.")
+                continue
+            report.steps = [
+                {
+                    "step": step.index,
+                    "job_type": step.job_type,
+                    "termination": step.termination,
+                    "optimization_converged": step.optimization_converged,
+                    "energy_hartree": step.energy,
+                    "frequency_count": len(step.frequencies),
+                    "imaginary_frequencies_cm1": [f for f in step.frequencies if f < 0],
+                }
+                for step in read.steps
+            ]
+            return
+        except HTTPException as exc:
+            notes.append(f"{path}: {exc.detail}")
+    report.output_note = " ".join(notes) or "No output location verified for this attempt."
+
+
+@router.get("/{server_id}/jobs/{job_id}")
+async def check_server_job(
+    server_id: str, job_id: str, request: Request, path: str = ""
+) -> saga_job.JobReport:
+    """Read Saga wrapper evidence within the keeper's existing read scope (D266)."""
+    server = await _reader(request, server_id)
+    if not re.fullmatch(r"[0-9]{1,20}", job_id):
+        raise HTTPException(422, "Supply the numeric Slurm job ID from the submission receipt.")
+    explicit = path.endswith(".log")
+    folder = posixpath.dirname(path) if explicit else path
+    listing = await _keeper(server, "list", path=folder or None, within=True)
+    names = [
+        item["name"]
+        for item in listing["entries"]
+        if item["kind"] == "file"
+        and item["name"].endswith(".log")
+        and (not explicit or item["name"] == posixpath.basename(path))
+    ]
+    if not explicit and (len(names) > 100 or len(listing["entries"]) >= keeper.MAX_LISTED):
+        raise HTTPException(422, "Large directory. Supply the path to the submission .log.")
+    if explicit and not names and len(listing["entries"]) >= keeper.MAX_LISTED:
+        names = [posixpath.basename(path)]
+    matches = []
+    for name in names:
+        candidate = posixpath.join(listing["path"], name)
+        meta = await _meta(server, candidate, head=2048)
+        first = saga_job.START.search(meta.head.decode("utf-8", errors="replace"))
+        if first and first[1] == job_id and meta.path == candidate:
+            matches.append(meta)
+    if not matches:
+        return saga_job.JobReport(
+            job_id, "unknown", "No matching start record. The current queue state is unknown."
+        )
+    if len(matches) > 1:
+        raise HTTPException(409, "Several logs match this ID. Supply a specific .log path.")
+    meta = matches[0]
+    if meta.size > keeper.MAX_READ:
+        raise HTTPException(422, "Wrapper log exceeds 1 MiB. Read it with read_server_file.")
+    if len(meta.head) < meta.size:
+        meta = await _meta(server, meta.path, head=keeper.MAX_READ)
+    if len(meta.head) != meta.size:
+        raise HTTPException(409, "Wrapper log changed during the check. Check again.")
+    report = saga_job.parse(meta.head.decode("utf-8", errors="replace"), job_id, meta.path)
+    if report.log_path:
+        await _job_output(request, server, report, meta)
+        latest = await _meta(server, meta.path, head=2048)
+        current = saga_job.START.search(latest.head.decode("utf-8", errors="replace"))
+        if latest.path != meta.path or not current or current[1] != job_id:
+            raise HTTPException(
+                409, "Submission log changed attempts during the check. Check again."
+            )
+    return report
 
 
 @router.get("/{server_id}/summary")

@@ -99,6 +99,53 @@ Conversion constants are defined once, in one module, from CODATA 2018 (P17).
 | Export | Whole investigation | The folder itself; optional "Export as zip" (P8) |
 
 ## 8. Open items affecting this document
+
+- Q100: failure markers in the wrapper log and supported edits to generated inputs (§9).
 - Q11: file variants per program beyond the main output.
 - Q32: duplicate tolerance default.
 - Q34: whether calculations and energies can be entered manually without a file (not discussed; v1 assumes no, per EN-1).
+
+## 9. Gaussian HPC wrapper workflow (D266)
+
+Jonas's two-step example, 2026-11-25. Both invocations use the submission workspace as their working directory. The geometry and generated input share a filename stem.
+
+| Operation | Example invocation | Result |
+|---|---|---|
+| Prepare | `submit_all_DFT.sh minimum.jd example.xyz nosub` | Creates `example.inp` for inspection or revision. No job is submitted. A bare job filename refers to a file in the workspace. The wrapper also accepts an absolute job-file path, so the helper can select the file from a trusted project directory. |
+| Submit | `submit_job_g16-C.01 example.inp -n 1 -c 40 -t 24` | Submits the prepared input and creates `example.log` in the submission workspace. This workflow always requests one node. The example requests 40 CPU cores and 24 hours of wall time. |
+
+The workspace `.log` is the submission wrapper's job record. It reports the separate run directory and is updated as the job completes, times out or fails. The developing Gaussian `.out`, checkpoint and other calculation files are in the run directory. On normal completion the wrapper copies files back to the submission workspace. When Gaussian exits with a fatal error, the wrapper also copies back the `.out`, which contains the Gaussian diagnostic. After a crash or wall-time exit the wrapper updates the workspace `.log` and the calculation files survive in the run directory. Copy-back may or may not have occurred. Inspect the output for this attempt in the workspace if present, or in its verified run directory otherwise.
+
+For agent follow-up, consult the wrapper log for job state and the Gaussian output for scientific progress or termination. The cluster helper must verify a reported run directory against the approved read scope and its association with this job before retrieving files (D266). Report unavailable output explicitly if that check fails or the files are gone.
+
+### Behaviour of the supplied preparation and submission scripts
+
+`submit_all_DFT.sh` explicitly handles XYZ and SDF and invokes the configured Java generator's `PrepareInputGaussian` task, writing its output messages to `<stem>.accLog`. With one selected geometry, the `nosub` branch exits successfully without checking the generator's status or validating the new input. For agent preparation, supply one geometry and one trusted project job file in a fresh attempt directory. Verify that this invocation produced a usable input before offering it for review or submission.
+
+`make_gaussian-linda_jobscript_for_SLURM.sh` uses the UiBKvant argument parser, calls `make_jobscript_for_SLURM` to generate the batch script, then calls `sbatch` outside debug mode. Its final `exit 0` does not preserve a failed scheduler exit status. Use the receipt to establish acceptance. A definite scheduler rejection and a lost reply require different follow-up. Jonas confirmed that `submit_job_g16-C.01` calls this script through a lightweight wrapper. The shared functions select files and generate the batch script.
+
+In the supplied `functions.sh`, `parseCLIArgs` starts the input list with the positional file and adds explicitly listed files. Optional inclusion regexes can select further entries at the top level of the submission directory. The shared functions do not add all files with the input's basename by default. For agent submissions, resolve the approved input and checkpoint in the cluster helper and keep file-selection rules under site control.
+
+The generated job constructs the run directory from the configured scratch root, login name, Slurm job ID and job name. For a fresh directory it copies the selected files, decompresses staged gzip files and runs the application preflight. An existing directory for the same ID and job name sets the wrapper's restart flag. It reuses that directory and skips staging and decompression. A new job ID starts a separate attempt even when its Gaussian input reads a previous checkpoint.
+
+On reaching postprocessing, the job applies its output rules and normally removes the run directory after copying. A copy message is printed before the copy succeeds. In the default Gaussian regex path, the copy loop runs in a pipeline. With default Bash behaviour, the loop's `cleanup=false` on error does not reach the parent performing cleanup. Follow-up should verify each needed artifact at the destination and check the verified run directory if a copy is missing. Report an unavailable artifact if neither location holds it.
+
+The preparation script discovers a tool installation and sources its site configuration. The submission script loads shared shell functions and embeds checkpoint names from the Gaussian input in its generated job. The restricted cluster helper must bind these dependencies to trusted installations, validate filenames and checkpoint references, and supply only the configured resource arguments. Agent write access must exclude control files and executable dependencies.
+
+### Evidence from Saga startup and completion logs using Gaussian 16 C.01
+
+On every job the wrapper searches the submission workspace for a checkpoint matching by name. On fresh staging, if it finds a match, it copies the checkpoint into the calculation workspace even when the submitted input never reads it. Determine whether a calculation depends on that checkpoint from the submitted input revision. A fresh calculation can create its own checkpoint. A restart or follow-on calculation that reads an earlier checkpoint requires the file under the expected name and in the required form before Gaussian starts. The Linda script also reads case-insensitive %CHK lines and rejects conflicting names in one input. For each distinct value it tries appending `.chk.gz`, `.chk`, `.fchk.gz`, then `.fchk`, taking the first existing candidate in that lookup. Explicit file lists or configured transfer rules may also select a checkpoint. Its preflight uses `unfchk` on formatted checkpoints after decompression when the wrapper's restart flag is off. The flag describes a wrapper path and should not be inferred solely from whether a chemistry input reads a checkpoint.
+
+The submission wrapper prints job-name and checkpoint-search messages, then the Slurm receipt `Submitted batch job <id>`. Record that numeric ID with the cluster and attempt as soon as the receipt arrives. It confirms acceptance. The current queue state requires a separate status check. When the workspace log becomes available, use only records matching that job ID, since successive attempts can reuse an input name. If the connection drops before the receipt is captured, keep the submission outcome uncertain and reconcile before any retry.
+
+| Evidence in the workspace log | Interpretation for follow-up |
+|---|---|
+| `Starting job <id>`, `JobName:` and `Work space:` | The start record identifies the running job and its calculation directory. Slurm's later `WorkDir=` identifies the submission directory. This example starts after the job leaves the queue. |
+| `Running Gaussian` and a launch line naming the input and output, with no later entries yet | Report that the matching job started and the wrapper reached Gaussian launch. Look for the named `.out` in the verified run directory for progress. A missing or empty output at launch leaves progress unknown. The launch line is descriptive log text. |
+| Gaussian module load and an input update before launch | The wrapper reports setting processor count and memory in the run copy of the input. Preserve the approved submission revision when comparing it with the input copied back. |
+| `Checking normal termination` followed by the output filename and `normally terminated` | The wrapper found normal Gaussian termination. Inspect the corresponding output for optimization convergence and any requested frequency or mode checks. |
+| Checkpoint formatting and individual copy-back messages | In this run the wrapper reported copying the input, output, compressed formatted checkpoint and `.fort.7`. It reported removing the binary checkpoint after formatting. Use the artifacts actually available when assessing a possible restart. |
+| Slurm snapshot `JobState=RUNNING`, followed by accounting text `Job exited normally.` and `Job <id> completed at ...` | The snapshot was taken before the final accounting summary. Match the attempt ID and use the later terminal evidence. Earlier module, striping and missing optional-file messages also occur in this successful example. |
+| `JOB <id> ... CANCELLED AT ...` followed by `Job was cancelled.` | Record the matching attempt as cancelled. In the observed manual cancellation, copy-back was skipped. The top-level task row shows exit status 0, the batch row shows signal 15, and the final accounting line still says `completed at`. That timestamp records the end of accounting for the job. The explicit cancellation supplies the outcome. Signal 15 alone does not establish who stopped the job or why. |
+
+After a user cancellation, stop automatic retries and await a new instruction before another submission. If the user wants to inspect partial progress, look in the verified run directory for this attempt and report which files are available. The log alone does not establish how far the chemistry progressed.

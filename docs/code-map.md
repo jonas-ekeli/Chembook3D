@@ -719,6 +719,12 @@ Routes for all of these are in `api/pathway.py`.
 
 ## SSH servers such as Saga (D122, A69)
 
+- Agent job follow-up (D266, FR-SSH-18): `check_server_job` in `mcp_tools.py` calls
+  `api/server_files.py` with the Slurm ID and an optional submission folder or wrapper log.
+  `parsers/saga_job.py` interprets the UiBKvant wrapper evidence. The route uses the keeper's
+  existing scoped reads and the same Gaussian inspection as the file summary. Tests in
+  `tests/test_saga_job.py` and `tests/test_remote.py` exercise the parser and MCP-to-SSH path.
+
 ### Keeper and login
 
 - `remote/servers.py` keeps the saved servers in `remote/servers.json` in the config folder (Saga first, nothing secret).
