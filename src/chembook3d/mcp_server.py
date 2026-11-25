@@ -123,7 +123,10 @@ Rules:
   between two structures (whatever their atom order; a side may be a sum of species) and,
   with a TS, whether it links two minima along its imaginary mode; group_structures sorts
   many into isomers, conformers and duplicates. They change nothing; import with
-  import_folder after showing the user the plan.
+  import_folder after showing the user the plan. In a playground, propose_mechanism writes
+  the edges with a confidence (A184) and evidence each, open for the user to review, and
+  places nodes in steps and groups; then call tidy_canvas. Never accept your own proposals;
+  list_proposals gives those still open (D264).
 - Papers and supporting information (D232): read_pdf reads a PDF on this computer, the user's
   or one a web fetch saved. In a long SI, `find` a compound's label first, then read those
   `pages`; `images` shows up to 4 pages as pictures (structures, schemes, tables) and `region`

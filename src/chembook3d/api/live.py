@@ -51,7 +51,7 @@ from chembook3d.models import (
     Turnover,
 )
 from chembook3d.services import branches as branch_service
-from chembook3d.services import calculation_removal, history, import_undo, node_merge
+from chembook3d.services import calculation_removal, history, import_undo, node_merge, proposals
 from chembook3d.services import groups as group_service
 from chembook3d.services import nodes as node_service
 from chembook3d.services import species as species_service
@@ -872,6 +872,15 @@ def _own_replace(session: Session, params: dict[str, Any], made: Autonomy) -> bo
     return made.owns(*(c["id"] for c in offer["removes"]))
 
 
+def _own_merge(session: Session, params: dict[str, Any], made: Autonomy) -> bool:
+    """D264c: in a playground, two nodes Claude made itself, with all that is theirs (their
+    calculations, notes and edges, as when they are deleted) and changed by nobody else since,
+    merge without asking. Everywhere else a merge always asks (D262i)."""
+    if not proposals.in_playground(session):
+        return False
+    return _own_nodes(session, made, [params["node_id"], params["into_id"]])
+
+
 def _own(param: str) -> Callable[[Session, dict[str, Any], Autonomy], bool]:
     """A record that takes nothing else with it."""
     return lambda _session, params, made: made.owns(params[param])
@@ -949,12 +958,14 @@ ACTIONS: dict[str, Action] = {
     "remove_calculation": Action(
         "DELETE", "/api/calculations/{calculation_id}", _describe_removal, own=_own_removal
     ),
-    # D262i: a merge always asks, whoever made the nodes.
+    # D262i: a merge asks, whoever made the nodes, except two of Claude's own in a playground
+    # while it works on its own (D264c).
     "merge_nodes": Action(
         "POST",
         "/api/nodes/{node_id}/merge/{into_id}",
         _describe_merge,
         lambda p: {k: p[k] for k in ("pairs", "branch", "anyway") if k in p},
+        own=_own_merge,
     ),
     "replace_with_local_result": Action(
         "POST", "/api/local/jobs/{job_id}/replace", _describe_replace, own=_own_replace

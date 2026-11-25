@@ -72,6 +72,8 @@ NOT_OFFERED = re.compile(
     # D213: installing the local tools and setting their cores and memory (PUT) are the
     # settings' own; reading their state is get_local_tools (D222)
     r"|local/tools(/install|/gxtb|/mace)?"
+    # D264: the review of Claude's proposed edges is the user's; Claude never accepts its own
+    r"|transitions/(accept-high|[^/]+/(accept|reject|fix))"
     r"|presence(/.*)?|shutdown)$"  # D107: tabs coming and going, and the Shut down button
 )
 

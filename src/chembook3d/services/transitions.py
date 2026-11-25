@@ -32,7 +32,7 @@ def side_value(field: str, value: Any) -> str:
 
 
 def snapshot(transition: Transition) -> dict[str, Any]:
-    return {
+    found = {
         "source_id": transition.source_id,
         "target_id": transition.target_id,
         "status": transition.status,
@@ -42,6 +42,14 @@ def snapshot(transition: Transition) -> dict[str, Any]:
             for e in transition.species
         ],
     }
+    if transition.review is not None:
+        # D264: a proposed edge's confidence and evidence stay in the history.
+        found |= {
+            "confidence": transition.confidence,
+            "evidence": transition.evidence,
+            "review": transition.review,
+        }
+    return found
 
 
 def endpoint(session: Session, record_id: str) -> Endpoint:
@@ -130,7 +138,11 @@ def _is_end(node_column, group_column, end: Endpoint):
     return node_column == end.id if isinstance(end, Node) else group_column == end.id
 
 
-def create(session: Session, fields: dict[str, Any]) -> Transition:
+def create(
+    session: Session, fields: dict[str, Any], proposal: dict[str, Any] | None = None
+) -> Transition:
+    """`proposal`: the confidence and evidence of an edge Claude proposes (D264,
+    `services/proposals.py`), written with it so its create entry keeps them."""
     source_id, target_id = fields.get("source_id"), fields.get("target_id")
     if not isinstance(source_id, str) or not isinstance(target_id, str):
         raise RecordError("A transition needs a source and a target")
@@ -156,6 +168,7 @@ def create(session: Session, fields: dict[str, Any]) -> Transition:
         notes=text_value("notes", fields.get("notes", "")),
         source_side=side_value("source_side", fields.get("source_side", "right")),
         target_side=side_value("target_side", fields.get("target_side", "left")),
+        **(proposal or {}),
     )
     if isinstance(source, Node):
         transition.source_node_id = source.id

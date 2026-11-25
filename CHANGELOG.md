@@ -6,6 +6,13 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Edges Claude proposes carry a confidence and evidence until you accept them (D264): in a playground
+  `propose_mechanism` writes many edges at once, each high, medium or low (A184) with what settled it,
+  and puts nodes in steps and groups. Each open proposal has a badge on its arrow; the edge's panel shows
+  the evidence with Accept, Fix… (move one end), Reject and Accept all high; "To review" in the canvas
+  bar and the Filters shows only the open proposals and their nodes. The playground's merge review warns
+  about proposals still open, without blocking. In a playground, while Claude works on its own, it merges
+  two nodes it made itself without asking. Migration 0039.
 - Claude can build a mechanism from a folder of outputs (D263): `survey_folder` reads every output
   in it without importing (per job step the level, energy, G and imaginary frequencies; files ending on
   the same geometry; restarts; what is imported already), `compare_structures` says which bonds form

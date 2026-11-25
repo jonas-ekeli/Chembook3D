@@ -229,6 +229,107 @@ function TransitionSpeciesSection({
 }
 
 /** FR-EDGE-01…03: a transition's ends, status and notes; direct connections say "no TS". */
+/** D264b: an edge Claude proposed: its confidence and evidence, and the user's Accept, Fix
+ * (move one end to another node) and Reject, with Accept all high for the whole canvas. */
+function ProposalSection({
+  transition,
+  canvas,
+  onChanged,
+  onRejected,
+}: {
+  transition: Transition
+  canvas: Canvas
+  onChanged: () => void
+  onRejected: () => void
+}) {
+  const [fixing, setFixing] = useState(false)
+  const [end, setEnd] = useState<'source' | 'target'>('target')
+  const [to, setTo] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  if (!transition.review) return null
+  const open = transition.review === 'open'
+  const confidence = transition.confidence ?? 'low'
+  const high = canvas.transitions.filter((t) => t.review === 'open' && t.confidence === 'high').length
+  const run = (done: Promise<unknown>, then: () => void) =>
+    done.then(then, (err: unknown) => setError(errorText(err)))
+  const kept = end === 'source' ? transition.target_id : transition.source_id
+  const current = end === 'source' ? transition.source_id : transition.target_id
+  const choices = [
+    ...canvas.nodes.filter((n) => n.kind !== 'species').map((n) => ({ id: n.id, label: nodeName(n) })),
+    ...canvas.groups.map((g) => ({ id: g.id, label: `${g.label || 'Group'} (group)` })),
+  ].filter((c) => c.id !== kept && c.id !== current)
+  return (
+    <section className="proposal-review" aria-label="Proposed by Claude">
+      <h3>
+        Proposed by Claude{' '}
+        <span className={`chip proposal proposal-${confidence}`} title={`${confidence} confidence (A184)`}>
+          {confidence}
+        </span>{' '}
+        <span className="muted small">{open ? 'to review' : 'accepted'}</span>
+      </h3>
+      <p className="evidence" aria-label="Evidence">
+        {transition.evidence || 'No evidence given.'}
+      </p>
+      {open && (
+        <div className="buttons">
+          <button className="primary small" onClick={() => run(api.acceptProposal(transition.id), onChanged)}>
+            Accept
+          </button>
+          <button className="small" aria-expanded={fixing} onClick={() => setFixing(!fixing)}>
+            Fix…
+          </button>
+          <button className="danger small" onClick={() => run(api.rejectProposal(transition.id), onRejected)}>
+            Reject
+          </button>
+          {high > 0 && (
+            <button className="small" onClick={() => run(api.acceptHighProposals(), onChanged)}>
+              Accept all high ({high})
+            </button>
+          )}
+        </div>
+      )}
+      {open && fixing && (
+        <div className="fields" role="group" aria-label="Fix the edge">
+          <label className="field">
+            <span>End</span>
+            <select value={end} onChange={(event) => setEnd(event.target.value as 'source' | 'target')}>
+              <option value="source">Start</option>
+              <option value="target">End</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Move to</span>
+            <select value={to} onChange={(event) => setTo(event.target.value)}>
+              <option value="">Choose a node…</option>
+              {choices.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="buttons">
+            <button
+              className="small"
+              disabled={!to}
+              onClick={() =>
+                run(api.fixProposal(transition.id, end, to), () => {
+                  setFixing(false)
+                  setTo('')
+                  onChanged()
+                })
+              }
+            >
+              Move the {end === 'source' ? 'start' : 'end'}
+            </button>
+          </div>
+        </div>
+      )}
+      {error && <p role="alert">{error}</p>}
+    </section>
+  )
+}
+
 export function TransitionInspector({
   transition,
   canvas,
@@ -292,6 +393,7 @@ export function TransitionInspector({
         )}
         {transition.cross_branch && <span>Between branches (interconversion)</span>}
       </div>
+      <ProposalSection transition={transition} canvas={canvas} onChanged={onChanged} onRejected={onDeleted} />
       <section className="fields">
         <StatusField value={transition.status} onChange={(status) => update({ status })} />
         <SideField

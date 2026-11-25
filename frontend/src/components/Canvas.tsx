@@ -51,6 +51,7 @@ import {
   speciesChip,
   STATUS_LABEL,
   type Canvas as CanvasData,
+  type Confidence,
   type Group,
   type GroupLayout,
   type Node,
@@ -231,10 +232,14 @@ type TransitionData = {
   /** D121: the scan paths run on the edge, and the chip that stands for them. */
   scanPaths: PathOnEdge[]
   paths: { text: string; title: string; missed: boolean } | null
+  /** D264: an open proposal of Claude's on the line and its confidence, shown as a badge. */
+  proposal: { id: string; confidence: Confidence } | null
 }
 
 /** D121: what clicking an edge's scan path chip does (the edge's id). */
 const PathChipClick = createContext<((transitionId: string) => void) | null>(null)
+/** D264: a proposal's badge selects its edge, whose panel has the review. */
+const ProposalClick = createContext<((transitionId: string) => void) | null>(null)
 
 /** D184: what a right-click on the canvas was on: a node card, a group, an arrow, the
  * selection's box, or the empty canvas (with the canvas position under the pointer). */
@@ -623,6 +628,7 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
   }
   const placer = useLabelPlacer()
   const onPaths = useContext(PathChipClick)
+  const onProposal = useContext(ProposalClick)
   const label = useRef<HTMLDivElement>(null)
   const placement = useSyncExternalStore(placer.subscribe, () => placer.get(id))
   // Hand the line and the label's size to the placer after every render; it places again
@@ -670,6 +676,19 @@ function TransitionEdge(props: EdgeProps<Edge<TransitionData>>) {
           style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, zIndex: level || undefined }}
         >
           <EdgePill data={data} />
+          {data.proposal && (
+            <button
+              className={`chip proposal proposal-${data.proposal.confidence} nodrag nopan`}
+              title={`Proposed by Claude, ${data.proposal.confidence} confidence: review it`}
+              aria-label={`Review the proposed edge (${data.proposal.confidence} confidence)`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onProposal?.(data.proposal!.id)
+              }}
+            >
+              {data.proposal.confidence}
+            </button>
+          )}
           {data.ids.length > 1 && (
             <span className="edge-count" title="Parallel transitions between these two boxes; filter by branch to see each">
               {data.ids.length} edges
@@ -897,14 +916,22 @@ function CanvasView({
       statuses: new Set(filters.statuses),
       steps: new Set(filters.steps),
     }
+    // D264b: "To review" shows only Claude's open proposals and the nodes and groups they join.
+    const reviewEnds = filters.review
+      ? new Set(data.transitions.filter((t) => t.review === 'open').flatMap((t) => [t.source_id, t.target_id]))
+      : null
+    const edgeShown = (t: Transition) => !hidden.statuses.has(t.status) && (!reviewEnds || t.review === 'open')
     const nodeShown = (n: Node) =>
       !hidden.branches.has(n.branch_id ?? 'none') &&
       !hidden.statuses.has(n.status) &&
-      !hidden.steps.has(n.step_id ?? 'none')
+      !hidden.steps.has(n.step_id ?? 'none') &&
+      (!reviewEnds || reviewEnds.has(n.id) || (!!n.group_id && reviewEnds.has(n.group_id)))
     const groupShown = (g: Group) => {
       const branches = [...g.incoming_branch_ids, ...(g.outgoing_branch_id ? [g.outgoing_branch_id] : [])]
       const branchOk = branches.length ? branches.some((b) => !hidden.branches.has(b)) : !hidden.branches.has('none')
-      return branchOk && !hidden.steps.has(g.step_id ?? 'none')
+      const reviewOk =
+        !reviewEnds || reviewEnds.has(g.id) || data.nodes.some((n) => n.group_id === g.id && reviewEnds.has(n.id))
+      return branchOk && !hidden.steps.has(g.step_id ?? 'none') && reviewOk
     }
     const byId = new Map(data.nodes.map((n) => [n.id, n]))
     const notesOf = (id: string) => notesByNode.get(id) ?? NO_NOTES
@@ -1201,7 +1228,7 @@ function CanvasView({
       }
       const sides = new Map<string, { side: 'left' | 'right'; at: number }>()
       for (const t of data.transitions) {
-        if (hidden.statuses.has(t.status)) continue
+        if (!edgeShown(t)) continue
         if (outside.has(t.source_id) && drawnAs.has(t.target_id))
           sides.set(t.source_id, { side: 'left', at: middle(drawnAs.get(t.target_id)!) })
         else if (outside.has(t.target_id) && drawnAs.has(t.source_id) && !sides.has(t.target_id))
@@ -1263,7 +1290,7 @@ function CanvasView({
       }
     }
     for (const t of data.transitions) {
-      if (hidden.statuses.has(t.status)) continue
+      if (!edgeShown(t)) continue
       const source = drawnAs.get(t.source_id)
       const target = drawnAs.get(t.target_id)
       if (!source || !target || source === target) continue
@@ -1287,6 +1314,7 @@ function CanvasView({
         merged.faded &&= FADED_STATUSES.has(t.status)
         for (const s of speciesChips(t)) if (!merged.species.some((x) => x.text === s.text)) merged.species.push(s)
         merged.scanPaths.push(...(t.scan_paths ?? []))
+        if (t.review === 'open') merged.proposal ??= { id: t.id, confidence: t.confidence ?? 'low' }
         merged.warnings.push(...t.warnings.map((w) => `${w.code}: ${w.message}`))
         same.ariaLabel = `${merged.ids.length} transitions`
         same.markerEnd = { type: MarkerType.ArrowClosed, color: merged.colour, width: 16, height: 16 }
@@ -1317,6 +1345,7 @@ function CanvasView({
           warnings: t.warnings.map((w) => `${w.code}: ${w.message}`),
           scanPaths: [...(t.scan_paths ?? [])],
           paths: null,
+          proposal: t.review === 'open' ? { id: t.id, confidence: t.confidence ?? 'low' } : null,
         },
       }
       between.set(`${source}>${target}`, drawn)
@@ -1713,6 +1742,7 @@ function CanvasView({
     if (node.type === 'csub') onOpenSub?.(node.id)
   })
   const onEdgeClick = useStable((_: MouseEvent, edge: Edge) => onSelect({ kind: 'edge', id: edge.id }))
+  const proposalClick = useStable((id: string) => onSelect({ kind: 'edge', id }))
   const onPaneClick = useStable(() => onSelect(null))
   const onNodeContextMenu = useStable((event: MouseEvent, node: FlowNode) => {
     if (node.type === 'stub') return event.preventDefault()
@@ -1781,6 +1811,7 @@ function CanvasView({
       }}
     >
       <PathChipClick.Provider value={pathChipClick}>
+      <ProposalClick.Provider value={proposalClick}>
       <ReactFlow
         nodes={nodes}
         edges={flowEdges}
@@ -1869,6 +1900,7 @@ function CanvasView({
           </div>
         )}
       </ReactFlow>
+      </ProposalClick.Provider>
       </PathChipClick.Provider>
       {tools && createPortal(canvasTools, tools)}
     </div>

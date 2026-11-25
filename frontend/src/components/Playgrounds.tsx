@@ -400,6 +400,13 @@ export function MergePlaygroundDialog({
         . Removals are not ticked unless you tick them. Merging saves a copy of {review.original_name} in its backups
         folder first; afterwards the playground can be opened but not changed.
       </p>
+      {!!review.warnings?.length && (
+        <ul className="warnings" aria-label="Before merging">
+          {review.warnings.map((w) => (
+            <li key={w}>{w}. Review them on the playground's canvas (To review), or merge them as they are.</li>
+          ))}
+        </ul>
+      )}
       {changes.length === 0 && <p className="muted">The playground has no changes to merge.</p>}
       {review.sections.map((section) => (
         <Fragment key={section.key}>
