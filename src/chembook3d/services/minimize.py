@@ -66,6 +66,8 @@ LINE = 179.0  # degrees: an angle this straight is held by the distance across i
 PLACED_SCALE = 0.2  # of the restraints' constants, for the angles and torsions of a placed ligand
 STEPS = 2000
 ROUNDS = 5  # STEPS each, until converged
+SETTLED = 0.1  # kcal/mol/Å: the largest force left on an atom when Minimize has converged
+STILL = 1e-5  # kcal/mol: or the energy a round still took off (forces at a restraint's kink)
 
 RDLogger.DisableLog("rdApp.*")
 
@@ -400,7 +402,13 @@ def minimize(
                 ff.AddFixedPoint(i)
         converged = False
         for _ in range(ROUNDS):
-            if ff.Minimize(maxIts=STEPS) == 0:
+            # RDKit's BFGS also stops "converged" when its line search stalls with the forces
+            # still large, and the next Minimize then moves on (D145): go on until the forces
+            # are gone or a round no longer lowers the energy.
+            before = ff.CalcEnergy()
+            if ff.Minimize(maxIts=STEPS) == 0 and (
+                max(map(abs, ff.CalcGrad())) < SETTLED or before - ff.CalcEnergy() < STILL
+            ):
                 converged = True
                 break
         for i, p in enumerate(np.array(ff.Positions(), dtype=float).reshape(-1, 3)):

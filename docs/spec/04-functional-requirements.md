@@ -48,6 +48,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-NODE-06 | Composition (formula) is derived from the coordinates and is not editable separately. | P12 | 1 |
 | FR-NODE-07 | The user can set a node's status to planned, running externally, done, failed, rejected or superseded. | D19 | 1 |
 | FR-NODE-08 | The user can add and remove free tags. The system tag `optimization-incomplete` can be removed by the user, and the removal is recorded in history. | D26 | 1 |
+| FR-NODE-09 | The user can merge two nodes, or two free species, holding the same molecule: the calculations, edges and records of one move onto the other, with atoms matched when they are numbered differently, after a preview, as one change that can be undone. | D262 | after 5 |
 
 **AC:**
 - Paste valid 3-atom xyz into a new node: it saves, and 3D shows 3 atoms.
