@@ -132,6 +132,8 @@ def test_both_ends_of_the_mode_are_relaxed_and_matched(open_client, tmp_path):
     outputs = tmp_path / "outputs"
     outputs.mkdir()
     (outputs / "a.log").write_text(g.output(g.step("#P B3LYP/6-31G(d) SP", [shifted(0.5)])))
+    # A second job on the same structure (a single point at another level) is the same one.
+    (outputs / "a_sp.log").write_text(g.output(g.step("#P PBE0/def2TZVP SP", [shifted(0.5)])))
 
     before = len(open_client.get(f"/api/nodes/{ts_id}/calculations").json())
     done = follow(open_client, ts_id, folder=str(outputs))
@@ -158,7 +160,8 @@ def test_both_ends_of_the_mode_are_relaxed_and_matched(open_client, tmp_path):
     assert [m["node_id"] for m in plus["matches"]] == [a_id]
     assert [m["node_id"] for m in minus["matches"]] == [b_id]
     assert plus["matches"][0]["rmsd"] < 0.5
-    assert [f["path"] for f in plus["files"]] == ["a.log"] and minus["files"] == []
+    assert sorted(f["path"] for f in plus["files"]) == ["a.log", "a_sp.log"]
+    assert len({f["structure"] for f in plus["files"]}) == 1 and minus["files"] == []
     assert matched["outcome"] == "links" and matched["confidence"] == "high"
     assert matched["verdict"] == "Followed the mode of “TS”: links “A” and “B”"
 

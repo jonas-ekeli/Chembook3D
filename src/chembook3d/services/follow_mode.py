@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from chembook3d import local_jobs, xyz
 from chembook3d.models import Node, Role, Status
-from chembook3d.services import folder_survey
+from chembook3d.services import folder_survey, thermo_settings
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
 from chembook3d.services.geometry import Rows
@@ -114,16 +114,35 @@ def _node_candidates(session: Session, exclude: str | None) -> list[_Candidate]:
     return out
 
 
-def _file_candidates(folder: Path, investigation: Path) -> list[_Candidate]:
-    return [
-        _Candidate(
-            final.rows,
-            final.charge,
-            final.multiplicity,
-            {"path": final.path, "step": final.step, "formula": _formula(final.rows)},
+def _file_candidates(folder: Path, investigation: Path, tolerance: float) -> list[_Candidate]:
+    """The folder's final structures. Files ending on one structure (an optimization and the
+    single point on it, a restart) share a `structure` number, so an end matching them all
+    matches one structure."""
+    out: list[_Candidate] = []
+    kept: list[_Candidate] = []  # one per structure
+    for final in folder_survey.final_structures(folder, True, investigation):
+        entry = {"path": final.path, "step": final.step, "formula": _formula(final.rows)}
+        candidate = _Candidate(final.rows, final.charge, final.multiplicity, entry).prepared()
+        same = next(
+            (
+                k
+                for k in kept
+                if k.entry["formula"] == entry["formula"]
+                and _compatible(k, final.charge, final.multiplicity)
+                and compare.same_structure(
+                    k.rows, final.rows, tolerance, (k.print_, candidate.print_)
+                )
+                is not None
+            ),
+            None,
         )
-        for final in folder_survey.final_structures(folder, True, investigation)
-    ]
+        if same is None:
+            entry["structure"] = len(kept) + 1
+            kept.append(candidate)
+        else:
+            entry["structure"] = same.entry["structure"]
+        out.append(candidate)
+    return out
 
 
 @dataclass
@@ -180,7 +199,7 @@ def _structures(matches: list[dict[str, Any]], files: list[dict[str, Any]]) -> l
     """The distinct structures an end matches, as keys: its nodes, else its files."""
     if matches:
         return [f"node:{m['node_id']}" for m in matches]
-    return [f"file:{f['path']}" for f in files]
+    return list(dict.fromkeys(f"file:{f['structure']}" for f in files))
 
 
 def _name(match: dict[str, Any]) -> str:
@@ -261,7 +280,9 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
     where = found.follow.get("folder")
     if where:
         try:
-            files = _file_candidates(Path(where), folder)
+            files = _file_candidates(
+                Path(where), folder, thermo_settings.settings(session).duplicate_tolerance
+            )
         except Exception as exc:  # noqa: BLE001 - a folder gone or unreadable is said
             notes.append(f"The folder {where} could not be read: {exc}")
     made = found.job.get("made") or {}
