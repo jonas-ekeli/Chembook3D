@@ -6,6 +6,9 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- An optimization at a level a node already has can replace the node's geometry at that level
+  (D260), when picked in the import dialog or in Local jobs and confirmed; a derived node stays the
+  default. What it replaces, and what sits on that, is removed (D259).
 - One calculation can be removed from its node (D259): Remove… in its record, after a confirm that
   lists the frequency jobs and single points sitting on it, which go with it. Claude asks for it with
   `remove_calculation`.

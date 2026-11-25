@@ -724,6 +724,43 @@ export function ImportDialog({
                 </fieldset>
               )}
 
+              {plan.replace && (
+                <fieldset aria-label="Same level">
+                  <legend>
+                    Step {plan.replace.step} at {plan.replace.level_label}, which the node already has
+                  </legend>
+                  <label className="check">
+                    <input type="radio" name="replace" checked={!plan.replace.chosen} onChange={() => change({ replace: false })} />
+                    <span>Keep it apart, on a derived node (suggested)</span>
+                  </label>
+                  <label className="check">
+                    <input type="radio" name="replace" checked={plan.replace.chosen} onChange={() => change({ replace: true })} />
+                    <span>
+                      Replace the node’s {plan.replace.level_label} geometry
+                      {plan.replace.node_geometry ? '; the node’s coordinates move to it' : ''}
+                    </span>
+                  </label>
+                  {plan.replace.chosen && (
+                    <>
+                      <p className="small">Removed for good on Import:</p>
+                      <ul className="small" aria-label="Calculations replaced">
+                        {plan.replace.removes.map((c) => (
+                          <li key={c.id}>
+                            the {c.type.replace('_', ' ')} at {c.level ?? 'an unknown level'}
+                            {c.file && <span className="muted"> ({c.file})</span>}
+                          </li>
+                        ))}
+                      </ul>
+                      {plan.replace.blockers.map((b) => (
+                        <p key={b} className="small cloud-job-problem" role="alert">
+                          {b}
+                        </p>
+                      ))}
+                    </>
+                  )}
+                </fieldset>
+              )}
+
               {plan.derived_offered && (
                 <label className="check">
                   <input

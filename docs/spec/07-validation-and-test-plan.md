@@ -232,6 +232,9 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-IMP-75 | Open an investigation saved before D255 | The repair links each single point and frequency job once as the rule read it; no label or energy changes (D255) |
 | T-IMP-76 | A DFT free species with an xTB optimization beside it and a single point at each geometry: preview, then remove the xTB optimization (D259) | The preview lists the single point at the xTB geometry and the two xTB files and changes nothing; the removal takes both, keeps the DFT calculations, the other single point and the coordinates, removes the two copies and adds one history entry |
 | T-IMP-77 | Remove the frequency step of an opt+freq file, then the optimization, each asked by Claude; remove another species' optimization with its frequency step (D259) | Each waits for the user's confirm with a summary naming what goes; the file's copy stays for the optimization and goes with it; the node keeps its coordinates; the optimization takes its frequency step along |
+| T-IMP-78 | A DFT free species with an xTB optimization beside it and a single point there; a second xTB file from another structure, previewed, then committed with replace (D260) | The plan offers Replace, unchosen, with a derived node; chosen, the steps attach to the node with a REPLACE warning; the old optimization and its single point and their copies go, the new one is beside the DFT geometry, and the history has the removal |
+| T-IMP-79 | A canvas node's own DFT geometry replaced by a DFT file from elsewhere; a species whose xTB optimization ended on its DFT geometry, then a replacing DFT file (D260) | The canvas node's optimization and frequency job go and its coordinates move to the new ones, with no warning; the species' replace is blocked by the xTB optimization and the commit is refused |
+| T-IMP-80 | Local refines with replace: at a new level, then from a structure at that level, confirmed through replace_with_local_result, then again with Derived node (D260) | The first imports beside as usual; the second waits with its replace_offer and imports nothing until the user confirms, then replaces the old stub geometry; asking again is refused; the third goes to a derived node |
 
 ## 6. Energy tests
 
@@ -633,6 +636,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-111 | A free species' ⋯ menu: Refine geometry… and Single point on this computer… (D246g) | Each opens its dialog |
 | T-UI-112 | Refine geometry… with Start from a pasted structure, first with the atoms in another order (D258) | The wrong order is named and Start stays off; the good structure runs, Local jobs says "from a structure" and the result is imported onto the node |
 | T-UI-113 | Remove… in a refined node's optimization record (D259) | The dialog lists the optimization and the frequency job on it and says the copy goes; after Remove the node has no calculations and the history has the removal |
+| T-UI-114 | Refine geometry… from a pasted structure with "offer to replace" on a refined node; Replace… in Local jobs (D260) | The finished job waits with its choice; the confirm lists the optimization and says the coordinates move; after Replace the node has the new coordinates and one calculation |
 
 ### Sub-investigations (D193)
 

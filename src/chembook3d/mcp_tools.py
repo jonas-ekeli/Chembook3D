@@ -1086,6 +1086,7 @@ TOOLS: list[ToolSpec] = [
         "Recompute a staged import's plan with options (target node, step, duplicate handling, "
         "custom basis and dispersion names, label, role, status, conformers).",
         help=IMPORT_HELP,
+        exclude=("replace",),  # D260: only the user picks Replace, in the app
     ),
     T(
         "commit_import",
@@ -1095,6 +1096,7 @@ TOOLS: list[ToolSpec] = [
         "Import a staged file with the options of the last preview; answers with the node and "
         "calculation ids created.",
         help=IMPORT_HELP,
+        exclude=("replace",),  # D260: only the user picks Replace, in the app
     ),
     T(
         "cancel_import",
@@ -1612,7 +1614,10 @@ TOOLS: list[ToolSpec] = [
         "POST",
         "/api/local/jobs/{job_id}/import",
         "Import a finished local job's result onto the node it was started from. The app does "
-        "this by itself while it is open; use it when that failed and the user asks.",
+        "this by itself while it is open; use it when that failed and the user asks. For a "
+        "job waiting with a replace_offer (D260), derived true makes a derived node; to "
+        "replace, use "
+        "replace_with_local_result.",
     ),
     T(
         "import_scan_path",
@@ -1853,6 +1858,10 @@ CONFIRM_DESCRIPTIONS = {
     "single points run at its geometry. The node keeps its coordinates and its other "
     "calculations; a copied file nothing else comes from goes too. Permanent, like "
     "delete_node; to take back a whole imported file, use undo_import.",
+    "replace_with_local_result": "Import a finished local job's result onto its node, "
+    "replacing the node's geometry at the job's level (D260): the job's replace_offer lists "
+    "the optimizations there and the calculations sitting on them, which are removed for good; "
+    "when the node's own coordinates came from that level they move to the result.",
     "delete_note": "Delete a note pinned to a node.",
     "delete_selectivity": "Delete a saved selectivity.",
     "delete_turnover": "Delete a saved turnover.",

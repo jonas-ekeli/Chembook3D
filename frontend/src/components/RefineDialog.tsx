@@ -79,6 +79,8 @@ export function RefineDialog({
   const [geometries, setGeometries] = useState<NodeGeometry[]>([])
   const [startFrom, setStartFrom] = useState('node')
   const [startXyz, setStartXyz] = useState('')
+  // D260: a result at a level the node has elsewhere may replace that geometry, once confirmed.
+  const [replace, setReplace] = useState(false)
   const own = useMemo(() => (node.xyz ? parseXyz(node.xyz) : []), [node.xyz])
   const fromXyz = startFrom === 'xyz'
   const startAtoms = useMemo(() => (fromXyz ? parseXyz(startXyz) : null), [fromXyz, startXyz])
@@ -186,6 +188,7 @@ export function RefineDialog({
         scan: scanRead && 'value' in scanRead ? scanRead.value : null,
         start_geometry_of: startFrom !== 'node' && !fromXyz ? startFrom : null,
         xyz: fromXyz ? startXyz : null,
+        replace: replace && !scanning,
       })
       .then(
         (job) => {
@@ -367,6 +370,17 @@ export function RefineDialog({
             multiplicity={stateValid ? multiplicityValue : null}
             onChange={chooseCore}
           />
+        )}
+        {node.calculation_count > 0 && !scanning && (
+          <label className="check">
+            <input
+              type="checkbox"
+              aria-label="Offer to replace the geometry at this level"
+              checked={replace}
+              onChange={(event) => setReplace(event.target.checked)}
+            />
+            If the node has this level at another geometry, offer to replace it instead of a derived node
+          </label>
         )}
         <fieldset className="refine-scan" aria-label="Scan">
           <legend>Scan</legend>

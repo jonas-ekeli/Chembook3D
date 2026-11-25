@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import AfterValidator, BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, object_session
 
@@ -404,6 +404,9 @@ class ImportOptionsIn(BaseModel):
     duplicate_node_id: str | None = None
     create_derived: bool = True
     beside: bool | None = None  # D246
+    # D260: replace the node's geometry at the file's level; Claude's tools leave it out, so
+    # only the user picks it in the import dialog
+    replace: bool = False
     basis_names: dict[str, str] = Field(default_factory=dict)
     dispersion_names: dict[str, str] = Field(default_factory=dict)
     label: str | None = None
@@ -1297,6 +1300,19 @@ def put_settings(body: SettingsIn, request: Request):
 # ---------- import (FR-IMP, FR-FILE) ----------
 
 
+def remove_after_commit(session: Session, folder: Path, stored: list[str]) -> None:
+    """D102, D259: remove stored copies once the transaction that removed their records has
+    committed."""
+    if not stored:
+        return
+
+    def remove(_session: Session) -> None:
+        for path in stored:
+            import_undo.remove_copy(folder, path)
+
+    event.listen(session, "after_commit", remove, once=True)
+
+
 def _options(body: ImportOptionsIn | None) -> imports.ImportOptions:
     return imports.ImportOptions(**body.model_dump()) if body else imports.ImportOptions()
 
@@ -1368,6 +1384,7 @@ def commit_import(token: str, body: ImportOptionsIn, request: Request, session: 
         raise HTTPException(422, str(exc)) from exc
     session.flush()
     _staging(request).discard(token)
+    remove_after_commit(session, _investigation(request).folder, result.removed_copies)
     return ImportCommitOut(
         node_id=result.node_id,
         derived_node_id=result.derived_node_id,

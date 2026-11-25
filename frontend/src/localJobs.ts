@@ -74,7 +74,8 @@ export function progressText(job: LocalJob): string | null {
 }
 
 export function awaitingLocalImport(job: LocalJob): boolean {
-  return job.importable && !job.import_error
+  // D260: one waiting for the user's choice between Replace and a derived node is not imported by itself
+  return job.importable && !job.import_error && !job.awaiting_choice
 }
 
 /** D213: the open investigation's local jobs, read every few seconds while one is starting,

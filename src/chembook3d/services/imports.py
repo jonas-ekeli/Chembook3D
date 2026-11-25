@@ -51,7 +51,14 @@ from chembook3d.models import (
 )
 from chembook3d.parsers import cml, crest, gaussian, joined, local_result, orca, xtb
 from chembook3d.parsers.common import NOT_STATIONARY, ParsedFile, ParsedStep
-from chembook3d.services import geometry, history, levels, spin, thermo_settings
+from chembook3d.services import (
+    calculation_removal,
+    geometry,
+    history,
+    levels,
+    spin,
+    thermo_settings,
+)
 from chembook3d.services import groups as group_service
 from chembook3d.services import nodes as node_service
 from chembook3d.services.warnings import OPTIMIZATION_INCOMPLETE
@@ -265,6 +272,9 @@ class ImportOptions:
     # D246: add an optimization at another level beside the node's geometry (True), or
     # continue it / make a derived node (False); None takes the plan's default.
     beside: bool | None = None
+    # D260: replace the node's geometry at the file's level (the optimizations there and the
+    # calculations sitting on them go) instead of making a derived node; asked in the app.
+    replace: bool = False
     basis_names: dict[str, str] = field(default_factory=dict)  # definition key → name
     dispersion_names: dict[str, str] = field(default_factory=dict)
     # D104: the basis set for steps whose file names none (ChkBasis from another job's
@@ -378,6 +388,11 @@ class Plan:
     # node's geometry: {step, level_label, default, chosen, alternative ("continue" or
     # "derived": what happens without it)}.
     beside: dict[str, Any] | None = None
+    # D260: the file's optimization ends elsewhere at a level the node already has: it can
+    # replace the node's geometry at that level, {step, level_label, calculation_ids (the
+    # optimizations replaced), removes (they and what sits on them, calculation_removal),
+    # files, node_geometry (the node's own coordinates move), blockers, chosen}.
+    replace: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -694,6 +709,73 @@ def _beside(
     }
 
 
+def _last_free_optimization(
+    steps: list[ParsedStep], chosen_rows: list[Any], tolerance: float
+) -> ParsedStep | None:
+    return next(
+        (
+            s
+            for s in reversed(steps)
+            if s.job_type in OPTIMIZATION_TYPES
+            and not s.constrained
+            and geometry.matches(_rows(s.final_geometry), chosen_rows, tolerance)
+        ),
+        None,
+    )
+
+
+def _replace(
+    session: Session,
+    target: Node,
+    steps: list[ParsedStep],
+    resolved: dict[int, _Resolved],
+    chosen_rows: list[Any],
+    options: ImportOptions,
+    tolerance: float,
+) -> dict[str, Any] | None:
+    """D260: the file's optimization ends elsewhere at a level the node already has (which
+    would give a derived node, D246 f): what replacing the node's geometry at that level would
+    remove. The optimizations at that level go with every calculation sitting on them (D259).
+    When the node's own geometry is one of theirs, its coordinates move to the file's; any other
+    calculation still at an old geometry (or with no coordinates, at the node's, A15) blocks it,
+    since it would be left on a geometry the node no longer holds."""
+    step = _last_free_optimization(steps, chosen_rows, tolerance)
+    if step is None or resolved[step.index].identity is None:
+        return None
+    identity = resolved[step.index].identity
+    old = [c for c in levels.optimizations(target) if levels.fields_of(c.level) == identity]
+    if not old:
+        return None
+    removal = calculation_removal.plan_many(session, old)
+    gone = {c.id for c in removal.all}
+    node_geometry = any(geometry.matches(c.geometry, target.geometry, tolerance) for c in old)
+    blockers = []
+    for calculation in target.calculations:
+        if calculation.id in gone:
+            continue
+        at_old = (
+            any(geometry.matches(calculation.geometry, c.geometry, tolerance) for c in old)
+            if calculation.geometry
+            else node_geometry
+        )
+        if at_old:
+            blockers.append(
+                f"The {calculation.type.replace('_', ' ')} at "
+                f"{levels.label(calculation.level) or 'an unknown level'} is still at the "
+                f"geometry replaced and would be left without it; remove it first (D260)"
+            )
+    return {
+        "step": step.index,
+        "level_label": _level_label(resolved[step.index].fields, step),
+        "calculation_ids": [c.id for c in old],
+        "removes": [calculation_removal.describe(c) for c in removal.all],
+        "files": [f.original_name for f in removal.files],
+        "node_geometry": node_geometry,
+        "blockers": blockers,
+        "chosen": bool(options.replace),
+    }
+
+
 def _levels_on(target: Node) -> list[dict[str, str] | None]:
     """The levels of the node's free optimizations (D157)."""
     return [levels.fields_of(c.level) for c in levels.optimizations(target)]
@@ -900,6 +982,7 @@ def _plan_steps(
     resolved = {s.index: _resolve_level(session, staged.parsed.program, s, options) for s in steps}
     continues_from = None
     beside = None
+    replace = None
     # D246: the node's other geometries, where its optimizations at other levels ended (added
     # beside its geometry, or its pre-optimizations); steps on any of them attach to the node.
     # D253: by the shared rule, so on a node without optimizations its frequency jobs' (D204).
@@ -941,6 +1024,34 @@ def _plan_steps(
         ):
             # D246: the node already has this level at another geometry: a derived node.
             continues_from = None
+        if continues_from is None and not (beside is not None and beside["chosen"]):
+            # D260: or, when asked, it replaces the node's geometry at that level.
+            replace = _replace(session, target, steps, resolved, chosen_rows, options, tolerance)
+        if replace is not None and replace["chosen"]:
+            if replace["blockers"]:
+                blockers.extend(replace["blockers"])
+            elif replace["node_geometry"]:
+                node_rows = chosen_rows
+            else:
+                others.append(chosen_rows)
+            gone = ", ".join(
+                f"the {c['type'].replace('_', ' ')} at {c['level']}" for c in replace["removes"]
+            )
+            warnings.append(
+                {
+                    "code": "REPLACE",
+                    "message": (
+                        f"Step {replace['step']} replaces the {replace['level_label']} geometry "
+                        f"of '{target.label}'"
+                        + (
+                            "; the node's coordinates move to it"
+                            if replace["node_geometry"]
+                            else ""
+                        )
+                        + f". Removed for good: {gone} (D260)."
+                    ),
+                }
+            )
     if continues_from is not None:
         node_rows = chosen_rows
         warnings.append(
@@ -958,6 +1069,7 @@ def _plan_steps(
         elsewhere
         and not geometry.matches(chosen_rows, node_rows, tolerance)
         and not (beside is not None and beside["chosen"])
+        and not (replace is not None and replace["chosen"] and not replace["blockers"])
     )
     if derived_offered:
         warnings.append(
@@ -1213,6 +1325,7 @@ def _plan_steps(
         blockers=blockers,
         continues_from=continues_from,
         beside=beside,
+        replace=replace,
     )
 
 
@@ -1748,6 +1861,9 @@ class CommitResult:
     calculation_ids: list[str]
     source_file_id: str
     group_id: str | None = None  # the group a CREST ensemble was imported as
+    # D260: the stored copies of files a Replace removed, for the caller to delete once the
+    # transaction has committed (import_undo.remove_copy)
+    removed_copies: list[str] = field(default_factory=list)
 
 
 _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -1908,6 +2024,15 @@ def commit(
         session.add(source)
 
         target = session.get(Node, plan_.target_node_id) if plan_.target_node_id else None
+        removed_copies: list[str] = []
+        replacing = plan_.replace is not None and plan_.replace["chosen"]
+        if replacing and target is not None:
+            # D260: the replaced optimizations and what sits on them go first, so the history
+            # has their removal before the import's own entries (import_undo reads those).
+            removal = calculation_removal.plan_many(
+                session, [session.get(Calculation, i) for i in plan_.replace["calculation_ids"]]
+            )
+            removed_copies = calculation_removal.apply(session, removal)
         if plan_.mode == "new":
             node = _new_node(session, fields, chosen_rows, chosen, None)
         elif plan_.mode == "planned":
@@ -1921,6 +2046,8 @@ def commit(
             node = target
             if options.status is not None:
                 _set(session, node, "status", options.status)
+            if replacing and plan_.replace["node_geometry"]:
+                _set(session, node, "geometry", chosen_rows)  # D260; the history keeps the old
             if plan_.continues_from is not None:
                 _set(session, node, "geometry", chosen_rows)  # D100; the history keeps the old
                 if all(
@@ -1982,6 +2109,7 @@ def commit(
         derived_node_id=derived.id if derived else None,
         calculation_ids=calculation_ids,
         source_file_id=source_id,
+        removed_copies=removed_copies,
     )
 
 

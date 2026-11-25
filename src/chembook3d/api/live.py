@@ -17,6 +17,7 @@ import uuid
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -796,6 +797,46 @@ def _own_removal(session: Session, params: dict[str, Any], made: Autonomy) -> bo
     return made.owns(*(c.id for c in found.all))
 
 
+def _replace_offer(session: Session, params: dict[str, Any]) -> tuple[dict[str, Any], dict]:
+    """D260: a local job waiting for the user's choice, and what replacing would remove."""
+    from chembook3d import local_jobs
+
+    folder = Path(str(session.get_bind().url.database)).parent
+    try:
+        job = local_jobs.read_job(folder, params["job_id"])
+    except local_jobs.LocalJobError as exc:
+        raise RecordError(str(exc)) from exc
+    offer = job.get("replace_offer")
+    if not offer or job.get("imported"):
+        raise RecordError(
+            "This job's result is waiting for no choice: only a job started with replace whose "
+            "result would replace a geometry can be imported this way"
+        )
+    return job, offer
+
+
+def _describe_replace(session: Session, params: dict[str, Any]) -> str:
+    job, offer = _replace_offer(session, params)
+    gone = _listing(
+        [
+            f"the {c['type'].replace('_', ' ')} at {c['level'] or 'an unknown level'}"
+            for c in offer["removes"]
+        ]
+    )
+    text = (
+        f"Replace the {offer['level_label']} geometry of “{job['node_label']}” with the result of "
+        f"local job {job['id']}, removing {gone}"
+    )
+    if offer["node_geometry"]:
+        text += "; the node's coordinates move to the result"
+    return text
+
+
+def _own_replace(session: Session, params: dict[str, Any], made: Autonomy) -> bool:
+    _job, offer = _replace_offer(session, params)
+    return made.owns(*(c["id"] for c in offer["removes"]))
+
+
 def _own(param: str) -> Callable[[Session, dict[str, Any], Autonomy], bool]:
     """A record that takes nothing else with it."""
     return lambda _session, params, made: made.owns(params[param])
@@ -872,6 +913,9 @@ ACTIONS: dict[str, Action] = {
     "undo_import": Action("POST", "/api/history/{entry_id}/undo", _describe_undo, own=_own_undo),
     "remove_calculation": Action(
         "DELETE", "/api/calculations/{calculation_id}", _describe_removal, own=_own_removal
+    ),
+    "replace_with_local_result": Action(
+        "POST", "/api/local/jobs/{job_id}/replace", _describe_replace, own=_own_replace
     ),
     "delete_alignment_set": Action(
         "DELETE",

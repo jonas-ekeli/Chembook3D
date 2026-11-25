@@ -356,6 +356,7 @@ def create_job(
     scan: dict[str, Any] | None = None,
     limit: int | None = None,
     start: Start | None = None,
+    replace: bool = False,
 ) -> dict[str, Any]:
     """Start a job. `limit` (seconds, D223) refuses one whose estimate is longer: the longest
     job Claude may start while it works on its own. D258: `start` runs it from another
@@ -430,6 +431,10 @@ def create_job(
         }
         if start is not None:
             job["start"] = start.described  # D258: where the job started, for the list
+        if replace and not scan:
+            # D260: a result at a level the node has at another geometry may replace it, once
+            # the user confirms; until then it waits instead of going to a derived node.
+            job["replace"] = True
         if history.SOURCE.get() != "manual":
             job["started_by"] = history.SOURCE.get()  # D223: "claude"
         if layers:
@@ -808,6 +813,8 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
         if (result.get("ts_check") or {}).get("end", {}).get("mode"):
             out["result"]["final_xyz"] = _xyz(result)  # D217: to animate the checked mode
     out["importable"] = status in ("converged", "not_converged") and not job.get("imported")
+    # D260: waiting for the user's choice between Replace and a derived node
+    out["awaiting_choice"] = bool(out["importable"] and job.get("replace_offer"))
     return out
 
 
@@ -1047,7 +1054,9 @@ def _running(pid: int) -> bool:
 # ---------- importing the result ----------
 
 
-def import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
+def import_result(
+    session: Session, folder: Path, job_id: str, replace: bool | None = None
+) -> dict[str, Any]:
     """Import a finished job's result. D223: whoever asks for the import (the page does, by
     itself), what a job Claude started brings in is Claude's in the history, as the job was."""
     by = history.SOURCE.get()
@@ -1058,12 +1067,17 @@ def import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any]
     token = history.SOURCE.set(by)
     try:
         with _importing:
-            return _import_result(session, folder, job_id)
+            return _import_result(session, folder, job_id, replace)
     finally:
         history.SOURCE.reset(token)
 
 
-def _import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
+def _import_result(
+    session: Session, folder: Path, job_id: str, replace: bool | None = None
+) -> dict[str, Any]:
+    """D260: `replace` True replaces the node's geometry at the job's level (the caller has
+    the user's confirm), False makes a derived node as usual; None does as the job asked: a
+    job started with replace waits for the user's choice when its result would replace."""
     status = job_status(folder, job_id)
     if status.get("imported"):
         raise LocalJobError("This job's result is imported already")
@@ -1111,11 +1125,18 @@ def _import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any
             target_node_id=node.id,
             origin_path=str(path),
             original_name=name,
+            replace=bool(replace),
         )
     staging = imports.Staging()
     try:
         device = platform.node() or "this computer"
         staged = staging.add(path.read_bytes(), name, str(path), device=device)
+        if replace is None and job.get("replace"):
+            offer = imports.plan(session, staged, options).replace
+            if offer is not None:
+                # D260: the user picks Replace (confirmed) or a derived node in Local jobs.
+                update_job(folder, job_id, replace_offer=offer, import_error=None)
+                return job_status(folder, job_id)
         try:
             committed = imports.commit(session, folder, staged, options)
         except (imports.ImportBlocked, imports.ImportFailed) as exc:
@@ -1129,13 +1150,29 @@ def _import_result(session: Session, folder: Path, job_id: str) -> dict[str, Any
         "calculation_ids": list(committed.calculation_ids),
         "at": _now(),
     }
-    update_job(folder, job_id, imported=imported, import_error=None)
+    if committed.removed_copies:
+        imported["replaced"] = True
+        _remove_after_commit(session, folder, committed.removed_copies)
+    update_job(folder, job_id, imported=imported, import_error=None, replace_offer=None)
     try:
         result = json.loads(path.read_text(encoding="utf-8"))
         calibrate(result, read_job(folder, job_id))
     except (OSError, ValueError):
         pass
     return {**job_status(folder, job_id), "imported": imported}
+
+
+def _remove_after_commit(session: Session, folder: Path, stored: list[str]) -> None:
+    """D260: the copies of files a Replace removed go once its transaction has committed."""
+    from sqlalchemy import event
+
+    from chembook3d.services import import_undo
+
+    def remove(_session: Session) -> None:
+        for directory in stored:
+            import_undo.remove_copy(folder, directory)
+
+    event.listen(session, "after_commit", remove, once=True)
 
 
 # ---------- D238: a TS guess between two minima ----------
