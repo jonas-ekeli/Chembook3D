@@ -205,7 +205,6 @@ def _node_dict(node: Node) -> dict[str, Any]:
         "label": node.label,
         "kind": node.kind,
         "role": node.role,
-        "xyz": node.geometry,
     }
 
 
