@@ -1225,6 +1225,32 @@ TOOLS: list[ToolSpec] = [
         },
     ),
     T(
+        "propose_mechanism",
+        "write",
+        "POST",
+        "/api/mechanism/propose",
+        "Propose the edges of a mechanism in one call, in a playground only (D264): each edge "
+        "with its confidence and the evidence that settled it, shown to the user as a badge on "
+        "the canvas until they Accept, Fix or Reject it; you never accept your own. "
+        "Confidence (A184): high from an IRC or a mode-follow whose two ends each match one "
+        "structure; medium from the bond check along the mode alone; low from names only or a "
+        "gap filled with a MACE guess (D265). Link a TS to the minima on each side; join two "
+        "minima only for a step without a TS on purpose; two TSs are refused. An edge already "
+        "there in the same direction is updated and opened again, not made twice. Optionally "
+        "put nodes in reaction steps and conformers in groups, by name (made when missing); no "
+        "branch is made or changed. All or nothing. The canvas is not laid out: call "
+        "tidy_canvas next.",
+    ),
+    T(
+        "list_proposals",
+        "read",
+        "GET",
+        "/api/proposals",
+        "The edges you proposed that the user has not accepted yet (D264), with their "
+        "confidence and evidence, and how many are open per confidence: for your summary and "
+        "its review list.",
+    ),
+    T(
         "read_pdf",
         "read",
         "GET",
@@ -1965,7 +1991,8 @@ CONFIRM_DESCRIPTIONS = {
     "energy's calculations count and the other's are set aside. Refused for different "
     "molecules, a TS with a minimum, or a mirror image; warned (pass anyway once the user has "
     "seen it) for a real bond change or geometries apart at one level. See preview_node_merge "
-    "first; pairs, branch and anyway are as there.",
+    "first; pairs, branch and anyway are as there. In a playground, while you work on your "
+    "own, two nodes you made yourself and nobody changed since merge without asking (D264c).",
     "replace_with_local_result": "Import a finished local job's result onto its node, "
     "replacing the node's geometry at the job's level (D260): the job's replace_offer lists "
     "the optimizations there and the calculations sitting on them, which are removed for good; "

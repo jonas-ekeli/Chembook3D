@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { expect, test } from '@playwright/test'
-import { E2E_DIR, startPage } from './helpers.ts'
+import { canvasNode, E2E_DIR, pressInView, startPage } from './helpers.ts'
 
 // D235, T-UI-100: New playground… on a recent row makes a working copy and opens it with the
 // playground band; Sync and Cloud jobs are gone there; the start page lists it under its original.
@@ -293,4 +293,95 @@ test('a playground is made its own investigation', async ({ page }) => {
   await expect(recent.getByRole('button', { name: `Playground 1, playground of ${name}` })).toHaveCount(0)
   await expect(recent.getByRole('listitem').filter({ hasText: study }).first()).toBeVisible()
   await expect(recent.getByRole('listitem').filter({ hasText: name }).first()).toBeVisible()
+})
+
+// D264, T-UI-118: edges Claude proposes in a playground carry a badge by confidence; the edge's
+// panel shows the evidence with Accept, Fix and Reject and Accept all high; "To review" shows
+// only the open proposals and their nodes; the merge review warns about those still open.
+
+test("Claude's proposed edges are reviewed on the canvas", async ({ page }) => {
+  const stamp = Date.now()
+  const folder = join(E2E_DIR, `proposals-${stamp}`)
+  const name = `Proposals ${stamp}`
+  expect((await page.request.post('/api/investigations', { data: { folder, name } })).ok()).toBeTruthy()
+  expect((await page.request.post('/api/playgrounds', { data: { folder } })).ok()).toBeTruthy()
+  const claude = { 'X-Chembook-Client': 'claude' }
+  const ids: Record<string, string> = {}
+  const nodes: [string, string][] = [['R', 'minimum'], ['TS', 'transition_state'], ['P', 'minimum'], ['Q', 'minimum'], ['S', 'minimum']]
+  for (const [i, [label, role]] of nodes.entries()) {
+    const made = await page.request.post('/api/nodes', { data: { label, role, pos_x: 280 * i, pos_y: 120 }, headers: claude })
+    ids[label] = (await made.json()).id
+  }
+  const edge = (from: string, to: string, confidence: string, evidence: string) => ({
+    source_id: ids[from],
+    target_id: ids[to],
+    confidence,
+    evidence,
+  })
+  const proposed = await page.request.post('/api/mechanism/propose', {
+    data: {
+      edges: [
+        edge('R', 'TS', 'high', 'IRC reverse end matches R (RMSD 0.03 Å)'),
+        edge('TS', 'P', 'high', 'IRC forward end matches P (RMSD 0.05 Å)'),
+        edge('P', 'Q', 'medium', 'One C–H bond breaks between them'),
+        edge('Q', 'S', 'low', 'names only'),
+      ],
+    },
+    headers: claude,
+  })
+  expect(proposed.ok()).toBeTruthy()
+  await page.goto('/')
+
+  const badges = page.locator('.edge-label button.chip.proposal')
+  await expect(badges).toHaveText(['high', 'high', 'medium', 'low'])
+  await expect(page.getByRole('button', { name: 'To review (4)' })).toBeVisible()
+  const inspector = page.getByLabel('Transition inspector')
+  const review = inspector.getByRole('region', { name: 'Proposed by Claude' })
+
+  // Fix the low one's end, then reject it.
+  await pressInView(page, badges.filter({ hasText: 'low' }))
+  await expect(review.getByLabel('Evidence')).toHaveText('names only')
+  await review.getByRole('button', { name: 'Fix…' }).click()
+  await review.getByRole('combobox', { name: 'End' }).selectOption('target')
+  await review.getByRole('combobox', { name: 'Move to' }).selectOption({ label: 'R' })
+  await review.getByRole('button', { name: 'Move the end' }).click()
+  await expect(review.getByLabel('Evidence')).toContainText('Fixed by the user: target “S” → “R”.')
+  await expect(inspector.locator('.transition-ends')).toHaveText('Q → R')
+  await review.getByRole('button', { name: 'Reject' }).click()
+  await expect(inspector).toHaveCount(0)
+  await expect(badges).toHaveText(['high', 'high', 'medium'])
+
+  // Accept the medium one: its badge goes, the evidence stays.
+  await pressInView(page, badges.filter({ hasText: 'medium' }))
+  await review.getByRole('button', { name: 'Accept', exact: true }).click()
+  await expect(review).toContainText('accepted')
+  await expect(review.getByLabel('Evidence')).toHaveText('One C–H bond breaks between them')
+  await expect(badges).toHaveText(['high', 'high'])
+
+  // To review: only the open proposals and their ends.
+  await page.getByRole('button', { name: 'To review (2)' }).click()
+  for (const label of ['R', 'TS', 'P']) await expect(canvasNode(page, label)).toBeVisible()
+  for (const label of ['Q', 'S']) await expect(canvasNode(page, label)).toHaveCount(0)
+  await page.getByRole('button', { name: 'To review (2)' }).click()
+  await expect(canvasNode(page, 'S')).toBeVisible()
+
+  // Accept all high, from one of them.
+  await pressInView(page, badges.first())
+  await review.getByRole('button', { name: 'Accept all high (2)' }).click()
+  await expect(badges).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^To review/ })).toHaveCount(0)
+
+  // One more, left open: the merge review warns, without blocking.
+  const late = await page.request.post('/api/mechanism/propose', {
+    data: { edges: [edge('P', 'S', 'low', 'names only')] },
+    headers: claude,
+  })
+  expect(late.ok()).toBeTruthy()
+  await expect(badges).toHaveText(['low'])
+  await page.getByRole('note', { name: 'Playground' }).getByRole('button', { name: 'Merge…' }).click()
+  const dialog = page.getByRole('dialog', { name: `Merge Playground 1 into ${name}` })
+  await expect(dialog.getByRole('list', { name: 'Before merging' })).toContainText(
+    '1 proposed edge is still open: high 0, medium 0, low 1',
+  )
+  await expect(dialog.getByRole('button', { name: 'Merge', exact: true })).toBeEnabled()
 })
