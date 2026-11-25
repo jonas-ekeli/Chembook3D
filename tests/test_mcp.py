@@ -55,6 +55,7 @@ NOT_OFFERED = re.compile(
     r"|playgrounds(/.*)?"  # D235: made from the start page or the switch, never by Claude (Q69)
     r"|source-files/[^/]+/(open|download)|imports|note-images(/.*)?|health"
     r"|live|selection$|view-state|confirmations(/.*)?|nodes/[^/]+/delete-preview"
+    r"|calculations/[^/]+/removal"  # D259: what remove_calculation's dialog lists
     r"|groups/[^/]+/delete-preview|sub-investigations/[^/]+/delete-preview|steric-profiles/[^/]+/table\.csv"
     r"|energies/table\.csv|history/[^/]+/undo|turnovers/[^/]+/table\.csv|custom-bases/[^/]+/file"
     r"|page/commands/[^/]+/(claim|report|file)"  # D226: the tab's own side of what Claude asks it

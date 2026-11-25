@@ -230,6 +230,8 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-IMP-73 | Override the basis of an optimization a single point and frequency job are linked to | The links stay; both geometry levels are the new level, the single point's change in the history; no W-LINK (D255, Q80) |
 | T-IMP-74 | A single point at the xTB geometry of a DFT node, its geometry level then set to the DFT level by hand | Linked to the xTB optimization at import; after the edit unlinked, the DFT level counts, W-LINK names the xTB geometry (D255) |
 | T-IMP-75 | Open an investigation saved before D255 | The repair links each single point and frequency job once as the rule read it; no label or energy changes (D255) |
+| T-IMP-76 | A DFT free species with an xTB optimization beside it and a single point at each geometry: preview, then remove the xTB optimization (D259) | The preview lists the single point at the xTB geometry and the two xTB files and changes nothing; the removal takes both, keeps the DFT calculations, the other single point and the coordinates, removes the two copies and adds one history entry |
+| T-IMP-77 | Remove the frequency step of an opt+freq file, then the optimization, each asked by Claude; remove another species' optimization with its frequency step (D259) | Each waits for the user's confirm with a summary naming what goes; the file's copy stays for the optimization and goes with it; the node keeps its coordinates; the optimization takes its frequency step along |
 
 ## 6. Energy tests
 
@@ -630,6 +632,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-110 | Match atoms saves (D243) | In the T-UI-17 window, "Renumber “start” to match “end”" and "Save “start” renumbered": the window closes, a notice says “start” now has the matched atom order, and its coordinates list the end's elements in order, the last glycerol atom first |
 | T-UI-111 | A free species' ⋯ menu: Refine geometry… and Single point on this computer… (D246g) | Each opens its dialog |
 | T-UI-112 | Refine geometry… with Start from a pasted structure, first with the atoms in another order (D258) | The wrong order is named and Start stays off; the good structure runs, Local jobs says "from a structure" and the result is imported onto the node |
+| T-UI-113 | Remove… in a refined node's optimization record (D259) | The dialog lists the optimization and the frequency job on it and says the copy goes; after Remove the node has no calculations and the history has the removal |
 
 ### Sub-investigations (D193)
 

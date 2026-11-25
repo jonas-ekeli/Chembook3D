@@ -68,6 +68,7 @@ _Chembook3D specification pack · v1.1 · 2026-09-29. Each requirement has a sta
 | FR-CALC-07 | Dispersion parameters set by IOp (IOp(3/174–179)) are part of the level only when the route names a dispersion model (EmpiricalDispersion or IOp(3/124)); without one Gaussian adds no dispersion and the level has none. Levels stored the other way by an earlier version are repaired when the investigation is opened. | D203 | 2 |
 | FR-CALC-08 | A node can hold optimized geometries at several levels. An optimization at another level from the node's geometry that ranks lower is added beside it (the node keeps its geometry), a free species takes a new level from elsewhere, and calculations at any of those geometries attach to the node with that geometry level; a local single point can be run at any of them. | D246 | after 5 |
 | FR-CALC-09 | A single point or frequency job stores the calculation whose geometry it is at, read before the geometry level set by hand and the D253 rule; a level override keeps the links and moves a linked single point's geometry level with it, in the history; a contradicting link or hand-set level warns W-LINK. | D255 | 2 |
+| FR-CALC-10 | One calculation can be removed from its node, after a confirm listing the calculations stored as sitting on it, which go with it; the node keeps its coordinates, and a copied file goes once no calculation comes from it | D259 | after 5 |
 
 **AC:**
 - Two calculations differing only in solvent are different levels.

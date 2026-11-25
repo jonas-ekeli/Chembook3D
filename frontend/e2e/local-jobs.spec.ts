@@ -572,3 +572,37 @@ test('a refine starts from a pasted structure', async ({ page }) => {
   const calculations = await (await page.request.get(`/api/nodes/${id}/calculations`)).json()
   expect(calculations).toHaveLength(1)
 })
+
+// T-UI-113, D259: a calculation is removed from its record after a confirm that lists the
+// calculations sitting on it, which go with it.
+test('a calculation is removed with those sitting on it', async ({ page }) => {
+  test.slow()
+  await newInvestigation(page, 'Remove a calculation')
+  const made = await page.request.post('/api/nodes', { data: { label: 'water', xyz: WATER, charge: 0, multiplicity: 1 } })
+  const id = (await made.json()).id
+  const started = await page.request.post('/api/local/jobs', { data: { node_id: id, method: 'stub', frequencies: true } })
+  expect(started.ok()).toBeTruthy()
+  const job = (await started.json()).id
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/local/jobs/${job}`)).json()).status, { timeout: 60_000 })
+    .toBe('converged')
+  expect((await page.request.post(`/api/local/jobs/${job}/import`)).ok()).toBeTruthy()
+  await page.reload()
+
+  await canvasNode(page, 'water').click()
+  const list = page.getByLabel('Node inspector').getByRole('list', { name: 'Calculations' })
+  await expect(list.getByRole('listitem')).toHaveCount(2)
+  await list.getByRole('button', { name: /^Optimization/ }).click()
+  await list.getByRole('button', { name: 'Remove…' }).click()
+  const confirm = page.getByRole('dialog', { name: 'Remove calculation?' })
+  const removed = confirm.getByRole('list', { name: 'Calculations removed' }).getByRole('listitem')
+  await expect(removed).toHaveCount(2)
+  await expect(removed.nth(0)).toContainText('the optimization at')
+  await expect(removed.nth(1)).toContainText('the frequency at')
+  await expect(confirm).toContainText('so its copy goes too')
+  await confirm.getByRole('button', { name: 'Remove', exact: true }).click()
+  await expect(confirm).toHaveCount(0)
+  await expect(page.getByLabel('Node inspector').getByText('No calculations yet.')).toBeVisible()
+  const history = await (await page.request.get('/api/history', { params: { record_id: id } })).json()
+  expect(history.some((e: { action: string }) => e.action === 'remove_calculations')).toBeTruthy()
+})

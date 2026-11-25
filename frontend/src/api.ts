@@ -1288,6 +1288,7 @@ export type HistoryEntry = {
     | 'remove_member'
     | 'dissolve'
     | 'undo_import'
+    | 'remove_calculations'
     | 'undo'
     | 'merge'
     | 'undo_merge'
@@ -2142,6 +2143,16 @@ export type BesidePlan = {
   alternative: 'continue' | 'derived'
 }
 
+/** D259: a calculation to remove, with those sitting on it and the files that go with them. */
+export type RemovedCalculation = { id: string; type: string; level: string | null; file: string | null; step: number | null }
+export type CalculationRemoval = {
+  node_id: string
+  node_label: string
+  calculation: RemovedCalculation
+  linked: RemovedCalculation[]
+  files: string[]
+}
+
 /** D246: one of the optimized geometries a node holds. */
 export type NodeGeometry = {
   calculation_id: string
@@ -2938,6 +2949,9 @@ export const api = {
   cancelBatch: (token: string) => request<void>('DELETE', `/batch-imports/${token}`),
 
   calculations: (nodeId: string) => request<Calculation[]>('GET', `/nodes/${nodeId}/calculations`),
+  /** D259: what removing a calculation takes with it, and the removal itself */
+  calculationRemoval: (id: string) => request<CalculationRemoval>('GET', `/calculations/${id}/removal`),
+  removeCalculation: (id: string) => request<CalculationRemoval>('DELETE', `/calculations/${id}`),
   /** D246: the optimized geometries a node holds, its own first. */
   nodeGeometries: (nodeId: string) => request<NodeGeometry[]>('GET', `/nodes/${nodeId}/geometries`),
   updateCalculation: (

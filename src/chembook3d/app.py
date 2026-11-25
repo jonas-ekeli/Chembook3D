@@ -18,6 +18,7 @@ from chembook3d import __version__, cloud_jobs, local_tools
 from chembook3d.api.batch_imports import router as batch_router
 from chembook3d.api.builder import router as builder_router
 from chembook3d.api.builds import Builds
+from chembook3d.api.calculation_removal import router as removal_router
 from chembook3d.api.claude import Panel
 from chembook3d.api.claude import router as claude_router
 from chembook3d.api.crystals import router as crystals_router
@@ -188,6 +189,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(router)
     app.include_router(batch_router)
     app.include_router(undo_router)
+    app.include_router(removal_router)
     app.include_router(pathway_router)
     app.include_router(energy_router)
     app.include_router(energy_profile_router)  # D190

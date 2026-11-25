@@ -135,6 +135,12 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 - Routes `GET`/`POST /api/history/{entry_id}/undo` in `api/import_undo.py`. The preview runs in a rolled-back session; the stored copies are removed after the commit.
 - `HistoryOut.undo` says which entries can be undone; `components/UndoImportDialog.tsx`; the MCP confirm action `undo_import` (one file only).
 
+## Removing one calculation (D259)
+
+- `services/calculation_removal.py`: `plan` follows `geometry_source_id` (D255) from the calculation to everything sitting on it and finds the files nothing else comes from; `apply` deletes them, writes one `remove_calculations` entry on the node and returns the copies to remove after the commit.
+- Routes in `api/calculation_removal.py`: `GET /api/calculations/{id}/removal` (preview) and `DELETE /api/calculations/{id}`; the MCP confirm action `remove_calculation` (`api/live.py`).
+- `CalculationList.tsx` `RemoveCalculation` (Remove… in the record), `HistoryList.tsx` `describeRemoval`.
+
 ## Download file names
 
 - Download file names built from the user's text (node, basis set, investigation) all go through `api/downloads.py` (`file_name`, `attachment`) and its mirror `fileName` in `frontend/src/util.ts`.
