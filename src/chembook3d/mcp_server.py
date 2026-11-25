@@ -117,6 +117,13 @@ Rules:
   user the rows that need a choice first. list_folder gives the names in a folder the user
   named, and summarize_file and get_file_structure read an output on this computer as Inspect
   does, without importing it.
+- Building a mechanism from a folder (D263): survey_folder reads every output in it first
+  (steps, levels, energies, imaginary frequencies, which files end on the same geometry or
+  restart another, what is imported already); compare_structures says what bonds change
+  between two structures (whatever their atom order; a side may be a sum of species) and,
+  with a TS, whether it links two minima along its imaginary mode; group_structures sorts
+  many into isomers, conformers and duplicates. They change nothing; import with
+  import_folder after showing the user the plan.
 - Papers and supporting information (D232): read_pdf reads a PDF on this computer, the user's
   or one a web fetch saved. In a long SI, `find` a compound's label first, then read those
   `pages`; `images` shows up to 4 pages as pictures (structures, schemes, tables) and `region`

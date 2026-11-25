@@ -6,6 +6,13 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Claude can build a mechanism from a folder of outputs (D263): `survey_folder` reads every output
+  in it without importing (per job step the level, energy, G and imaginary frequencies; files ending on
+  the same geometry; restarts; what is imported already), `compare_structures` says which bonds form
+  and break between two structures whatever their atom order (a side may be a sum of species) and
+  whether a TS links two minima along its imaginary mode (A184), and `group_structures` sorts many
+  into isomers, conformers and duplicates. The import's duplicate check no longer depends on atom
+  order: a duplicate numbered otherwise is attached in the node's numbering.
 - A minimum's imaginary mode from a local GFN2-xTB, g-xTB or MACE-OMOL-0 frequency job can be fixed on
   this computer (D261): Fix imaginary mode in the frequency calculation tries the structure pushed both
   ways along the mode, keeps the lower try without an imaginary mode, and offers to replace the

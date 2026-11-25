@@ -53,6 +53,7 @@ RADII = {
 DEFAULT_RADIUS = 1.5
 BOND_SCALE = 1.2
 MIN_DISTANCE = 0.4  # Å; closer atoms are not bonded but overlapping
+OUTER_SCALE = 1.5  # A181: a bond beyond 1.5 × the covalent radii is really broken
 
 ROUNDS = 4  # label rounds: an anchor's surroundings agree up to this many bonds out
 NEIGHBOUR_PENALTY = 5.0  # Å² per neighbour that would not stay a neighbour
@@ -438,6 +439,58 @@ def match(
         same_numbering=same,
         doubts=doubts,
     )
+
+
+Pairs = list[tuple[int, int]]
+
+
+def changes(start: Rows, end: Rows, mapping: list[int] | None = None) -> tuple[Pairs, Pairs]:
+    """Bonds (start's numbering, by the 3D view's rule) formed and broken from the start to the
+    end, the end's atom `mapping[i]` taken as the start's atom i (None: the same numbering)."""
+    p = _coords(start)
+    q = _coords(end)
+    if mapping is not None:
+        q = q[mapping]
+    elements = [row[0] for row in start]
+    a, b = bonds(p, elements), bonds(q, elements)
+    formed = np.argwhere(np.triu(b & ~a))
+    broken = np.argwhere(np.triu(a & ~b))
+    return [tuple(map(int, x)) for x in formed], [tuple(map(int, x)) for x in broken]
+
+
+def split_changes(
+    start: Rows,
+    end: Rows,
+    mapping: list[int] | None,
+    formed: Pairs,
+    broken: Pairs,
+) -> tuple[Pairs, Pairs, Pairs, Pairs]:
+    """A181: the bonds formed and broken (start's numbering) that really are, within 1.2 × the
+    covalent radii in one geometry and beyond 1.5 × in the other, and the weak ones between
+    the two, such as a metal–olefin contact that lengthens at another level: (real formed,
+    real broken, weak formed, weak broken)."""
+    p = _coords(start)
+    q = _coords(end)
+    if mapping is not None:
+        q = q[mapping]
+    radii = np.array([RADII.get(row[0], DEFAULT_RADIUS) for row in start])
+
+    def far(x: np.ndarray, i: int, j: int) -> bool:
+        return float(np.linalg.norm(x[i] - x[j])) > OUTER_SCALE * (radii[i] + radii[j])
+
+    real_formed = [(i, j) for i, j in formed if far(p, i, j)]  # bonded in the end, far before
+    real_broken = [(i, j) for i, j in broken if far(q, i, j)]  # bonded before, far in the end
+    weak_formed = [pair for pair in formed if pair not in real_formed]
+    weak_broken = [pair for pair in broken if pair not in real_broken]
+    return real_formed, real_broken, weak_formed, weak_broken
+
+
+def real_changes(start: Rows, end: Rows, result: Match) -> tuple[Pairs, Pairs]:
+    """A181: the bonds Match atoms found formed or broken (start's numbering) that really are:
+    within 1.2 × the covalent radii in one geometry and beyond 1.5 × in the other. One between
+    the two, such as a metal–olefin contact that lengthens at another level, is weak."""
+    formed, broken, _, _ = split_changes(start, end, result.mapping, result.formed, result.broken)
+    return formed, broken
 
 
 def renumbered(start: Rows, end: Rows, mapping: list[int]) -> Rows:

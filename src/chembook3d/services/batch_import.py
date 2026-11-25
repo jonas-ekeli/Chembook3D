@@ -728,7 +728,9 @@ def run(
                         closest = plan_.duplicates[0]
                         blocker = (
                             f"Possible duplicate of “{closest['label']}” (RMSD "
-                            f"{closest['rmsd']:.3f} Å): attach it there or make a new node"
+                            f"{closest['rmsd']:.3f} Å"
+                            + (", its atoms numbered otherwise" if closest["renumbered"] else "")
+                            + "): attach it there or make a new node"
                         )
                     blockers.append(blocker)
                 if target is None and plan_.mode != "new":
@@ -819,7 +821,11 @@ def run(
                 derived=bool(plan_ and plan_.derived_offered),
                 candidates=[{"node_id": n.id, "label": n.label} for n in candidates],
                 duplicates=[
-                    {**(describe(d["node_id"], d["label"]) or {}), "rmsd": d["rmsd"]}
+                    {
+                        **(describe(d["node_id"], d["label"]) or {}),
+                        "rmsd": d["rmsd"],
+                        "renumbered": d["renumbered"],
+                    }
                     for d in (plan_.duplicates if plan_ else [])
                 ],
                 duplicate_action=chosen.duplicate_action,
