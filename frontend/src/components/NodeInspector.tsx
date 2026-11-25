@@ -159,6 +159,7 @@ export function NodeInspector({
   servers = [],
   onIrc,
   onRefine,
+  onMerge,
   onFixMode,
   onSinglePoint,
   onEditStructure,
@@ -188,6 +189,8 @@ export function NodeInspector({
   servers?: RemoteServer[]
   /** D131: open the node's IRC window. */
   onIrc?: () => void
+  /** D262: merge another free species into this one */
+  onMerge?: () => void
   /** D213: Refine geometry… on this computer */
   onRefine?: () => void
   /** D261: a "Fix imaginary mode" job started from one of the node's frequency jobs */
@@ -399,6 +402,14 @@ export function NodeInspector({
       icon: 'flask',
       title: 'The energy of the structure as it is, with Psi4 on this computer (D240)',
       onSelect: onSinglePoint,
+    })
+  }
+  if (isSpecies && onMerge && node.atom_count > 0) {
+    moreItems.push({
+      label: 'Merge another species into this one…',
+      icon: 'layers',
+      title: 'The other free species dissolves into this one; its calculations move onto it (D262)',
+      onSelect: onMerge,
     })
   }
   if (!isSpecies) {

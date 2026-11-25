@@ -148,7 +148,8 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 - `services/atom_maps.py`: reordering per-atom data (`reordered`, `modes`, `mode_check`, `constraint_text`, `compose`), and `mapped_step`, through which `trajectory.read_steps` and `irc._read_step` read a merged calculation's file. Columns (migration 0038): `Calculation.atom_map`, `merged_from`, `set_aside`.
 - Set aside (D262d): `energies.set_aside_at`, `energies.counted` in `NodeEnergies.energy`, `counterpoise`, `frequency_jobs`, `optimization_at`; `thermo_source` takes the frequency job only from the energy's own node; `levels.geometry_at_level` prefers geometries not set aside.
 - Routes in `api/node_merge.py`: `POST /api/nodes/{id}/merge-preview` (MCP read tool `preview_node_merge`) and `POST /api/nodes/{id}/merge/{into_id}` (409 with the reasons when refused or warned without `anyway`); the MCP confirm action `merge_nodes` (`api/live.py` `_describe_merge`, always asks). `CalculationOut.merged_from`, `renumbered`, `set_aside`.
-- Tests: `tests/test_node_merge.py` (T-ID-12 to T-ID-15).
+- Frontend: `components/MergeNodesDialog.tsx` (the window: direction and Swap, refusals, the `AtomMatchReview` when numbered otherwise, warnings with Merge anyway, RMSDs, the shared levels table, the branch choice, what changes; a free species picks the other from `candidates`), opened by the selection's Merge… (`panelActions.ts` `merge`, `PathwayInspectors.tsx` `onMerge`) and a free species' "Merge another species into this one…" (`NodeInspector.tsx`, App's `nodeItems`); App's `nodeMerge` state. `api.ts` `previewNodeMerge`, `mergeNodes`, `MergePreview`; `CalculationList.tsx` badges "from “A”" and "set aside".
+- Tests: `tests/test_node_merge.py` (T-ID-12 to T-ID-15), `e2e/atom-match.spec.ts` (T-UI-116).
 
 ## Download file names
 

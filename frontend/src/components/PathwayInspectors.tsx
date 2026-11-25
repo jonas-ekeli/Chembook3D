@@ -1116,6 +1116,7 @@ export function SelectionInspector({
   onSinglePoint,
   onSettings,
   onRenumbered,
+  onMerge,
   asked,
 }: {
   nodes: Node[]
@@ -1137,6 +1138,8 @@ export function SelectionInspector({
   onEquilibrium: () => void
   /** D184: an action asked from the selection's right-click menu or the palette. */
   asked?: Request | null
+  /** D262: merge the second selected node into the first. */
+  onMerge?: (nodes: [Node, Node]) => void
 }) {
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -1168,6 +1171,7 @@ export function SelectionInspector({
     else if (key === 'create-group') setCreating(true)
     else if (key === 'overlay') setOverlay(true)
     else if (key === 'match') setMatching(true)
+    else if (key === 'merge') onMerge?.([nodes[0], nodes[1]])
     else if (key === 'scan-path') setScanning(true)
     else if (key === 'ts-guess') setGuessing(true)
     else if (key === 'single-point') onSinglePoint?.(singlePointNodes(nodes, groups, canvas).map((n) => n.id))

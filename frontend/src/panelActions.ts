@@ -48,7 +48,7 @@ export function groupActions(group: Group, canvas: Canvas): PanelAction[] {
 }
 
 /** The selection's actions, in the panel's order: add to a group selected with the nodes (A20),
- * create a group (WF-07), overlay (FR-3D-04), match atoms (D113), scan path (D114), TS guess
+ * create a group (WF-07), overlay (FR-3D-04), match atoms (D113), merge (D262), scan path (D114), TS guess
  * (D238), single points (D240), compare sterics (D81), selectivity (D83) and conformer
  * equilibrium (D171). D184: its right-click menu offers the same. */
 export function selectionActions(nodes: Node[], groups: Group[], canvas: Canvas): PanelAction[] {
@@ -83,6 +83,12 @@ export function selectionActions(nodes: Node[], groups: Group[], canvas: Canvas)
       label: 'Match atoms…',
       disabled: nodes.length !== 2 || groups.length > 0 || nodes.some((n) => !n.xyz),
       title: "Match one structure's atoms to the other's numbering, review it and save it renumbered (D113, D243)",
+    },
+    {
+      key: 'merge',
+      label: 'Merge…',
+      disabled: nodes.length !== 2 || groups.length > 0 || nodes.some((n) => !n.xyz),
+      title: 'Merge two nodes holding the same molecule: one dissolves into the other, its calculations, edges and records moving onto it (D262)',
     },
     {
       key: 'scan-path',
