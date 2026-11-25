@@ -42,6 +42,7 @@ from chembook3d.api.notes import router as note_router
 from chembook3d.api.page import router as page_router
 from chembook3d.api.pathway import router as pathway_router
 from chembook3d.api.playgrounds import router as playground_router
+from chembook3d.api.proposals import router as proposals_router
 from chembook3d.api.remote import router as remote_router
 from chembook3d.api.routes import close_and_push, router
 from chembook3d.api.scan_editor import router as scan_editor_router
@@ -216,6 +217,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(local_files_router)  # D225
     app.include_router(crystals_router)  # D234
     app.include_router(structures_router)  # D263
+    app.include_router(proposals_router)  # D264
     app.include_router(job_router)
     app.include_router(scan_path_router)  # D114
     app.include_router(irc_router)  # D131

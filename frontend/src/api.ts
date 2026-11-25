@@ -129,6 +129,8 @@ export type MergeReview = {
   /** The original's history entries since the playground was made. */
   changed_since: number
   sections: { key: string; title: string; changes: MergeChange[] }[]
+  /** D264b: what to look at first, never a blocker (proposed edges still open). */
+  warnings?: string[]
 }
 
 export type MergeResult = {
@@ -294,7 +296,16 @@ export type Transition = {
   warnings: Finding[]
   /** D121: the scan paths run on this edge. Never the edge's energy (D27, EN-3). */
   scan_paths: PathOnEdge[]
+  /** D264: an edge Claude proposed: its confidence (A184) and what settled it. */
+  confidence: Confidence | null
+  evidence: string
+  /** D264: 'open' until the user accepts it; null for an edge never proposed. */
+  review: 'open' | 'accepted' | null
 }
+
+/** D264, A184: how sure Claude is of an edge it proposed. */
+export type Confidence = 'high' | 'medium' | 'low'
+export const CONFIDENCES: Confidence[] = ['high', 'medium', 'low']
 
 /** D121: a scan path shown on its edge. */
 export type PathOnEdge = {
@@ -3189,6 +3200,12 @@ export const api = {
   updateTransition: (id: string, fields: Partial<Pick<Transition, 'status' | 'notes' | 'source_side' | 'target_side'>>) =>
     request<Transition>('PATCH', `/transitions/${id}`, fields),
   deleteTransition: (id: string) => request<void>('DELETE', `/transitions/${id}`),
+  /** D264: the user's review of an edge Claude proposed. */
+  acceptProposal: (id: string) => request<Transition>('POST', `/transitions/${id}/accept`),
+  acceptHighProposals: () => request<Transition[]>('POST', '/transitions/accept-high'),
+  rejectProposal: (id: string) => request<void>('POST', `/transitions/${id}/reject`),
+  fixProposal: (id: string, end: 'source' | 'target', node_id: string) =>
+    request<Transition>('POST', `/transitions/${id}/fix`, { end, node_id }),
   attachSpecies: (id: string, species_id: string, direction: SpeciesDirection, count: number) =>
     request<Transition>('PUT', `/transitions/${id}/species`, { species_id, direction, count }),
   detachSpecies: (id: string, speciesId: string) =>

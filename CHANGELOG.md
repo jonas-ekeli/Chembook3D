@@ -6,6 +6,13 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Edges Claude proposes carry a confidence and evidence until you accept them (D264): in a playground
+  `propose_mechanism` writes many edges at once, each high, medium or low (A184) with what settled it,
+  and puts nodes in steps and groups. Each open proposal has a badge on its arrow; the edge's panel shows
+  the evidence with Accept, Fix… (move one end), Reject and Accept all high; "To review" in the canvas
+  bar and the Filters shows only the open proposals and their nodes. The playground's merge review warns
+  about proposals still open, without blocking. In a playground, while Claude works on its own, it merges
+  two nodes it made itself without asking. Migration 0039.
 - A transition state's imaginary mode can be followed on this computer (D263c, A184): its frequency
   calculation's structure, at any level, is pushed 0.1 Å both ways along the mode and each end relaxed
   for up to 40 steps with MACE-OMOL-0 or GFN2-xTB. The result is never imported: the ends are matched

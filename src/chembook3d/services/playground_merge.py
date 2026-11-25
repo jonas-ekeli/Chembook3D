@@ -60,7 +60,7 @@ from chembook3d.investigation import (
     acquire_ownership,
 )
 from chembook3d.models import Base, HistoryEntry, utcnow
-from chembook3d.services import energies, history, levels
+from chembook3d.services import energies, history, levels, proposals
 from chembook3d.services.notes import images_in
 
 Key = tuple
@@ -969,9 +969,18 @@ def review(investigation: Investigation, folder: Path) -> dict[str, Any]:
     return _review(merged, found, investigation, since or 0)
 
 
+def proposal_warnings(merged: Plan) -> list[str]:
+    """What the review warns about without blocking the merge: edges Claude proposed in the
+    playground that the user has not accepted yet (D264b)."""
+    rows = merged.play.get("transitions", {}).values()
+    found = proposals.warning(proposals.counts([r for r in rows if r.get("review") == "open"]))
+    return [found] if found else []
+
+
 def _review(merged: Plan, found: Playground, investigation: Investigation, since: int) -> dict:
     info = investigation.info()
     return {
+        "warnings": proposal_warnings(merged),
         "playground": {
             "name": found.name,
             "folder": str(found.folder),
@@ -1402,6 +1411,7 @@ def merge(
             chosen, brought, blockers = _chosen(merged, ticked)
             result: dict[str, Any] = {
                 "counts": _counts(chosen),
+                "warnings": proposal_warnings(merged),
                 "brought": brought,
                 "blockers": blockers,
                 "backup": None,

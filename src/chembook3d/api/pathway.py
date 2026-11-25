@@ -138,6 +138,11 @@ class TransitionOut(BaseModel):
     species: list[TransitionSpeciesOut]  # D69: free species that join or leave
     warnings: list[WarningOut]  # W-BALANCE
     scan_paths: list[PathOnEdgeOut] = []  # D121: scan paths run on this edge
+    # D264: an edge Claude proposed: high, medium or low (A184), what settled it, and "open"
+    # until the user accepts it ("accepted"); review None for an edge never proposed.
+    confidence: str | None = None
+    evidence: str = ""
+    review: str | None = None
 
 
 class TransitionSpeciesIn(BaseModel):
@@ -436,6 +441,9 @@ def _transition_out(
             WarningOut(**w.as_dict()) for w in species_service.balance_warnings(session, transition)
         ],
         scan_paths=[PathOnEdgeOut(**asdict(p)) for p in paths.get(transition.id, [])],
+        confidence=transition.confidence,
+        evidence=transition.evidence,
+        review=transition.review,
         **facts,
     )
 

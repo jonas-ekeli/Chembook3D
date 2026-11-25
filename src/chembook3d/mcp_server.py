@@ -126,7 +126,10 @@ Rules:
   import_folder after showing the user the plan. A TS that no IRC and no bond check along
   its mode settles (D263c): start_local_follow_mode relaxes both ends of its mode briefly,
   get_follow_mode_ends matches them against the nodes (A184) and gives the verdict, and
-  make_node_from_end makes a node only from an end that matches nothing.
+  make_node_from_end makes a node only from an end that matches nothing. In a playground,
+  propose_mechanism writes the edges with a confidence (A184) and evidence each, open for
+  the user to review, and places nodes in steps and groups; then call tidy_canvas. Never
+  accept your own proposals; list_proposals gives those still open (D264).
 - Papers and supporting information (D232): read_pdf reads a PDF on this computer, the user's
   or one a web fetch saved. In a long SI, `find` a compound's label first, then read those
   `pages`; `images` shows up to 4 pages as pictures (structures, schemes, tables) and `region`
