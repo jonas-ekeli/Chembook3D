@@ -6,6 +6,8 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The notebook agent can check a Saga Gaussian job by its Slurm ID, distinguish cancellation
+  from normal exit, and report convergence and frequencies from accessible output (D266).
 - Edges Claude proposes carry a confidence and evidence until you accept them (D264): in a playground
   `propose_mechanism` writes many edges at once, each high, medium or low (A184) with what settled it,
   and puts nodes in steps and groups. Each open proposal has a badge on its arrow; the edge's panel shows

@@ -147,6 +147,10 @@ TS end, warnings): tell the person, and `send_scan_path` sends it once they agre
 The investigation must be linked to GitHub (Sync, then Link to GitHub) for this to work.
 
 Files on Saga or another server (D124): when the person is logged in in the app's server tab,
+`check_server_job` checks a Saga job by its Slurm receipt ID in the submission directory.
+Use the wrapper evidence for job state and the parsed output for scientific conclusions.
+An unavailable log or output leaves the corresponding result unknown. Recheck after the
+user reconnects if needed. For a user-cancelled attempt, stop and await their instructions.
 `list_servers` tells where its terminal is, and `list_server_files`, `read_server_file`,
 `summarize_server_file` and `get_server_structure` read the files there and in the
 directories below it, without importing anything. Use them to answer questions about
