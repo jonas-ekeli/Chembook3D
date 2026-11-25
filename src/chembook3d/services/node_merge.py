@@ -243,10 +243,9 @@ def _refusals(session: Session, into: Node, source: Node, folder: Path | None) -
         if not node.geometry:
             found.append(f"{_quoted(node)} has no coordinates")
     if into.geometry and source.geometry:
-        try:
-            atom_matching.check_atoms(into.geometry, source.geometry)
-        except RecordError as exc:
-            found.append(str(exc)[:1].upper() + str(exc)[1:])
+        differs = atom_matching.atom_difference(into.geometry, source.geometry)
+        if differs:
+            found.append(differs[:1].upper() + differs[1:])
     if folder is not None:
         found.extend(_waiting_jobs(folder, source))
     return found
@@ -322,13 +321,10 @@ def plan(
     merge.refusals = _refusals(session, into, source, folder)
     if merge.refusals:
         return merge
-    try:
-        result = atom_matching.match(
-            into.geometry, source.geometry, atom_matching.pairs_from(options.pairs)
-        )
-    except RecordError as exc:
-        merge.refusals.append(str(exc))
-        return merge
+    # A pair fixed by hand that does not fit raises, answered as any RecordError is.
+    result = atom_matching.match(
+        into.geometry, source.geometry, atom_matching.pairs_from(options.pairs)
+    )
     merge.match = result
     merge.mapping = result.mapping
     if result.inverted:
