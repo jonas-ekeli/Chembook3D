@@ -719,6 +719,12 @@ Routes for all of these are in `api/pathway.py`.
 
 ## SSH servers such as Saga (D122, A69)
 
+- The local preparation pilot (D266, FR-SSH-19) connects `api/hpc_jobs.py` and
+  `api/live.py` to the keeper's fixed SSH subsystem. `remote/job_pilot.py` validates
+  files, guards the one-time submission in SQLite and records the receipt.
+  `tests/fake_ssh_server.py` provisions the fixture and `tests/hpc_pilot_runner.py`
+  implements the synthetic wrappers. See 05 §9 for an interactive local run.
+
 - Agent job follow-up (D266, FR-SSH-18): `check_server_job` in `mcp_tools.py` calls
   `api/server_files.py` with the Slurm ID and an optional submission folder or wrapper log.
   `parsers/saga_job.py` interprets the UiBKvant wrapper evidence. The route uses the keeper's

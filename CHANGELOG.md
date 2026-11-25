@@ -6,6 +6,10 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The local HPC pilot can prepare a Gaussian optimization from an approved job description
+  and XYZ geometry. The app shows the input and resources for approval and retains the
+  attempt so a lost submission reply can be checked without submitting twice (D266).
+
 - The notebook agent can check a Saga Gaussian job by its Slurm ID, distinguish cancellation
   from normal exit, and report convergence and frequencies from accessible output (D266).
 - Edges Claude proposes carry a confidence and evidence until you accept them (D264): in a playground

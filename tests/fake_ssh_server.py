@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import contextlib
 import fnmatch
+import json
 import os
 import posixpath
 import socket
@@ -27,6 +28,8 @@ from pathlib import Path
 
 import asyncssh
 from asyncssh.x11 import walk_xauth
+
+from chembook3d.remote.job_pilot import LOCAL_WORK, SUBSYSTEM, JobPilot
 
 USER = "jonas"
 PASSWORD = "correct horse"
@@ -87,6 +90,8 @@ class FakeSaga:
     def __init__(self, root: Path, real_shell: bool = False, port: int = 0, x11: bool = True):
         self.root = root
         self.real_shell = real_shell
+        self.job_pilot = None
+        self.drop_submit_reply = False
         self.port = port
         self.x11 = x11
         self.xauthority = root / ".Xauthority"  # the cookies of the forwarded displays
@@ -172,6 +177,23 @@ class FakeSaga:
     async def _session(self, process: asyncssh.SSHServerProcess) -> None:
         self.record.commands.append(process.command)
         self.record.displays.append(process.channel.get_x11_display())
+        if process.subsystem == SUBSYSTEM and self.job_pilot is not None:
+            try:
+                envelope = json.loads(await process.stdin.read(65536))
+                value = await asyncio.to_thread(self.job_pilot.handle, envelope)
+                if self.drop_submit_reply and envelope["request"]["operation"] == "submit":
+                    self.drop_submit_reply = False
+                    process.exit(1)  # the helper recorded the receipt, but the app lost the reply
+                    return
+                reply = {"ok": True, "result": value}
+            except (OSError, ValueError, KeyError) as exc:
+                reply = {"ok": False, "error": str(exc)}
+            process.stdout.write(json.dumps(reply).encode())
+            process.exit(0)
+            return
+        if process.subsystem:
+            process.exit(1)
+            return
         if self.real_shell and process.command:
             await _real(process)
         else:
@@ -439,17 +461,81 @@ async def _real(process: asyncssh.SSHServerProcess) -> None:
     process.exit(child.returncode or 0)
 
 
+def enable_job_pilot(fake: FakeSaga, config: Path, server_id: str) -> None:
+    """Create a local operator profile and toy project, outside the real user's settings."""
+    import secrets
+
+    remote = LOCAL_WORK
+    work = fake.root / remote.lstrip("/")
+    work.mkdir(parents=True, exist_ok=True)
+    geometries = work / "geometries"
+    geometries.mkdir(exist_ok=True)
+    (geometries / "water.xyz").write_text(
+        "3\nWater\nO 0 0 0\nH 0.76 0.59 0\nH -0.76 0.59 0\n", encoding="ascii"
+    )
+    private = config / "pilot-helper"
+    jobs = private / "job-files"
+    jobs.mkdir(parents=True, exist_ok=True)
+    (jobs / "minimum.jd").write_text("#p HF/STO-3G Opt", encoding="ascii")
+    tool = (sys.executable, str(Path(__file__).with_name("hpc_pilot_runner.py").resolve()))
+    profile = config / "remote" / "local-job-pilot.json"
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    target = ["127.0.0.1", fake.port, USER]
+    if profile.exists():
+        saved = json.loads(profile.read_text("utf-8"))
+        if saved["target"] != target or saved["server_id"] != server_id:
+            raise ValueError("This pilot profile belongs to a different server.")
+        key = bytes.fromhex(saved["key"])
+    else:
+        key = secrets.token_bytes(32)
+        with os.fdopen(
+            os.open(profile, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8"
+        ) as stream:
+            json.dump({"target": target, "key": key.hex(), "server_id": server_id}, stream)
+    fake.job_pilot = JobPilot(
+        private,
+        work,
+        remote,
+        geometries,
+        jobs,
+        (*tool, "prepare", "ok"),
+        (*tool, "submit", "ok"),
+        key,
+        40,
+        24,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--root", required=True)
+    parser.add_argument(
+        "--job-pilot-config",
+        type=Path,
+        help="Enable the local Gaussian pilot using an isolated app config folder.",
+    )
     args = parser.parse_args()
     root = Path(args.root)
     root.mkdir(parents=True, exist_ok=True)
     fake = FakeSaga(root, port=args.port)
 
     async def serve() -> None:
+        if args.job_pilot_config:
+            # A repeat run on the same isolated profile must keep the host key trusted
+            # by the app so the user can reconnect and recover an earlier receipt.
+            key = args.job_pilot_config / "pilot-helper" / "ssh-host-key"
+            key.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                descriptor = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                fake.key = asyncssh.read_private_key(key)
+            else:
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(fake.key.export_private_key())
         await fake.start_async()
+        if args.job_pilot_config:
+            enable_job_pilot(fake, args.job_pilot_config, "saga")
         print(f"fake Saga on 127.0.0.1:{fake.port}", flush=True)
         await asyncio.Event().wait()
 

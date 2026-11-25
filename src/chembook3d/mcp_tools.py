@@ -683,6 +683,24 @@ TOOLS: list[ToolSpec] = [
         "ones below it can be read; the user moves it with cd. You cannot log in.",
     ),
     T(
+        "prepare_gaussian_job",
+        "write",
+        "POST",
+        "/api/hpc-jobs/{server_id}/prepare",
+        "Prepare one ordinary Gaussian optimization on the configured local HPC pilot. "
+        "Select an approved .jd and .xyz by filename. Uses one node. Returns the complete "
+        "input for review, revision digest and attempt ID. Preparation never submits.",
+    ),
+    T(
+        "get_prepared_job",
+        "read",
+        "GET",
+        "/api/hpc-jobs/{server_id}/attempts/{attempt}",
+        "Recover the durable state of a local HPC pilot attempt, including after a lost "
+        "submission reply. A receipt includes the arguments for check_server_job. "
+        "For an uncertain attempt reconcile it with the scheduler before any new submission.",
+    ),
+    T(
         "check_server_job",
         "read",
         "GET",
@@ -2023,6 +2041,8 @@ TOOLS += [
 # ---------- deleting: the app asks the user (D91) ----------
 
 CONFIRM_DESCRIPTIONS = {
+    "submit_prepared_job": "Submit one reviewed Gaussian input on the local HPC pilot using "
+    "its prepared resource request. Only a confirmation in the app authorizes the attempt.",
     "delete_node": "Delete a node (or free species) with its calculations, notes and every "
     "edge touching it.",
     "delete_group": "Delete a group with its contents: its members, their calculations and "

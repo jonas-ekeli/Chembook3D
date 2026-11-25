@@ -148,6 +148,11 @@ The investigation must be linked to GitHub (Sync, then Link to GitHub) for this 
 
 Files on Saga or another server (D124): when the person is logged in in the app's server tab,
 `check_server_job` checks a Saga job by its Slurm receipt ID in the submission directory.
+For the configured local HPC pilot, prepare_gaussian_job returns the input for review.
+Use its approved results directory for reads and its geometries directory for new XYZ files.
+Use submit_prepared_job for that attempt after review. If the reply is lost, use
+get_prepared_job on the same attempt and pass its follow_up arguments to check_server_job.
+An uncertain attempt must be reconciled before considering another submission.
 Use the wrapper evidence for job state and the parsed output for scientific conclusions.
 An unavailable log or output leaves the corresponding result unknown. Recheck after the
 user reconnects if needed. For a user-cancelled attempt, stop and await their instructions.

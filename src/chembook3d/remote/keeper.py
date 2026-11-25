@@ -34,6 +34,8 @@ from pathlib import Path
 
 import asyncssh
 
+from chembook3d.remote.job_pilot import LOCAL_WORK, SUBSYSTEM
+
 
 def _download_destination(folder: Path, name: str) -> Path:
     """Keep a remote POSIX basename safe when the local filesystem is Windows too."""
@@ -60,7 +62,7 @@ def _download_destination(folder: Path, name: str) -> Path:
 # files once the user allows it (D126); 6: the files one `inspect` names go to the app as one
 # list (D129); 7: the `scans` command opening the scan editor, and `upload` taking the next free
 # name instead of replacing (D138)
-PROTOCOL = 7
+PROTOCOL = 8  # named job helper subsystem on a loopback pilot server (D266)
 KEEPER_FILE = "keeper.json"
 KNOWN_HOSTS = "known_hosts"
 LOG_FILE = "keeper.log"
@@ -323,6 +325,7 @@ class Session:
     sftp: asyncssh.SFTPClient | None = None
     x11: str | None = None  # the X11 display the next shell forwards to (D123a)
     writes: bool = False  # D126: the user let Claude write new files; off at every login
+    pilot_scope: bool = False
     written: list[dict] = field(default_factory=list)  # what Claude wrote in this login
 
     async def files(self) -> asyncssh.SFTPClient:
@@ -505,6 +508,12 @@ async def within(session: Session, sftp: asyncssh.SFTPClient, path: object) -> s
         )
     if path is not None and not isinstance(path, str):
         raise Outside("The path must be text.")
+    if session.pilot_scope:
+        base = await sftp.realpath(LOCAL_WORK)
+        target = await sftp.realpath(posixpath.join(shell.cwd, path or "."))
+        if base != LOCAL_WORK or (target != base and not target.startswith(base + "/")):
+            raise Outside("This path is outside the pilot's approved results directory.")
+        return target
     root = await sftp.realpath(shell.cwd)
     target = await sftp.realpath(posixpath.join(shell.cwd, path or "."))
     if target != root and not target.startswith(root.rstrip("/") + "/"):
@@ -805,12 +814,50 @@ class Keeper:
             allowed = "may" if session.writes else "may not"
             log.info("Claude %s write on %s", allowed, session.server["host"])
             return {"ok": True, "writes": session.writes}
+        if op == "job_pilot":
+            session = self.sessions.get(str(msg.get("server")))
+            if session is None:
+                return {"ok": False, "error": "Not logged in."}
+            target = [session.server[k] for k in ("host", "port", "username")]
+            if target[0] not in {"127.0.0.1", "::1"} or target != msg.get("target"):
+                return {"ok": False, "error": "The connected server is not the local pilot."}
+            try:
+                result = await session.conn.run(
+                    subsystem=SUBSYSTEM,
+                    input=json.dumps(msg["envelope"]) + "\n",
+                    encoding="utf-8",
+                    timeout=90,
+                    check=True,
+                )
+                reply = json.loads(result.stdout)
+                if not isinstance(reply, dict) or not isinstance(reply.get("ok"), bool):
+                    raise ValueError("Malformed helper response.")
+                session.used = time.monotonic()
+                return reply
+            except (OSError, ValueError, TimeoutError, asyncssh.Error) as exc:
+                return {"ok": False, "error": f"Local job helper unavailable: {_reason(exc)}"}
         if op in ("list", "download", "upload", "read", "write"):
             session = self.sessions.get(str(msg.get("server")))
             if session is None:
                 return {"ok": False, "error": "Not logged in."}
             inside = msg.get("within") is True  # D124: only the shell's directory and below
             try:
+                if (
+                    (inside or op in {"read", "write"})
+                    and session.server["host"] in {"127.0.0.1", "::1"}
+                    and not session.pilot_scope
+                ):
+                    try:
+                        profile = json.loads(
+                            (self.folder / "local-job-pilot.json").read_text("utf-8")
+                        )
+                        session.pilot_scope = profile["target"] == [
+                            session.server[k] for k in ("host", "port", "username")
+                        ]
+                    except FileNotFoundError:
+                        pass
+                    except (ValueError, KeyError, TypeError) as exc:
+                        raise Outside("Invalid local pilot file policy.") from exc
                 if op == "list":
                     return await self._list(session, msg.get("path"), inside)
                 if op == "upload":
@@ -876,7 +923,10 @@ class Keeper:
             entries.append(
                 {"name": name, "kind": kind, "size": attrs.size, "modified": attrs.mtime}
             )
-        return {"ok": True, "path": path, "entries": entries}
+        result = {"ok": True, "path": path, "entries": entries}
+        if inside and session.pilot_scope:
+            result["agent_read_root"] = LOCAL_WORK
+        return result
 
     async def _download(
         self, session: Session, paths: object, folder: object, inside: bool = False
@@ -1038,9 +1088,23 @@ class Keeper:
             return {"ok": False, "error": "Name the file to write."}
         sftp = await session.files()
         root = await sftp.realpath(shell.cwd)
+        if session.pilot_scope:
+            approved = LOCAL_WORK + "/geometries"
+            if await sftp.realpath(approved) != approved:
+                raise Outside("Invalid pilot geometry directory.")
+            # Resolve relative requests against the terminal, then create files only
+            # below the fixed geometry root even if the user moves the terminal.
+            path = posixpath.join(root, path)
+            if not path.startswith(approved + "/"):
+                raise Outside(
+                    "Agent file creation on the pilot is limited to its geometries directory."
+                )
+            root = approved
         relative = path
         if path.startswith("/"):
-            for base in {shell.cwd.rstrip("/"), root.rstrip("/")}:
+            for base in (
+                [root] if session.pilot_scope else [shell.cwd.rstrip("/"), root.rstrip("/")]
+            ):
                 if path.startswith(base + "/"):
                     relative = path[len(base) + 1 :]
                     break

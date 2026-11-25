@@ -16,6 +16,7 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -130,10 +131,14 @@ class Confirmation:
     folder: str
     expires: float
     status: str = "pending"  # pending, running, done, refused, expired, failed
+    preview: str | None = None
     result: Any = None
     error: str | None = None
     finished: float | None = None
     unasked: bool = False  # D223: Claude's own record, deleted without asking while it works alone
+
+
+confirmed_action: ContextVar[Confirmation | None] = ContextVar("confirmed_action", default=None)
 
 
 @dataclass
@@ -352,6 +357,7 @@ class ConfirmationOut(BaseModel):
     id: str
     action: str
     summary: str
+    preview: str | None = None
     reason: str
     status: str
     seconds_left: float
@@ -381,6 +387,7 @@ def _confirmation_out(c: Confirmation) -> ConfirmationOut:
         id=c.id,
         action=c.action,
         summary=c.summary,
+        preview=c.preview,
         reason=c.reason,
         status=c.status,
         seconds_left=max(0.0, round(c.expires - time.monotonic(), 1)),
@@ -530,7 +537,7 @@ class Action:
 
     method: str
     path: str  # with {param} placeholders, each a record id
-    describe: Callable[[Session, dict[str, Any]], str]
+    describe: Callable[[Session, dict[str, Any]], str | tuple[str, str]]
     body: Callable[[dict[str, Any]], dict[str, Any] | None] = lambda _params: None
     # D223: whether everything the change removes is Claude's own (made by it, and changed by
     # nobody else since); None: it always asks
@@ -886,7 +893,16 @@ def _own(param: str) -> Callable[[Session, dict[str, Any], Autonomy], bool]:
     return lambda _session, params, made: made.owns(params[param])
 
 
+def _describe_hpc_submission(session: Session, params: dict) -> tuple[str, str]:
+    from chembook3d.api.hpc_jobs import describe_submission
+
+    return describe_submission(session, params)
+
+
 ACTIONS: dict[str, Action] = {
+    "submit_prepared_job": Action(
+        "POST", "/api/hpc-jobs/{server_id}/attempts/{attempt}/submit", _describe_hpc_submission
+    ),
     "delete_node": Action("DELETE", "/api/nodes/{node_id}", _describe_node, own=_own_node),
     "delete_group": Action("DELETE", "/api/groups/{group_id}", _describe_group, own=_own_group),
     "dissolve_group": Action(
@@ -997,13 +1013,15 @@ def ask(body: ConfirmationIn, request: Request, session: DbSession):
         value = body.params.get(name)
         if not isinstance(value, str) or not value or "/" in value:
             raise HTTPException(422, f"'{name}' must be the id of a record")
-    summary = action.describe(session, body.params)
+    description = action.describe(session, body.params)
+    summary, preview = description if isinstance(description, tuple) else (description, None)
     timeout = max(5.0, min(body.timeout, 600.0))
     confirmation = Confirmation(
         id=uuid.uuid4().hex,
         action=body.action,
         params=dict(body.params),
         summary=summary,
+        preview=preview,
         reason=body.reason.strip()[:1000],
         folder=_folder(request) or "",
         expires=time.monotonic() + timeout,
@@ -1035,9 +1053,13 @@ async def _run(app: ASGIApp, state: LiveState, found: Confirmation) -> None:
     path = action.path.format(**{k: quote(found.params[k], safe="") for k in action.params})
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
-        response = await client.request(
-            action.method, path, json=action.body(found.params), headers={CLIENT_HEADER: AGENT}
-        )
+        token = confirmed_action.set(found)
+        try:
+            response = await client.request(
+                action.method, path, json=action.body(found.params), headers={CLIENT_HEADER: AGENT}
+            )
+        finally:
+            confirmed_action.reset(token)
     with state.lock:
         if response.is_success:
             found.result = response.json() if response.content else None

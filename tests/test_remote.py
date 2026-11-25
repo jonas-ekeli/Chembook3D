@@ -23,7 +23,15 @@ from chembook3d.mcp_server import Bridge
 from chembook3d.mcp_tools import BY_NAME, PANEL_ALLOWED, READ_ONLY_TOOLS, TOOLS
 from chembook3d.parsers import orca
 from chembook3d.remote import client, keeper
-from tests.fake_ssh_server import CODE, PASSWORD, USER, FakeSaga, FakeXServer, free_display
+from tests.fake_ssh_server import (
+    CODE,
+    PASSWORD,
+    USER,
+    FakeSaga,
+    FakeXServer,
+    enable_job_pilot,
+    free_display,
+)
 
 APP = "http://127.0.0.1:8765"
 ORIGIN = {"origin": APP}
@@ -1218,6 +1226,96 @@ def test_check_server_job_through_mcp(at_work, saga):
     assert at_work.get(url + "302").json()["state"] == "cancelled"
 
 
+def test_user_can_export_and_import_outside_the_pilot_area(at_work, saga, config_dir):
+    enable_job_pilot(saga, config_dir, "saga")
+    assert _allow(at_work).is_success
+    assert _write(at_work, "manual.xyz").status_code == 409
+    node = _node(at_work, "manual")
+    sent = at_work.post("/api/remote/servers/saga/send", json={"node_id": node}, headers=ORIGIN)
+    assert sent.json() == {"path": f"{WORK}/manual.xyz", "sent": True, "exists": False}
+    plan = at_work.post(
+        "/api/remote/servers/saga/import", json={"paths": [f"{WORK}/{TS}"]}, headers=ORIGIN
+    )
+    assert plan.is_success
+    imported = at_work.post(f"/api/imports/{plan.json()['token']}/commit", json={})
+    assert imported.is_success and imported.json()["node_id"]
+
+
+@pytest.mark.parametrize("drop_reply", [False, True])
+def test_local_preparation_submission_and_follow_up_through_mcp(
+    at_work, saga, config_dir, drop_reply
+):
+    # The app, bridge, real keeper and loopback SSH helper exercise the production routes.
+    args = {
+        "server_id": "saga",
+        "job_file": "minimum.jd",
+        "geometry": "water.xyz",
+        "cores": 40,
+        "hours": 24,
+    }
+    assert (
+        at_work.post(
+            "/api/hpc-jobs/saga/prepare", json={k: v for k, v in args.items() if k != "server_id"}
+        ).status_code
+        == 409
+    )
+    enable_job_pilot(saga, config_dir, "saga")
+    saga.drop_submit_reply = drop_reply
+    remote = saga.job_pilot.remote_work
+    # The user's shell stays in WORK, outside the pilot. Its location grants no agent access.
+    assert _allow(at_work).is_success
+    assert _write(at_work, "other.xyz").status_code == 409
+    assert _write(at_work, f"{remote}/other.xyz").status_code == 409
+    assert _write(at_work, f"{remote}/geometries/other.xyz", "1\n\nHe 0 0 0\n").is_success
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            bridge = Bridge(APP, http=http)
+            assert (
+                await bridge.call("list_server_files", {"server_id": "saga", "path": WORK})
+            ).is_error
+            prepared = await bridge.call("prepare_gaussian_job", args)
+            assert not prepared.is_error, prepared.content
+            record = json.loads(prepared.content[0].text)
+            ids = {"attempt": record["attempt"], "server_id": "saga"}
+            assert record["state"] == "prepared" and "#p HF/STO-3G Opt" in record["input"]
+            url = f"/api/hpc-jobs/saga/attempts/{record['attempt']}/submit"
+            assert (await http.post(url)).status_code == 403
+            for approved in (False, True):
+                task = asyncio.create_task(bridge.call("submit_prepared_job", ids))
+                try:
+                    with anyio.fail_after(10):
+                        while True:
+                            pending = (await http.get("/api/live")).json()["confirmations"]
+                            if pending:
+                                break
+                            await asyncio.sleep(0.02)
+                    dialog = pending[0]
+                    assert record["revision"] in dialog["summary"]
+                    assert dialog["preview"] == record["input"]
+                    assert "40 cores, 24 h" in dialog["summary"]
+                    answer = f"/api/confirmations/{dialog['id']}/answer"
+                    assert (await http.post(answer, json={"confirm": True})).status_code == 403
+                    response = await http.post(answer, json={"confirm": approved}, headers=ORIGIN)
+                    expected = ("failed" if drop_reply else "done") if approved else "refused"
+                    assert response.json()["status"] == expected, response.text
+                    await task
+                finally:
+                    task.cancel()
+                status = await bridge.call("get_prepared_job", ids)
+                observed = json.loads(status.content[0].text)
+                assert observed["state"] == ("submitted" if approved else "prepared")
+            checked = await bridge.call("check_server_job", observed["follow_up"])
+            assert json.loads(checked.content[0].text)["state"] == "started"
+            assert saga.record.logins == 1
+            calls = saga.job_pilot.work / record["attempt"] / "submission" / "scheduler-calls.txt"
+            assert calls.read_text().splitlines() == ["water.inp 1 40 24"]
+
+    anyio.run(exercise)
+
+
 # ---------- T-SSH-23 Claude imports outputs from the terminal's directory (D225) ----------
 
 
@@ -1478,7 +1576,7 @@ def test_scans_reports_go_to_the_app_apart_from_inspect():
         {"type": "inspect", "paths": ["/w/x.out"]},
         {"type": "cwd", "path": "/w"},
     ]
-    assert "scans() {" in keeper.RC and keeper.PROTOCOL == 7
+    assert "scans() {" in keeper.RC and keeper.PROTOCOL >= 7
 
 
 def _editor_on(at_work, path: str) -> dict:

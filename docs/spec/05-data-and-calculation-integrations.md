@@ -107,6 +107,35 @@ Conversion constants are defined once, in one module, from CODATA 2018 (P17).
 
 ## 9. Gaussian HPC wrapper workflow (D266)
 
+### Running the first workflow locally
+
+From a checkout with development dependencies installed, run:
+
+```text
+uv run pytest -q tests/test_hpc_jobs.py tests/test_remote.py::test_local_preparation_submission_and_follow_up_through_mcp
+```
+
+This exercises the app through MCP, the keeper and a loopback SSH subsystem. It uses synthetic water coordinates and a project job file. The generator and scheduler are local stand-ins. To try the workflow interactively, start the stand-in from the repository root:
+
+```text
+uv run python -m tests.fake_ssh_server --port 8767 --root .venv/hpc-demo/cluster --job-pilot-config .venv/hpc-demo/config
+```
+
+In a second PowerShell window at the repository root, start the built app with isolated settings:
+
+```powershell
+$env:CHEMBOOK3D_CONFIG_DIR = (Resolve-Path .venv/hpc-demo/config).Path
+uv run chembook3d --port 8875
+```
+
+Open a local test investigation. In that app's server settings edit its Saga entry to host `127.0.0.1`, port `8767` and user `jonas`. Connect with the fixture password `correct horse` and code `123456`. Ask the agent to prepare `water.xyz` using `minimum.jd` on one node with 40 cores and 24 hours. The input, resources and attempt ID are available before submission. Request submission, expand **Review Gaussian input** in the app, then choose **Submit job** or **Refuse**.
+
+The fixed read directory is `/cluster/work/gaussian-pilot`. The existing agent file-write toggle permits new files under its `geometries` subdirectory. The helper chooses a fresh attempt folder, verifies atom order and coordinates, and stages the approved revision in its own submission directory. The project job files and authorization records live outside the fake server's SFTP tree. Moving the user's terminal does not change either agent boundary.
+
+Use `get_prepared_job` with the attempt ID after a lost reply. A recorded numeric receipt supplies `check_server_job` with its directory and job ID. The demo wrapper produces a start log. A missing receipt after the wrapper has run leaves the attempt uncertain and blocks replay. SDF, checkpoint-based restarts, constrained inputs, scans, IRC and deployment on Saga are later milestones.
+
+### Saga wrapper example
+
 Jonas's two-step example, 2026-11-25. Both invocations use the submission workspace as their working directory. The geometry and generated input share a filename stem.
 
 | Operation | Example invocation | Result |

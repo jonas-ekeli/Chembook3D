@@ -336,8 +336,12 @@ async def list_server_files(server_id: str, request: Request, path: str = "") ->
     return FileListing(
         server=server.id,
         path=answer["path"],
-        cwd_note="Paths are relative to the terminal's current directory; only it and the "
-        "directories below it can be read.",
+        cwd_note=(
+            f"Agent reads on this pilot are limited to the tree under {answer['agent_read_root']}."
+            if answer.get("agent_read_root")
+            else "Paths are relative to the terminal's current directory; only it and the "
+            "directories below it can be read."
+        ),
         entries=[
             FileEntry(
                 name=e["name"],
