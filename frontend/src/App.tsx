@@ -47,6 +47,7 @@ import { CloudJobsDialog } from './components/CloudJobsDialog'
 import { useScanPathImports } from './cloudJobs'
 import { LocalJobsDialog } from './components/LocalJobsDialog'
 import { RefineDialog } from './components/RefineDialog'
+import { MergeNodesDialog } from './components/MergeNodesDialog'
 import { SinglePointDialog } from './components/SinglePointDialog'
 import { scanText, tsCheckText, useLocalJobs } from './localJobs'
 import { CanvasPane, type CanvasEnergy, type CanvasContextMenu, type CanvasTarget, type TidySides } from './components/Canvas'
@@ -225,6 +226,8 @@ function App() {
   const [showJobs, setShowJobs] = useState(false) // D115
   const [showLocalJobs, setShowLocalJobs] = useState(false) // D213
   const [refineNode, setRefineNode] = useState<string | null>(null) // D213: its Refine geometry dialog
+  // D262: the Merge window: the node kept, and the one merged into it (null: picked, for a free species)
+  const [nodeMerge, setNodeMerge] = useState<[Node, Node | null] | null>(null)
   const [singlePoint, setSinglePoint] = useState<string[] | null>(null) // D240: the nodes of a single point dialog
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -1396,6 +1399,19 @@ function App() {
           }}
         />
       )}
+      {nodeMerge && investigation && (
+        <MergeNodesDialog
+          key={nodeMerge.map((n) => n?.id).join('-')}
+          nodes={nodeMerge}
+          candidates={canvas.species}
+          onClose={() => setNodeMerge(null)}
+          onMerged={(into, done) => {
+            choose({ kind: 'node', id: into.id })
+            reload()
+            setNotice(`“${done.from.label || 'Untitled node'}” is merged into “${nodeName(into)}”.`)
+          }}
+        />
+      )}
       {refineNode && investigation && nodeOrSpecies(refineNode) && (
         <RefineDialog
           key={refineNode}
@@ -2150,6 +2166,13 @@ function App() {
       { label: 'Edit structure in 3D…', icon: 'pencil', onSelect: () => setEditingNode(node.id) },
       node.atom_count > 0 && { label: 'Refine geometry…', icon: 'flask', onSelect: () => setRefineNode(node.id) },
       node.atom_count > 0 && { label: 'Single point on this computer…', icon: 'flask', onSelect: () => setSinglePoint([node.id]) },
+      species &&
+        node.atom_count > 0 && {
+          label: 'Merge another species into this one…',
+          icon: 'layers',
+          title: 'D262: the other free species dissolves into this one, its calculations moving onto it',
+          onSelect: () => setNodeMerge([node, null]),
+        },
       !species &&
         node.role === 'transition_state' && { label: 'IRC…', icon: 'wave', onSelect: () => setIrcNode(node.id) },
       !species && { label: 'Start energy pathway here', icon: 'chart', separated: true, onSelect: startPathway },
@@ -2265,6 +2288,7 @@ function App() {
     'create-group': 'group',
     overlay: 'cube',
     match: 'link',
+    merge: 'layers',
     'scan-path': 'wave',
     'ts-guess': 'flask',
     'single-point': 'flask',
@@ -2691,6 +2715,7 @@ function App() {
         onSelectivity={() => newSelectivity(multiNodes, multiGroups)}
         onEquilibrium={() => newEquilibrium(multiNodes, multiGroups)}
         onSinglePoint={setSinglePoint}
+        onMerge={(pair) => setNodeMerge(pair)}
         onRenumbered={(node, derived) => {
           choose({ kind: 'node', id: node.id })
           reload()
@@ -2736,6 +2761,7 @@ function App() {
         servers={remote?.enabled ? remote.servers.filter((s) => s.connected) : []}
         onIrc={() => setIrcNode(selectedNode.id)}
         onRefine={() => setRefineNode(selectedNode.id)}
+        onMerge={selectedNode.kind === 'species' ? () => setNodeMerge([selectedNode, null]) : undefined}
         onFixMode={(job) => {
           localJobs.refresh()
           setNotice(

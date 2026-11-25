@@ -1581,7 +1581,16 @@ export type Calculation = {
   created_at: string
   /** D157: what held the structure while it was optimized ("constrained B(1,2)", "2 frozen atoms") */
   constraints?: string[]
+  /** D262: where a merge brought it from */
+  merged_from?: MergedFrom | null
+  /** D262c: its file numbers the atoms otherwise; frames are read through the stored map */
+  renumbered?: boolean
+  /** D262d: the composite levels at which a merge set it aside: shown, not counted */
+  set_aside?: string[]
 }
+
+/** D262h: a calculation's merge: the node it came from and when (naive UTC ISO). */
+export type MergedFrom = { node_id: string; label: string; at: string; entry_id: number }
 
 /** D162: the spin expectation value a calculation printed (Gaussian's before annihilation,
  * with `after` the value after it), S(S+1) of its multiplicity, and whether it is further from
@@ -2196,6 +2205,58 @@ export type CalculationRemoval = {
   calculation: RemovedCalculation
   linked: RemovedCalculation[]
   files: string[]
+}
+
+/** D262: what merging one node into another would do (the preview), or did. */
+export type MergeOptions = {
+  /** Atom pairs fixed by hand, 1-based [kept node's atom, merged node's atom] */
+  pairs?: [number, number][]
+  /** On two different branches: none (shared by both, D67), keep the kept node's, take the other's */
+  branch?: 'none' | 'keep' | 'take'
+  anyway?: boolean
+}
+
+export type MergeNode = { id: string; label: string; kind: string; role: string }
+
+export type MergeLevel = {
+  key: string
+  label: string
+  energy_type: string
+  /** hartree */
+  into_value: number | null
+  from_value: number | null
+  /** whose calculations count at the level */
+  counts: 'into' | 'from'
+}
+
+export type MergeCalculation = RemovedCalculation & { irc_part: string | null; set_aside: string[] }
+
+export type MergePreview = {
+  into: MergeNode
+  from: MergeNode
+  refusals: string[]
+  warnings: string[]
+  match:
+    | (Omit<AtomMatch, 'start_id' | 'end_id' | 'start_xyz' | 'end_xyz' | 'renumbered_xyz'> & {
+        real_formed: [number, number][]
+        real_broken: [number, number][]
+      })
+    | null
+  /** RMSDs after fitting: the whole match first (level null), then one per shared geometry level */
+  geometries: { level: string | null; rmsd: number | null; warned: boolean }[]
+  levels: MergeLevel[]
+  /** the geometry the kept node shows afterwards, and whose */
+  card: { from: 'into' | 'from'; level: string | null } | null
+  calculations: MergeCalculation[]
+  set_aside_on_into: MergeCalculation[]
+  edges_moved: string[]
+  edges_dropped: string[]
+  changes: string[]
+  branch: 'none' | 'keep' | 'take'
+  /** the two are on two different branches, so the branch choice applies */
+  branch_choice: boolean
+  can_merge: boolean
+  entry_id?: number
 }
 
 /** D246: one of the optimized geometries a node holds. */
@@ -2999,6 +3060,11 @@ export const api = {
   /** D259: what removing a calculation takes with it, and the removal itself */
   calculationRemoval: (id: string) => request<CalculationRemoval>('GET', `/calculations/${id}/removal`),
   removeCalculation: (id: string) => request<CalculationRemoval>('DELETE', `/calculations/${id}`),
+  /** D262: what merging `sourceId` into `intoId` would do, and the merge (the source dissolves). */
+  previewNodeMerge: (sourceId: string, intoId: string, options: MergeOptions = {}) =>
+    request<MergePreview>('POST', `/nodes/${sourceId}/merge-preview`, { into_id: intoId, ...options }),
+  mergeNodes: (sourceId: string, intoId: string, options: MergeOptions = {}) =>
+    request<MergePreview>('POST', `/nodes/${sourceId}/merge/${intoId}`, options),
   /** D246: the optimized geometries a node holds, its own first. */
   nodeGeometries: (nodeId: string) => request<NodeGeometry[]>('GET', `/nodes/${nodeId}/geometries`),
   updateCalculation: (

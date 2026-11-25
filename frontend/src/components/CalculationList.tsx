@@ -559,6 +559,22 @@ export function CalculationList({
                   pre-optimization
                 </span>
               )}
+              {c.merged_from && (
+                <span
+                  className="badge"
+                  title={`Merged from “${c.merged_from.label || 'Untitled node'}” on ${c.merged_from.at.slice(0, 10)}${c.renumbered ? '; its file numbers the atoms otherwise and is read through the match' : ''} (D262)`}
+                >
+                  from “{c.merged_from.label || 'Untitled node'}”
+                </span>
+              )}
+              {!!c.set_aside?.length && (
+                <span
+                  className="badge"
+                  title={`A merge set it aside at ${c.set_aside.join(', ')}: shown, not counted, while the other node's calculations there remain (D262)`}
+                >
+                  set aside
+                </span>
+              )}
               {!!c.parsed_level?.basis_given && (
                 <span className="badge" title="The file names no basis set; it was given at import (D104)">
                   basis given

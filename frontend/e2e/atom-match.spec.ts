@@ -78,3 +78,41 @@ test('match the atoms of two structures numbered differently', async ({ page }) 
   // Its own coordinates: the last glycerol atom comes first now.
   expect(Number(rows[0][1])).toBeCloseTo(GLYCEROL[13][1], 3)
 })
+
+// T-UI-116, D262: two nodes holding the same molecule numbered differently are merged from the
+// selection: the window shows the match side by side and what changes, and Merge leaves one node.
+test('merge two nodes holding the same molecule', async ({ page }) => {
+  test.slow() // software WebGL is slow on the Windows runners
+  await newInvestigation(page, 'Merge test')
+  const ids: string[] = []
+  for (const body of [
+    { label: 'kept', xyz: xyz(GLYCEROL), pos_x: 100, pos_y: 100, tags: ['one'] },
+    { label: 'merged', xyz: xyz(reversed), pos_x: 400, pos_y: 100, tags: ['two'] },
+  ]) {
+    const response = await page.request.post('/api/nodes', { data: body })
+    expect(response.ok()).toBeTruthy()
+    ids.push((await response.json()).id)
+  }
+  await page.reload()
+  await canvasNode(page, 'kept').click()
+  await canvasNode(page, 'merged').click({ modifiers: ['Control'] })
+  await page.getByLabel('Selection inspector').getByRole('button', { name: 'Merge…' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'Merge “merged” into “kept”' })
+  await expect(dialog.getByRole('region', { name: 'Atom match' })).toBeVisible()
+  await expect(dialog.getByTestId('viewer3d')).toHaveCount(2)
+  await expect(dialog.getByLabel('What changes')).toContainText('Tags added: two')
+  await expect(dialog.getByLabel('Refused')).toHaveCount(0)
+  // Swap keeps the other one, and back.
+  await dialog.getByRole('button', { name: 'Swap' }).click()
+  await expect(page.getByRole('dialog', { name: 'Merge “kept” into “merged”' })).toBeVisible()
+  await page.getByRole('dialog', { name: 'Merge “kept” into “merged”' }).getByRole('button', { name: 'Swap' }).click()
+  await dialog.getByRole('button', { name: 'Merge', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(canvasNode(page, 'merged')).toHaveCount(0)
+  await expect(canvasNode(page, 'kept')).toBeVisible()
+  const kept = await (await page.request.get(`/api/nodes/${ids[0]}`)).json()
+  expect(kept.tags).toEqual(['one', 'two'])
+  const history = await (await page.request.get('/api/history', { params: { record_id: ids[0] } })).json()
+  expect(history.some((e: { action: string }) => e.action === 'merge_nodes')).toBeTruthy()
+})

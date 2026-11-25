@@ -5759,3 +5759,15 @@ li.merge-conflict .merge-kind {
   gap: 4px;
   color: var(--warn);
 }
+/* D262: the Merge window's warnings */
+.merge-warnings {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn-text);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  margin: 0.5rem 0;
+}
+.merge-warnings ul {
+  margin: 0.25rem 0;
+}

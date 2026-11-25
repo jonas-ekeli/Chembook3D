@@ -644,6 +644,7 @@ Build the Ru-CAAC example ([02 §6](02-domain-model.md)) as a fixture investigat
 | T-UI-113 | Remove… in a refined node's optimization record (D259) | The dialog lists the optimization and the frequency job on it and says the copy goes; after Remove the node has no calculations and the history has the removal |
 | T-UI-114 | Refine geometry… from a pasted structure with "offer to replace" on a refined node; Replace… in Local jobs (D260) | The finished job waits with its choice; the confirm lists the optimization and says the coordinates move; after Replace the node has the new coordinates and one calculation |
 | T-UI-115 | A stub-saddle frequency job with an imaginary mode on a minimum: Fix imaginary mode in its record, then Local jobs and Replace… (D261) | A notice says the fix started; the finished job waits with its choice, says what each try ended with and which was kept; the confirm lists the optimization and the frequency job; afterwards the node has one frequency job without an imaginary mode |
+| T-UI-116 | Select two nodes of the same molecule numbered differently and choose Merge… | The window "Merge “B” into “A”" shows the atom match side by side and what changes, Swap turns it round, and Merge leaves one node with both nodes' tags and a merge_nodes history entry (D262) |
 
 ### Sub-investigations (D193)
 
