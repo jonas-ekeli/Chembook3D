@@ -30,8 +30,8 @@ from chembook3d import pathtools
 from chembook3d.models import Calculation, CalculationType, Node
 from chembook3d.parsers import joined, xtb
 from chembook3d.parsers.common import Criterion, ParsedFile, ParsedStep
+from chembook3d.services import atom_maps, geometry, history, imports
 from chembook3d.services import files as file_service
-from chembook3d.services import geometry, history, imports
 from chembook3d.services import nodes as node_service
 
 # Two structures printed one after the other this close (Å, every coordinate) are the same
@@ -161,6 +161,7 @@ def read_steps(folder: Path, calculation: Calculation) -> Steps:
     )
     if step is None or not step.geometries:
         raise StepsUnavailable(f"No structures were found for this step in {source.original_name}")
+    step = atom_maps.mapped_step(step, calculation.atom_map)  # D262c: in its node's numbering
 
     frames = frames_of(step, calculation.geometry)
     points = {f.point for f in frames if f.point is not None}

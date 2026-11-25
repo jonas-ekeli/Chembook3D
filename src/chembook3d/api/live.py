@@ -51,7 +51,7 @@ from chembook3d.models import (
     Turnover,
 )
 from chembook3d.services import branches as branch_service
-from chembook3d.services import calculation_removal, history, import_undo
+from chembook3d.services import calculation_removal, history, import_undo, node_merge
 from chembook3d.services import groups as group_service
 from chembook3d.services import nodes as node_service
 from chembook3d.services import species as species_service
@@ -792,6 +792,41 @@ def _describe_removal(session: Session, params: dict[str, Any]) -> str:
     return text
 
 
+def _describe_merge(session: Session, params: dict[str, Any]) -> str:
+    """D262: the merge as its preview gives it; refused, with why, as the app's window is."""
+    found = node_merge.plan(
+        session,
+        params["node_id"],
+        params["into_id"],
+        node_merge.Options(
+            pairs=params.get("pairs") or [],
+            branch=params.get("branch") or "none",
+            anyway=bool(params.get("anyway", False)),
+        ),
+    )
+    if found.refusals:
+        raise RecordError(found.refusals[0])
+    if found.warnings and not found.options.anyway:
+        raise RecordError(
+            "Merging warns: " + "; ".join(found.warnings) + ". Ask again with anyway once the "
+            "user has seen it"
+        )
+    summary = found.as_dict()
+    text = f"Merge “{_label(found.source)}” into “{_label(found.into)}”"
+    parts = [_count(len(summary["calculations"]), "calculation") + " move"]
+    if summary["edges_moved"]:
+        parts.append(_count(len(summary["edges_moved"]), "edge") + " move")
+    if summary["edges_dropped"]:
+        parts.append(_count(len(summary["edges_dropped"]), "edge") + " go")
+    text += ": " + _listing(parts)
+    for level in found.levels:
+        winner = found.source if level.counts == "source" else found.into
+        text += f". At {level.label} “{_label(winner)}”'s calculations count"
+    if found.warnings:
+        text += ". Despite: " + "; ".join(found.warnings)
+    return text
+
+
 def _own_removal(session: Session, params: dict[str, Any], made: Autonomy) -> bool:
     found = calculation_removal.plan(session, params["calculation_id"])
     return made.owns(*(c.id for c in found.all))
@@ -913,6 +948,13 @@ ACTIONS: dict[str, Action] = {
     "undo_import": Action("POST", "/api/history/{entry_id}/undo", _describe_undo, own=_own_undo),
     "remove_calculation": Action(
         "DELETE", "/api/calculations/{calculation_id}", _describe_removal, own=_own_removal
+    ),
+    # D262i: a merge always asks, whoever made the nodes.
+    "merge_nodes": Action(
+        "POST",
+        "/api/nodes/{node_id}/merge/{into_id}",
+        _describe_merge,
+        lambda p: {k: p[k] for k in ("pairs", "branch", "anyway") if k in p},
     ),
     "replace_with_local_result": Action(
         "POST", "/api/local/jobs/{job_id}/replace", _describe_replace, own=_own_replace

@@ -220,7 +220,9 @@ test('long names along the bottom wrap inside their columns', async ({ page }) =
     )
     for (const name of names) {
       await expect(name).toHaveCount(1)
-      expect(await name.locator('tspan').count()).toBeGreaterThan(1)
+      // Retried: the first render can draw the names before the drawer's style places them
+      // along the bottom, where they wrap (seen twice in CI, 2026-11-22 and 11-25).
+      await expect.poll(() => name.locator('tspan').count()).toBeGreaterThan(1)
     }
     const boxes: { x: number; y: number; width: number; height: number }[] = []
     for (const line of [...names, ...steps]) boxes.push((await line.boundingBox())!)

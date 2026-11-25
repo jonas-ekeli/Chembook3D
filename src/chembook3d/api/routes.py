@@ -379,6 +379,12 @@ class CalculationOut(BaseModel):
     thermo: ThermoModelOut | None = None  # D163
     notes: str
     removed_points: list[int] = []  # D117: scan points left out of a scan path
+    # D262: where a merge brought it from ({node_id, label, at, entry_id}), whether its file
+    # numbers the atoms otherwise (frames go through the map), and the composite levels at
+    # which it is set aside: shown, not counted.
+    merged_from: dict[str, Any] | None = None
+    renumbered: bool = False
+    set_aside: list[str] = []
     created_at: UtcDatetime
 
 
@@ -1501,6 +1507,12 @@ def _calculation_out(request: Request, calculation: Calculation) -> CalculationO
         thermo=_thermo_out(calculation),
         notes=calculation.notes,
         removed_points=calculation.removed_points or [],
+        merged_from=calculation.merged_from,
+        renumbered=calculation.atom_map is not None,
+        set_aside=[
+            energies.key_label(object_session(calculation), energies.LevelKey.decode(key))
+            for key in calculation.set_aside or []
+        ],
         created_at=calculation.created_at,
     )
 

@@ -32,6 +32,7 @@ READ_POSTS = {
     "/api/energies/table",
     "/api/overlay",
     "/api/atom-match",
+    "/api/nodes/{node_id}/merge-preview",  # D262: changes nothing
     "/api/scan-paths/plan",
     "/api/builder/run",
     "/api/builder/picture",  # D233: draws, stores nothing

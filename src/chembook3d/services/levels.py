@@ -422,11 +422,15 @@ def geometry_at_level(
         return node.geometry
     if tolerance is None:
         tolerance = thermo_settings.tolerance(object_session(node))
-    at_level = [
-        rows
+    entries = [
+        (rows, value)
         for rows, value in Sources(node, _itself).entries
         if rows and value.level_id == geometry_level_id
     ]
+    # D262d: a geometry a merge set aside at this level only when no other is left.
+    key = f"{geometry_level_id}~{geometry_level_id}"  # energies.LevelKey.encode()
+    kept = [rows for rows, value in entries if key not in (value.set_aside or [])]
+    at_level = kept or [rows for rows, _value in entries]
     if not at_level or any(geometry.matches(rows, node.geometry, tolerance) for rows in at_level):
         return node.geometry
     return at_level[-1]

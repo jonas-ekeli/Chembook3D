@@ -40,6 +40,7 @@ from chembook3d import settings as app_settings
 from chembook3d.models import Calculation, CalculationType, Node, Role
 from chembook3d.parsers.common import IrcRun, ParsedStep
 from chembook3d.services import (
+    atom_maps,
     atom_matching,
     geometry,
     imports,
@@ -172,7 +173,10 @@ def _read_step(folder: Path, calculation: Calculation) -> tuple[ParsedStep, str]
     if parsed is None:
         return None
     step = next((s for s in parsed.steps if s.index == calculation.step_index), None)
-    return (step, source.original_name) if step is not None else None
+    if step is None:
+        return None
+    # D262c: a merged calculation's frames in its node's numbering.
+    return atom_maps.mapped_step(step, calculation.atom_map), source.original_name
 
 
 def _masses(rows: list[list[Any]]) -> np.ndarray:
