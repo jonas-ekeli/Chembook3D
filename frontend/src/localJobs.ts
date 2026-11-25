@@ -258,6 +258,28 @@ export function scanText(job: LocalJob): string | null {
   return `${head}; the energy spans ${span.toFixed(1)} kcal/mol.`
 }
 
+/** D261: what a "Fix imaginary mode" job did: its tries both ways along the mode and the one
+ * kept, in a sentence; null when the job is no fix or has no result yet. */
+export function fixModeText(job: LocalJob): string | null {
+  const found = job.result?.fix_mode
+  if (!found) return null
+  const tries = found.tries.map((t) => {
+    const end = !t.converged
+      ? 'did not converge'
+      : t.imaginary?.length
+        ? `${t.imaginary.length} imaginary (${t.imaginary.map((f) => `${Math.abs(f).toFixed(0)}i`).join(', ')})`
+        : 'no imaginary mode'
+    return `${t.shift > 0 ? '+' : ''}${t.shift} Å: ${end}`
+  })
+  const kept = found.tries[found.kept]
+  const head = `Tried ${tries.join('; ')}.`
+  if (!kept) return head
+  const change = found.change_kcal !== null ? `, ${found.change_kcal > 0 ? '+' : ''}${found.change_kcal.toFixed(2)} kcal/mol from the start` : ''
+  return found.fixed
+    ? `${head} Kept ${kept.shift > 0 ? '+' : ''}${kept.shift} Å, the lowest without an imaginary mode${change}.`
+    : `${head} No try lost the imaginary mode; kept the lowest, ${kept.shift > 0 ? '+' : ''}${kept.shift} Å${change}.`
+}
+
 /** D215: what the check of a TS search's final structure found, in a sentence; null when the
  * job is no TS search or has no final check. */
 /** D238: what a TS guess found: the band's maxima, the changing bonds at the saddle (Å) and

@@ -2736,6 +2736,12 @@ function App() {
         servers={remote?.enabled ? remote.servers.filter((s) => s.connected) : []}
         onIrc={() => setIrcNode(selectedNode.id)}
         onRefine={() => setRefineNode(selectedNode.id)}
+        onFixMode={(job) => {
+          localJobs.refresh()
+          setNotice(
+            `Fixing the imaginary mode of “${job.node_label}” with ${job.level} on this computer; Local jobs shows how it goes and offers Replace when it ends.`,
+          )
+        }}
         onSinglePoint={() => setSinglePoint([selectedNode.id])}
         onEditStructure={() => setEditingNode(selectedNode.id)}
         energy={canvasEnergy}

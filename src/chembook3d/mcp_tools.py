@@ -1562,6 +1562,21 @@ TOOLS: list[ToolSpec] = [
         "correction_seconds, about half an hour for 70 atoms).",
     ),
     T(
+        "start_local_fix_mode",
+        "write",
+        "POST",
+        "/api/local/fix-mode",
+        "Fix an imaginary mode of a minimum on this computer (D261): from the structure of the "
+        "node's frequency calculation (calculation_id) at a local level that computes "
+        "frequencies (GFN2-xTB, g-xTB or MACE-OMOL-0; not B97-3c, r2SCAN-3c or a Gaussian/ORCA "
+        "file), displaced both ways along its lowest imaginary mode by 0.1 Å for the atom "
+        "moving most (0.3 Å when neither try loses the imaginary mode), each optimized with "
+        "frequencies at the same level; the lower try without an imaginary mode is kept. The "
+        "job offers Replace (D260): the user picks in Local jobs whether it replaces the "
+        "geometry at that level (and the calculations on it) or goes to a derived node. Only "
+        "start one the user asked for; it takes up to four optimizations and frequency jobs.",
+    ),
+    T(
         "start_local_single_points",
         "write",
         "POST",

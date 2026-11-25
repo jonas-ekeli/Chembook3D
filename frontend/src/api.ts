@@ -1020,6 +1020,8 @@ export type LocalTools = {
   ts_guess?: { seconds_per_step: number; gradients: number; seconds: number; correction_seconds: number } | null
   /** D240: the single point levels, the default first, each with its estimate for `atoms` */
   single_point_levels?: SinglePointLevel[]
+  /** D261: the levels "Fix imaginary mode" runs at, as a calculation's program and method */
+  fix_mode_levels?: { method: string; program: string; label: string }[]
   /** the methods a refine offers: value for the request, label to show */
   methods: {
     value: string
@@ -1156,6 +1158,8 @@ export type LocalJob = {
   replace?: boolean
   replace_offer?: ReplacePlan | null
   awaiting_choice?: boolean
+  /** D261: a "Fix imaginary mode" job: the frequency job it follows and its imaginary mode */
+  fix_mode?: FixModeSpec | null
   /** D258: the structure the job started from, when not the node's coordinates */
   start?: { from: 'geometry' | 'structure'; calculation_id?: string; label: string | null } | null
   status:
@@ -1197,6 +1201,8 @@ export type LocalJob = {
     final_xyz?: string | null
     /** D238: what a TS guess found */
     ts_guess?: TsGuessFound | null
+    /** D261: the tries along the imaginary mode and the one kept */
+    fix_mode?: FixModeFound | null
     /** D218: a scan's points: the coordinates' values, the energy and whether it converged */
     scan?: {
       coordinates: LocalScan['coordinates']
@@ -1215,6 +1221,25 @@ export type LocalJob = {
     replaced?: boolean
   } | null
   import_error?: string | null
+}
+
+/** D261: what a "Fix imaginary mode" job follows. */
+export type FixModeSpec = {
+  calculation_id: string
+  wavenumber: number
+  imaginary: number[]
+  shifts: number[]
+  start_energy: number | null
+}
+
+/** D261: its tries (signed shift in Å along the mode) and the one kept. */
+export type FixModeFound = {
+  wavenumber: number | null
+  tries: { shift: number; converged: boolean; energy: number | null; cycles: number; imaginary: number[] | null }[]
+  kept: number
+  fixed: boolean
+  start_energy: number | null
+  change_kcal: number | null
 }
 
 /** FR-3D-07: a named list of alignment atoms per node. */
@@ -3150,6 +3175,8 @@ export const api = {
     /** D239: also correct the saddle with PBE single points */
     correct?: boolean
   }) => request<LocalJob>('POST', '/local/ts-guess', body),
+  /** D261: push a minimum off an imaginary mode of one of its local frequency jobs */
+  startFixMode: (body: { node_id: string; calculation_id: string }) => request<LocalJob>('POST', '/local/fix-mode', body),
   /** D240: a single point of each node's structure on this computer, one job per node */
   startSinglePoints: (body: { node_ids: string[]; level: string; geometry_of?: Record<string, string> }) =>
     request<LocalJob[]>('POST', '/local/single-points', body),

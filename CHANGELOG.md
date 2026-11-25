@@ -6,6 +6,10 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- A minimum's imaginary mode from a local GFN2-xTB, g-xTB or MACE-OMOL-0 frequency job can be fixed on
+  this computer (D261): Fix imaginary mode in the frequency calculation tries the structure pushed both
+  ways along the mode, keeps the lower try without an imaginary mode, and offers to replace the
+  geometry at that level. Claude starts one with `start_local_fix_mode`.
 - An optimization at a level a node already has can replace the node's geometry at that level
   (D260), when picked in the import dialog or in Local jobs and confirmed; a derived node stays the
   default. What it replaces, and what sits on that, is removed (D259).

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
 import { api, type LocalJob } from '../api'
-import { localStatusText, progressText, scanText, tsCheckText, tsGuessText } from '../localJobs'
+import { fixModeText, localStatusText, progressText, scanText, tsCheckText, tsGuessText } from '../localJobs'
 import { Modal } from './Modal'
 import { errorText, withDisplacements } from '../util'
 import { Viewer3D } from './Viewer3D'
@@ -146,6 +146,7 @@ export function LocalJobsDialog({
                 const shown = showMode === job.id && mode && xyz ? withDisplacements(xyz, mode) : null
                 const found = job.result?.frequencies
                 const scanned = scanText(job)
+                const fixed = fixModeText(job)
                 const guess = tsGuessText(job)
                 return (
                   <Fragment key={job.id}>
@@ -163,6 +164,7 @@ export function LocalJobsDialog({
                             ` · from ${job.start.from === 'geometry' ? `its ${job.start.label ?? 'other'} geometry` : 'a structure'}`}
                           {job.constraints && ' · with constraints'}
                           {job.transition && job.kind !== 'ts_guess' && ' · TS search'}
+                          {job.fix_mode && ` · fix the ${Math.abs(job.fix_mode.wavenumber).toFixed(0)}i cm⁻¹ mode`}
                           {job.kind === 'single_point' && ' · single point'}
                           {job.scan &&
                             (job.scan.grid
@@ -211,6 +213,11 @@ export function LocalJobsDialog({
                             {w}
                           </div>
                         ))}
+                        {fixed && (
+                          <div className="small" aria-label="Fix imaginary mode">
+                            {fixed}
+                          </div>
+                        )}
                         {scanned && (
                           <div className="small" aria-label="Scan">
                             {scanned}
