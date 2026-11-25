@@ -13,6 +13,13 @@ artifacts and publishes nothing.
   bar and the Filters shows only the open proposals and their nodes. The playground's merge review warns
   about proposals still open, without blocking. In a playground, while Claude works on its own, it merges
   two nodes it made itself without asking. Migration 0039.
+- A transition state's imaginary mode can be followed on this computer (D263c, A184): its frequency
+  calculation's structure, at any level, is pushed 0.1 Å both ways along the mode and each end relaxed
+  for up to 40 steps with MACE-OMOL-0 or GFN2-xTB. The result is never imported: the ends are matched
+  against the nodes (and a folder's outputs) by their bonds and an RMSD under 0.5 Å, with a verdict
+  (links A and B, one end matches, none, or both on one structure), shown in Local jobs. Claude uses
+  `start_local_follow_mode`, `get_follow_mode_ends` and `make_node_from_end`, which makes a planned node
+  from an end that matches nothing.
 - Claude can build a mechanism from a folder of outputs (D263): `survey_folder` reads every output
   in it without importing (per job step the level, energy, G and imaginary frequencies; files ending on
   the same geometry; restarts; what is imported already), `compare_structures` says which bonds form

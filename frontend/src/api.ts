@@ -1144,7 +1144,7 @@ export type TsGuessFound = {
 
 export type LocalJob = {
   id: string
-  kind: 'refine' | 'ts_guess' | 'single_point'
+  kind: 'refine' | 'ts_guess' | 'single_point' | 'follow_mode'
   /** D240: a single point's level */
   single_point?: { level: string; label: string } | null
   /** D238: a TS guess between two structures joined by an edge */
@@ -1171,6 +1171,10 @@ export type LocalJob = {
   awaiting_choice?: boolean
   /** D261: a "Fix imaginary mode" job: the frequency job it follows and its imaginary mode */
   fix_mode?: FixModeSpec | null
+  /** D263c: a mode-follow job: the TS's frequency job, its mode, shift, steps and folder */
+  follow_mode?: FollowModeSpec | null
+  /** D263c: a result that is information only (a mode-follow): never imported */
+  nothing_to_import?: boolean
   /** D258: the structure the job started from, when not the node's coordinates */
   start?: { from: 'geometry' | 'structure'; calculation_id?: string; label: string | null } | null
   status:
@@ -1214,6 +1218,13 @@ export type LocalJob = {
     ts_guess?: TsGuessFound | null
     /** D261: the tries along the imaginary mode and the one kept */
     fix_mode?: FixModeFound | null
+    /** D263c: how each end of the mode relaxed */
+    follow_mode?: {
+      wavenumber: number | null
+      shift: number
+      steps: number
+      ends: Record<'+' | '-', { shift: number; converged: boolean; cycles: number; energy: number | null }>
+    } | null
     /** D218: a scan's points: the coordinates' values, the energy and whether it converged */
     scan?: {
       coordinates: LocalScan['coordinates']
@@ -1251,6 +1262,49 @@ export type FixModeFound = {
   fixed: boolean
   start_energy: number | null
   change_kcal: number | null
+}
+
+/** D263c: what a mode-follow job follows. */
+export type FollowModeSpec = {
+  calculation_id: string
+  level: string | null
+  ts_node_id: string
+  ts_label: string
+  wavenumber: number
+  imaginary: number[]
+  shift: number
+  steps: number
+  folder: string | null
+}
+
+/** D263c, A184: a structure one end of a mode-follow matches: a node, or a file of its folder. */
+export type FollowModeMatch = { rmsd: number; renumbered?: boolean } & (
+  | { node_id: string; label: string; role: string | null }
+  | { path: string; step: number }
+)
+
+/** D263c, A184: the ends of a finished mode-follow, matched against the nodes, with the verdict. */
+export type FollowModeEnds = {
+  job_id: string
+  ts: { node_id: string; label: string; calculation_id: string; level: string | null; wavenumber: number }
+  ends: Record<
+    '+' | '-',
+    {
+      shift: number
+      converged: boolean
+      cycles: number
+      energy: number | null
+      formed: { bond: string; ts: number; end: number }[]
+      broken: { bond: string; ts: number; end: number }[]
+      matches: FollowModeMatch[]
+      files?: FollowModeMatch[]
+      node_made?: string
+    }
+  >
+  outcome: 'links' | 'one_end' | 'none' | 'ambiguous' | 'same_structure'
+  verdict: string
+  confidence: 'high' | null
+  flags: string[]
 }
 
 /** FR-3D-07: a named list of alignment atoms per node. */
@@ -3312,6 +3366,8 @@ export const api = {
   cancelLocalJob: (id: string) => request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/cancel`),
   importLocalJob: (id: string, derived = false) =>
     request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/import`, derived ? { derived } : undefined),
+  /** D263c: a finished mode-follow's ends matched against the nodes (A184) */
+  followModeEnds: (id: string) => request<FollowModeEnds>('GET', `/local/jobs/${encodeURIComponent(id)}/ends`),
   /** D260: import replacing the node's geometry at the job's level (after the user's confirm) */
   replaceWithLocalJob: (id: string) => request<LocalJob>('POST', `/local/jobs/${encodeURIComponent(id)}/replace`),
   atomMatch: (startId: string, endId: string, pairs: [number, number][] = []) =>

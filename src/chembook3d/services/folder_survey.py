@@ -132,6 +132,38 @@ def survey(
         staging.clear()
 
 
+@dataclass
+class Final:
+    """A file's final structure, as the survey's `geometry` numbers compare them."""
+
+    path: str  # inside the folder, with "/"
+    step: int
+    rows: Rows
+    charge: int | None
+    multiplicity: int | None
+
+
+def final_structures(
+    folder: Path, recursive: bool = True, investigation: Path | None = None
+) -> list[Final]:
+    """D263c: the final structure of each output in `folder` (the last step with one), read
+    as the survey reads them; nothing is staged for the app or written."""
+    staging = imports.Staging()
+    try:
+        batch = batch_import.scan(staging, folder, recursive, investigation)
+        found = []
+        for item in batch.files:
+            if isinstance(item.staged.parsed, crest.Ensemble):
+                continue
+            last = batch_import._final(item.staged)
+            rows = imports._rows(last.final_geometry) if last is not None else None
+            if last is not None and rows:
+                found.append(Final(item.relative, last.index, rows, last.charge, last.multiplicity))
+        return found
+    finally:
+        staging.clear()
+
+
 def _file(session: Session, staged: imports.StagedFile) -> dict[str, Any]:
     parsed = staged.parsed
     if isinstance(parsed, crest.Ensemble):

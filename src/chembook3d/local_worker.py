@@ -16,6 +16,8 @@ Files in the job folder:
 - ``trajectory.xyz``: one frame per optimizer step, the comment holding the energy (and, D220,
   a scan's point: ``cycle 4 energy -5.07 point 2``).
 - ``scan-points.jsonl``: D220, a scan's points as each one ends (as ``result.json`` lists them).
+- ``follow-ends.jsonl``: D263c, a mode-follow's ends as each one ends (as ``result.json``'s
+  ``follow_mode.ends`` holds them), for the Inspect window while the other end runs.
 - ``criteria.jsonl``: D220, one line per optimizer step after the first, the convergence criteria
   geomeTRIC judged that step's structure by (``record_criteria``), for the Inspect window.
 - ``result.json``: written once at the end, with the outcome and the final geometry.
@@ -207,14 +209,16 @@ def _stub(start, shrink: float, weight: float, delay: float):
     return stub
 
 
-def _saddle(start, delay: float):
+def _saddle(start, delay: float, top_scale: float = 1.05, width: float = 0.3):
     """Test engine with a saddle point: harmonic bonds at the starting distances, except
     between atoms 1 and 2, which sit in a double well whose barrier top is 5 % longer than
-    their starting distance (a TS search climbs to it; its imaginary mode is that bond)."""
+    their starting distance (a TS search climbs to it; its imaginary mode is that bond).
+    D263c: a mode-follow starts at a TS, so its top is the starting distance itself
+    (`top_scale` 1) and its wells `FOLLOW_WIDTH` Bohr either side, a bond made and broken."""
     import numpy as np
 
     rest = _stub(start, 1.0, 0.1, 0.0)
-    top, width, height = 1.05 * float(np.linalg.norm(start[0] - start[1])), 0.3, 0.5
+    top, height = top_scale * float(np.linalg.norm(start[0] - start[1])), 0.5
 
     def saddle(x):
         if delay:
@@ -223,7 +227,7 @@ def _saddle(start, delay: float):
         d = x[0] - x[1]
         r = float(np.linalg.norm(d))
         # the harmonic term rest() put on this pair is taken off again
-        r0 = top / 1.05
+        r0 = top / top_scale
         w = 0.1 / r0**2
         e -= w * (r - r0) ** 2
         f = -2 * w * (r - r0) * d / r
@@ -391,6 +395,8 @@ def _engine(method: str, numbers, start, job: dict, folder: Path, delay: bool = 
     if method == "stub":
         return _stub(start, 0.98, 0.1, wait)
     if method == "stub-saddle":
+        if job.get("follow_mode"):
+            return _saddle(start, wait, 1.0, FOLLOW_WIDTH)
         return _saddle(start, wait)
     if method == "stub-low":  # a second, different test engine for ONIOM's low level
         return _stub(start, 0.95, 0.05, 0.0)
@@ -581,6 +587,7 @@ def grid_cells(scan: dict) -> list[tuple[float, float, list[int]]]:
 
 CRITERIA = "criteria.jsonl"
 SCAN_POINTS = "scan-points.jsonl"
+FOLLOW_ENDS = "follow-ends.jsonl"  # D263c
 
 
 def record_criteria(store) -> None:
@@ -1162,6 +1169,45 @@ def pick_frame(frames: list[dict], warnings: list[str]) -> int:
 
 
 HARTREE_KCAL = 627.509474
+FOLLOW_WIDTH = 0.95  # Bohr: the stub-saddle's wells either side of a mode-follow's TS (0.5 Å)
+
+
+def follow_mode(follow: dict, start, optimize_from, progress, record=None) -> dict:
+    """D263c, A184: the two ends of a mode-follow job. The TS (Å) is displaced along its
+    imaginary mode so that the atom moving most moves `shift` Å, + then −; each end is relaxed
+    by `optimize_from` (at most `steps` optimizer steps: one that stops there is expected and
+    kept, as not converged). `record(name, end)` keeps each end as it finishes. The ends carry
+    their frames, energies and criteria for the Inspect window."""
+    import numpy as np
+
+    mode = np.asarray(follow["mode"], float)
+    largest = float(np.linalg.norm(mode, axis=1).max()) or 1.0
+    shift = float(follow["shift"])
+    ends: dict = {}
+    for name, sign in (("+", 1), ("-", -1)):
+        progress.update(phase=f"End {name}: {sign * shift:+g} Å along the mode, relaxing")
+        x_start = np.asarray(start, float) + sign * shift * mode / largest
+        state = optimize_from(x_start)
+        frames, energies, criteria = state["lists"][:3]
+        ends[name] = {
+            "shift": round(sign * shift, 4),
+            "converged": state["converged"],
+            "cycles": len(frames),
+            "energy": state["energy"],
+            "coordinates": np.asarray(state["coords"], float).round(8).tolist(),
+            "frames": frames,
+            "energies": energies,
+            "criteria": criteria,
+        }
+        if record is not None:
+            record(name, ends[name])
+    progress.update(phase=None)
+    return {
+        "wavenumber": follow.get("wavenumber"),
+        "shift": shift,
+        "steps": follow.get("steps"),
+        "ends": ends,
+    }
 
 
 def fix_mode(fix: dict, start, optimize_from, frequencies_at, progress) -> dict:
@@ -1429,6 +1475,33 @@ def run(folder: Path, lock: Path | None) -> int:
                 result["ts_check"] = {"start": mode_check(symbols, x0, first, job.get("reacting"))}
                 result["ts_check"]["start"].pop("mode", None)  # only the final mode is shown
                 progress.update(phase=None)
+            lists = (frames, energies, criteria, frame_points)
+
+            def optimize_from(x_start) -> dict:
+                """One optimization from `x_start` (Å) with its own frames and files (D261's
+                tries, D263c's ends)."""
+                for kept in lists:
+                    kept.clear()
+                traj.write_text("", encoding="utf-8")  # the Inspect window shows this one
+                judged.write_text("", encoding="utf-8")
+                last["coords"], last["energy"] = x_start, None
+                molecule.xyzs = [x_start.copy()]
+                options["customengine"] = Engine(molecule)
+                done = True
+                try:
+                    geometric.optimize.run_optimizer(**options)
+                except geometric.errors.GeomOptNotConvergedError:
+                    done = False
+                finally:
+                    _close_geometric_logs()
+                return {
+                    "converged": done,
+                    "lists": [list(values) for values in lists],
+                    "coords": np.asarray(last["coords"], float).copy(),
+                    "energy": last["energy"],
+                    "files": [traj.read_text(encoding="utf-8"), judged.read_text("utf-8")],
+                }
+
             converged = True
             _redirect_geometric_log(log)
             scan = job.get("scan")
@@ -1475,31 +1548,6 @@ def run(folder: Path, lock: Path | None) -> int:
             elif job.get("fix_mode") and frequency_engine is not None:
                 # D261: displaced both ways along the imaginary mode, each optimized and its
                 # frequencies computed; the lower result without an imaginary mode is kept.
-                lists = (frames, energies, criteria, frame_points)
-
-                def optimize_from(x_start) -> dict:
-                    for kept in lists:
-                        kept.clear()
-                    traj.write_text("", encoding="utf-8")  # the Inspect window shows this try
-                    judged.write_text("", encoding="utf-8")
-                    last["coords"], last["energy"] = x_start, None
-                    molecule.xyzs = [x_start.copy()]
-                    options["customengine"] = Engine(molecule)
-                    done = True
-                    try:
-                        geometric.optimize.run_optimizer(**options)
-                    except geometric.errors.GeomOptNotConvergedError:
-                        done = False
-                    finally:
-                        _close_geometric_logs()
-                    return {
-                        "converged": done,
-                        "lists": [list(values) for values in lists],
-                        "coords": np.asarray(last["coords"], float).copy(),
-                        "energy": last["energy"],
-                        "files": [traj.read_text(encoding="utf-8"), judged.read_text("utf-8")],
-                    }
-
                 def frequencies_at(x):
                     final = numerical_hessian(frequency_engine, x, progress, "Frequencies")
                     freqs, modes = harmonic(symbols, x, final)
@@ -1522,6 +1570,25 @@ def run(folder: Path, lock: Path | None) -> int:
                     result["frequencies"] = kept["frequencies"]
                 result["fix_mode"] = found
                 frequency_engine = None  # the kept try's frequencies are in already
+            elif job.get("follow_mode"):
+                # D263c, A184: displaced both ways along the TS's imaginary mode, each end
+                # relaxed for a few steps; the app matches the ends, nothing is imported.
+                options["maxiter"] = int(job["follow_mode"].get("steps", 40))
+                ends_file = folder / FOLLOW_ENDS
+                ends_file.write_text("", encoding="utf-8")
+
+                def keep_end(name, end):
+                    with ends_file.open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps({"end": name, **end}) + "\n")
+
+                found = follow_mode(job["follow_mode"], start, optimize_from, progress, keep_end)
+                for values in lists:
+                    values.clear()  # the ends keep their own frames
+                traj.write_text("", encoding="utf-8")
+                judged.write_text("", encoding="utf-8")
+                last["coords"], last["energy"] = start, None
+                converged = all(end["converged"] for end in found["ends"].values())
+                result["follow_mode"] = found
             else:
                 try:
                     geometric.optimize.run_optimizer(**options)

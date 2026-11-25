@@ -43,11 +43,12 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from chembook3d import local_tools, xyz
-from chembook3d.local_worker import CRITERIA, METHOD_LABELS, SCAN_POINTS, grid_cells
+from chembook3d.local_worker import CRITERIA, FOLLOW_ENDS, METHOD_LABELS, SCAN_POINTS, grid_cells
 from chembook3d.models import Calculation, Node, Role
 from chembook3d.parsers import local_result
 from chembook3d.services import history, imports, levels, oniom
 from chembook3d.services import nodes as node_service
+from chembook3d.services.geometry import matches as same_geometry
 from chembook3d.services.records import RecordError
 
 JOBS_DIR = "local-jobs"
@@ -358,19 +359,23 @@ def create_job(
     start: Start | None = None,
     replace: bool = False,
     fix_mode: dict[str, Any] | None = None,
+    follow_mode: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Start a job. `limit` (seconds, D223) refuses one whose estimate is longer: the longest
     job Claude may start while it works on its own. D258: `start` runs it from another
     structure than the node's coordinates (one of its other geometries, or XYZ text or a
     build), with the node's atoms in its order and its charge and multiplicity; the job stays
-    the node's, and its result is imported by the usual rules (D246)."""
+    the node's, and its result is imported by the usual rules (D246). D263c: `follow_mode`
+    makes a job that follows a TS's imaginary mode both ways from `start` (its frequency
+    calculation's structure, in that calculation's order), never imported."""
     if method not in methods():
         raise LocalJobError(f"Unknown method {method!r}; offered: {', '.join(methods())}")
     atoms = node_service.atoms_of(node)
     if not atoms:
         raise LocalJobError(f'Node "{node.label}" has no coordinates')
     if start is not None:
-        check_start(node, start.atoms, charge, multiplicity)
+        if follow_mode is None:  # a mode-follow's ends are never imported onto the node
+            check_start(node, start.atoms, charge, multiplicity)
         atoms = start.atoms
     if multiplicity < 1:
         raise LocalJobError("The multiplicity is at least 1")
@@ -401,6 +406,9 @@ def create_job(
         seconds = estimate(method, len(atoms), resources.cores, model)["seconds"]
         seconds *= scan["points"] if scan else 1  # one optimization per point, at most
         seconds *= 2 * len(fix_mode["shifts"]) if fix_mode else 1  # D261: its tries, at most
+        if follow_mode:  # A184: two ends of at most so many steps each
+            per_step = estimate(method, len(atoms), resources.cores)["seconds_per_step"]
+            seconds = per_step * 2 * follow_mode["steps"]
         if seconds > limit:
             raise LocalJobError(
                 f"This job is estimated at about {_duration(seconds)}, over the "
@@ -410,7 +418,15 @@ def create_job(
             )
     with _records:
         default = f"{node.label} {METHODS.get(method, method)}" + (
-            " TS" if transition else " scan" if scan else " fix mode" if fix_mode else ""
+            " TS"
+            if transition
+            else " scan"
+            if scan
+            else " fix mode"
+            if fix_mode
+            else " follow mode"
+            if follow_mode
+            else ""
         )
         job_id = _new_id(folder, name or default)
         path = jobs_dir(folder) / job_id
@@ -464,6 +480,10 @@ def create_job(
             job["scan"] = scan  # D218: a relaxed scan, imported as a node of its own
         if fix_mode and not scan and not transition:
             job["fix_mode"] = fix_mode  # D261: tries along an imaginary mode
+        if follow_mode and not scan and not transition:
+            job["kind"] = FOLLOW_MODE  # D263c: both ends of the mode, information only
+            job["follow_mode"] = follow_mode
+            job.pop("replace", None)
         if method in TEST_METHODS and os.environ.get("CHEMBOOK3D_LOCAL_STUB_DELAY"):
             job["stub_delay_s"] = float(os.environ["CHEMBOOK3D_LOCAL_STUB_DELAY"])
         _write(path / JOB_JSON, job)
@@ -569,6 +589,125 @@ def create_fix_mode(
             "mode": [[float(v) for v in atom] for atom in modes[lowest]],
             "shifts": list(FIX_SHIFTS),
             "start_energy": result.energy,
+        },
+    )
+
+
+# ---------- D263c, A184: follow a TS's imaginary mode both ways ----------
+
+FOLLOW_MODE = "follow_mode"
+FOLLOW_SHIFT = 0.1  # A184: Å moved by the atom moving most, each way
+FOLLOW_STEPS = 40  # A184: optimizer steps each end relaxes for, at most
+FOLLOW_METHODS = {"mace-omol": "MACE-OMOL-0", "gfn2": "GFN2-xTB"}
+FOLLOW_TEST_METHODS = {"stub-saddle", "stub", "mace-stub"}  # CHEMBOOK3D_LOCAL_STUB=1 only
+FOLLOW_END_FIELDS = ("shift", "converged", "cycles", "energy")  # job_status's, per end
+
+
+def _follow_calculation(node: Node, calculation_id: str | None, tolerance: float) -> Calculation:
+    """The frequency calculation to follow: the one named (on the node), else the node's at its
+    geometry with exactly one imaginary frequency, else the one with the lowest; one away from
+    the node's geometry only when none is at it."""
+    if calculation_id is not None:
+        found = next((c for c in node.calculations if c.id == calculation_id), None)
+        if found is None:
+            raise LocalJobError(f'"{node.label}" has no calculation {calculation_id}')
+        return found
+
+    def imaginary(calc: Calculation) -> list[float]:
+        result = calc.result
+        return [float(f) for f in (result.frequencies if result is not None else []) if f < 0]
+
+    with_mode = [c for c in node.calculations if imaginary(c) and c.geometry]
+    if not with_mode:
+        raise LocalJobError(
+            f'"{node.label}" has no frequency calculation with an imaginary frequency to follow'
+        )
+    at = [c for c in with_mode if same_geometry(c.geometry, node.geometry, tolerance)]
+    return min(
+        at or with_mode,
+        key=lambda c: (len(imaginary(c)) != 1, min(imaginary(c)), -c.created_at.timestamp()),
+    )
+
+
+def create_follow_mode(
+    folder: Path,
+    node: Node,
+    calculation_id: str | None = None,
+    method: str = "mace-omol",
+    survey_folder: str | None = None,
+    limit: int | None = None,
+    tolerance: float = 0.05,
+) -> dict[str, Any]:
+    """D263c, A184: a job that follows a TS's imaginary mode both ways: the frequency
+    calculation's structure (any level, DFT included) displaced 0.1 Å along the normalised
+    lowest imaginary mode on each side (the atom moving most moves 0.1 Å) and each relaxed for
+    at most 40 steps with MACE-OMOL-0 or GFN2-xTB. Its result is information, never imported:
+    `services/follow_mode.py` matches the ends against the nodes and the folder named here."""
+    offered = methods()
+    allowed = set(FOLLOW_METHODS) | (FOLLOW_TEST_METHODS if method in TEST_METHODS else set())
+    if method not in allowed:
+        raise LocalJobError(
+            f"Follow the mode runs with {' or '.join(FOLLOW_METHODS)} "
+            f"({', '.join(FOLLOW_METHODS.values())}); {method!r} is not one"
+        )
+    if method not in offered:
+        if method in local_tools.MACE_METHODS:
+            raise LocalJobError(
+                "MACE-OMOL-0 is not installed on this computer: install it in Settings, Local "
+                "calculations, or follow the mode with gfn2"
+            )
+        raise LocalJobError(_install_first(method))
+    calculation = _follow_calculation(node, calculation_id, tolerance)
+    result = calculation.result
+    wavenumbers = [float(f) for f in (result.frequencies if result is not None else [])]
+    if not any(f < 0 for f in wavenumbers):
+        raise LocalJobError("This calculation has no imaginary frequency to follow")
+    modes = result.normal_modes
+    if len(modes) != len(wavenumbers):
+        raise LocalJobError(
+            "This calculation has no normal modes stored to follow (its file printed none, or "
+            "they were not read)"
+        )
+    lowest = min(range(len(wavenumbers)), key=wavenumbers.__getitem__)
+    source = calculation.geometry_source
+    rows = calculation.geometry or (source.geometry if source is not None else None)
+    if not rows:
+        raise LocalJobError("This calculation has no structure to start from")
+    atoms = [xyz.Atom(e, x, y, z) for e, x, y, z in rows]
+    if len(modes[lowest]) != len(atoms):
+        raise LocalJobError("The normal mode does not match the structure's atoms")
+    if not np.linalg.norm(np.asarray(modes[lowest], float), axis=1).max() > 0:
+        raise LocalJobError("The imaginary mode moves no atom")
+    where = None
+    if survey_folder:
+        path = Path(survey_folder).expanduser()
+        if not path.is_absolute() or not path.is_dir():
+            raise LocalJobError(f"{survey_folder} is not a folder on this computer (a full path)")
+        where = str(path)
+    charge = calculation.charge if calculation.charge is not None else node.charge or 0
+    multiplicity = (
+        calculation.multiplicity if calculation.multiplicity is not None else node.multiplicity or 1
+    )
+    return create_job(
+        folder,
+        node,
+        method,
+        charge,
+        multiplicity,
+        frequencies=False,
+        limit=limit,
+        start=Start(atoms, calculation.id, levels.label(calculation.level)),
+        follow_mode={
+            "calculation_id": calculation.id,
+            "level": levels.label(calculation.level),
+            "ts_node_id": node.id,
+            "ts_label": node.label,
+            "wavenumber": wavenumbers[lowest],
+            "imaginary": [f for f in wavenumbers if f < 0],
+            "mode": [[float(v) for v in atom] for atom in modes[lowest]],
+            "shift": FOLLOW_SHIFT,
+            "steps": FOLLOW_STEPS,
+            "folder": where,
         },
     )
 
@@ -852,6 +991,8 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
         out["ts_guess"] = {k: v for k, v in job["ts_guess"].items() if k != "end"}
     if job.get("fix_mode"):  # D261: the mode it follows stays in job.json
         out["fix_mode"] = {k: v for k, v in job["fix_mode"].items() if k != "mode"}
+    if job.get("follow_mode"):  # D263c: likewise
+        out["follow_mode"] = {k: v for k, v in job["follow_mode"].items() if k != "mode"}
     out["atoms"] = len(job.get("elements") or [])
     out["status"] = status
     out["active"] = status in ("starting", "queued", "running", "cancelling")
@@ -884,6 +1025,15 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
                 "fix_mode",  # D261: its tries and the one kept
             )
         }
+        found = result.get("follow_mode")
+        if found:  # D263c: each end's state, without its frames
+            out["result"]["follow_mode"] = {
+                **{k: v for k, v in found.items() if k != "ends"},
+                "ends": {
+                    name: {k: v for k, v in end.items() if k in FOLLOW_END_FIELDS}
+                    for name, end in (found.get("ends") or {}).items()
+                },
+            }
         found = result.get("ts_guess")
         if found:  # D238: what the guess's notes say, without the ends' structures
             out["result"]["ts_guess"] = {
@@ -904,7 +1054,13 @@ def job_status(folder: Path, job_id: str) -> dict[str, Any]:
             }
         if (result.get("ts_check") or {}).get("end", {}).get("mode"):
             out["result"]["final_xyz"] = _xyz(result)  # D217: to animate the checked mode
-    out["importable"] = status in ("converged", "not_converged") and not job.get("imported")
+    # D263c: a mode-follow's result is information: nothing to import (`follow_mode.ends`)
+    out["nothing_to_import"] = job.get("kind") == FOLLOW_MODE
+    out["importable"] = (
+        status in ("converged", "not_converged")
+        and not job.get("imported")
+        and not out["nothing_to_import"]
+    )
     # D260: waiting for the user's choice between Replace and a derived node
     out["awaiting_choice"] = bool(out["importable"] and job.get("replace_offer"))
     return out
@@ -1057,7 +1213,12 @@ def inspect_data(folder: Path, job_id: str) -> tuple[dict[str, Any], dict[str, A
             scan["cells"] = [cell for _, _, cell in grid_cells(scan)]
         data["scan"] = scan
         data["frame_points"] = [p or 0 for p in frame_points]
-    files = (path / TRAJECTORY, path / CRITERIA, path / SCAN_POINTS)
+    if job.get("follow_mode"):
+        # D263c: the ends relaxed so far, then the one relaxing now (trajectory.xyz)
+        follow = {k: v for k, v in job["follow_mode"].items() if k != "mode"}
+        follow["ends"] = {str(e.pop("end")): e for e in _lines(path / FOLLOW_ENDS) if "end" in e}
+        data["follow_mode"] = follow
+    files = (path / TRAJECTORY, path / CRITERIA, path / SCAN_POINTS, path / FOLLOW_ENDS)
     size = sum(f.stat().st_size for f in files if f.is_file())
     return data, status, size
 
@@ -1171,6 +1332,12 @@ def _import_result(
     the user's confirm), False makes a derived node as usual; None does as the job asked: a
     job started with replace waits for the user's choice when its result would replace."""
     status = job_status(folder, job_id)
+    if status.get("nothing_to_import"):
+        raise LocalJobError(
+            "A mode-follow job's result is information and is never imported: its ends are "
+            "matched by GET /api/local/jobs/{id}/ends (get_follow_mode_ends), and an end that "
+            "matches nothing becomes a node with make_node_from_end"
+        )
     if status.get("imported"):
         raise LocalJobError("This job's result is imported already")
     if status["status"] not in ("converged", "not_converged"):

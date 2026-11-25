@@ -173,6 +173,10 @@ geometry; restarts; what is imported already). `compare_structures` says which b
 between two structures, whatever their atom order (a side may be a list: a sum of species),
 and with a TS whether it links two minima along its imaginary mode; `group_structures` sorts
 many into isomers, conformers and duplicates. Then `import_folder`, showing the plan first.
+A TS that neither an IRC nor the bond check along its mode settles (D263c):
+`start_local_follow_mode` relaxes both ends of its mode briefly, `get_follow_mode_ends` matches
+them against the nodes (A184) with a verdict, and `make_node_from_end` makes a node only from
+an end that matches nothing; a TS still unsettled is flagged, never guessed.
 
 Writing new files there (D126): only when the person asks for files (inputs, job scripts, xyz,
 notes) and has turned on "Let Claude write new files here" in the server's tab (`list_servers`

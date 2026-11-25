@@ -34,6 +34,9 @@ as one single-point step at the job's structure, so its import onto the node giv
 node's optimization as its geometry level (FR-CALC-04), e.g. `Psi4 PBE-D3M(BJ)/def2-TZVP // MACE
 MACE-OMOL-0`.
 
+D263c: a mode-follow's result (`follow_mode.ends`, + and −) is read as one optimization step per
+end, each with its own structures, for the Inspect window; it is never imported.
+
 D242: a TS guess's result (D238) carries the check of its saddle, a Hessian over the reacting
 region only. It is read onto the optimization step as `mode_check`, never as a frequency step:
 a partial Hessian gives no ZPE or G.
@@ -286,6 +289,71 @@ def _single_point(data: dict, geometries: list[list[Atom]]) -> ParsedFile:
     return ParsedFile(program=str(data.get("program") or "local"), version=version, steps=[step])
 
 
+def _atoms(elements: list, frames: list) -> list[list[Atom]]:
+    return [
+        [
+            Atom(e, float(x), float(y), float(z))
+            for e, (x, y, z) in zip(elements, frame, strict=True)
+        ]
+        for frame in frames
+    ]
+
+
+def _relaxation(data: dict, index: int, name: str, end: dict, state: object) -> ParsedStep:
+    """D263c: one end of a mode-follow as an optimization step of its own."""
+    elements = data.get("elements") or []
+    geometries = _atoms(elements, end.get("frames") or [])
+    route = Route(
+        text=f"local {data.get('method', '')} relaxation of the mode's {name} end",
+        method=data.get("level") or data.get("method"),
+        basis="",
+    )
+    route.job_type = "optimization"
+    step = ParsedStep(
+        index=index,
+        route=route,
+        charge=data.get("charge"),
+        multiplicity=data.get("multiplicity"),
+        geometries=geometries,
+        geometry_energies=[_energy(e) for e in end.get("energies") or []][: len(geometries)],
+        geometry_criteria=_criteria(end, len(geometries)),
+    )
+    shift = end.get("shift")
+    step.title = f"{name} end" + (f" ({float(shift):+g} Å along the mode)" if shift else "")
+    step.scf_energy = _energy(end.get("energy"))
+    converged = end.get("converged")
+    step.optimization_converged = None if state == RUNNING else bool(converged)
+    if converged and geometries:
+        step.converged_geometries = [len(geometries) - 1]
+    step.termination = "normal" if state != "failed" else "abnormal"
+    step.missing = [] if step.scf_energy is not None else ["total energy"]
+    if not geometries:
+        step.missing.append("geometry")
+    return step
+
+
+def _follow_mode(data: dict) -> ParsedFile:
+    """D263c: each end of a mode-follow, + then −; while it runs, the end relaxing now from
+    the frames written so far."""
+    state = data.get("state")
+    ends = (data.get("follow_mode") or {}).get("ends") or {}
+    steps = []
+    for name in ("+", "-"):
+        if name in ends:
+            steps.append(_relaxation(data, len(steps) + 1, name, ends[name], "converged"))
+        elif state == RUNNING:
+            current = {
+                "frames": data.get("frames") or [],
+                "energies": data.get("energies") or [],
+                "criteria": data.get("criteria") or [],
+                "energy": data.get("energy"),
+            }
+            steps.append(_relaxation(data, len(steps) + 1, name, current, RUNNING))
+            break
+    version = (data.get("versions") or {}).get(str(data.get("program", "")).lower())
+    return ParsedFile(program=str(data.get("program") or "local"), version=version, steps=steps)
+
+
 def parse(text: str) -> ParsedFile:
     try:
         data = json.loads(text)
@@ -317,6 +385,8 @@ def parse_data(data: object) -> ParsedFile:
             ]
         ]
     state = data.get("state")
+    if data.get("follow_mode"):
+        return _follow_mode(data)
     if data.get("single_point"):
         return _single_point(data, geometries)
     if data.get("scan"):
