@@ -79,7 +79,7 @@ Notes:
 | ID-5 | Once a node has a calculation, editing its coordinates creates a **new node** with `derived_from` set to the original. The original and its calculations are unchanged (D23). |
 | ID-6 | Importing a calculation onto a planned node with no calculations replaces its provisional geometry with the imported one. The previous geometry is kept in the change history (D24). |
 | ID-7 | A calculation imported onto an existing node must match that node's atoms and coordinates. If it does not, the app warns and offers to create a new node instead (see FR-IMP-08). |
-| ID-8 | If an import nearly matches an existing node (same composition, charge and multiplicity, and geometry within a configurable tolerance), the app warns of a possible duplicate. The user decides. The app never merges (D47). |
+| ID-8 | If an import nearly matches an existing node (same composition, charge and multiplicity, and geometry within a configurable tolerance), the app warns of a possible duplicate. The user decides. The app never merges on its own (D47); the user can merge two nodes (D262). |
 
 ## 4. Lifecycle
 
@@ -172,7 +172,7 @@ Checks against the model:
 | INV-4 | An interconversion transition never changes the branch of either endpoint. |
 | INV-5 | All energy values shown in one view share one composite level and one energy type. |
 | INV-6 | A calculation's results always remain attached to the geometry they were computed on (ID-5). |
-| INV-7 | _(P3)_ Deleting or rejecting a node never silently rewires transitions. Transitions touching a deleted node are deleted with it, after a confirmation that lists them; rejected nodes keep their edges. |
+| INV-7 | _(P3)_ Deleting or rejecting a node never silently rewires transitions. Transitions touching a deleted node are deleted with it, after a confirmation that lists them; rejected nodes keep their edges. A merge (D262) moves edges onto the node that stays, listing those it drops in its confirm. |
 | INV-8 | A direct connection is never displayed as if a barrier had been computed: profiles and edges mark it "no TS" (D53). |
 
 ## 8. Edge cases
