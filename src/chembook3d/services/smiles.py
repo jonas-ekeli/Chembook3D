@@ -16,13 +16,18 @@ from dataclasses import dataclass
 import numpy as np
 from rdkit import Chem, RDLogger
 from rdkit.Chem import rdDistGeom, rdForceFieldHelpers
+from rdkit.DistanceGeometry import DoTriangleSmoothing
 
-from chembook3d.services import builder, geometry, minimize
+from chembook3d.services import atom_matching, builder, geometry, minimize
 from chembook3d.services.builder import BuildError, Rows, Structure
 
 MAX_ATOMS = 300  # with hydrogens
 SEED = 0xC0FFEE
 STEPS = 2000
+TRIES = 10  # seeds tried for coordinates with only the drawn bonds
+LIMIT_SLACK = 0.05  # Å either side of a metal bond's length, and above a raised lower bound
+CLEAR_BOND = 1.1  # atoms not bonded to a metal: at least this times the 3D view's bond limit
+LIGAND_ANGLE = 75  # degrees: the least angle between two ligand atoms of a metal
 ORGANIC = {"H", "B", "C", "N", "O", "F", "Si", "P", "S", "Cl", "Se", "Br", "I"}
 TRANS = 150  # two bonds to a metal drawn at least this far apart are trans (D142f)
 SPINS = 36  # turns tried for a ligand about its bond to the metal
@@ -109,22 +114,9 @@ def _built(mol: Chem.Mol, dummies: list[int]) -> Built:
     mol = Chem.AddHs(mol)
     if mol.GetNumAtoms() > MAX_ATOMS:
         raise BuildError(f"That makes more than {MAX_ATOMS} atoms")
-    if not _embedded(mol):
-        raise BuildError(
-            "RDKit could not make 3D coordinates for this; build it in parts and bond them here"
-        )
-    if rdForceFieldHelpers.MMFFHasAllMoleculeParams(mol):
-        rdForceFieldHelpers.MMFFOptimizeMolecule(mol, maxIters=STEPS)
-    elif rdForceFieldHelpers.UFFHasAllMoleculeParams(mol):
-        rdForceFieldHelpers.UFFOptimizeMolecule(mol, maxIters=STEPS)
-    coords = mol.GetConformer().GetPositions()
-    shape = _metal_shape(mol)
-    if shape is not None:
-        coords = _placed(mol, coords, *shape)
     elements = [a.GetSymbol() for a in mol.GetAtoms()]
     metals = any(e not in ORGANIC for e in elements)
-    if metals:
-        coords = _metal_bonds(mol, elements, coords)
+    coords = _coordinates(mol, elements, metals)
     if not dummies:
         rows = [[e, *(float(c) for c in p)] for e, p in zip(elements, coords, strict=True)]
         return Built(rows, None, None, metals)
@@ -135,12 +127,105 @@ def _built(mol: Chem.Mol, dummies: list[int]) -> Built:
     return Built(rows, keep.index(attach), coords[dummy].astype(float), metals)
 
 
-def _embedded(mol: Chem.Mol) -> bool:
-    """ETKDG from the fixed seed, then from random coordinates."""
-    for random in (False, True):
+def _coordinates(mol: Chem.Mol, elements: list[str], metals: bool) -> np.ndarray:
+    """3D coordinates whose bonds, as the 3D view finds them, are the ones drawn (T-BLD-23).
+    RDKit's own distance bounds round a metal are loose, so ETKDG can fold a chelate's ring onto
+    the metal (RDKit 2026.09.2 did so for the drawn CAAC Hoveyda precatalyst); `_metal_limits`
+    tightens them. A ligand set on its corner (`_placed`) can still land on another ligand's H,
+    so a guess whose bonds are not the drawn ones is made again from the next seed, up to TRIES,
+    and the first is kept when none comes out clean."""
+    drawn = {tuple(sorted((b.GetBeginAtomIdx(), b.GetEndAtomIdx()))) for b in mol.GetBonds()}
+    limits = _metal_limits(mol, elements) if metals else None
+    first = None
+    for attempt in range(TRIES):
+        if not _embedded(mol, SEED + attempt, limits, fallback=attempt == 0):
+            if attempt == 0:
+                raise BuildError(
+                    "RDKit could not make 3D coordinates for this; build it in parts and bond "
+                    "them here"
+                )
+            continue
+        coords = _cleaned(mol, elements, metals)
+        if first is None:
+            first = coords
+        adjacency = atom_matching.bonds(coords, elements)
+        found = {(int(i), int(j)) for i, j in zip(*np.nonzero(np.triu(adjacency)), strict=True)}
+        if found == drawn:
+            return coords
+    assert first is not None
+    return first
+
+
+def _metal_limits(mol: Chem.Mol, elements: list[str]) -> np.ndarray | None:
+    """RDKit's distance bounds with each metal's bonds at the sum of the covalent radii (as
+    `_metal_bonds` sets them, D142d), atoms not bonded to it kept CLEAR_BOND times farther than
+    the 3D view's bond limit, and two of its ligand atoms (not bonded to each other or to one
+    atom) at least LIGAND_ANGLE apart round it. None when the bounds cannot be smoothed."""
+    limits = rdDistGeom.GetMoleculeBoundsMatrix(mol)
+    radii = [atom_matching.RADII.get(e, atom_matching.DEFAULT_RADIUS) for e in elements]
+
+    def at_least(i: int, j: int, low: float, high: float | None = None) -> None:
+        a, b = min(i, j), max(i, j)  # the upper bound is [a][b], the lower [b][a]
+        limits[b][a] = max(limits[b][a], low)
+        limits[a][b] = max(limits[a][b], low + LIMIT_SLACK) if high is None else high
+
+    for metal in (a for a in mol.GetAtoms() if a.GetSymbol() not in ORGANIC):
+        m = metal.GetIdx()
+        ligands = [a.GetIdx() for a in metal.GetNeighbors()]
+        lengths = {x: builder._bond_length(elements[m], elements[x]) for x in ligands}
+        for x in range(len(elements)):
+            if x == m:
+                continue
+            if x in lengths:
+                a, b = min(m, x), max(m, x)
+                limits[b][a] = lengths[x] - LIMIT_SLACK
+                limits[a][b] = lengths[x] + LIMIT_SLACK
+            else:
+                at_least(m, x, CLEAR_BOND * atom_matching.BOND_SCALE * (radii[m] + radii[x]))
+        for i, x in enumerate(ligands):
+            near_x = {a.GetIdx() for a in mol.GetAtomWithIdx(x).GetNeighbors()} - {m}
+            for y in ligands[i + 1 :]:
+                near_y = {a.GetIdx() for a in mol.GetAtomWithIdx(y).GetNeighbors()} - {m}
+                if y in near_x or near_x & near_y:
+                    continue  # an η ligand's atoms, or a small bite (κ² carboxylate)
+                lx, ly = lengths[x], lengths[y]
+                low = np.sqrt(lx * lx + ly * ly - 2 * lx * ly * np.cos(np.radians(LIGAND_ANGLE)))
+                at_least(x, y, float(low))
+    if not DoTriangleSmoothing(limits):
+        return None
+    return limits
+
+
+def _cleaned(mol: Chem.Mol, elements: list[str], metals: bool) -> np.ndarray:
+    """The embedded coordinates cleaned up by MMFF94 or UFF, each metal in its drawn shape."""
+    if rdForceFieldHelpers.MMFFHasAllMoleculeParams(mol):
+        rdForceFieldHelpers.MMFFOptimizeMolecule(mol, maxIters=STEPS)
+    elif rdForceFieldHelpers.UFFHasAllMoleculeParams(mol):
+        rdForceFieldHelpers.UFFOptimizeMolecule(mol, maxIters=STEPS)
+    coords = mol.GetConformer().GetPositions()
+    shape = _metal_shape(mol)
+    if shape is not None:
+        coords = _placed(mol, coords, *shape)
+    if metals:
+        coords = _metal_bonds(mol, elements, coords)
+    return coords
+
+
+def _embedded(
+    mol: Chem.Mol, seed: int = SEED, limits: np.ndarray | None = None, fallback: bool = True
+) -> bool:
+    """ETKDG from the seed, within `limits` when given; with `fallback`, then with RDKit's own
+    bounds and from random coordinates."""
+    tries: list[tuple[np.ndarray | None, bool]] = [(limits, False)]
+    if fallback:
+        tries += [(None, False)] if limits is not None else []
+        tries += [(None, True)]
+    for bounds, random in tries:
         params = rdDistGeom.ETKDGv3()
-        params.randomSeed = SEED
+        params.randomSeed = seed
         params.useRandomCoords = random
+        if bounds is not None:
+            params.SetBoundsMat(bounds)
         try:
             if rdDistGeom.EmbedMolecule(mol, params) == 0:
                 return True
