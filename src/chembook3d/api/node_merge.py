@@ -1,6 +1,6 @@
 """HTTP API for merging two nodes (D262, FR-NODE-09). The rules live in
 `services/node_merge.py`; these handlers only translate. The preview changes nothing; the merge
-is one write with one history entry."""
+is one write with one history entry, and Undo merge (D262h) works from that entry."""
 
 from typing import Any
 
@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from chembook3d.api.routes import DbSession, _investigation
-from chembook3d.services import node_merge
+from chembook3d.services import node_merge, node_merge_undo
 
 router = APIRouter(prefix="/api")
 
@@ -61,3 +61,21 @@ def merge(
     summary = found.as_dict()
     entry = node_merge.apply(session, found)
     return {**summary, "entry_id": entry.id}
+
+
+@router.get("/node-merges/{entry_id}/undo")
+def preview_merge_undo(entry_id: int, session: DbSession) -> dict[str, Any]:
+    """What undoing a merge from its history entry would bring back, and what blocks it.
+    Changes nothing."""
+    return node_merge_undo.plan(session, entry_id).as_dict()
+
+
+@router.post("/node-merges/{entry_id}/undo")
+def undo_merge(entry_id: int, session: DbSession) -> dict[str, Any]:
+    """Undo a merge (D262h): the merged node comes back with its id and every row the merge
+    changed is put back. 409 with the blockers when something it wrote has changed since."""
+    found = node_merge_undo.plan(session, entry_id)
+    if found.blockers:
+        raise HTTPException(409, {"blockers": found.blockers, "message": "; ".join(found.blockers)})
+    entry = node_merge_undo.apply(session, found)
+    return {**found.as_dict(), "undo_entry_id": entry.id}

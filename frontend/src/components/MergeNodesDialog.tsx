@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react'
-import { api, HARTREE_IN_KCAL_MOL, type AtomMatch, type MergeOptions, type MergePreview, type Node } from '../api'
+import {
+  api,
+  ApiError,
+  HARTREE_IN_KCAL_MOL,
+  type AtomMatch,
+  type HistoryEntry,
+  type MergeOptions,
+  type MergePreview,
+  type Node,
+  type NodeMergeUndo,
+} from '../api'
 import { nodeName } from '../names'
 import { errorText } from '../util'
 import { AtomMatchReview } from './AtomMatchDialog'
@@ -262,6 +272,7 @@ export function MergeNodesDialog({
           )}
           <section aria-label="What changes">
             <h3>What changes</h3>
+            <p className="small muted">One change in the history: Undo merge there brings “{from ? nodeName(from) : ''}” back.</p>
             <ul className="small">
               {preview.changes.map((c) => (
                 <li key={c}>{c}</li>
@@ -277,6 +288,85 @@ export function MergeNodesDialog({
         </>
       )}
       {error && <p role="alert">{error}</p>}
+    </Modal>
+  )
+}
+
+function counted(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`
+}
+
+/** D262h: confirm undoing a merge of two nodes from its history entry, after showing what comes
+ * back, or what blocks it (something the merge wrote has changed since). */
+export function UndoNodeMergeDialog({
+  entry,
+  onClose,
+  onDone,
+}: {
+  entry: HistoryEntry
+  onClose: () => void
+  onDone: (result: NodeMergeUndo) => void
+}) {
+  const [preview, setPreview] = useState<NodeMergeUndo | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    api.nodeMergeUndoPreview(entry.id).then(setPreview, (err: unknown) => setError(errorText(err)))
+  }, [entry.id])
+
+  const value = (entry.new_value ?? {}) as { from_label?: string; into_label?: string }
+  const from = preview?.from_label ?? value.from_label ?? 'the merged node'
+  const into = preview?.into_label ?? value.into_label ?? 'the kept node'
+  const blockers = preview?.blockers ?? []
+  const confirm = () => {
+    setBusy(true)
+    api.undoNodeMerge(entry.id).then(onDone, (err: unknown) => {
+      setBusy(false)
+      if (err instanceof ApiError && err.blockers && preview) setPreview({ ...preview, blockers: err.blockers })
+      else setError(errorText(err))
+    })
+  }
+
+  return (
+    <Modal
+      title={`Undo the merge of “${from}” into “${into}”?`}
+      onClose={onClose}
+      actions={
+        <>
+          <button onClick={onClose}>{blockers.length ? 'Close' : 'Cancel'}</button>
+          {preview && !blockers.length && (
+            <button className="danger" disabled={busy} onClick={confirm}>
+              Undo merge
+            </button>
+          )}
+        </>
+      }
+    >
+      {error && <p className="error">{error}</p>}
+      {!preview && !error && <p className="muted">Checking what changed since the merge…</p>}
+      {preview && blockers.length > 0 && (
+        <>
+          <p>This merge cannot be undone: what it wrote has changed since.</p>
+          <ul aria-label="What blocks the undo">
+            {blockers.map((b) => (
+              <li key={b}>{b}</li>
+            ))}
+          </ul>
+          <p className="muted">Undo or put back those changes first, then try again.</p>
+        </>
+      )}
+      {preview && !blockers.length && (
+        <ul aria-label="What the undo does">
+          <li>
+            “{from}” comes back as it was, with {counted(preview.calculations, 'calculation', 'calculations')} in its own
+            numbering.
+          </li>
+          {preview.edges > 0 && <li>{counted(preview.edges, 'edge goes', 'edges go')} back as they were.</li>}
+          <li>“{into}” gets back its tags, notes, geometry and energies from before the merge; later changes stay.</li>
+          {preview.records > 0 && <li>{counted(preview.records, 'other record is', 'other records are')} put back.</li>}
+        </ul>
+      )}
     </Modal>
   )
 }

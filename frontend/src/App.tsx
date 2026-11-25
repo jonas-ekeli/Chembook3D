@@ -47,7 +47,7 @@ import { CloudJobsDialog } from './components/CloudJobsDialog'
 import { useScanPathImports } from './cloudJobs'
 import { LocalJobsDialog } from './components/LocalJobsDialog'
 import { RefineDialog } from './components/RefineDialog'
-import { MergeNodesDialog } from './components/MergeNodesDialog'
+import { MergeNodesDialog, UndoNodeMergeDialog } from './components/MergeNodesDialog'
 import { SinglePointDialog } from './components/SinglePointDialog'
 import { scanText, tsCheckText, useLocalJobs } from './localJobs'
 import { CanvasPane, type CanvasEnergy, type CanvasContextMenu, type CanvasTarget, type TidySides } from './components/Canvas'
@@ -3264,7 +3264,7 @@ function App() {
               onSelect={(id) => selectNode(id, true)}
               onUndo={setUndoing}
             />
-            {undoing && undoing.undo !== 'merge' && (
+            {undoing && undoing.undo !== 'merge' && undoing.undo !== 'node_merge' && (
               <UndoImportDialog
                 entry={undoing}
                 onClose={() => setUndoing(null)}
@@ -3276,6 +3276,17 @@ function App() {
             )}
             {undoing && undoing.undo === 'merge' && (
               <UndoMergeDialog entry={undoing} onClose={() => setUndoing(null)} onDone={mergeUndone} />
+            )}
+            {undoing && undoing.undo === 'node_merge' && (
+              <UndoNodeMergeDialog
+                entry={undoing}
+                onClose={() => setUndoing(null)}
+                onDone={(result) => {
+                  setUndoing(null)
+                  reload()
+                  setNotice(`Undid the merge: “${result.from_label}” is back.`)
+                }}
+              />
             )}
           </main>
         )}

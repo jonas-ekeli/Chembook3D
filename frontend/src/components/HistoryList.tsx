@@ -329,6 +329,14 @@ function describeMerge(entry: HistoryEntry): string | null {
   return null
 }
 
+/** D262: two nodes merged, and that merge undone. */
+function describeNodeMerge(entry: HistoryEntry): string | null {
+  if (entry.action !== 'merge_nodes' && entry.action !== 'undo_merge_nodes') return null
+  const value = (entry.new_value ?? {}) as { from_label?: string; into_label?: string }
+  const pair = `“${value.from_label || 'Untitled'}” into “${value.into_label || 'Untitled'}”`
+  return entry.action === 'merge_nodes' ? `Merged ${pair}` : `Undid the merge of ${pair}`
+}
+
 /** D102: an import undone, one file or a whole batch. */
 function describeUndo(entry: HistoryEntry): string | null {
   if (entry.action === 'undo_import') {
@@ -356,6 +364,7 @@ function describeUndo(entry: HistoryEntry): string | null {
 function describe(entry: HistoryEntry, names: Names): string {
   const other =
     describeMerge(entry) ??
+    describeNodeMerge(entry) ??
     describeUndo(entry) ??
     describeRemoval(entry) ??
     describeNote(entry) ??
@@ -464,7 +473,11 @@ export function HistoryList({
           )}
           {onUndo && entry.undo && (
             <button className="small" onClick={() => onUndo(entry)}>
-              {entry.undo === 'batch' ? 'Undo batch' : entry.undo === 'merge' ? 'Undo merge' : 'Undo import'}
+              {entry.undo === 'batch'
+                ? 'Undo batch'
+                : entry.undo === 'merge' || entry.undo === 'node_merge'
+                  ? 'Undo merge'
+                  : 'Undo import'}
             </button>
           )}
         </li>
