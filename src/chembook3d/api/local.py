@@ -22,7 +22,8 @@ from chembook3d.api.live import AGENT, CLIENT_HEADER
 from chembook3d.api.pathway import StepStructureOut, step_structure
 from chembook3d.api.routes import DbSession, _investigation
 from chembook3d.models import Node
-from chembook3d.services import builder
+from chembook3d.services import builder, thermo_settings
+from chembook3d.services import follow_mode as follow_service
 from chembook3d.services import nodes as node_service
 from chembook3d.services.records import get
 
@@ -496,6 +497,48 @@ def start_fix_mode(body: FixModeIn, request: Request, session: DbSession) -> dic
         raise _refused(exc) from exc
 
 
+class FollowModeIn(BaseModel):
+    node_id: str = Field(description="The transition state node")
+    calculation_id: str | None = Field(
+        None,
+        description="Its frequency calculation with the imaginary mode and stored normal modes, "
+        "at any level (DFT included); default the node's at its geometry with exactly one "
+        "imaginary frequency, else the one with the lowest",
+    )
+    method: str = Field(
+        "mace-omol",
+        description="mace-omol (MACE-OMOL-0, the default) or gfn2 (GFN2-xTB): what the ends "
+        "relax with",
+    )
+    folder: str | None = Field(
+        None,
+        description="A folder on this computer (full path) whose outputs' final structures the "
+        "ends are also matched against, as survey_folder reads them",
+    )
+
+
+@router.post("/follow-mode")
+def start_follow_mode(body: FollowModeIn, request: Request, session: DbSession) -> dict[str, Any]:
+    """D263c, A184: follow a TS's imaginary mode both ways: the frequency calculation's
+    structure displaced 0.1 Å along the mode on each side, each end relaxed for at most 40
+    steps. The result is information, never imported: GET /jobs/{id}/ends matches the ends."""
+    _local_page_only(request)
+    folder = _investigation(request).folder
+    node = get(session, Node, body.node_id, "Node")
+    try:
+        return local_jobs.create_follow_mode(
+            folder,
+            node,
+            body.calculation_id,
+            body.method,
+            body.folder,
+            _claude_limit(request, folder),
+            thermo_settings.settings(session).geometry_tolerance,
+        )
+    except local_jobs.LocalJobError as exc:
+        raise _refused(exc) from exc
+
+
 class SinglePointsIn(BaseModel):
     node_ids: list[str] = Field(
         description="The nodes whose structures get a single point, one job each (a group's "
@@ -667,5 +710,43 @@ def replace_with_result(job_id: str, request: Request, session: DbSession) -> di
     _local_page_only(request)
     try:
         return local_jobs.import_result(session, _investigation(request).folder, job_id, True)
+    except local_jobs.LocalJobError as exc:
+        raise _refused(exc) from exc
+
+
+@router.get("/jobs/{job_id}/ends")
+def follow_mode_ends(job_id: str, request: Request, session: DbSession) -> dict[str, Any]:
+    """D263c, A184: a mode-follow job's ends: how each relaxed, its bonds against the TS, the
+    nodes (and the job's folder's outputs) it matches, and the verdict."""
+    _local_page_only(request)
+    try:
+        return follow_service.ends(session, _investigation(request).folder, job_id)
+    except local_jobs.LocalJobError as exc:
+        raise _refused(exc) from exc
+
+
+class EndNodeIn(BaseModel):
+    label: str | None = Field(None, description="Default: '<TS label> end +' or 'end −'")
+    anyway: bool = Field(
+        False, description="Make it even though the end matches a node (say why to the user)"
+    )
+
+
+@router.post("/jobs/{job_id}/ends/{end}/node", status_code=201)
+def make_node_from_end(
+    job_id: str,
+    end: str,
+    request: Request,
+    session: DbSession,
+    body: EndNodeIn | None = None,
+) -> dict[str, Any]:
+    """D263c: a new node from an end of a mode-follow that matches nothing: coordinates only,
+    a planned minimum beside the TS with its charge and multiplicity."""
+    _local_page_only(request)
+    body = body or EndNodeIn()
+    try:
+        return follow_service.make_node(
+            session, _investigation(request).folder, job_id, end, body.label, body.anyway
+        )
     except local_jobs.LocalJobError as exc:
         raise _refused(exc) from exc

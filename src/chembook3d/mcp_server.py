@@ -123,7 +123,10 @@ Rules:
   between two structures (whatever their atom order; a side may be a sum of species) and,
   with a TS, whether it links two minima along its imaginary mode; group_structures sorts
   many into isomers, conformers and duplicates. They change nothing; import with
-  import_folder after showing the user the plan.
+  import_folder after showing the user the plan. A TS that no IRC and no bond check along
+  its mode settles (D263c): start_local_follow_mode relaxes both ends of its mode briefly,
+  get_follow_mode_ends matches them against the nodes (A184) and gives the verdict, and
+  make_node_from_end makes a node only from an end that matches nothing.
 - Papers and supporting information (D232): read_pdf reads a PDF on this computer, the user's
   or one a web fetch saved. In a long SI, `find` a compound's label first, then read those
   `pages`; `images` shows up to 4 pages as pictures (structures, schemes, tables) and `region`

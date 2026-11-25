@@ -465,6 +465,56 @@ def same_structure(
     return Same(rmsd, None if identity else mapping)
 
 
+def end_match(
+    end: Rows,
+    other: Rows,
+    prints: tuple[Print, Print] | None = None,
+    counts: tuple["_Bonds", "_Bonds"] | None = None,
+) -> Same | None:
+    """A184: whether `other` is the structure a mode-follow end (or an IRC end) relaxed to:
+    the same bonds by A181's rule with weak contacts, metal–hydrogen ones included, left out
+    (`split`), and an atom-matched RMSD under END_RMSD, whatever the order of its atoms. Ruled
+    out cheaply first by the order-independent bound and the bond counts; then the same
+    numbering, the numbering by position and Match atoms are tried in that order."""
+    if not same_atoms(end, other):
+        return None
+    pa, pb = prints or (signature(end), signature(other))
+    if lower_bound(pa, pb) >= END_RMSD:
+        return None
+    ca, cb = counts or (_bond_counts(end), _bond_counts(other))
+    if not _could_be_same(ca, cb, False):
+        return None
+    tried: set[tuple[int, ...]] = set()
+
+    def check(mapping: list[int]) -> Same | None:
+        key = tuple(mapping)
+        if key in tried:
+            return None
+        tried.add(key)
+        rmsd = geometry.aligned_rmsd(end, [other[j] for j in mapping])
+        if rmsd is None or rmsd >= END_RMSD:
+            return None
+        formed, broken = atom_matching.changes(end, other, mapping)
+        real_formed, real_broken, _, _ = split(end, other, mapping, formed, broken)
+        if real_formed or real_broken:
+            return None
+        identity = all(i == j for i, j in enumerate(mapping))
+        return Same(rmsd, None if identity else mapping)
+
+    if geometry.elements(end) == geometry.elements(other):
+        found = check(list(range(len(end))))
+        if found is not None:
+            return found
+    found = check(_by_position(end, other)[1])
+    if found is not None:
+        return found
+    try:
+        matched = atom_matching.match(end, other)
+    except Exception:  # noqa: BLE001 - a match that cannot be made matches nothing
+        return None
+    return check(matched.mapping)
+
+
 def _metal_hydrogen(rows: Rows, pair: tuple[int, int]) -> bool:
     kinds = {rows[pair[0]][0], rows[pair[1]][0]}
     return "H" in kinds and bool(kinds & METALS)

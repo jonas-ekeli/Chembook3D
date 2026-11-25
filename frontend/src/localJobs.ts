@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, type LocalConstraints, type LocalJob, type LocalScan, type SavedModeCheck } from './api'
+import { api, type FollowModeEnds, type FollowModeMatch, type LocalConstraints, type LocalJob, type LocalScan, type SavedModeCheck } from './api'
 import { measure, parseAtomList, type Atom } from './chem'
 import { errorText } from './util'
 
@@ -35,9 +35,10 @@ export function localStatusText(job: LocalJob): string {
     case 'cancelling':
       return 'Stopping'
     case 'converged':
-      return job.kind === 'single_point' ? 'Done' : 'Converged'
+      return job.kind === 'single_point' || job.kind === 'follow_mode' ? 'Done' : 'Converged'
     case 'not_converged':
-      return 'Stopped before converging'
+      // D263c: a mode-follow's ends stop at 40 steps on purpose
+      return job.kind === 'follow_mode' ? 'Done' : 'Stopped before converging'
     case 'failed':
       return 'Failed'
     case 'cancelled':
@@ -75,7 +76,8 @@ export function progressText(job: LocalJob): string | null {
 
 export function awaitingLocalImport(job: LocalJob): boolean {
   // D260: one waiting for the user's choice between Replace and a derived node is not imported by itself
-  return job.importable && !job.import_error && !job.awaiting_choice
+  // D263c: a mode-follow's result is information, never imported
+  return job.importable && !job.import_error && !job.awaiting_choice && !job.nothing_to_import
 }
 
 /** D213: the open investigation's local jobs, read every few seconds while one is starting,
@@ -278,6 +280,35 @@ export function fixModeText(job: LocalJob): string | null {
   return found.fixed
     ? `${head} Kept ${kept.shift > 0 ? '+' : ''}${kept.shift} Å, the lowest without an imaginary mode${change}.`
     : `${head} No try lost the imaginary mode; kept the lowest, ${kept.shift > 0 ? '+' : ''}${kept.shift} Å${change}.`
+}
+
+function matchName(match: FollowModeMatch): string {
+  return 'node_id' in match ? `“${match.label}”` : `${match.path} (step ${match.step})`
+}
+
+/** D263c, A184: what a mode-follow found, in a sentence: how each end relaxed, and once its
+ * ends are matched (`ends`), what each end matches; null when the job is no mode-follow or
+ * has no result yet. */
+export function followModeText(job: LocalJob, ends?: FollowModeEnds | null): string | null {
+  const found = job.result?.follow_mode
+  const label = job.follow_mode?.ts_label ?? job.node_label
+  if (!found?.ends?.['+'] || !found.ends['-']) return null
+  const sides = (['+', '-'] as const).map((side) => {
+    const shown = side === '+' ? '+' : '−'
+    const matched = ends?.ends[side]
+    if (matched) {
+      const all = matched.matches.length ? matched.matches : (matched.files ?? [])
+      if (!all.length) return `${shown} end matches nothing`
+      const first = `${matchName(all[0])} (${all[0].rmsd.toFixed(2)} Å)`
+      return all.length === 1 ? `${shown} end matches ${first}` : `${shown} end matches ${all.length} structures, nearest ${first}`
+    }
+    const end = found.ends[side]
+    return `${shown} end ${end.converged ? 'converged' : 'stopped'} after ${end.cycles} steps`
+  })
+  const head = `Followed the mode of “${label}”: ${sides.join(', ')}`
+  if (ends?.outcome === 'links') return `${head}. It links them (A184).`
+  if (ends?.outcome === 'same_structure') return `${head}. Both ends match the same structure.`
+  return `${head}.`
 }
 
 /** D215: what the check of a TS search's final structure found, in a sentence; null when the

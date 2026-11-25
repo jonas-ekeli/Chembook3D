@@ -1652,6 +1652,50 @@ TOOLS: list[ToolSpec] = [
         "start one the user asked for; it takes up to four optimizations and frequency jobs.",
     ),
     T(
+        "start_local_follow_mode",
+        "write",
+        "POST",
+        "/api/local/follow-mode",
+        "Follow a transition state's imaginary mode both ways on this computer (D263c, A184), "
+        "to find which minima it links: from its frequency calculation's structure at any "
+        "level (a DFT file included; it needs stored normal modes), displaced 0.1 Å along the "
+        "lowest imaginary mode on each side (the atom moving most) and each end relaxed for at "
+        "most 40 steps with MACE-OMOL-0 (method mace-omol, the default, when installed) or "
+        "GFN2-xTB (gfn2). Use it only for a TS that no IRC in the folder and no bond check "
+        "along the mode (compare_structures with ts) settled: cheapest evidence first. folder "
+        "names the folder of outputs whose final structures the ends are also matched "
+        "against. The result is never imported: when it has finished, get_follow_mode_ends "
+        "matches the ends; an end that matches nothing may become a node with "
+        "make_node_from_end. Minutes for 70 atoms with MACE.",
+    ),
+    T(
+        "get_follow_mode_ends",
+        "read",
+        "GET",
+        "/api/local/jobs/{job_id}/ends",
+        "The ends of a finished start_local_follow_mode job (D263c, A184): per end (+ and -) "
+        "whether it converged and in how many steps, the bonds formed and broken against the "
+        "TS, the nodes it matches (the same bonds, weak and metal–hydrogen contacts left out, "
+        "and atom-matched RMSD under 0.5 Å, whatever the atom order; nearest first) and the "
+        "files of the job's folder it matches; with `verdict`: links two structures (both ends "
+        "each match exactly one: high confidence), one end matches, no end matches, or both "
+        "ends match the same structure (flagged). A TS left unsettled is flagged, never "
+        "guessed. Changes nothing.",
+    ),
+    T(
+        "make_node_from_end",
+        "write",
+        "POST",
+        "/api/local/jobs/{job_id}/ends/{end}/node",
+        "Make a node from an end of a mode-follow job that matches nothing (D263c): its "
+        "coordinates only (a partial relaxation is a guess, so no calculation), a planned "
+        "minimum labelled '<TS> end +' or 'end −' beside the TS on its canvas, with the TS's "
+        "charge and multiplicity. Refused when the end matches a node (it names it) unless "
+        "anyway is true. Only when get_follow_mode_ends says the end matches nothing and the "
+        "mechanism needs it.",
+        help={"end": "+ or - (plus or minus)."},
+    ),
+    T(
         "start_local_single_points",
         "write",
         "POST",
