@@ -328,12 +328,12 @@ class _Matcher:
         return _rmsd(placed[mapping], self.p)
 
 
-def check_atoms(start: Rows, end: Rows) -> None:
-    """Both ends hold the same atoms; otherwise a RecordError saying how they differ."""
+def atom_difference(start: Rows, end: Rows) -> str | None:
+    """How the two ends' atoms differ, or None when both hold the same atoms."""
     if not start or not end:
-        raise RecordError("both structures need coordinates")
+        return "both structures need coordinates"
     if len(start) != len(end):
-        raise RecordError(
+        return (
             f"the structures have {len(start)} and {len(end)} atoms; a match needs the same "
             "atoms in both"
         )
@@ -342,7 +342,15 @@ def check_atoms(start: Rows, end: Rows) -> None:
     if a != b:
         differ = sorted(e for e in set(a) | set(b) if a[e] != b[e])
         details = ", ".join(f"{e} {a[e]} and {b[e]}" for e in differ)
-        raise RecordError(f"the structures hold different atoms ({details})")
+        return f"the structures hold different atoms ({details})"
+    return None
+
+
+def check_atoms(start: Rows, end: Rows) -> None:
+    """Both ends hold the same atoms; otherwise a RecordError saying how they differ."""
+    differs = atom_difference(start, end)
+    if differs:
+        raise RecordError(differs)
 
 
 def match(
