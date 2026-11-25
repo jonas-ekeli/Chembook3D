@@ -116,3 +116,34 @@ test('merge two nodes holding the same molecule', async ({ page }) => {
   const history = await (await page.request.get('/api/history', { params: { record_id: ids[0] } })).json()
   expect(history.some((e: { action: string }) => e.action === 'merge_nodes')).toBeTruthy()
 })
+
+// T-UI-117, D262h: a merge is undone from the kept node's history; the merged node comes back.
+test('undo a merge of two nodes from the history', async ({ page }) => {
+  await newInvestigation(page, 'Undo merge test')
+  const ids: string[] = []
+  for (const body of [
+    { label: 'kept', xyz: xyz(GLYCEROL), pos_x: 100, pos_y: 100, tags: ['one'] },
+    { label: 'merged', xyz: xyz(GLYCEROL), pos_x: 400, pos_y: 100, tags: ['two'] },
+  ]) {
+    const response = await page.request.post('/api/nodes', { data: body })
+    expect(response.ok()).toBeTruthy()
+    ids.push((await response.json()).id)
+  }
+  const merged = await page.request.post(`/api/nodes/${ids[1]}/merge/${ids[0]}`, { data: {} })
+  expect(merged.ok()).toBeTruthy()
+  await page.reload()
+  await expect(canvasNode(page, 'merged')).toHaveCount(0)
+  await canvasNode(page, 'kept').click()
+  const history = page.getByLabel('Node history')
+  await expect(history).toContainText('Merged “merged” into “kept”')
+  await history.getByRole('button', { name: 'Undo merge' }).click()
+  const undo = page.getByRole('dialog', { name: 'Undo the merge of “merged” into “kept”?' })
+  await expect(undo.getByLabel('What the undo does')).toContainText('“merged” comes back as it was')
+  await undo.getByRole('button', { name: 'Undo merge' }).click()
+  await expect(undo).toHaveCount(0)
+  await expect(canvasNode(page, 'merged')).toBeVisible()
+  const kept = await (await page.request.get(`/api/nodes/${ids[0]}`)).json()
+  expect(kept.tags).toEqual(['one'])
+  await expect(history).toContainText('Undid the merge of “merged” into “kept”')
+  await expect(history.getByRole('button', { name: 'Undo merge' })).toHaveCount(0)
+})

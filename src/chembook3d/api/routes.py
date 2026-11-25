@@ -51,6 +51,7 @@ from chembook3d.services import (
     import_undo,
     imports,
     levels,
+    node_merge_undo,
     playground_merge_undo,
     scan_edges,
     spin,
@@ -624,6 +625,7 @@ def _history_out(entry: HistoryEntry, undo: dict[int, str] | None = None) -> His
 def _history_list(session: Session, entries: list[HistoryEntry]) -> list[HistoryOut]:
     undo = import_undo.undo_kinds(session, entries)
     undo.update(playground_merge_undo.undo_kinds(session, entries))  # D235j
+    undo.update(node_merge_undo.undo_kinds(session, entries))  # D262h
     return [_history_out(e, undo) for e in entries]
 
 

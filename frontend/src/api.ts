@@ -1308,7 +1308,8 @@ export type HistoryEntry = {
   // records as one entry each
   // undo_import (one file) and undo (a batch) undo an import (D102); merge and undo_merge are a
   // playground's merge into this investigation and its undo (D235h, D235j); detach is this
-  // investigation made from a playground (D236)
+  // investigation made from a playground (D236); merge_nodes and undo_merge_nodes are two nodes
+  // merged and that merge undone (D262)
   action:
     | 'create'
     | 'update'
@@ -1324,13 +1325,15 @@ export type HistoryEntry = {
     | 'merge'
     | 'undo_merge'
     | 'detach'
+    | 'merge_nodes'
+    | 'undo_merge_nodes'
   field: string | null
   old_value: unknown
   new_value: unknown
   source: string
   /** D102: the entry's import can still be undone, one file or a whole batch; D235j: a
-   * playground's merge that can still be undone */
-  undo?: 'import' | 'batch' | 'merge' | null
+   * playground's merge that can still be undone; D262h: two nodes' merge that can still be undone */
+  undo?: 'import' | 'batch' | 'merge' | 'node_merge' | null
 }
 
 /** D102: what undoing one imported file removes and puts back. */
@@ -1370,6 +1373,22 @@ export type MergeUndo = {
   /** The playground is still there and can be merged again. */
   playground_back: boolean
   history_id: number | null
+}
+
+/** D262h: what undoing a merge of two nodes brings back, or what blocks it. */
+export type NodeMergeUndo = {
+  entry_id: number
+  into_id: string
+  from_id: string
+  from_label: string
+  into_label: string
+  blockers: string[]
+  /** Calculations going back to the merged node. */
+  calculations: number
+  /** Edges moved back or brought back. */
+  edges: number
+  /** Other records put back. */
+  records: number
 }
 
 export type RecentInfo = {
@@ -3004,6 +3023,9 @@ export const api = {
   /** D235j: undo a playground's merge from its history entry; the preview writes nothing. */
   mergeUndoPreview: (entryId: number) => request<MergeUndo>('GET', `/playgrounds/merge/${entryId}/undo`),
   undoMerge: (entryId: number) => request<MergeUndo>('POST', `/playgrounds/merge/${entryId}/undo`),
+  /** D262h: undo a merge of two nodes from its history entry; the preview writes nothing. */
+  nodeMergeUndoPreview: (entryId: number) => request<NodeMergeUndo>('GET', `/node-merges/${entryId}/undo`),
+  undoNodeMerge: (entryId: number) => request<NodeMergeUndo>('POST', `/node-merges/${entryId}/undo`),
 
   overview: (since?: string | null) =>
     request<Overview>('GET', since ? `/overview?since=${encodeURIComponent(since)}` : '/overview'),

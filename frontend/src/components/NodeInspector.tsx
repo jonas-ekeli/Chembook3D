@@ -24,6 +24,7 @@ import { PopOut, PopOutButton } from './PopOut'
 import { usePopOut } from '../popOut'
 import { HistoryList } from './HistoryList'
 import { UndoImportDialog } from './UndoImportDialog'
+import { UndoNodeMergeDialog } from './MergeNodesDialog'
 import { Modal } from './Modal'
 import { PinnedNotesSection } from './NoteContent'
 import { SplitDialog } from './PathwayInspectors'
@@ -864,7 +865,18 @@ export function NodeInspector({
         <HistoryList entries={history} names={recordNames(canvas)} onRestore={restore} onUndo={setUndoing} />
       </section>
 
-      {undoing && (
+      {undoing && undoing.undo === 'node_merge' && (
+        <UndoNodeMergeDialog
+          entry={undoing}
+          onClose={() => setUndoing(null)}
+          onDone={(result) => {
+            setUndoing(null)
+            onChanged(node, `Undid the merge: “${result.from_label}” is back.`)
+          }}
+        />
+      )}
+
+      {undoing && undoing.undo !== 'node_merge' && (
         <UndoImportDialog
           entry={undoing}
           onClose={() => setUndoing(null)}

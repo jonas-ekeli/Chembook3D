@@ -58,7 +58,7 @@ NOT_OFFERED = re.compile(
     r"|live|selection$|view-state|confirmations(/.*)?|nodes/[^/]+/delete-preview"
     r"|calculations/[^/]+/removal"  # D259: what remove_calculation's dialog lists
     r"|groups/[^/]+/delete-preview|sub-investigations/[^/]+/delete-preview|steric-profiles/[^/]+/table\.csv"
-    r"|energies/table\.csv|history/[^/]+/undo|turnovers/[^/]+/table\.csv|custom-bases/[^/]+/file"
+    r"|energies/table\.csv|history/[^/]+/undo|node-merges/[^/]+/undo|turnovers/[^/]+/table\.csv|custom-bases/[^/]+/file"
     r"|page/commands/[^/]+/(claim|report|file)"  # D226: the tab's own side of what Claude asks it
     r"|claude(/.*)?"  # the Claude panel (D92): Claude never starts terminals
     r"|remote(/.*)?"  # D122: logging in to a server is for the app's own page only

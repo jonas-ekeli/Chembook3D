@@ -1136,8 +1136,3 @@ def merge_nodes(
 ) -> tuple[Merge, HistoryEntry]:
     found = plan(session, source_id, into_id, options, folder)
     return found, apply(session, found)
-
-
-def undo_kinds(session: Session, entries: list[HistoryEntry]) -> dict[int, str]:
-    """The merge entries listed that Undo merge offers (built in a later step, D262h)."""
-    return {}

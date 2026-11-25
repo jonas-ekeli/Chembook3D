@@ -1,4 +1,4 @@
-"""Merging two nodes (D262, FR-NODE-09, A181): T-ID-12 to T-ID-15."""
+"""Merging two nodes (D262, FR-NODE-09, A181): T-ID-12 to T-ID-18."""
 
 from chembook3d.models import Calculation
 from tests import gaussian_text as g
@@ -196,3 +196,116 @@ def test_claude_asks_before_merging(open_client):
     done = open_client.post(url, json={"confirm": True}, headers=ORIGIN).json()
     assert done["status"] == "done", done
     assert open_client.get(f"/api/nodes/{a}").status_code == 404
+
+
+# ---------- Undo merge (D262h) ----------
+
+SKIPPED = {"history", "alembic_version"}
+
+
+def everything(client) -> dict:
+    """Every row of every table but the history, times of change left out, normal modes as
+    read back."""
+    from sqlalchemy import select
+
+    from chembook3d.models import Base, NormalModes, unpack_modes
+
+    found = {}
+    with client.app.state.investigation.sessions() as session:
+        for table in Base.metadata.sorted_tables:
+            if table.name in SKIPPED:
+                continue
+            rows = []
+            for row in session.execute(select(table)):
+                values = dict(row._mapping)
+                values.pop("updated_at", None)
+                if table.name == NormalModes.__tablename__:
+                    values["data"] = unpack_modes(values["data"])
+                rows.append(repr(sorted(values.items())))
+            found[table.name] = sorted(rows)
+    return found
+
+
+def merge_entry(client, b):
+    entries = client.get("/api/history").json()
+    return next(e for e in entries if e["action"] == "merge_nodes" and e["record_id"] == b)
+
+
+def two_with_edges(client):
+    b = water(client, "B", tags=["kept"])
+    a = water(client, "A", SWAPPED, tags=["merged"], notes="A's notes")
+    x = client.post("/api/nodes", json={"label": "X"}).json()["id"]
+    y = client.post("/api/nodes", json={"label": "Y"}).json()["id"]
+    for source, target in ((b, x), (a, x), (a, y), (a, b)):
+        made = client.post("/api/transitions", json={"source_id": source, "target_id": target})
+        assert made.status_code in (200, 201), made.text
+    client.put("/api/view-state", json={"reference_id": a})
+    return a, b
+
+
+def test_undo_merge_puts_everything_back(open_client):
+    """T-ID-16: one Undo merge brings A back with its id and puts every row the merge changed
+    back as it was, normal modes in A's numbering again; it is offered once."""
+    a, b = two_with_edges(open_client)
+    before = everything(open_client)
+    assert merge(open_client, a, b).status_code == 200
+    entry = merge_entry(open_client, b)
+    assert entry["undo"] == "node_merge"
+
+    found = open_client.get(f"/api/node-merges/{entry['id']}/undo")
+    assert found.status_code == 200, found.text
+    assert found.json()["blockers"] == [] and found.json()["calculations"] == 3
+    done = open_client.post(f"/api/node-merges/{entry['id']}/undo")
+    assert done.status_code == 200, done.text
+
+    after = everything(open_client)
+    for table in before:
+        assert after[table] == before[table], table
+    assert open_client.get("/api/view-state").json()["reference_id"] == a
+    assert node(open_client, a)["label"] == "A"
+    assert merge_entry(open_client, b)["undo"] is None
+    again = open_client.post(f"/api/node-merges/{entry['id']}/undo")
+    assert again.status_code >= 400
+    undone = open_client.get("/api/history").json()[0]
+    assert undone["action"] == "undo_merge_nodes" and undone["new_value"]["entry_id"] == entry["id"]
+
+
+def test_undo_merge_is_refused_when_later_work_changed_what_it_wrote(open_client):
+    """T-ID-17: a moved calculation removed since refuses the undo, naming it; a change to a
+    column the merge did not write (B's label) does not, and stays."""
+    b = water(open_client, "B")
+    a = water(open_client, "A", SWAPPED)
+    assert merge(open_client, a, b).status_code == 200
+    entry = merge_entry(open_client, b)
+    open_client.patch(f"/api/nodes/{b}", json={"label": "B2"})
+    assert open_client.get(f"/api/node-merges/{entry['id']}/undo").json()["blockers"] == []
+
+    moved = [
+        c for c in calculations(open_client, b) if c["source_file"]["original_name"] == "A_sp.log"
+    ]
+    removed = open_client.delete(f"/api/calculations/{moved[0]['id']}")
+    assert removed.status_code in (200, 204), removed.text
+    blockers = open_client.get(f"/api/node-merges/{entry['id']}/undo").json()["blockers"]
+    assert any("was removed after the merge" in text for text in blockers), blockers
+    refused = open_client.post(f"/api/node-merges/{entry['id']}/undo")
+    assert refused.status_code == 409
+    assert node(open_client, b)["label"] == "B2"
+
+
+def test_undo_import_of_a_merged_file_asks_to_undo_the_merge_first(open_client):
+    """T-ID-18: Undo import of a file whose calculations were merged is blocked until the
+    merge is undone (D262h); then it goes through."""
+    b = water(open_client, "B")
+    a = water(open_client, "A", SWAPPED)
+    assert merge(open_client, a, b).status_code == 200
+    entries = open_client.get("/api/history").json()
+    imported = next(
+        e
+        for e in entries
+        if e["undo"] == "import" and e["new_value"] and "A_sp" in str(e["new_value"])
+    )
+    blocked = open_client.get(f"/api/history/{imported['id']}/undo").json()
+    assert any("undo that merge first" in text for text in blocked["blockers"]), blocked
+    entry = merge_entry(open_client, b)
+    assert open_client.post(f"/api/node-merges/{entry['id']}/undo").status_code == 200
+    assert open_client.get(f"/api/history/{imported['id']}/undo").json()["blockers"] == []

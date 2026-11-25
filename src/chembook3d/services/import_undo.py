@@ -45,7 +45,7 @@ from chembook3d.models import (
     TransitionSpecies,
     Turnover,
 )
-from chembook3d.services import geometry, history, levels, thermo_settings
+from chembook3d.services import geometry, history, levels, node_merge_undo, thermo_settings
 from chembook3d.services import groups as group_service
 from chembook3d.services import nodes as node_service
 from chembook3d.services import transitions as transition_service
@@ -473,11 +473,27 @@ def _single_points_on(session: Session, records: ImportRecords, node: Node) -> l
     return blockers
 
 
+def _merged(session: Session, records: ImportRecords) -> list[str]:
+    """D262h: calculations of the file moved onto another node by a merge not undone; the merge
+    is undone first."""
+    found = []
+    for calculation in records.calculations:
+        entry = node_merge_undo.standing_merge(session, calculation)
+        if entry is not None:
+            value = entry.new_value or {}
+            found.append(
+                f"Its calculations were merged from “{value.get('from_label') or 'Untitled'}” "
+                f"into “{value.get('into_label') or 'Untitled'}”: undo that merge first"
+            )
+    return list(dict.fromkeys(found))
+
+
 def plan(session: Session, records: ImportRecords) -> UndoPlan:
     """What undoing the import would do and what blocks it. Changes nothing."""
     deleted = [n for n in (session.get(Node, i) for i in records.created) if n is not None]
     group = session.get(GroupNode, records.group_id) if records.group_id else None
-    blockers = _depends_on_created(session, records, deleted, group) if deleted else []
+    blockers = _merged(session, records)
+    blockers += _depends_on_created(session, records, deleted, group) if deleted else []
 
     restored: list[tuple[Node, str]] = []
     kept: list[tuple[Node, str]] = []
