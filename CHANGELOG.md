@@ -6,6 +6,14 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- "Build mechanism from folder…" (D263a, FR-PANEL-09), in the Claude panel's menu, the command palette and
+  on the start page (for a new investigation): it asks for the folder of outputs, the longest local job
+  (4 hours) and whether to use the literature, shows the Work on its own warning, makes a playground,
+  turns the switch on there and starts Claude with `/build-mechanism <folder>` typed in, where it can be
+  followed and stopped. The command is the playbook (D263g, h): survey, import, group, link each TS
+  cheapest evidence first, propose the edges with their confidence and evidence, tidy and a summary note
+  with a review list; it keeps the energy rules, flags what it must not decide, and uses the literature
+  only where D263h says (none with `--no-literature`).
 - Claude can build a mechanism from a folder of outputs (D263): `survey_folder` reads every output
   in it without importing (per job step the level, energy, G and imaginary frequencies; files ending on
   the same geometry; restarts; what is imported already), `compare_structures` says which bonds form

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError, serverFields, type RemoteServer, type RemoteStatus } from '../api'
 import { CLUSTER_PRESETS, HPC } from '../hpc'
-import { ClaudePanel } from './ClaudePanel'
+import { ClaudePanel, type BuildRun } from './ClaudePanel'
 import { ServerPanel } from './ServerPanel'
 
 // The panel docked at the right of the notebook: Claude Code (D92) and the HPC servers such as
@@ -98,6 +98,9 @@ export function SidePanel({
   onCwd,
   playground,
   onPlaygroundFirst,
+  build,
+  onBuildTaken,
+  onBuildMechanism,
 }: {
   /** The tab shown, or null when the panel is hidden. */
   tab: SideTab | null
@@ -116,6 +119,11 @@ export function SidePanel({
   playground: boolean
   /** D235i: "Make a playground first" on Claude's Work on its own warning. */
   onPlaygroundFirst: (jobLimit: number, cloud: boolean) => Promise<void>
+  /** D263a: a build for the Claude panel to start (ClaudePanel's `build`). */
+  build: BuildRun | null
+  onBuildTaken: () => void
+  /** D263a: "Build mechanism from folder…" in the Claude panel's menu. */
+  onBuildMechanism: () => void
 }) {
   const [width, setWidth] = useState(560)
   const [picked, setPicked] = useState<string | null>(null)
@@ -208,6 +216,9 @@ export function SidePanel({
           onAttention={() => onTab('claude')}
           playground={playground}
           onPlaygroundFirst={onPlaygroundFirst}
+          build={build}
+          onBuildTaken={onBuildTaken}
+          onBuildMechanism={onBuildMechanism}
         />
         {tab === HPC && remote?.enabled && (
           <div className="hpc-choice">

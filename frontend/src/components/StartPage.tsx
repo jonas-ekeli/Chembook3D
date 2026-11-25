@@ -232,6 +232,7 @@ export function StartPage({
   settings,
   error,
   onNew,
+  onBuild,
   onOpen,
   onClone,
   onScanEditor,
@@ -248,6 +249,8 @@ export function StartPage({
   settings: Settings | null
   error: string | null
   onNew: () => void
+  /** D263a: "Build mechanism from folder…": a new investigation, then its start dialog. */
+  onBuild: () => void
   onOpen: () => void
   onClone: () => void
   onScanEditor: () => void
@@ -294,6 +297,12 @@ export function StartPage({
           description="An empty canvas in a folder you choose"
           primary
           onClick={onNew}
+        />
+        <Action
+          icon="spark"
+          name="Build mechanism from folder…"
+          description="A new investigation that Claude builds from a folder of outputs"
+          onClick={onBuild}
         />
         <Action icon="folder" name="Open investigation…" description="A folder on this computer" onClick={onOpen} />
         <Action icon="branch" name="Open from GitHub…" description="Clone a synced investigation" onClick={onClone} />

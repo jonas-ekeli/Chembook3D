@@ -8,7 +8,8 @@ function join(parent: string, name: string): string {
 }
 
 /** Choose a folder on this computer (FR-INV-02). A web page cannot read local paths, so the
- * backend lists folders. In "create" mode the user picks a parent folder and a new name. */
+ * backend lists folders. In "create" mode the user picks a parent folder and a new name; in
+ * "folder" mode any folder, such as one of outputs (D263a). */
 export function FolderPicker({
   mode,
   onCancel,
@@ -21,7 +22,7 @@ export function FolderPicker({
   busy = false,
   children,
 }: {
-  mode: 'open' | 'create'
+  mode: 'open' | 'create' | 'folder'
   onCancel: () => void
   onChoose: (folder: string, name: string) => void
   /** For other uses of a new folder, such as Open from GitHub (D71). */
@@ -66,22 +67,23 @@ export function FolderPicker({
 
   const trimmed = name.trim()
   const canChoose =
-    listing !== null && (mode === 'open' ? listing.is_investigation : trimmed.length > 0)
+    listing !== null &&
+    (mode === 'open' ? listing.is_investigation : mode === 'folder' || trimmed.length > 0)
   const choose = () => {
     if (!listing || !canChoose || busy) return
-    if (mode === 'open') onChoose(listing.path, '')
+    if (mode !== 'create') onChoose(listing.path, '')
     else onChoose(join(listing.path, trimmed), trimmed)
   }
 
   return (
     <Modal
-      title={title ?? (mode === 'open' ? 'Open investigation' : 'New investigation')}
+      title={title ?? (mode === 'open' ? 'Open investigation' : mode === 'folder' ? 'Choose a folder' : 'New investigation')}
       onClose={onCancel}
       actions={
         <>
           <button onClick={onCancel}>Cancel</button>
           <button className="primary" disabled={!canChoose || busy} onClick={choose}>
-            {chooseLabel ?? (mode === 'open' ? 'Open' : 'Create')}
+            {chooseLabel ?? (mode === 'open' ? 'Open' : mode === 'folder' ? 'Use this folder' : 'Create')}
           </button>
         </>
       }

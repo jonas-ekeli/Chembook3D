@@ -55,6 +55,8 @@ import { EnergyDrawer, type DrawerPath, type DrawerView } from './components/Ene
 import { downloadBlob, errorText } from './util'
 import { FilterMenu } from './components/FilterMenu'
 import { FolderPicker } from './components/FolderPicker'
+import { BuildMechanismDialog } from './components/BuildMechanism'
+import type { BuildRun } from './components/ClaudePanel'
 import { GModelBadge } from './components/GModelBadge'
 import { HistoryList } from './components/HistoryList'
 import { SettingsDialog } from './components/SettingsDialog'
@@ -344,6 +346,12 @@ function App() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   // D92, D122: the side panel's tab (Claude or an SSH server), or null when it is hidden.
   const [sideTab, setSideTab] = useState<SideTab | null>(null)
+  // D263a: "Build mechanism from folder…": its start dialog, the build the Claude panel of the
+  // investigation in `folder` is to start, and the start page's card, which makes a new
+  // investigation first.
+  const [building, setBuilding] = useState(false)
+  const [buildRun, setBuildRun] = useState<(BuildRun & { folder: string }) | null>(null)
+  const buildAfterCreate = useRef(false)
   const [remote, setRemote] = useState<RemoteStatus | null>(null)
   const loadRemote = useCallback(() => api.remoteStatus().then(setRemote, () => undefined), [])
   // A cd in a server's terminal: Send to and Import from here follow it without a reload (D122).
@@ -782,13 +790,15 @@ function App() {
   // D235: make a playground of the investigation in `folder` and open it. A refusal the open
   // dialogs answer (open elsewhere, an upgrade, a sync conflict) closes the New playground dialog
   // and asks there, making the playground again on the answer; any other is the dialog's to show.
-  // `name` null takes the next "Playground N"; `alone` (D235i) turns Work on its own on there.
+  // `name` null takes the next "Playground N"; `alone` (D235i) turns Work on its own on there;
+  // `then` (D263a) is told the playground once it is open.
   const makePlayground = (
     folder: string,
     name: string | null,
     force = false,
     upgradeConfirmed = false,
     alone?: { job_limit: number; cloud: boolean },
+    then?: (made: Investigation) => void,
   ): Promise<void> => {
     setLockPrompt(null)
     setUpgrade(null)
@@ -799,11 +809,12 @@ function App() {
         if (version !== identityVersion.current) return
         opened(inv, true)
         if (inv.notice) setNotice(inv.notice)
+        then?.(inv)
       },
       (err: unknown) => {
         if (err instanceof ApiError && (err.lock || err.needsUpgrade || err.syncConflict)) {
           setPlaygroundFor(null)
-          openFailed(folder, (f, u) => void makePlayground(folder, name, f, u, alone).catch(openFailed(folder)))(err)
+          openFailed(folder, (f, u) => void makePlayground(folder, name, f, u, alone, then).catch(openFailed(folder)))(err)
           return
         }
         throw err
@@ -935,10 +946,36 @@ function App() {
   const createAt = (folder: string, name: string) => {
     setPicker(null)
     const version = identityVersion.current
+    const build = buildAfterCreate.current
+    buildAfterCreate.current = false
     api.createInvestigation(folder, name).then(
-      (inv) => version === identityVersion.current && opened(inv),
+      (inv) => {
+        if (version !== identityVersion.current) return
+        opened(inv)
+        if (build) setBuilding(true)
+      },
       (err: unknown) => setError(errorText(err)),
     )
+  }
+
+  // D263a, FR-PANEL-09: the start dialog accepted. An investigation gets a playground first,
+  // opened with Work on its own on at the build's limit; then (or at once in a playground) the
+  // Claude panel is shown and starts the build.
+  const startBuild = async (run: BuildRun) => {
+    if (!investigation) return
+    const start = (folder: string) => {
+      setBuildRun({ ...run, folder })
+      setSideTab('claude')
+    }
+    if (investigation.playground) {
+      setBuilding(false)
+      start(investigation.folder)
+      return
+    }
+    await makePlayground(investigation.folder, null, false, false, { job_limit: run.jobLimit, cloud: run.cloud }, (made) =>
+      start(made.folder),
+    )
+    setBuilding(false)
   }
 
   const close = () => {
@@ -1275,7 +1312,10 @@ function App() {
       {picker && (
         <FolderPicker
           mode={picker}
-          onCancel={() => setPicker(null)}
+          onCancel={() => {
+            buildAfterCreate.current = false
+            setPicker(null)
+          }}
           onChoose={(folder, name) => (picker === 'open' ? openFolder(folder) : createAt(folder, name))}
         />
       )}
@@ -1908,6 +1948,10 @@ function App() {
         settings={settings}
         error={error}
         onNew={() => setPicker('create')}
+        onBuild={() => {
+          buildAfterCreate.current = true
+          setPicker('create')
+        }}
         onOpen={() => setPicker('open')}
         onClone={() => setCloning('address')}
         onScanEditor={() => openScanEditor([])}
@@ -2522,6 +2566,10 @@ function App() {
     command('claude', sideTab === 'claude' ? 'Hide the Claude panel' : 'Claude panel', 'spark', () =>
       setSideTab(sideTab === 'claude' ? null : 'claude'),
     )
+    if (!investigation.read_only)
+      command('build-mechanism', 'Build mechanism from folder…', 'spark', () => setBuilding(true), {
+        keywords: 'Claude playground outputs import link',
+      })
     if (remote?.enabled)
       command('hpc', hpcLabel(remote.servers), 'terminal', () => {
         const first = remote.servers.find((server) => server.connected)
@@ -3304,7 +3352,17 @@ function App() {
             onPlaygroundFirst={(job_limit, cloud) =>
               makePlayground(investigation.folder, null, false, false, { job_limit, cloud })
             }
+            build={buildRun?.folder === investigation.folder ? buildRun : null}
+            onBuildTaken={() => setBuildRun(null)}
+            onBuildMechanism={() => setBuilding(true)}
           />
+          {building && (
+            <BuildMechanismDialog
+              playground={investigation.playground != null}
+              onCancel={() => setBuilding(false)}
+              onStart={startBuild}
+            />
+          )}
         </div>
         {dialogs}
         <KeyListener onKey={onKey} />
