@@ -115,6 +115,16 @@ IMPORT_HELP = {
 }
 
 
+# D263: what a structure reference of the folder tools is.
+STRUCTURE_HELP = (
+    "a reference: {node_id} (a node's structure, with its frequency job at that geometry), "
+    "{calculation_id, frame?, irc_end?} (its final geometry, or a structure of its file), "
+    "{path, step?, frame?, irc_end?} (an output or xyz file on this computer; step as "
+    "summarize_file numbers them, frame from 1 with -1 the last, irc_end 'forward' or "
+    "'reverse' the last point of that IRC direction) or {xyz} (XYZ text, with charge and "
+    "multiplicity if known); label names it in the answer."
+)
+
 FIELD_HELP_LEVEL = "Composite level key 'levelId~geometryLevelId' from get_energy_options."
 
 T = ToolSpec
@@ -1147,6 +1157,71 @@ TOOLS: list[ToolSpec] = [
             "structures).",
             "frame": "Structure number in the step, 1-based; negative counts from the end "
             "(default -1, the last).",
+        },
+    ),
+    T(
+        "survey_folder",
+        "read",
+        "GET",
+        "/api/folder-survey",
+        "Survey every output in a folder on this computer the user named, before importing "
+        "anything (D263): per file its program, title and the role the import would suggest, "
+        "and per job step the job type, level (a number into `levels`), formula, atoms, "
+        "charge, multiplicity, energy, G when it has frequencies, the imaginary frequencies "
+        "(or the lowest real ones), convergence, termination and an IRC's directions with "
+        "their points. Files ending on the same structure share a `geometry` number (single "
+        "points and restarts on an optimization, whatever the atom order); `starts_from` is "
+        "the geometry a file's first structure is (a restart or continuation); "
+        "`already_imported` and `matches_node` say what the investigation has already. "
+        "Nothing is imported or staged. Use it first to build a mechanism from a folder, then "
+        "compare_structures and group_structures, then import_folder.",
+        help={
+            "path": "Full path of the folder.",
+            "recursive": "Also read the folders below it (default true).",
+        },
+    ),
+    T(
+        "compare_structures",
+        "read",
+        "POST",
+        "/api/structures/compare",
+        "Compare two structures whatever their atom order (D263): B's atoms matched onto A's "
+        "numbering (`mapping`), the bonds formed and broken from A to B (A181: within 1.2 × "
+        "the covalent radii on one side and beyond 1.5 × on the other; weak contacts such as "
+        "a metal–olefin one are listed apart), the atom-matched RMSD, the distances that "
+        "change most, and whether they are the same molecule or a duplicate. When A or B "
+        "has an imaginary frequency (a TS; a node's frequency job at its geometry counts), "
+        "the atom pairs its imaginary mode moves, the side of the mode the other lies on, and "
+        "whether the bonds that change lie along it. With `ts`: whether that TS links minima "
+        "A and B (A184: one to three bonds change, each along its mode, and A and B lie on "
+        "opposite sides), as links, does not link or unclear, with the reasons. Changes "
+        "nothing.",
+        help={
+            "a": STRUCTURE_HELP + " A list of them is a sum of species (e.g. catalyst + "
+            "substrate against their adduct): placed far apart, charges added.",
+            "b": "The other structure or sum of species, as for a.",
+            "ts": "A transition state to check against A and B (A184); " + STRUCTURE_HELP,
+            "count_weak": "Count weak contacts (between 1.2 × and 1.5 × the covalent radii) "
+            "as bond changes too.",
+        },
+    ),
+    T(
+        "group_structures",
+        "read",
+        "POST",
+        "/api/structures/group",
+        "Group structures into isomers (other bonds), conformers (the same bonds, further "
+        "apart than the duplicate tolerance) and duplicates (within it), whatever their atom "
+        "order (D263): by formula, charge and multiplicity, then by bonds (metal contacts "
+        "aside, then matched atom by atom), then by atom-matched RMSD. Gives per formula its "
+        "molecules, per molecule its conformers, per conformer its members (index in the "
+        "list, label, RMSD to the first), and `near_cut`: pairs that could have gone either "
+        "way. Up to 300 structures. Changes nothing.",
+        help={
+            "structures": "The structures, each " + STRUCTURE_HELP,
+            "all_nodes": "Add every node and free species with coordinates.",
+            "count_weak": "Count weak contacts (between 1.2 × and 1.5 × the covalent radii) "
+            "as bond differences too.",
         },
     ),
     T(

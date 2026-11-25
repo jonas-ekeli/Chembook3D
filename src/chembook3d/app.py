@@ -52,6 +52,7 @@ from chembook3d.api.server_files import copies as server_copies
 from chembook3d.api.server_files import router as server_files_router
 from chembook3d.api.snapshot import router as snapshot_router
 from chembook3d.api.sterics import router as steric_router
+from chembook3d.api.structures import router as structures_router
 from chembook3d.api.sub_investigations import router as sub_investigation_router
 from chembook3d.api.turnover import router as turnover_router
 from chembook3d.api.view_state import router as view_state_router
@@ -214,6 +215,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(server_files_router)  # D124
     app.include_router(local_files_router)  # D225
     app.include_router(crystals_router)  # D234
+    app.include_router(structures_router)  # D263
     app.include_router(job_router)
     app.include_router(scan_path_router)  # D114
     app.include_router(irc_router)  # D131

@@ -30,7 +30,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from sqlalchemy import Table, delete, or_, select, update
 from sqlalchemy.orm import Session
 
@@ -76,7 +75,6 @@ from chembook3d.services.records import RecordError, get
 
 ACTION = "merge_nodes"
 UNDO_KIND = "node_merge"  # HistoryOut.undo; "merge" is a playground's (D235j)
-OUTER_SCALE = 1.5  # A181: a bond beyond 1.5 × the covalent radii is really broken
 BRANCH_CHOICES = ("none", "keep", "take")
 
 
@@ -274,24 +272,8 @@ def _waiting_jobs(folder: Path, node: Node) -> list[str]:
     return found
 
 
-def real_changes(
-    start: list[Any], end: list[Any], result: atom_matching.Match
-) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
-    """A181: the bonds Match atoms found formed or broken (start's numbering) that really are:
-    within 1.2 × the covalent radii in one geometry and beyond 1.5 × in the other. One between
-    the two, such as a metal–olefin contact that lengthens at another level, is weak."""
-    p = np.array([[float(v) for v in row[1:4]] for row in start])
-    q = np.array([[float(v) for v in row[1:4]] for row in end])[result.mapping]
-    radii = np.array(
-        [atom_matching.RADII.get(row[0], atom_matching.DEFAULT_RADIUS) for row in start]
-    )
-
-    def far(x: np.ndarray, i: int, j: int) -> bool:
-        return float(np.linalg.norm(x[i] - x[j])) > OUTER_SCALE * (radii[i] + radii[j])
-
-    formed = [(i, j) for i, j in result.formed if far(p, i, j)]  # bonded in A, far in B
-    broken = [(i, j) for i, j in result.broken if far(q, i, j)]  # bonded in B, far in A
-    return formed, broken
+# A181's rule lives with the atom match, which the folder tools share (D263).
+real_changes = atom_matching.real_changes
 
 
 def _bond_text(into: Node, rows: list[Any], pair: tuple[int, int]) -> str:

@@ -42,6 +42,8 @@ READ_POSTS = {
     "/api/local/core",
     "/api/calculations/{calculation_id}/steps/trim-preview",
     "/api/steric-profiles/{profile_id}/difference",
+    "/api/structures/compare",  # D263: compares, stores nothing
+    "/api/structures/group",
 }
 # Changes that delete nothing and are undone at once, so they do not ask (A38).
 UNASKED_DELETES = {

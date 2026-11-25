@@ -52,6 +52,7 @@ from chembook3d.models import (
 from chembook3d.parsers import cml, crest, gaussian, joined, local_result, orca, xtb
 from chembook3d.parsers.common import NOT_STATIONARY, ParsedFile, ParsedStep
 from chembook3d.services import (
+    atom_maps,
     calculation_removal,
     geometry,
     history,
@@ -393,6 +394,10 @@ class Plan:
     # optimizations replaced), removes (they and what sits on them, calculation_removal),
     # files, node_geometry (the node's own coordinates move), blockers, chosen}.
     replace: dict[str, Any] | None = None
+    # D263: attached to a possible duplicate that numbers its atoms otherwise: for each of the
+    # node's atoms, the file's (0-based); every step is read through it and each calculation
+    # keeps it (D262c).
+    atom_map: list[int] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -543,7 +548,11 @@ def _duplicates(
     exclude: set[str],
     tolerance: float,
 ) -> list[dict[str, Any]]:
-    """FR-IMP-09: nodes with the same atoms, charge and multiplicity within the tolerance."""
+    """FR-IMP-09: nodes with the same atoms, charge and multiplicity within the tolerance,
+    whatever the order of the atoms (D263): `renumbered` when the node numbers them otherwise,
+    and `atom_map` (0-based, for each of the node's atoms the one of `rows`) to attach by."""
+    from chembook3d.services import structure_compare  # it reads files through this module
+
     found = []
     for node in node_service.list_nodes(session):
         if node.id in exclude or not node.geometry:
@@ -556,10 +565,32 @@ def _duplicates(
             and node.multiplicity != multiplicity
         ):
             continue
-        rmsd = geometry.aligned_rmsd(rows, node.geometry)
-        if rmsd is not None and rmsd <= tolerance:
-            found.append({"node_id": node.id, "label": node.label, "rmsd": rmsd})
+        same = structure_compare.same_structure(node.geometry, rows, tolerance)
+        if same is not None:
+            found.append(
+                {
+                    "node_id": node.id,
+                    "label": node.label,
+                    "rmsd": same.rmsd,
+                    "renumbered": same.mapping is not None,
+                    "atom_map": same.mapping,
+                }
+            )
     return sorted(found, key=lambda d: d["rmsd"])
+
+
+def _shown(duplicates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The duplicates as the plan shows them, without their atom maps."""
+    return [{k: v for k, v in d.items() if k != "atom_map"} for d in duplicates]
+
+
+def _duplicate_message(duplicate: dict[str, Any]) -> str:
+    """W-DUP."""
+    return (
+        f"Possible duplicate of '{duplicate['label']}' (RMSD {duplicate['rmsd']:.3f} Å"
+        + (", its atoms numbered otherwise" if duplicate.get("renumbered") else "")
+        + ")."
+    )
 
 
 def _already_imported(session: Session, checksum: str) -> list[dict[str, Any]]:
@@ -950,6 +981,7 @@ def _plan_steps(
     chosen_rows = _rows(chosen.final_geometry) if chosen else None
 
     duplicates: list[dict[str, Any]] = []
+    atom_map: list[int] | None = None
     if target is None and chosen_rows:
         duplicates = _duplicates(
             session,
@@ -963,6 +995,15 @@ def _plan_steps(
             if options.duplicate_action == "attach":
                 node_id = options.duplicate_node_id or duplicates[0]["node_id"]
                 target = session.get(Node, node_id)
+                chosen_duplicate = next((d for d in duplicates if d["node_id"] == node_id), None)
+                if target is not None and chosen_duplicate and chosen_duplicate["atom_map"]:
+                    # D263: a duplicate numbered otherwise is attached in the node's numbering,
+                    # every step read through the map (as a merged calculation's, D262c).
+                    atom_map = chosen_duplicate["atom_map"]
+                    steps = [atom_maps.mapped_step(s, atom_map) for s in steps]
+                    with_geometry = [s for s in steps if s.final_geometry]
+                    chosen = next(s for s in with_geometry if s.index == chosen.index)
+                    chosen_rows = _rows(chosen.final_geometry)
             elif options.duplicate_action != "new":
                 blockers.append(
                     "This geometry is a possible duplicate: attach it to the existing node "
@@ -1269,26 +1310,10 @@ def _plan_steps(
             exclude,
             settings.duplicate_tolerance,
         ):
-            warnings.append(
-                {
-                    "code": "W-DUP",
-                    "message": (
-                        f"Possible duplicate of '{duplicate['label']}' "
-                        f"(RMSD {duplicate['rmsd']:.3f} Å)."
-                    ),
-                }
-            )
+            warnings.append({"code": "W-DUP", "message": _duplicate_message(duplicate)})
     if mode == "new" and duplicates:
         for duplicate in duplicates:
-            warnings.append(
-                {
-                    "code": "W-DUP",
-                    "message": (
-                        f"Possible duplicate of '{duplicate['label']}' "
-                        f"(RMSD {duplicate['rmsd']:.3f} Å)."
-                    ),
-                }
-            )
+            warnings.append({"code": "W-DUP", "message": _duplicate_message(duplicate)})
 
     stem = PurePath(staged.original_name).stem
     role = _suggested_role(written)
@@ -1316,7 +1341,7 @@ def _plan_steps(
         steps=step_plans,
         xyz=xyz.format_xyz(chosen.final_geometry, comment=stem) if chosen else None,
         derived_offered=derived_offered,
-        duplicates=duplicates,
+        duplicates=_shown(duplicates),
         already_imported=_already_imported(session, staged.checksum),
         names=names,
         warnings=warnings,
@@ -1326,6 +1351,7 @@ def _plan_steps(
         continues_from=continues_from,
         beside=beside,
         replace=replace,
+        atom_map=atom_map,
     )
 
 
@@ -2004,7 +2030,8 @@ def commit(
     if plan_.kind == "irc":
         return _commit_irc(session, folder, staged, plan_, options, dry_run)
     fields = _node_fields(session, plan_, options)
-    steps = {s.index: s for s in staged.parsed.steps}
+    # D263: a duplicate numbered otherwise is attached in its node's numbering.
+    steps = {s.index: atom_maps.mapped_step(s, plan_.atom_map) for s in staged.parsed.steps}
     chosen = steps[plan_.chosen_step] if plan_.chosen_step is not None else None
     chosen_rows = _rows(chosen.final_geometry) if chosen else None
 
@@ -2088,6 +2115,7 @@ def commit(
                     session, owner, step, step_plan, staged, source, at.level if at else None
                 )
                 calculation.geometry_source = at
+                calculation.atom_map = plan_.atom_map  # D262c
                 calculation_ids.append(calculation.id)
                 if calculation.type in OPTIMIZATION_TYPES and not calculation.constraints:
                     sources.add(calculation.geometry, calculation)  # D157

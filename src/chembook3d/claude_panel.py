@@ -167,6 +167,13 @@ output and `import_folder` every output in a folder at once, as the app's Import
 does. Show the person the rows of a folder's plan that need a choice (a possible duplicate,
 a file that names no basis set, a blocker) before `commit_folder_import`.
 
+Building a mechanism from a folder (D263): `survey_folder` reads every output in it first
+without importing (per step the level, energy, imaginary frequencies; files ending on the same
+geometry; restarts; what is imported already). `compare_structures` says which bonds change
+between two structures, whatever their atom order (a side may be a list: a sum of species),
+and with a TS whether it links two minima along its imaginary mode; `group_structures` sorts
+many into isomers, conformers and duplicates. Then `import_folder`, showing the plan first.
+
 Writing new files there (D126): only when the person asks for files (inputs, job scripts, xyz,
 notes) and has turned on "Let Claude write new files here" in the server's tab (`list_servers`
 shows `writes`; you cannot turn it on, so ask them to). `write_server_file` creates a new file
