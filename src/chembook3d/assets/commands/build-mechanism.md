@@ -57,8 +57,10 @@ makes one. Never make, merge or discard a playground yourself.
   the mechanism's energetics.
 - Invent no structure: build nothing the folder does not have, beyond an end that
   `make_node_from_end` makes. Filling gaps comes in a later version; for now flag each gap.
-- Ask the person when a choice changes the chemistry (which reaction class, which species
-  leaves, whether two branches are one).
+- A choice that changes the chemistry (which reaction class, which species leaves, whether
+  two branches are one) is the person's: ask when they are there; while you work on your
+  own, take the reading the files support best, build nothing on it beyond what they show,
+  and put it first in the review list.
 - Each choice you make is a "Claude chose:" line in the notes of its record.
 
 ## Flag, never decide
