@@ -1596,6 +1596,17 @@ TOOLS: list[ToolSpec] = [
         "geometries (get_node_geometries), e.g. its MACE geometry beside a DFT one.",
     ),
     T(
+        "preview_node_merge",
+        "read",
+        "POST",
+        "/api/nodes/{node_id}/merge-preview",
+        "What merging node_id into into_id would do (D262): why it is refused, what it warns "
+        "about (real bond changes, geometries at one level further apart than the duplicate "
+        "tolerance), the atom match, both nodes' values at each level they share and which "
+        "count, the geometry the kept node shows, and the calculations, edges and records that "
+        "move. Changes nothing; merge_nodes asks the user to confirm the merge.",
+    ),
+    T(
         "get_node_geometries",
         "read",
         "GET",
@@ -1873,6 +1884,13 @@ CONFIRM_DESCRIPTIONS = {
     "single points run at its geometry. The node keeps its coordinates and its other "
     "calculations; a copied file nothing else comes from goes too. Permanent, like "
     "delete_node; to take back a whole imported file, use undo_import.",
+    "merge_nodes": "Merge two nodes, or two free species, holding the same molecule (D262): "
+    "node_id dissolves into into_id, its calculations (renumbered as into_id when the atoms are "
+    "numbered otherwise), edges and records moving onto it. At a level both have, the lower "
+    "energy's calculations count and the other's are set aside. Refused for different "
+    "molecules, a TS with a minimum, or a mirror image; warned (pass anyway once the user has "
+    "seen it) for a real bond change or geometries apart at one level. See preview_node_merge "
+    "first; pairs, branch and anyway are as there.",
     "replace_with_local_result": "Import a finished local job's result onto its node, "
     "replacing the node's geometry at the job's level (D260): the job's replace_offer lists "
     "the optimizations there and the calculations sitting on them, which are removed for good; "
@@ -1965,6 +1983,26 @@ def input_schema(spec: ToolSpec) -> dict[str, Any]:
             properties["restore_branches"] = {
                 "type": "boolean",
                 "description": "Members go back to the branches they came from.",
+                "default": False,
+            }
+        if spec.name == "merge_nodes":
+            properties["pairs"] = {
+                "type": "array",
+                "items": {"type": "array", "items": {"type": "integer"}},
+                "description": "Atom pairs fixed by hand, 1-based [into_id's atom, node_id's "
+                "atom], as in match_atoms.",
+                "default": [],
+            }
+            properties["branch"] = {
+                "type": "string",
+                "enum": ["none", "keep", "take"],
+                "description": "On two different branches: none (shared by both, D67), keep "
+                "into_id's, or take node_id's.",
+                "default": "none",
+            }
+            properties["anyway"] = {
+                "type": "boolean",
+                "description": "Merge despite the preview's warnings.",
                 "default": False,
             }
         properties["reason"] = {

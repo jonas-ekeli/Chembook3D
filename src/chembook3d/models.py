@@ -314,6 +314,16 @@ class Calculation(Base):
     irc_part: Mapped[str | None] = mapped_column(String(16), default=None)
     irc_direction: Mapped[str | None] = mapped_column(String(16), default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    # D262c: a calculation merged from another node keeps its node's numbering in the database;
+    # for each atom in that numbering, the atom (0-based) of its stored file's step. Frames read
+    # from the file go through it (services/atom_maps.py). None: the file's own order.
+    atom_map: Mapped[list[Any] | None] = mapped_column(default=None)
+    # D262h: where a merge brought it from, {"node_id", "label", "at", "entry_id"}; None for one
+    # imported onto its node.
+    merged_from: Mapped[dict[str, Any] | None] = mapped_column(default=None)
+    # D262d: the composite level keys (`levelId~geometryLevelId`) at which a merge set it aside:
+    # shown, not counted, while calculations not set aside remain there (A181).
+    set_aside: Mapped[list[Any]] = mapped_column(default=list, server_default="[]")
 
     # D255: for a single point or frequency job, the calculation whose geometry it is at (a
     # free optimization, or on a node without one its frequency job, D204), stored at import

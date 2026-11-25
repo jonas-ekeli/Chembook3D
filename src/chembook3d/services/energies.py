@@ -253,6 +253,18 @@ def _order(calculation: Calculation) -> tuple:
     return (calculation.created_at, calculation.step_index or 0)
 
 
+def set_aside_at(calculation: Calculation, key: LevelKey) -> bool:
+    """D262d: a merge set this calculation aside at this composite level."""
+    return key.encode() in (calculation.set_aside or [])
+
+
+def counted(calculations: list[Calculation], key: LevelKey) -> list[Calculation]:
+    """D262d, A181: the calculations that count at this composite level: those a merge did
+    not set aside there, or all of them when none is left (the other node's were removed)."""
+    kept = [c for c in calculations if not set_aside_at(c, key)]
+    return kept or calculations
+
+
 def calculation_key(
     calculation: Calculation,
     node_geometry_level_id: str | None,
@@ -521,11 +533,12 @@ class NodeEnergies:
         found = [c for c in self.by_key.get(key, []) if c.result.energy is not None]
         if len({_state(c) for c in found} - {None}) > 1:
             return None
+        found = counted(found, key)
         return found[-1] if found else None
 
     def counterpoise(self, key: LevelKey) -> Calculation | None:
         """D161: the latest counterpoise job with a BSSE at this composite level."""
-        found = [c for c in self.by_key.get(key, []) if bsse_of(c) is not None]
+        found = counted([c for c in self.by_key.get(key, []) if bsse_of(c) is not None], key)
         return found[-1] if found else None
 
     def _no_energy(self, key: LevelKey) -> Value:
@@ -545,7 +558,9 @@ class NodeEnergies:
         return Value(None, None, "no energy at this level")
 
     def thermo_source(self, key: LevelKey) -> Calculation | None:
-        """EN-4: the latest frequency calculation on this node at the geometry level."""
+        """EN-4: the latest frequency calculation on this node at the geometry level. D262d:
+        after a merge, from the same node's calculations as the energy at this level, never a
+        single point of one node with the correction of the other."""
         if key.geometry_level_id is None:
             return None
         at_geometry = LevelKey(key.geometry_level_id, key.geometry_level_id)
@@ -555,6 +570,11 @@ class NodeEnergies:
             if c.type == CalculationType.FREQUENCY
             and (c.result.frequencies or c.result.g_corr is not None)
         ]
+        if any(set_aside_at(c, key) for c in found):
+            energy = self.energy(key)
+            aside = energy is not None and set_aside_at(energy, key)
+            # Only the energy's own node's (A181: set-aside ones count again together).
+            found = [c for c in found if set_aside_at(c, key) == aside]
         return found[-1] if found else None
 
     def qh(self, calculation: Calculation) -> thermochem.QuasiHarmonic:
@@ -589,7 +609,7 @@ class NodeEnergies:
         energies at that geometry level use)."""
         found: dict[LevelKey, Calculation] = {}
         for key, calculations in self.by_key.items():
-            for calculation in calculations:
+            for calculation in counted(calculations, key):
                 if calculation.type == CalculationType.FREQUENCY:
                     found[key] = calculation
         return list(found.items())
@@ -600,6 +620,7 @@ class NodeEnergies:
             return None
         at_geometry = LevelKey(key.geometry_level_id, key.geometry_level_id)
         found = [c for c in self.by_key.get(at_geometry, []) if c.type in levels.OPTIMIZATION_TYPES]
+        found = counted(found, at_geometry)  # D262d
         # D253: the geometry comes from a free optimization (D157); a held one at the same
         # level (a scan, a restrained pre-optimization) is only a fallback.
         free = [c for c in found if levels.is_geometry_source(c)]

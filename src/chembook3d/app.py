@@ -37,6 +37,7 @@ from chembook3d.api.live import router as live_router
 from chembook3d.api.local import router as local_router
 from chembook3d.api.local_files import router as local_files_router
 from chembook3d.api.measurements import router as measurement_router
+from chembook3d.api.node_merge import router as node_merge_router
 from chembook3d.api.notes import router as note_router
 from chembook3d.api.page import router as page_router
 from chembook3d.api.pathway import router as pathway_router
@@ -190,6 +191,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(batch_router)
     app.include_router(undo_router)
     app.include_router(removal_router)
+    app.include_router(node_merge_router)
     app.include_router(pathway_router)
     app.include_router(energy_router)
     app.include_router(energy_profile_router)  # D190

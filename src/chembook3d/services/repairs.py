@@ -1,7 +1,11 @@
 """One-off corrections of records an earlier version of the app got wrong. Each repair runs
 once per investigation, when it is opened by a version that has it; its name is then kept in
 `InvestigationInfo.repairs`. The database is backed up first: by the migration when one ran,
-else by `investigation._run_repairs` (D248)."""
+else by `investigation._run_repairs` (D248).
+
+A repair that writes per-atom data read back from a stored file (geometries, modes, held
+coordinates) must put it through the calculation's `atom_map` first (`atom_maps.mapped_step`):
+a merged calculation keeps its node's numbering, not its file's (D262c)."""
 
 import logging
 import re
