@@ -176,6 +176,8 @@ The command asks the existing keeper to perform one capability check on its auth
 
 An older keeper reports an unknown operation. At a convenient time, log out all its saved HPC sessions, allow at least a minute for the empty keeper to exit, then log in from the updated checkout. Count any 2FA at that login separately from the probe. The diagnostic never opens, replaces or closes an SSH login.
 
+**Saga result.** The first CLI attempt reached an older keeper and stopped locally. After following the reconnect procedure, Jonas reported `ok: true` from `chembook3d saga-probe`. The updated keeper ran the fixed helper over the existing authenticated SSH connection. The probe exercised no Slurm operations.
+
 **What remains before job submission.** Validate file scopes for every agent tool on the chosen deployment and confirm the agent cannot change the helper, scripts, job files, dependencies or authorization records. A helper can reject requests it receives. The process that owns an ordinary interactive SSH connection retains the user's account privileges. If the requirement includes protection against that process being compromised, a separate server-enforced access boundary is necessary. Record this decision under Q101, then test the actual generator with `nosub` before considering a scheduler submission.
 
 ### Saga wrapper example
