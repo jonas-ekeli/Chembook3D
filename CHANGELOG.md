@@ -6,6 +6,10 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Fixed: while working on its own, Claude stopped after nine of its local jobs had ended, because
+  Claude Code ends a turn after its Stop hook has blocked nine times in a row (D231). The panel now
+  raises that cap. `/build-mechanism` runs the TS partner search on every TS before it starts any
+  mode-follow.
 - Claude finds the minima a transition state links starting from the TS (FR-MCP-25, A186):
   `find_ts_partners` predicts from the TS's imaginary mode the bonds that form and break on each
   side, searches the investigation's true minima and free species (and a minimum plus a free species,
