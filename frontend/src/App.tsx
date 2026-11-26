@@ -39,7 +39,7 @@ import {
   type SyncStatus,
   type ViewState,
 } from './api'
-import { NO_FILTERS, type Filters, type Selection, type ViewMode } from './canvasView'
+import { hiddenCount, NO_FILTERS, openProposals, type Filters, type Selection, type ViewMode } from './canvasView'
 import { BasisSetsDialog } from './components/BasisSets'
 import { BoxEndDialog, MoveToDialog, NewSubDialog, SubInspector } from './components/SubInvestigations'
 import { canvasOf, chainOf, contentsText, placeText, subName, subsOf, transitionCanvas, visibleCanvases } from './subCanvas'
@@ -2548,9 +2548,12 @@ function App() {
     }
     if (levelOption?.bsse)
       command('bsse', withBsse ? 'Energies without BSSE' : 'Energies with BSSE', 'flask', () => setWithBsse(!withBsse))
-    const hidden = filters.branches.length + filters.statuses.length + filters.steps.length
-    if (hidden) command('filters-all', 'Filters: show all', 'filter', () => setFilters(NO_FILTERS))
-    const filter = (key: keyof Filters, value: string, label: string) => {
+    if (hiddenCount(filters)) command('filters-all', 'Filters: show all', 'filter', () => setFilters(NO_FILTERS))
+    if (openProposals(canvas) || filters.review)
+      command('filter-review', filters.review ? 'Filter: show all edges, not only those to review' : 'Filter: only edges to review', 'filter', () =>
+        setFilters({ ...filters, review: !filters.review }),
+      )
+    const filter = (key: 'branches' | 'statuses' | 'steps', value: string, label: string) => {
       const off = filters[key].includes(value)
       command(`filter-${key}-${value}`, `Filter: ${off ? 'show' : 'hide'} ${label}`, 'filter', () =>
         setFilters({ ...filters, [key]: off ? filters[key].filter((v) => v !== value) : [...filters[key], value] }),
@@ -3089,6 +3092,16 @@ function App() {
               </button>
             </div>
             <FilterMenu canvas={canvas} filters={filters} onChange={setFilters} />
+            {(openProposals(canvas) > 0 || filters.review) && (
+              <button
+                className="quiet"
+                aria-pressed={!!filters.review}
+                title="Show only the edges Claude proposed that you have not accepted yet, and their nodes (D264)"
+                onClick={() => setFilters({ ...filters, review: !filters.review })}
+              >
+                To review ({openProposals(canvas)})
+              </button>
+            )}
             <span className="vsep" />
             <div className="energy-select" role="group" aria-label="Energy view">
               <span className="lbl">Energies</span>

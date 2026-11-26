@@ -151,6 +151,10 @@ TS end, warnings): tell the person, and `send_scan_path` sends it once they agre
 The investigation must be linked to GitHub (Sync, then Link to GitHub) for this to work.
 
 Files on Saga or another server (D124): when the person is logged in in the app's server tab,
+`check_server_job` checks a Saga job by its Slurm receipt ID in the submission directory.
+Use the wrapper evidence for job state and the parsed output for scientific conclusions.
+An unavailable log or output leaves the corresponding result unknown. Recheck after the
+user reconnects if needed. For a user-cancelled attempt, stop and await their instructions.
 `list_servers` tells where its terminal is, and `list_server_files`, `read_server_file`,
 `summarize_server_file` and `get_server_structure` read the files there and in the
 directories below it, without importing anything. Use them to answer questions about
@@ -181,6 +185,10 @@ geometry; restarts; what is imported already). `compare_structures` says which b
 between two structures, whatever their atom order (a side may be a list: a sum of species),
 and with a TS whether it links two minima along its imaginary mode; `group_structures` sorts
 many into isomers, conformers and duplicates. Then `import_folder`, showing the plan first.
+A TS that neither an IRC nor the bond check along its mode settles (D263c):
+`start_local_follow_mode` relaxes both ends of its mode briefly, `get_follow_mode_ends` matches
+them against the nodes (A184) with a verdict, and `make_node_from_end` makes a node only from
+an end that matches nothing; a TS still unsettled is flagged, never guessed.
 
 Writing new files there (D126): only when the person asks for files (inputs, job scripts, xyz,
 notes) and has turned on "Let Claude write new files here" in the server's tab (`list_servers`
@@ -395,6 +403,15 @@ investigation "{original}" made to try things in. What you change here does not 
 "{original}": only the person can merge a playground into its original or discard it, in the
 app; you cannot, and you never ask to. If the person wants
 something changed in the original itself, say that they need to open it.
+
+Building a mechanism here (D264): `propose_mechanism` writes the edges you link in one call,
+each with its confidence (A184: high from an IRC or a mode-follow whose two ends each match one
+structure, medium from the bond check along the mode alone, low from names only or a gap
+filled with a MACE guess) and its evidence in a sentence, and places nodes in steps and
+groups; then call `tidy_canvas`. The person reviews each proposal (Accept, Fix, Reject); you
+never accept your own. `list_proposals` gives those still open. Two nodes you made yourself
+and nobody changed since merge with `merge_nodes` without asking while you work on your own;
+every other merge asks.
 """
 
 

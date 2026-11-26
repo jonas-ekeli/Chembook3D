@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
-import { api, type LocalJob } from '../api'
-import { fixModeText, localStatusText, progressText, scanText, tsCheckText, tsGuessText } from '../localJobs'
+import { api, type FollowModeEnds, type LocalJob } from '../api'
+import { fixModeText, followModeText, localStatusText, progressText, scanText, tsCheckText, tsGuessText } from '../localJobs'
 import { Modal } from './Modal'
 import { errorText, withDisplacements } from '../util'
 import { Viewer3D } from './Viewer3D'
@@ -36,8 +36,28 @@ export function LocalJobsDialog({
   const [error, setError] = useState<string | null>(null)
   const [showMode, setShowMode] = useState<string | null>(null) // D217: the job whose mode is shown
   const [replacing, setReplacing] = useState<LocalJob | null>(null) // D260: the Replace being confirmed
+  // D263c: a finished mode-follow's ends, matched against the nodes when the list opens
+  const [ends, setEnds] = useState<Record<string, FollowModeEnds>>({})
   // Read the jobs again on opening: one Claude started is not known yet.
   useEffect(() => onChanged(), [onChanged])
+  const followed = jobs
+    .filter((job) => job.kind === 'follow_mode' && !job.active && job.result?.follow_mode)
+    .map((job) => job.id)
+    .join(' ')
+  useEffect(() => {
+    let live = true
+    for (const id of followed ? followed.split(' ') : []) {
+      api
+        .followModeEnds(id)
+        .then((found) => {
+          if (live) setEnds((known) => ({ ...known, [id]: found }))
+        })
+        .catch(() => undefined) // the line then says how the ends relaxed, without matches
+    }
+    return () => {
+      live = false
+    }
+  }, [followed])
 
   const act = (key: string, run: () => Promise<unknown>) => {
     setBusy(key)
@@ -147,6 +167,7 @@ export function LocalJobsDialog({
                 const found = job.result?.frequencies
                 const scanned = scanText(job)
                 const fixed = fixModeText(job)
+                const followedText = followModeText(job, ends[job.id])
                 const guess = tsGuessText(job)
                 return (
                   <Fragment key={job.id}>
@@ -165,6 +186,8 @@ export function LocalJobsDialog({
                           {job.constraints && ' · with constraints'}
                           {job.transition && job.kind !== 'ts_guess' && ' · TS search'}
                           {job.fix_mode && ` · fix the ${Math.abs(job.fix_mode.wavenumber).toFixed(0)}i cm⁻¹ mode`}
+                          {job.follow_mode &&
+                            ` · follow the ${Math.abs(job.follow_mode.wavenumber).toFixed(0)}i cm⁻¹ mode both ways (result not imported)`}
                           {job.kind === 'single_point' && ' · single point'}
                           {job.scan &&
                             (job.scan.grid
@@ -218,6 +241,16 @@ export function LocalJobsDialog({
                             {fixed}
                           </div>
                         )}
+                        {followedText && (
+                          <div className="small" aria-label="Follow mode">
+                            {followedText}
+                          </div>
+                        )}
+                        {ends[job.id]?.flags.map((f) => (
+                          <div key={f} className="small muted">
+                            {f}
+                          </div>
+                        ))}
                         {scanned && (
                           <div className="small" aria-label="Scan">
                             {scanned}

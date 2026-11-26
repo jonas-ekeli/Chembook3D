@@ -67,6 +67,15 @@
   --leave-text: #4a1fb8; /* a species that leaves (D69) */
   --leave-bg: #f4f3ff;
   --leave-border: #bdb4fe;
+  --proposal-high-text: #05603a; /* D264: the badge of an edge Claude proposed, by confidence */
+  --proposal-high-bg: #d1fadf;
+  --proposal-high-border: #32d583;
+  --proposal-medium-text: #93370d;
+  --proposal-medium-bg: #fef0c7;
+  --proposal-medium-border: #fdb022;
+  --proposal-low-text: #912018;
+  --proposal-low-bg: #fee4e2;
+  --proposal-low-border: #f97066;
   --tag-bg: #eef0f3;
   --chart-grid: #eaecf0; /* grid lines of the charts drawn in the app */
   --sketch-bond: #5f6670; /* a structure card's bonds (MoleculeSketch) */
@@ -182,6 +191,15 @@
   --leave-text: #bdb4fe;
   --leave-bg: #221a40;
   --leave-border: #4a3a8c;
+  --proposal-high-text: #75e0a7;
+  --proposal-high-bg: #0f2a1d;
+  --proposal-high-border: #2f8f5f;
+  --proposal-medium-text: #fec84b;
+  --proposal-medium-bg: #2b2210;
+  --proposal-medium-border: #b54708;
+  --proposal-low-text: #fda29b;
+  --proposal-low-bg: #3a1714;
+  --proposal-low-border: #b42318;
   --tag-bg: #252c36;
   --chart-grid: #262d37;
   --sketch-bond: #aab2bf;
@@ -3907,6 +3925,53 @@ button.chip {
   background: var(--leave-bg);
   border-color: var(--leave-border);
   color: var(--leave-text);
+}
+/* D264: an edge Claude proposed and the user has not accepted yet, by its confidence */
+.chip.proposal {
+  font-weight: 600;
+}
+/* on the canvas the badge is a button that selects its edge */
+button.chip.proposal {
+  pointer-events: auto;
+  min-height: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 0;
+}
+button.chip.proposal:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+.chip.proposal-high {
+  background: var(--proposal-high-bg);
+  border-color: var(--proposal-high-border);
+  color: var(--proposal-high-text);
+}
+.chip.proposal-medium {
+  background: var(--proposal-medium-bg);
+  border-color: var(--proposal-medium-border);
+  color: var(--proposal-medium-text);
+}
+.chip.proposal-low {
+  background: var(--proposal-low-bg);
+  border-color: var(--proposal-low-border);
+  color: var(--proposal-low-text);
+}
+.proposal-review {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-alt);
+}
+.proposal-review .evidence {
+  white-space: pre-wrap;
+  margin: 0;
+}
+.proposal-review .buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 /* D121: a scan path shown on its edge; always xTB, never the edge's barrier (INV-8) */
 .chip.scan-path-chip {

@@ -325,6 +325,7 @@ class MergeReviewOut(BaseModel):
     original_name: str
     changed_since: int  # the original's history entries since the playground was made
     sections: list[MergeSectionOut]
+    warnings: list[str] = []  # D264b: proposed edges still open; never a blocker
 
 
 class MergeStartOut(InvestigationOut):
@@ -333,6 +334,7 @@ class MergeStartOut(InvestigationOut):
 
 class MergeResultOut(BaseModel):
     counts: dict[str, int]  # added, changed, removed
+    warnings: list[str] = []  # as the review's (D264b)
     brought: list[str]  # changes not ticked but needed by a ticked one
     blockers: list[str]
     backup: str | None = None  # the original's copy in backups/, once merged

@@ -599,6 +599,12 @@ class Transition(Base):
     # D76: the side of each box the arrow leaves from and arrives at; display only.
     source_side: Mapped[str] = mapped_column(String(8), default="right", server_default="right")
     target_side: Mapped[str] = mapped_column(String(8), default="left", server_default="left")
+    # D264: an edge Claude proposed (`services/proposals.py`): its confidence (high, medium,
+    # low; A184), the evidence that settled it, and "open" until the user accepts it, then
+    # "accepted". `review` is None on an ordinary edge, never proposed (migration 0039).
+    confidence: Mapped[str | None] = mapped_column(String(8), default=None)
+    evidence: Mapped[str] = mapped_column(Text, default="", server_default=text("''"))
+    review: Mapped[str | None] = mapped_column(String(16), default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     species: Mapped[list["TransitionSpecies"]] = relationship(
