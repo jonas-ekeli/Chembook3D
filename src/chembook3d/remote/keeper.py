@@ -814,6 +814,23 @@ class Keeper:
             allowed = "may" if session.writes else "may not"
             log.info("Claude %s write on %s", allowed, session.server["host"])
             return {"ok": True, "writes": session.writes}
+        if op == "saga_probe":
+            from chembook3d.remote import probe
+
+            if msg.keys() - {"op", "token", "server"}:
+                return {"ok": False, "error": "The capability check accepts only a server ID."}
+            session = self.sessions.get(str(msg.get("server")))
+            if session is None:
+                return {"ok": False, "error": "Log in to Saga in Chembook's HPC tab first."}
+            host = session.server["host"].lower()
+            if host not in {"127.0.0.1", "::1", "saga.sigma2.no"} and not host.endswith(
+                ".saga.sigma2.no"
+            ):
+                return {"ok": False, "error": "Select the connected Saga server."}
+            reply = await probe.check(session.conn)
+            if reply["ok"]:
+                session.used = time.monotonic()
+            return reply
         if op == "job_pilot":
             session = self.sessions.get(str(msg.get("server")))
             if session is None:

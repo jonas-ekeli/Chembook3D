@@ -149,13 +149,32 @@ printf '%s\n' '{"operation":"submit"}' | python3 -I "$HOME/.local/lib/chembook3d
 
 Expect `chembook3d-probe-v1` and a list containing only `capabilities` for the first request. The second should print `Unsupported request` and exit with status 1. The probe only reads stdin and writes the reply. These checks establish interpreter availability, file placement and request handling in an interactive login.
 
-**Second live check.** Test the same fixed launcher through an ordinary non-interactive SSH exec channel. For example, from an interactive PowerShell window, substitute your Saga login for `USERNAME`:
+Jonas ran the capabilities request in an interactive SSH login on Saga and reported `{"ok":true,"protocol":"chembook3d-probe-v1","operations":["capabilities"]}`. A subsequent `submit` request returned `ok: false`. The process exit status was not reported.
+
+**Second live check.** Test the same fixed launcher through an ordinary non-interactive SSH exec channel. For example, from an interactive PowerShell window, substitute your Saga login for `USERNAME` and use the actual uploaded path:
 
 ```powershell
 '{"operation":"capabilities"}' | ssh -T USERNAME@saga.sigma2.no 'python3 -I .local/lib/chembook3d/hpc_capability_probe.py'
 ```
 
-This separate SSH client can prompt for 2FA. Record the reply and exit status. Success demonstrates fixed-command execution for that login. Reuse of Chembook's own connection on Saga is a subsequent integration test. The keeper currently enables job requests only for the loopback pilot.
+Jonas confirmed this separate SSH client prompted for 2FA and returned `ok: true` on Saga. This establishes that an ordinary SSH exec channel can launch the probe under his account.
+
+**Third live check.** Put the reviewed probe at the fixed path `~/.local/lib/chembook3d/hpc_capability_probe.py` on Saga. If the uploaded copy is elsewhere, run the following from its directory in your Saga terminal:
+
+```sh
+mkdir -p ~/.local/lib/chembook3d
+cp -n hpc_capability_probe.py ~/.local/lib/chembook3d/
+```
+
+On the workstation, update the testing branch with `git pull --ff-only`. Open Chembook from this checkout (`uv run chembook3d`) and log in to Saga in its HPC tab. With the tab connected, use a second local terminal in the same checkout and app configuration:
+
+```text
+uv run chembook3d saga-probe
+```
+
+The command asks the existing keeper to perform one capability check on its authenticated connection. It accepts an optional saved server ID (default `saga`). The fixed launcher checks the uploaded file against the reviewed digest and runs the verified bytes. The expected result is `chembook3d-probe-v1` without a further authentication prompt. This user diagnostic is available from the CLI. Agent job preparation and submission are still limited to the loopback pilot.
+
+An older keeper reports an unknown operation. At a convenient time, log out all its saved HPC sessions, allow at least a minute for the empty keeper to exit, then log in from the updated checkout. Count any 2FA at that login separately from the probe. The diagnostic never opens, replaces or closes an SSH login.
 
 **What remains before job submission.** Validate file scopes for every agent tool on the chosen deployment and confirm the agent cannot change the helper, scripts, job files, dependencies or authorization records. A helper can reject requests it receives. The process that owns an ordinary interactive SSH connection retains the user's account privileges. If the requirement includes protection against that process being compromised, a separate server-enforced access boundary is necessary. Record this decision under Q101, then test the actual generator with `nosub` before considering a scheduler submission.
 

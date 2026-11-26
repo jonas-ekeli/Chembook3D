@@ -20,6 +20,7 @@ import os
 import posixpath
 import socket
 import socketserver
+import subprocess
 import sys
 import threading
 from collections.abc import Iterator
@@ -29,6 +30,7 @@ from pathlib import Path
 import asyncssh
 from asyncssh.x11 import walk_xauth
 
+from chembook3d.remote import probe
 from chembook3d.remote.job_pilot import LOCAL_WORK, SUBSYSTEM, JobPilot
 
 USER = "jonas"
@@ -177,6 +179,21 @@ class FakeSaga:
     async def _session(self, process: asyncssh.SSHServerProcess) -> None:
         self.record.commands.append(process.command)
         self.record.displays.append(process.channel.get_x11_display())
+        if process.command == probe.COMMAND:
+            # Run the keeper's exact pinned launcher in the stand-in account's home.
+            home = str(self.root / HOME.lstrip("/"))
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [sys.executable, "-I", "-S", "-c", probe.PROBE_SOURCE],
+                env={**os.environ, "HOME": home, "USERPROFILE": home},
+                input=await process.stdin.read(257),
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+            process.stdout.write(result.stdout)
+            process.exit(result.returncode)
+            return
         if process.subsystem == SUBSYSTEM and self.job_pilot is not None:
             try:
                 envelope = json.loads(await process.stdin.read(65536))

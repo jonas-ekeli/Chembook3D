@@ -1255,6 +1255,30 @@ def test_missing_job_subsystem_never_falls_back_to_shell(at_work, saga, config_d
     assert saga.record.logins == 1 and not (pilot.state / "attempts.sqlite").exists()
 
 
+def test_saga_probe_reuses_the_keepers_login(at_work, saga, capsys):
+    from chembook3d.cli import main
+    from chembook3d.remote import probe
+    from tests.fake_ssh_server import HOME
+
+    before = len(saga.record.commands)
+    with pytest.raises(client.KeeperError, match="only a server ID"):
+        asyncio.run(client.call("saga_probe", server="saga", path="custom.py"))
+    assert len(saga.record.commands) == before
+    dest = saga.root / HOME.lstrip("/") / ".local/lib/chembook3d/hpc_capability_probe.py"
+    for install in (False, True):
+        if install:
+            dest.parent.mkdir(parents=True)
+            dest.write_text("raise RuntimeError('unreviewed file')", encoding="ascii")
+        with pytest.raises(SystemExit) as failure:
+            main(["saga-probe"])
+        assert failure.value.code == 1 and "Install the branch's probe" in capsys.readouterr().err
+    source = Path(__file__).resolve().parents[1] / "scripts/hpc_capability_probe.py"
+    dest.write_bytes(source.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    main(["saga-probe"])
+    assert json.loads(capsys.readouterr().out) == probe.REPLY
+    assert saga.record.logins == 1 and saga.record.commands[before:] == [probe.COMMAND] * 3
+
+
 @pytest.mark.parametrize("drop_reply", [False, True])
 def test_local_preparation_submission_and_follow_up_through_mcp(
     at_work, saga, config_dir, drop_reply

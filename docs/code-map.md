@@ -719,6 +719,10 @@ Routes for all of these are in `api/pathway.py`.
 
 ## SSH servers such as Saga (D122, A69)
 
+- `chembook3d saga-probe` is the user-run Q101 diagnostic. The keeper passes the
+  existing session to `remote/probe.py` for a fixed, digest-checked capability query.
+  See 05 §9 for the Saga procedure.
+
 - The local preparation pilot (D266, FR-SSH-19) connects `api/hpc_jobs.py` and
   `api/live.py` to the keeper's fixed SSH subsystem. `remote/job_pilot.py` validates
   files, guards the one-time submission in SQLite and records the receipt.
