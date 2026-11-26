@@ -1,6 +1,6 @@
-"""D263 a, f, g, h (FR-PANEL-09, FR-PANEL-10): the `/build-mechanism` playbook in the panel's
-working folder, and the job limit "Build mechanism from folder…" turns Work on its own on with
-(T-PANEL-16, T-PANEL-17)."""
+"""D263 a, f, g, h and D265 (FR-PANEL-09, FR-PANEL-10): the `/build-mechanism` playbook in the
+panel's working folder, and the job limit "Build mechanism from folder…" turns Work on its own
+on with (T-PANEL-16, T-PANEL-17)."""
 
 import json
 
@@ -81,6 +81,25 @@ def test_the_panel_gets_the_build_mechanism_command(tmp_path, monkeypatch):
     assert "--no-literature" in flat and "D230c" in flat and "read_pdf" in flat
     assert "never raises a confidence on its own" in flat
     assert "numbers are never energies" in flat
+    # D265: gaps filled after linking unless --no-gaps, at most 10, MACE guesses only.
+    assert text.index("propose_mechanism") < text.index("find_gaps")
+    assert "argument-hint: <folder> [--no-literature] [--no-gaps]" in text
+    for rule in (
+        "## Filling gaps (D265)",
+        "Skip this with `--no-gaps`",
+        "Fill at most 10 a run",
+        "cheapest and most certain first",
+        "never a new branch",
+        "`start_local_refine` at `mace-omol`",
+        "`start_local_ts_guess`",
+        "`correct` only when the person asked",
+        "consult the literature first (unless `--no-literature`)",
+        "from SMILES",
+        "Filled by Claude",
+        'planned "(MACE guess)" nodes',
+        "each gap with what you built for it, the gaps left flagged",
+    ):
+        assert rule in flat, rule
 
     # Written over on every start, so an old copy follows the app.
     (work / ".claude" / "commands" / "build-mechanism.md").write_text("old", encoding="utf-8")

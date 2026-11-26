@@ -103,3 +103,9 @@ test('Build mechanism from folder types the playbook command with the folder (D2
   assert.equal(buildMechanismCommand(' /data/a\nb\x1b[A ', true), '/build-mechanism "/data/a b [A"')
   assert.equal(buildMechanismCommand('/data/"odd" name', true), '/build-mechanism "/data/odd name"')
 })
+
+test('Build mechanism from folder adds --no-gaps only when gaps are not filled (D265d)', () => {
+  assert.equal(buildMechanismCommand('/data/ru', true, true), '/build-mechanism /data/ru')
+  assert.equal(buildMechanismCommand('/data/ru', true, false), '/build-mechanism /data/ru --no-gaps')
+  assert.equal(buildMechanismCommand('/data/r u', false, false), '/build-mechanism "/data/r u" --no-literature --no-gaps')
+})
