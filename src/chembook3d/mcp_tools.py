@@ -683,6 +683,15 @@ TOOLS: list[ToolSpec] = [
         "ones below it can be read; the user moves it with cd. You cannot log in.",
     ),
     T(
+        "prepare_saga_minimum",
+        "write",
+        "POST",
+        "/api/hpc-jobs/{server_id}/prepare-minimum",
+        "Prepare the single operator-enrolled minimum on Saga using nosub. The helper selects "
+        "the verified XYZ, job description and work directory. Returns the checked Gaussian "
+        "input and SHA-256. Repeating returns the same successful preparation. No submission.",
+    ),
+    T(
         "prepare_gaussian_job",
         "write",
         "POST",

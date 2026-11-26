@@ -172,7 +172,7 @@ On the workstation, update the testing branch with `git pull --ff-only`. Open Ch
 uv run chembook3d saga-probe
 ```
 
-The command asks the existing keeper to perform one capability check on its authenticated connection. It accepts an optional saved server ID (default `saga`). The fixed launcher checks the uploaded file against the reviewed digest and runs the verified bytes. The expected result is `chembook3d-probe-v1` without a further authentication prompt. This user diagnostic is available from the CLI. Agent job preparation and submission are still limited to the loopback pilot.
+The command asks the existing keeper to perform one capability check on its authenticated connection. It accepts an optional saved server ID (default `saga`). The fixed launcher checks the uploaded file against the reviewed digest and runs the verified bytes. The expected result is `chembook3d-probe-v1` without a further authentication prompt. This user diagnostic is available from the CLI. The separate preparation test below uses the notebook agent. Submission is available in the loopback pilot.
 
 An older keeper reports an unknown operation. At a convenient time, log out all its saved HPC sessions, allow at least a minute for the empty keeper to exit, then log in from the updated checkout. Count any 2FA at that login separately from the probe. The diagnostic never opens, replaces or closes an SSH login.
 
@@ -181,6 +181,18 @@ An older keeper reports an unknown operation. At a convenient time, log out all 
 **What remains before job submission.** Validate file scopes for every agent tool on the chosen deployment and confirm the agent cannot change the helper, scripts, job files, dependencies or authorization records. A helper can reject requests it receives. The process that owns an ordinary interactive SSH connection retains the user's account privileges. If the requirement includes protection against that process being compromised, a separate server-enforced access boundary is necessary. Record this decision under Q101. The manual Saga preparation below provides the reference for testing an agent-requested preparation through the restricted helper.
 
 ### Saga wrapper example
+
+#### Reproducing a verified minimum through the agent
+
+1. On the workstation, update the testing checkout with `git pull --ff-only`. Log out older Chembook HPC sessions at a convenient time, allow at least a minute for the keeper to exit and restart Chembook from the updated checkout with `uv run chembook3d`.
+2. Transfer `src/chembook3d/remote/saga_prepare.py` from this checkout to `~/saga_prepare.py` using the operator's usual transfer method. In a **Saga terminal**, change to the successful `min-test-…` directory beneath the project pilot. Run `python3 ~/saga_prepare.py setup "$PWD/NAME.inp"`, replacing `NAME.inp` with the generated filename. Compare the printed SHA-256 with the digest of the manual run. Setup enrolls the sibling XYZ, the fixed minimum job description in the project's `jobdescriptions` directory, the generator in `~/tools/scripts` and the original input digest. It installs the helper and its configuration in `~/.local/lib/chembook3d`. The operator is responsible for the generator and its shell and Java dependencies and keeps them outside agent-writable locations.
+3. In Chembook, open an investigation and log in to Saga in the HPC tab. Ask the notebook agent to use `prepare_saga_minimum` on Saga and report the input name, directory and SHA-256. The server ID is the only tool argument. The keeper supplies the fixed launcher and the helper supplies the generator arguments, including `nosub`. The acceptance criterion is an input in a new `prepare-…` directory whose full SHA-256 equals the digest printed during setup. Repeating the request should return the same directory and digest. The live agent result is pending.
+
+Once enrolled, the notebook agent can read files inside the pilot. With the app's write toggle enabled it can create new, safely named XYZ files directly in `geometries/`. The preparation uses only the exact XYZ selected during setup. Manual terminal, import and export actions continue to use the user's chosen location.
+
+The helper records its attempt in the operator's home before it runs the wrapper. After a lost reply, repeat the same request. A completed attempt returns the checked input. If an attempt is incomplete or differs from the reference, inspect its directory and wrapper logs on Saga. Running setup again deliberately enrolls a fresh attempt. A missing or changed helper requires a matching copy from the workstation checkout.
+
+#### Project job descriptions
 
 Jonas identified three project job descriptions in one directory on Saga and created a sibling directory named `chembook3d-pilot` in his project area for calculation files. The intended write scope is that pilot directory and its children. The generator scripts and job descriptions stay outside it. Use a fresh child directory for each preparation so an existing input cannot be mistaken for new output.
 

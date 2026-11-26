@@ -3,6 +3,7 @@ the keeper, the terminal, and coming back after a restart. `tests/fake_ssh_serve
 in for Saga; the keeper runs as the separate process it is in the app."""
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -20,11 +21,12 @@ from fastapi.testclient import TestClient
 
 from chembook3d.app import create_app
 from chembook3d.mcp_server import Bridge
-from chembook3d.mcp_tools import BY_NAME, PANEL_ALLOWED, READ_ONLY_TOOLS, TOOLS
+from chembook3d.mcp_tools import BY_NAME, PANEL_ALLOWED, READ_ONLY_TOOLS, TOOLS, input_schema
 from chembook3d.parsers import orca
 from chembook3d.remote import client, keeper
 from tests.fake_ssh_server import (
     CODE,
+    HOME,
     PASSWORD,
     USER,
     FakeSaga,
@@ -1258,7 +1260,6 @@ def test_missing_job_subsystem_never_falls_back_to_shell(at_work, saga, config_d
 def test_saga_probe_reuses_the_keepers_login(at_work, saga, capsys):
     from chembook3d.cli import main
     from chembook3d.remote import probe
-    from tests.fake_ssh_server import HOME
 
     before = len(saga.record.commands)
     with pytest.raises(client.KeeperError, match="only a server ID"):
@@ -1277,6 +1278,116 @@ def test_saga_probe_reuses_the_keepers_login(at_work, saga, capsys):
     main(["saga-probe"])
     assert json.loads(capsys.readouterr().out) == probe.REPLY
     assert saga.record.logins == 1 and saga.record.commands[before:] == [probe.COMMAND] * 3
+
+
+SAGA_WORK = f"/cluster/projects/nn0000k/{USER}/chembook3d-pilot"
+
+
+def _enroll_saga(saga) -> Path:
+    marker = ".local/lib/chembook3d/.prepare-minimum.json"
+    # The fixture's SFTP home is its root, and the launcher uses the SSH account's HOME.
+    for login_home in (saga.root, saga.root / HOME.lstrip("/")):
+        manifest = login_home / marker
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        with os.fdopen(
+            os.open(manifest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600),
+            "w",
+            encoding="utf-8",
+        ) as stream:
+            json.dump({"work_root": SAGA_WORK}, stream)
+    work = saga.root / SAGA_WORK.lstrip("/")
+    (work / "geometries").mkdir(parents=True)
+    return work
+
+
+def test_saga_preparation_uses_only_the_fixed_command_on_the_existing_login(at_work, saga):
+    from chembook3d.remote import saga_access
+
+    tool = BY_NAME["prepare_saga_minimum"]
+    schema = input_schema(tool)
+    assert set(schema["properties"]) == {"server_id"}
+    assert schema["required"] == ["server_id"]
+    assert tool.kind == "write"
+    before = len(saga.record.commands)
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            bridge = Bridge(APP, http=http)
+            args = {"server_id": "saga"}
+            assert (await bridge.call(tool.name, args)).is_error  # no operator installation
+            assert saga.record.commands[before:] == []
+            work = _enroll_saga(saga)
+            assert (await bridge.call(tool.name, {**args, "path": "water.xyz"})).is_error
+            with pytest.raises(client.KeeperError):
+                await client.call("saga_prepare_minimum", server="saga", path="water.xyz")
+            assert saga.record.commands[before:] == []
+
+            # The launcher is available, but the installed helper is not.
+            assert (await bridge.call(tool.name, args)).is_error
+            assert saga.record.commands[before:] == [saga_access.COMMAND]
+
+            input_text = (
+                "#p HF/STO-3G Opt\n\nWater\n\n0 1\nO 0 0 0\nH 0.76 0.59 0\nH -0.76 0.59 0\n\n"
+            )
+            digest = hashlib.sha256(input_text.encode()).hexdigest()
+            directory = "prepare-0123456789abcdef0123456789abcdef"
+            prepared = {
+                "state": "prepared",
+                "directory": f"{SAGA_WORK}/{directory}",
+                "input_name": "water.inp",
+                "input": input_text,
+                "sha256": digest,
+                "reference_sha256": digest,
+            }
+            (work / directory).mkdir()
+            (work / directory / "water.inp").write_bytes(input_text.encode())
+            saga.saga_prepare_reply = {
+                "ok": True,
+                "result": {**prepared, "reference_sha256": "0" * 64},
+            }
+            assert (await bridge.call(tool.name, args)).is_error
+            saga.saga_prepare_reply = {"ok": True, "result": prepared}
+            answer = await bridge.call(tool.name, args)
+            assert not answer.is_error, answer.content
+            assert json.loads(answer.content[0].text) == prepared
+
+    anyio.run(exercise)
+    assert saga.record.commands[before:] == [saga_access.COMMAND] * 3
+    assert saga.record.saga_prepare_requests == [b'{"operation":"prepare_minimum"}\n'] * 3
+    assert saga.record.answers == [[PASSWORD], [CODE]]
+    assert saga.record.logins == 1
+
+
+def test_saga_enrollment_scopes_legacy_agent_files_but_preserves_manual_transfers(at_work, saga):
+    work = _enroll_saga(saga)
+    (work / "results").mkdir()
+    (work / "results" / "sample.txt").write_text("fixture result", encoding="utf-8")
+    assert _allow(at_work).is_success
+    assert _write(at_work, "manual.xyz", WATER).status_code == 409
+    assert _write(at_work, f"{SAGA_WORK}/results/other.xyz", WATER).status_code == 409
+    assert _write(at_work, f"{SAGA_WORK}/geometries/deep/other.xyz", WATER).status_code == 409
+    assert _write(at_work, f"{SAGA_WORK}/geometries/other.inp", WATER).status_code == 409
+    assert _write(at_work, f"{SAGA_WORK}/geometries/other.xyz", WATER).is_success
+    assert (work / "geometries" / "other.xyz").read_bytes() == WATER.encode()
+
+    files = "/api/server-files/saga"
+    assert at_work.get(f"{files}/files", params={"path": WORK}).status_code == 409
+    assert at_work.get(f"{files}/read", params={"path": f"{WORK}/job.gjf"}).status_code == 409
+    result = at_work.get(f"{files}/read", params={"path": f"{SAGA_WORK}/results/sample.txt"})
+    assert result.is_success and "fixture result" in result.text
+
+    node = _node(at_work, "manual")
+    sent = at_work.post("/api/remote/servers/saga/send", json={"node_id": node}, headers=ORIGIN)
+    assert sent.json() == {"path": f"{WORK}/manual.xyz", "sent": True, "exists": False}
+    plan = at_work.post(
+        "/api/remote/servers/saga/import", json={"paths": [f"{WORK}/{TS}"]}, headers=ORIGIN
+    )
+    assert plan.is_success, plan.text
+    imported = at_work.post(f"/api/imports/{plan.json()['token']}/commit", json={})
+    assert imported.is_success and imported.json()["node_id"]
+    assert saga.record.logins == 1
 
 
 @pytest.mark.parametrize("drop_reply", [False, True])

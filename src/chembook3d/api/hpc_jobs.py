@@ -15,6 +15,25 @@ from chembook3d.remote import client, job_pilot, servers
 router = APIRouter(prefix="/api/hpc-jobs")
 
 
+@router.post("/{server_id}/prepare-minimum")
+async def prepare_saga_minimum(server_id: str, request: Request):
+    """Prepare the minimum enrolled by the operator in a Saga login (D266)."""
+    _check(request, page_only=False)
+    _investigation(request)
+    _saved(server_id)
+    if request.query_params or (await request.body()).strip() not in {b"", b"null", b"{}"}:
+        raise HTTPException(422, "Only the saved server ID is accepted.")
+    try:
+        reply = await client.call("saga_prepare_minimum", server=server_id, timeout=115)
+    except client.KeeperError as exc:
+        if "Unknown operation" in str(exc):
+            raise HTTPException(
+                409, "The open HPC login uses an older keeper. See the Saga test procedure."
+            ) from exc
+        raise HTTPException(409, str(exc)) from exc
+    return reply["result"]
+
+
 class PrepareIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     geometry: str = Field(max_length=84)

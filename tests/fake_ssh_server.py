@@ -47,6 +47,7 @@ class Record:
     logins: int = 0  # successful logins
     commands: list[str | None] = field(default_factory=list)  # each session's command
     displays: list[str | None] = field(default_factory=list)  # each session's X11 display
+    saga_prepare_requests: list[bytes] = field(default_factory=list)
 
 
 class _Server(asyncssh.SSHServer):
@@ -94,6 +95,7 @@ class FakeSaga:
         self.real_shell = real_shell
         self.job_pilot = None
         self.drop_submit_reply = False
+        self.saga_prepare_reply: dict | None = None
         self.port = port
         self.x11 = x11
         self.xauthority = root / ".Xauthority"  # the cookies of the forwarded displays
@@ -177,16 +179,28 @@ class FakeSaga:
             self._thread.join(5)
 
     async def _session(self, process: asyncssh.SSHServerProcess) -> None:
+        from chembook3d.remote import saga_access
+
         self.record.commands.append(process.command)
         self.record.displays.append(process.channel.get_x11_display())
-        if process.command == probe.COMMAND:
+        if process.command in (probe.COMMAND, saga_access.COMMAND):
+            request = await process.stdin.read(257)
+            if process.command == saga_access.COMMAND:
+                self.record.saga_prepare_requests.append(request)
+                if self.saga_prepare_reply is not None:
+                    process.stdout.write(json.dumps(self.saga_prepare_reply).encode())
+                    process.exit(0)
+                    return
+                launcher = saga_access.LAUNCHER
+            else:
+                launcher = probe.PROBE_SOURCE
             # Run the keeper's exact pinned launcher in the stand-in account's home.
             home = str(self.root / HOME.lstrip("/"))
             result = await asyncio.to_thread(
                 subprocess.run,
-                [sys.executable, "-I", "-S", "-c", probe.PROBE_SOURCE],
+                [sys.executable, "-I", "-S", "-c", launcher],
                 env={**os.environ, "HOME": home, "USERPROFILE": home},
-                input=await process.stdin.read(257),
+                input=request,
                 capture_output=True,
                 timeout=10,
                 check=False,

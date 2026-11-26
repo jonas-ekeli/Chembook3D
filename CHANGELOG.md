@@ -6,6 +6,10 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The notebook agent can reproduce one manually verified Gaussian minimum input through
+  an existing Saga login. The operator enrolls the reference on Saga. The helper runs the
+  generator with `nosub` and checks the full input against its SHA-256 digest (D266).
+
 - The local HPC pilot can prepare a Gaussian optimization from an approved job description
   and XYZ geometry. The app shows the input and resources for approval and retains the
   attempt so a lost submission reply can be checked without submitting twice (D266).

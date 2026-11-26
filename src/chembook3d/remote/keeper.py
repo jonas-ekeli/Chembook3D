@@ -34,6 +34,7 @@ from pathlib import Path
 
 import asyncssh
 
+from chembook3d.remote import saga_access
 from chembook3d.remote.job_pilot import LOCAL_WORK, SUBSYSTEM
 
 
@@ -326,6 +327,7 @@ class Session:
     x11: str | None = None  # the X11 display the next shell forwards to (D123a)
     writes: bool = False  # D126: the user let Claude write new files; off at every login
     pilot_scope: bool = False
+    saga_work: str | None = None
     written: list[dict] = field(default_factory=list)  # what Claude wrote in this login
 
     async def files(self) -> asyncssh.SFTPClient:
@@ -497,6 +499,16 @@ class Outside(ValueError):
     reported yet."""
 
 
+async def refresh_saga_scope(session: Session) -> None:
+    try:
+        root = await saga_access.enrolled_root(await session.files(), session.server["username"])
+    except ValueError as exc:
+        raise Outside(str(exc)) from exc
+    if session.saga_work is not None and root != session.saga_work:
+        raise Outside("The Saga file policy changed; reconnect before using agent file tools.")
+    session.saga_work = root
+
+
 async def within(session: Session, sftp: asyncssh.SFTPClient, path: object) -> str:
     """D124: the full path `path` names (relative to the shell's current directory, symlinks
     followed by the server's realpath), refused unless it is that directory or below it."""
@@ -508,10 +520,11 @@ async def within(session: Session, sftp: asyncssh.SFTPClient, path: object) -> s
         )
     if path is not None and not isinstance(path, str):
         raise Outside("The path must be text.")
-    if session.pilot_scope:
-        base = await sftp.realpath(LOCAL_WORK)
+    if session.pilot_scope or session.saga_work:
+        approved = session.saga_work or LOCAL_WORK
+        base = await sftp.realpath(approved)
         target = await sftp.realpath(posixpath.join(shell.cwd, path or "."))
-        if base != LOCAL_WORK or (target != base and not target.startswith(base + "/")):
+        if base != approved or (target != base and not target.startswith(base + "/")):
             raise Outside("This path is outside the pilot's approved results directory.")
         return target
     root = await sftp.realpath(shell.cwd)
@@ -823,11 +836,28 @@ class Keeper:
             if session is None:
                 return {"ok": False, "error": "Log in to Saga in Chembook's HPC tab first."}
             host = session.server["host"].lower()
-            if host not in {"127.0.0.1", "::1", "saga.sigma2.no"} and not host.endswith(
-                ".saga.sigma2.no"
-            ):
+            if not saga_access.is_saga(host):
                 return {"ok": False, "error": "Select the connected Saga server."}
             reply = await probe.check(session.conn)
+            if reply["ok"]:
+                session.used = time.monotonic()
+            return reply
+        if op == "saga_prepare_minimum":
+            if msg.keys() - {"op", "token", "server"}:
+                return {"ok": False, "error": "The preparation accepts only a saved server ID."}
+            session = self.sessions.get(str(msg.get("server")))
+            if session is None or not saga_access.is_saga(session.server["host"]):
+                return {"ok": False, "error": "Connect to the enrolled Saga server in the HPC tab."}
+            try:
+                await refresh_saga_scope(session)
+                if session.saga_work is None:
+                    return {
+                        "ok": False,
+                        "error": "Enroll the verified manual minimum on Saga first.",
+                    }
+                reply = await saga_access.prepare(session.conn, session.saga_work)
+            except (Outside, OSError, asyncssh.Error) as exc:
+                return {"ok": False, "error": _reason(exc)}
             if reply["ok"]:
                 session.used = time.monotonic()
             return reply
@@ -859,6 +889,11 @@ class Keeper:
                 return {"ok": False, "error": "Not logged in."}
             inside = msg.get("within") is True  # D124: only the shell's directory and below
             try:
+                if inside or op in {"read", "write"}:
+                    # Detect enrollment through the account's SFTP home, including when
+                    # the user has multiple saved names for the same host. Manual transfers
+                    # continue to use the user's own file scope.
+                    await refresh_saga_scope(session)
                 if (
                     (inside or op in {"read", "write"})
                     and session.server["host"] in {"127.0.0.1", "::1"}
@@ -941,8 +976,8 @@ class Keeper:
                 {"name": name, "kind": kind, "size": attrs.size, "modified": attrs.mtime}
             )
         result = {"ok": True, "path": path, "entries": entries}
-        if inside and session.pilot_scope:
-            result["agent_read_root"] = LOCAL_WORK
+        if inside and (session.pilot_scope or session.saga_work):
+            result["agent_read_root"] = session.saga_work or LOCAL_WORK
         return result
 
     async def _download(
@@ -1105,8 +1140,8 @@ class Keeper:
             return {"ok": False, "error": "Name the file to write."}
         sftp = await session.files()
         root = await sftp.realpath(shell.cwd)
-        if session.pilot_scope:
-            approved = LOCAL_WORK + "/geometries"
+        if session.pilot_scope or session.saga_work:
+            approved = (session.saga_work or LOCAL_WORK) + "/geometries"
             if await sftp.realpath(approved) != approved:
                 raise Outside("Invalid pilot geometry directory.")
             # Resolve relative requests against the terminal, then create files only
@@ -1116,11 +1151,19 @@ class Keeper:
                 raise Outside(
                     "Agent file creation on the pilot is limited to its geometries directory."
                 )
+            if session.saga_work and not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\.xyz", path[len(approved) + 1 :]
+            ):
+                raise Outside(
+                    "Agent writes on this deployment are limited to flat, named XYZ files."
+                )
             root = approved
         relative = path
         if path.startswith("/"):
             for base in (
-                [root] if session.pilot_scope else [shell.cwd.rstrip("/"), root.rstrip("/")]
+                [root]
+                if session.pilot_scope or session.saga_work
+                else [shell.cwd.rstrip("/"), root.rstrip("/")]
             ):
                 if path.startswith(base + "/"):
                     relative = path[len(base) + 1 :]

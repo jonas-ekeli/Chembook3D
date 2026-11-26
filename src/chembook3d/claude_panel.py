@@ -148,6 +148,8 @@ The investigation must be linked to GitHub (Sync, then Link to GitHub) for this 
 
 Files on Saga or another server (D124): when the person is logged in in the app's server tab,
 `check_server_job` checks a Saga job by its Slurm receipt ID in the submission directory.
+On an enrolled Saga account use prepare_saga_minimum to reproduce the operator's manual
+minimum with nosub. Report its directory, input name and SHA-256. This is preparation only.
 For the configured local HPC pilot, prepare_gaussian_job returns the input for review.
 Use its approved results directory for reads and its geometries directory for new XYZ files.
 Use submit_prepared_job for that attempt after review. If the reply is lost, use

@@ -719,6 +719,13 @@ Routes for all of these are in `api/pathway.py`.
 
 ## SSH servers such as Saga (D122, A69)
 
+- `prepare_saga_minimum` in `mcp_tools.py` calls `api/hpc_jobs.py`. The keeper uses
+  `remote/saga_access.py` to check the enrolled directory and launch the pinned helper
+  over the existing SSH connection. `remote/saga_prepare.py` is the standalone file
+  the operator copies to Saga. Its setup and acceptance procedure are in 05 §9.
+  `tests/test_saga_prepare.py` covers the cluster helper and `tests/test_remote.py`
+  covers the agent interface, login reuse and file scopes.
+
 - `chembook3d saga-probe` is the user-run Q101 diagnostic. The keeper passes the
   existing session to `remote/probe.py` for a fixed, digest-checked capability query.
   See 05 §9 for the Saga procedure.
