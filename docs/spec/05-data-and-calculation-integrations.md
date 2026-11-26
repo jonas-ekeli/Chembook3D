@@ -178,9 +178,19 @@ An older keeper reports an unknown operation. At a convenient time, log out all 
 
 **Saga result.** The first CLI attempt reached an older keeper and stopped locally. After following the reconnect procedure, Jonas reported `ok: true` from `chembook3d saga-probe`. The updated keeper ran the fixed helper over the existing authenticated SSH connection. The probe exercised no Slurm operations.
 
-**What remains before job submission.** Validate file scopes for every agent tool on the chosen deployment and confirm the agent cannot change the helper, scripts, job files, dependencies or authorization records. A helper can reject requests it receives. The process that owns an ordinary interactive SSH connection retains the user's account privileges. If the requirement includes protection against that process being compromised, a separate server-enforced access boundary is necessary. Record this decision under Q101, then test the actual generator with `nosub` before considering a scheduler submission.
+**What remains before job submission.** Validate file scopes for every agent tool on the chosen deployment and confirm the agent cannot change the helper, scripts, job files, dependencies or authorization records. A helper can reject requests it receives. The process that owns an ordinary interactive SSH connection retains the user's account privileges. If the requirement includes protection against that process being compromised, a separate server-enforced access boundary is necessary. Record this decision under Q101. The manual Saga preparation below provides the reference for testing an agent-requested preparation through the restricted helper.
 
 ### Saga wrapper example
+
+Jonas identified three project job descriptions in one directory on Saga and created a sibling directory named `chembook3d-pilot` in his project area for calculation files. The intended write scope is that pilot directory and its children. The generator scripts and job descriptions stay outside it. Use a fresh child directory for each preparation so an existing input cannot be mistaken for new output.
+
+| Job description | Purpose | Pilot coverage |
+|---|---|---|
+| `min-go_PBEPBE-GD3MBJ_DZ_singlet_CONVER9.jd` | Ordinary geometry optimization to a minimum | Jonas ran the generator with `nosub` in a fresh pilot directory on Saga. The generated input was 39,735 bytes with four Link1 separators. |
+| `ts-go_PBEPBE-GD3MBJ_DZ_singlet_CONVER9.jd` | Transition-state geometry optimization | Identified for a later validation against a representative generated TS input. |
+| `sp_PBEPBE-GD3MBJ_QZ_singlet.jd` | Single-point energy calculation | Identified for a later validation against a representative generated single-point input. |
+
+Jonas confirmed that the SHA-256 of the live generated input matched the reference after removing only the memory and processor directives from each of its five steps. This verifies byte-for-byte agreement for the manual `nosub` run, including the geometry, routes, custom basis, effective core potential and dispersion settings. Agent-requested preparation on Saga remains to be tested against this reference.
 
 An ordinary minimum from the supplied project job file is one scheduler job with five Gaussian steps. The first HF single point takes the XYZ coordinates and inline basis and effective core potential. A DFT single point and wavefunction stability step precede the geometry optimization. A frequency step follows it. The last four steps read the geometry, basis and guess from the checkpoint produced earlier in the same input. A successful stability step alone does not establish that the geometry has converged.
 
