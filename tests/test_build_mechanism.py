@@ -74,6 +74,8 @@ def test_the_panel_gets_the_build_mechanism_command(tmp_path, monkeypatch):
         "never guess the two minima",
         '"links" with one candidate per side',
         "is medium (A184 bond check)",
+        "true minima at the TS's geometry level first",
+        "`other_level` is a weaker link",
         "raise a medium link to high",
         "both ends land on one structure, say so in the evidence and keep the bond check's",
         "Start several mode-follows, then collect their ends",

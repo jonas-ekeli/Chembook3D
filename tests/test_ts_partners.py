@@ -121,8 +121,10 @@ METHYL = [["C", 0.0, 0.0, 0.0]] + [
 ]
 
 
-def _ts_output() -> str:
-    atoms = _methyl_pair(2.2)
+def _ts_output(distance=2.2, frequencies=(-450.0, 300.0, 900.0)) -> str:
+    """A frequency job at B3LYP/6-31G(d) of the methyls `distance` Å apart, its lowest mode
+    moving the carbons apart: the TS, or (with a smaller imaginary one) a TS-like structure."""
+    atoms = _methyl_pair(distance)
     still = [[0.0, 0.0, 0.0] for _ in atoms]
     apart = [[-0.5, 0.0, 0.0], [0.5, 0.0, 0.0], *still[2:]]
     others = [[[0.0, 0.0, 0.1] if k == n else [0.0, 0.0, 0.0] for k in range(8)] for n in (2, 5)]
@@ -133,9 +135,23 @@ def _ts_output() -> str:
             [atoms],
             -79.0,
             title="ts",
-            after=[*frequency_lines([-450.0, 300.0, 900.0], modes, atoms), *g.THERMO.splitlines()],
+            after=[*frequency_lines(list(frequencies), modes, atoms), *g.THERMO.splitlines()],
         )
     )
+
+
+def _optimization(distance: float, route="#P B3LYP/6-31G(d) Opt", body=()) -> str:
+    """An optimization ending on the methyls `distance` Å apart, converged."""
+    end = _methyl_pair(distance)
+    start = [(e, z, x * 1.02, y, w) for e, z, x, y, w in end]
+    return g.output(g.step(route, [start, end], -79.5, converged=True, body=list(body)))
+
+
+def _imported(client, name, text, **fields) -> str:
+    made = commit(client, upload(client, name, text))["node_id"]
+    if fields:
+        client.patch(f"/api/nodes/{made}", json=fields)
+    return made
 
 
 def _node(client, label, rows, **fields) -> str:
@@ -152,8 +168,9 @@ def test_a_side_is_a_minimum_and_a_free_species_from_the_investigation(open_clie
     """T-MCP-51: a TS node imported with its frequency job; by default every minimum and free
     species is searched, and a methyl node plus the methyl free species is the + side (its
     RMSD over the methyl); ethane is the − side; the pair links, with references to pass on.
-    The TS itself, another TS and a node of other atoms are not candidates; `species` [] leaves
-    sums out; a node without a mode as the TS is refused; another site is refused."""
+    The TS itself, another TS and a node with no role and nothing to show it is a minimum are
+    not candidates; `species` [] leaves sums out; a node without a mode as the TS is refused;
+    another site is refused."""
     ts = commit(open_client, upload(open_client, "ts.log", _ts_output()))["node_id"]
     open_client.patch(f"/api/nodes/{ts}", json={"label": "TS", "role": "transition_state"})
     ethane = _node(open_client, "ethane", ETHANE, role="minimum")
@@ -178,7 +195,12 @@ def test_a_side_is_a_minimum_and_a_free_species_from_the_investigation(open_clie
     assert check["a"]["node_id"] == ethane and check["a"]["ref"] == {"node_id": ethane}
     assert check["b"]["species_node_id"] == radical and isinstance(check["b"]["ref"], list)
     assert check["changed"] == ["C1–C2"]
-    assert found["searched"]["structures"] == 4  # ethane, methyl, CH3, water: no TS
+    assert found["searched"]["structures"] == 3  # ethane, methyl, CH3
+    assert found["searched"]["left_out"] == {
+        "transition state": 1,
+        "not shown to be a minimum": 1,  # water, made from XYZ text with no role
+    }
+    assert found["level"] == "Gaussian B3LYP/6-31G(D)"
 
     alone = _partners(open_client, ts={"node_id": ts}, species=[]).json()
     assert [s["found"] for s in alone["sides"]] == [1, 0] and alone["check"] is None
@@ -231,3 +253,65 @@ def test_the_tool_over_mcp_and_in_the_guides(tmp_path):
         assert "ref" not in found["check"]["a"]  # XYZ text is not echoed back
 
     anyio.run(run)
+
+
+def test_decoys_near_the_ts_that_are_no_minima_or_at_another_level(open_client):
+    """T-MCP-51, A186: nearer the TS than the real ethane (an optimization at the TS's level)
+    lie a constrained optimization, a TS-like structure with an imaginary frequency (both
+    marked minimum) and a copy of ethane at another level: the first two are left out, the copy
+    is not listed while the ethane at the TS's level is, and the pair at that level links.
+    Without it, the copy is listed as `other_level` and the summary says so."""
+    from tests.test_constrained import MODREDUNDANT
+
+    ts = _imported(open_client, "ts.log", _ts_output(), label="TS", role="transition_state")
+    ethane = _imported(open_client, "ethane.log", _optimization(1.53), label="ethane")
+    held = _imported(
+        open_client,
+        "fix22.log",
+        _optimization(1.9, "#P B3LYP/6-31G(d) Opt=ModRedundant", MODREDUNDANT),
+        label="scan",
+        role="minimum",
+    )
+    tslike = _imported(
+        open_client,
+        "relaxed.log",
+        _ts_output(2.0, (-120.0, 300.0, 900.0)),
+        label="TS-like",
+        role="minimum",
+    )
+    copy = _imported(
+        open_client, "ethane-xtb.log", _optimization(1.75, "#P B3LYP/STO-3G Opt"), label="copy"
+    )
+    _node(open_client, "CH3", METHYL, kind="species", multiplicity=2)
+
+    found = _partners(open_client, ts={"node_id": ts}).json()
+    assert found["searched"]["left_out"] == {
+        "scan or constrained geometry": 1,
+        "imaginary frequency": 1,
+    }
+    minus, plus = found["sides"]
+    assert [c["node_id"] for c in minus["candidates"]] == [ethane]
+    assert minus["at_other_levels"] == 1 and "other_level" not in minus
+    assert minus["candidates"][0]["level"] == found["level"] == "Gaussian B3LYP/6-31G(D)"
+    assert [c["label"] for c in plus["candidates"]] == ["CH3 + CH3"]
+    assert found["check"]["verdict"] == "links" and found["check"]["a"]["node_id"] == ethane
+    assert "other level" not in found["summary"]
+    listed = {c.get("node_id") for s in found["sides"] for c in s["candidates"]}
+    assert not listed & {held, tslike, copy}
+
+    # Named as candidates, the decoys are searched: the copy is marked, the nearer one first.
+    named = _partners(
+        open_client,
+        ts={"node_id": ts},
+        candidates=[{"node_id": n} for n in (copy, held, ethane)],
+    ).json()
+    assert [c["node_id"] for c in named["sides"][0]["candidates"]] == [held, ethane]
+
+    assert open_client.delete(f"/api/nodes/{ethane}").status_code in (200, 204)
+    fallen = _partners(open_client, ts={"node_id": ts}).json()
+    minus = fallen["sides"][0]
+    assert [c["node_id"] for c in minus["candidates"]] == [copy]
+    assert minus["other_level"] is True and minus["candidates"][0]["other_level"] is True
+    assert "STO-3G" in minus["candidates"][0]["level"]
+    assert fallen["check"]["a"]["other_level"] is True
+    assert "no candidate at the TS's geometry level" in fallen["summary"]

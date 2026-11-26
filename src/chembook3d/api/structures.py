@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from chembook3d.api.jobs import _local_page_only
 from chembook3d.api.routes import DbSession, _investigation
+from chembook3d.models import Node
 from chembook3d.services import batch_import, folder_survey, thermo_settings, ts_partners
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
@@ -122,8 +123,15 @@ def compare_structures(body: CompareIn, request: Request, session: DbSession) ->
         raise _refused(exc) from exc
 
 
-def _given(session: Any, folder: Path, ref: Side, tolerance: float) -> ts_partners.Candidate:
-    """A structure the caller named, with the reference to pass on (not XYZ text)."""
+def _given(
+    session: Any, folder: Path, ref: Side, tolerance: float, level: ts_partners.Level | None
+) -> ts_partners.Candidate:
+    """A structure the caller named, with the reference to pass on (not XYZ text); a node
+    with the geometry levels it holds (A186)."""
+    if isinstance(ref, StructureRef) and set(_ref(ref)) == {"node_id"}:
+        node = session.get(Node, ref.node_id)
+        if node is not None and node.geometry:
+            return ts_partners.node_candidate(session, folder, node, tolerance, level)
     structure = _side(session, folder, ref, tolerance)
     refs = [_ref(r) for r in ref] if isinstance(ref, list) else [_ref(ref)]
     entry: dict[str, Any] = {"label": structure.label}
@@ -136,22 +144,28 @@ def _given(session: Any, folder: Path, ref: Side, tolerance: float) -> ts_partne
 
 @router.post("/structures/ts-partners")
 def find_ts_partners(body: PartnersIn, request: Request, session: DbSession) -> dict[str, Any]:
-    """D263c, A184, A186: the minima on each side of a TS's imaginary mode, nearest first,
-    and A184's bond check of the best pair. Changes nothing."""
+    """D263c, A184, A186: the minima on each side of a TS's imaginary mode, those at the TS's
+    geometry level and nearest first, and A184's bond check of the best pair. Changes
+    nothing."""
     _local_page_only(request)
     folder = _investigation(request).folder
     tolerance = thermo_settings.settings(session).duplicate_tolerance
     try:
         ts = _side(session, folder, body.ts, tolerance)
-        known: tuple[list, list] = ([], [])
+        level = ts_partners.ts_level(session, _ref(body.ts))
+        candidates: list[ts_partners.Candidate] = []
+        species: list[ts_partners.Candidate] = []
+        skipped: dict[str, int] = {}
         if body.candidates is None or body.species is None:
-            known = ts_partners.from_investigation(session, folder, tolerance, body.ts.node_id)
-        candidates, species = known
+            candidates, species, skipped = ts_partners.from_investigation(
+                session, folder, tolerance, body.ts.node_id, level
+            )
         if body.candidates is not None:
-            candidates = [_given(session, folder, r, tolerance) for r in body.candidates]
+            candidates = [_given(session, folder, r, tolerance, level) for r in body.candidates]
+            skipped = {}
         if body.species is not None:
-            species = [_given(session, folder, r, tolerance) for r in body.species]
-        return ts_partners.find(ts, candidates, species, tolerance, body.top)
+            species = [_given(session, folder, r, tolerance, level) for r in body.species]
+        return ts_partners.find(ts, candidates, species, tolerance, body.top, level, skipped)
     except (compare.StructureError, RecordError) as exc:
         raise _refused(exc) from exc
 

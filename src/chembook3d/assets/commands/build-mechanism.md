@@ -34,7 +34,9 @@ makes one. Never make, merge or discard a playground yourself.
    a. an IRC in the folder: `compare_structures` with its `irc_end` against the nodes;
    b. else `find_ts_partners` on the TS; never guess the two minima for
       `compare_structures` with `ts`. Its `check` "links" with one candidate per side (or the
-      nearest of one molecule's conformers) is medium (A184 bond check);
+      nearest of one molecule's conformers) is medium (A184 bond check). It searches true
+      minima at the TS's geometry level first; a candidate marked `other_level` is a weaker
+      link: say so in the evidence;
    c. when it finds nothing on a side, or says unclear or does not link:
       `start_local_follow_mode`, then `get_follow_mode_ends`; ends that each match one
       structure are high, and also raise a medium link to high when time allows. When both

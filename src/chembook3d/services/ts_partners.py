@@ -3,9 +3,10 @@
 `structure_compare.compare` with a TS checks two minima Claude names; with a hundred minima
 Claude cannot guess the pair. `find` starts from the TS instead: its imaginary mode's active
 pairs (`structure_compare._active`) say which bonds form and break on each side, and every
-candidate structure (by default each minimum node and free species of the open investigation,
-and each sum of one of them with a free species, for a step where a species joins or leaves) is
-tested, whatever its atom order:
+candidate structure (by default each true minimum and free species of the open investigation,
+`left_out` dropping TSs, scan or constrained geometries and imaginary frequencies, and each sum
+of one of them with a free species, for a step where a species joins or leaves) is tested,
+whatever its atom order:
 
 - the same atoms as the TS (or, for a sum, as the TS's atoms together), and charge and
   multiplicity where both are known;
@@ -17,10 +18,11 @@ tested, whatever its atom order:
 - the side of the mode it lies on (`structure_compare._side`); one whose active distances
   change both ways is kept on the side most of the motion points to and marked `mixed`.
 
-Each side's candidates are ranked by the atom-matched RMSD to the TS (for a sum, over the
-larger species' atoms); energies are never read. The best pairs are then checked by A184's
-bond check (`structure_compare.compare` with the TS), and the first that links is given, else
-the best pair's verdict. Nothing is written.
+Each side's candidates are those holding a geometry at the TS's own geometry level (compared at
+that geometry), other levels only when a side has none there (`other_level`), each ranked by the
+atom-matched RMSD to the TS (for a sum, over the larger species' atoms); energies are never
+read. The best pairs are then checked by A184's bond check (`structure_compare.compare` with the
+TS), and the first that links is given, else the best pair's verdict. Nothing is written.
 """
 
 import time
@@ -33,8 +35,8 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from chembook3d.models import GroupNode, NodeKind, Role
-from chembook3d.services import atom_matching, geometry
+from chembook3d.models import Calculation, CalculationType, GroupNode, Node, NodeKind, Role
+from chembook3d.services import atom_matching, geometry, levels
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
 from chembook3d.services.geometry import Rows
@@ -47,40 +49,140 @@ MAX_TOP = 10
 @dataclass
 class Candidate:
     """A structure the TS may link, with how the answer names it (`label`, `ref` to pass to
-    compare_structures, `node_id`, `group` …)."""
+    compare_structures, `node_id`, `group`, `level` …) and the geometry levels it holds (ids;
+    None: not known, as for XYZ text or a node without calculations)."""
 
     structure: compare.Structure
     entry: dict[str, Any]
+    levels: frozenset[str] | None = None
+
+
+@dataclass
+class Level:
+    """The TS's geometry level (A186: candidates at it come first)."""
+
+    id: str
+    label: str
+
+
+def ts_level(session: Session | None, ref: dict[str, Any]) -> Level | None:
+    """The geometry level of a TS given as a node (its geometry's) or a calculation (its own
+    when it is a free optimization or frequency job, else its node's)."""
+    if session is None:
+        return None
+    found = None
+    if ref.get("node_id"):
+        node = session.get(Node, str(ref["node_id"]))
+        found = levels.node_geometry_level(node) if node is not None else None
+    elif ref.get("calculation_id"):
+        calc = session.get(Calculation, str(ref["calculation_id"]))
+        if calc is not None:
+            own = calc.level is not None and not calc.constraints
+            free = own and (
+                levels.is_geometry_source(calc) or calc.type == CalculationType.FREQUENCY
+            )
+            found = calc.level if free else levels.node_geometry_level(calc.node)
+    if found is None:
+        return None
+    return Level(found.id, levels.label(found) or "its level")
+
+
+def _latest_frequency(node: Node, tolerance: float) -> Calculation | None:
+    jobs = [
+        c
+        for c in node.calculations
+        if c.type == CalculationType.FREQUENCY
+        and c.result is not None
+        and c.result.frequencies
+        and geometry.matches(c.geometry, node.geometry, tolerance)
+    ]
+    return max(jobs, key=lambda c: c.created_at) if jobs else None
+
+
+def left_out(node: Node, tolerance: float) -> str | None:
+    """Why a node is no minimum to search by default (A186), or None: a TS; a scan path; a
+    geometry from a scan or constrained optimization (W-CONSTRAINED) that no free one ended on;
+    an imaginary frequency in its latest frequency job at its geometry; without a role, neither
+    a converged free optimization nor a frequency job at its geometry."""
+    if node.kind != NodeKind.SPECIES and node.role == Role.TRANSITION_STATE:
+        return "transition state"
+    if node.path_edge_id is not None:
+        return "scan path"
+    free = levels.geometry_sources(node)
+    held = [c for c in node.calculations if c.constraints and c.geometry]
+    if held and not any(geometry.matches(c.geometry, node.geometry, tolerance) for c in free):
+        return "scan or constrained geometry"
+    frequency = _latest_frequency(node, tolerance)
+    if frequency is not None and (frequency.result.imaginary_count or 0) > 0:
+        return "imaginary frequency"
+    if node.kind == NodeKind.SPECIES or node.role == Role.MINIMUM:
+        return None
+    converged = any(
+        c.result is not None and c.result.optimization_converged is True
+        for c in levels.optimizations(node)
+    )
+    if not converged and frequency is None:
+        return "not shown to be a minimum"
+    return None
+
+
+def node_candidate(
+    session: Session,
+    folder: Path,
+    node: Node,
+    tolerance: float,
+    level: Level | None,
+    groups: dict[str, str] | None = None,
+) -> Candidate:
+    """A node as a candidate: at the TS's geometry level when it holds a geometry there
+    (`levels.geometry_at_level`), else its own geometry."""
+    structure = compare.resolve(session, folder, {"node_id": node.id}, tolerance)
+    held = {c.level_id: c.level for c in levels.geometry_sources(node) if c.level is not None}
+    entry: dict[str, Any] = {
+        "label": structure.label,
+        "node_id": node.id,
+        "ref": {"node_id": node.id},
+    }
+    shown = levels.node_geometry_level(node, tolerance)
+    if level is not None and level.id in held:
+        rows = levels.geometry_at_level(node, level.id, tolerance)
+        if rows and rows is not node.geometry and len(rows) == len(structure.rows):
+            structure.rows = [[r[0], float(r[1]), float(r[2]), float(r[3])] for r in rows]
+            structure.modes = structure.mode_rows = None
+        shown = held[level.id]
+    if shown is not None:
+        entry["level"] = levels.label(shown)
+    if node.kind == NodeKind.SPECIES:
+        entry["kind"] = "species"
+    if groups and node.group_id in groups:
+        entry["group"] = groups[node.group_id]
+    return Candidate(structure, entry, frozenset(held) or None)
 
 
 def from_investigation(
-    session: Session, folder: Path, tolerance: float, exclude: str | None = None
-) -> tuple[list[Candidate], list[Candidate]]:
-    """Every node with coordinates that is not a TS (minima, and nodes without a role), and
-    every free species; and the free species alone, for sums."""
+    session: Session,
+    folder: Path,
+    tolerance: float,
+    exclude: str | None = None,
+    level: Level | None = None,
+) -> tuple[list[Candidate], list[Candidate], dict[str, int]]:
+    """The true minima (A186: every node with coordinates `left_out` keeps) and the free
+    species; the free species alone, for sums; and how many nodes were left out, by why."""
     groups = {g.id: g.label or "Untitled group" for g in session.scalars(select(GroupNode))}
     candidates, species = [], []
+    skipped: Counter = Counter()
     for node in node_service.list_nodes(session, with_calculations=True):
         if not node.geometry or node.id == exclude:
             continue
-        is_species = node.kind == NodeKind.SPECIES
-        if not is_species and node.role == Role.TRANSITION_STATE:
+        why = left_out(node, tolerance)
+        if why is not None:
+            skipped[why] += 1
             continue
-        structure = compare.resolve(session, folder, {"node_id": node.id}, tolerance)
-        entry: dict[str, Any] = {
-            "label": structure.label,
-            "node_id": node.id,
-            "ref": {"node_id": node.id},
-        }
-        if is_species:
-            entry["kind"] = "species"
-        if node.group_id in groups:
-            entry["group"] = groups[node.group_id]
-        candidate = Candidate(structure, entry)
+        candidate = node_candidate(session, folder, node, tolerance, level, groups)
         candidates.append(candidate)
-        if is_species:
+        if node.kind == NodeKind.SPECIES:
             species.append(candidate)
-    return candidates, species
+    return candidates, species, dict(skipped)
 
 
 def _sum(main: Candidate, extra: Candidate) -> Candidate:
@@ -96,7 +198,9 @@ def _sum(main: Candidate, extra: Candidate) -> Candidate:
             entry[key] = main.entry[key]
     if "node_id" in extra.entry:
         entry["species_node_id"] = extra.entry["node_id"]
-    return Candidate(structure, entry)
+    if "level" in main.entry:
+        entry["level"] = main.entry["level"]
+    return Candidate(structure, entry, main.levels)
 
 
 def _tried(
@@ -207,9 +311,13 @@ def find(
     species: list[Candidate],
     tolerance: float,
     top: int = TOP,
+    level: Level | None = None,
+    skipped: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """D263c, A184, A186: the structures on each side of the TS's imaginary mode, nearest
-    first, and A184's bond check of the best pair. See the module's docstring."""
+    """D263c, A184, A186: the structures on each side of the TS's imaginary mode, those at the
+    TS's geometry `level` first (others only when a side has none there, marked `other_level`),
+    nearest first, and A184's bond check of the best pair. `skipped`: the nodes left out of the
+    default candidates, by why. See the module's docstring."""
     started = time.perf_counter()
     mode = compare._active(ts)
     if mode is None:
@@ -259,23 +367,31 @@ def find(
             entry["imaginary"] = [round(f, 1) for f in structure.imaginary]
         if mixed:
             entry["mixed"] = True
-        key = (mixed, bool(structure.imaginary), rmsd if rmsd is not None else np.inf)
+        other = (
+            level is not None and candidate.levels is not None and level.id not in candidate.levels
+        )
+        if other:
+            entry["other_level"] = True
+        key = (other, mixed, bool(structure.imaginary), rmsd if rmsd is not None else np.inf)
         found[side].append((key, candidate, entry))
-    for side in found:
-        found[side].sort(key=lambda f: f[0])
-
     predicted = _predicted(rows, mode)
     sides = []
     for side in ("−", "+"):
-        listed = found[side]
-        sides.append(
-            {
-                "side": side,
-                "bonds": predicted[side],
-                "found": len(listed),
-                "candidates": [entry for _, _, entry in listed[:top]],
-            }
-        )
+        found[side].sort(key=lambda f: f[0])
+        same = [f for f in found[side] if not f[0][0]]
+        listed = same or found[side]  # other levels only when none is at the TS's (A186)
+        shown: dict[str, Any] = {
+            "side": side,
+            "bonds": predicted[side],
+            "found": len(listed),
+            "candidates": [entry for _, _, entry in listed[:top]],
+        }
+        if same and len(same) < len(found[side]):
+            shown["at_other_levels"] = len(found[side]) - len(same)
+        if listed and not same:
+            shown["other_level"] = True
+        found[side] = listed
+        sides.append(shown)
 
     check, tries = _check(ts, found, tolerance)
     seconds = round(time.perf_counter() - started, 2)
@@ -297,11 +413,15 @@ def find(
         },
         "seconds": seconds,
     }
+    if level is not None:
+        out["level"] = level.label
+    if skipped:
+        out["searched"]["left_out"] = skipped
     if len(ts.imaginary) > 1:
         out["notes"] = [
             f"“{ts.label}” has {len(ts.imaginary)} imaginary frequencies; the lowest is used."
         ]
-    out["summary"], out["next"] = _words(ts, sides, check)
+    out["summary"], out["next"] = _words(ts, sides, check, level)
     return out
 
 
@@ -313,9 +433,9 @@ def _check(
     """A184's bond check of the best pairs, the nearest first: the first that links, else the
     best pair's verdict."""
     minus, plus = found["−"][:PAIR_TRIES], found["+"][:PAIR_TRIES]
-    pairs = sorted(
+    pairs = sorted(  # at the TS's level first, then nearest
         ((i, j) for i in range(len(minus)) for j in range(len(plus))),
-        key=lambda p: (p[0] + p[1], p[0]),
+        key=lambda p: (minus[p[0]][0][0] + plus[p[1]][0][0], p[0] + p[1], p[0]),
     )
     first = None
     for count, (i, j) in enumerate(pairs, start=1):
@@ -337,11 +457,28 @@ def _check(
 
 
 def _named(entry: dict[str, Any]) -> dict[str, Any]:
-    keys = ("label", "node_id", "species_node_id", "ref", "rmsd")
+    keys = ("label", "node_id", "species_node_id", "ref", "rmsd", "level", "other_level")
     return {k: entry[k] for k in keys if k in entry}
 
 
 def _words(
+    ts: compare.Structure,
+    sides: list[dict[str, Any]],
+    check: dict[str, Any] | None,
+    level: Level | None = None,
+) -> tuple[str, str]:
+    summary, next_ = _said(ts, sides, check)
+    fallen = [s["side"] for s in sides if s.get("other_level")]
+    if fallen and level is not None:
+        summary += (
+            f" The {' and '.join(fallen)} side has no candidate at the TS's geometry level "
+            f"({level.label}): those listed are at other levels (`other_level`), so a link "
+            "through them is weaker."
+        )
+    return summary, next_
+
+
+def _said(
     ts: compare.Structure, sides: list[dict[str, Any]], check: dict[str, Any] | None
 ) -> tuple[str, str]:
     follow = "follow the mode (start_local_follow_mode, then get_follow_mode_ends)"
