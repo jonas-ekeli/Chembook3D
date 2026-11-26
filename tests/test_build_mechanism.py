@@ -77,6 +77,7 @@ def test_the_panel_gets_the_build_mechanism_command(tmp_path, monkeypatch):
         "true minima at the TS's geometry level first",
         "`other_level` is a weaker link",
         "raise a medium link to high",
+        "propose what they settle (step 6) before you start any mode-follow",
         "both ends land on one structure, say so in the evidence and keep the bond check's",
         "Start several mode-follows, then collect their ends",
         "do not stop while a TS is unsettled and a tool remains to try",

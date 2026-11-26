@@ -451,6 +451,7 @@ def prepare(
     settings: dict = {"permissions": {"allow": allow, "deny": list(DENIED_TOOLS)}}
     if alone is not None:
         settings["hooks"] = stop_hook(app_url)
+        settings["env"] = {STOP_HOOK_CAP_NAME: str(STOP_HOOK_CAP)}
     guide = NOTEBOOK_GUIDE.format(name=name.replace("\n", " "))
     if playground is not None:
         guide += PLAYGROUND_GUIDE.format(
@@ -516,8 +517,18 @@ def command(executable: str, resume: bool) -> list[str]:
     return argv
 
 
+# D231: Claude Code ends a turn anyway after a Stop hook has blocked it 9 times in a row. While
+# Claude works on its own, the app wakes it each time one of its jobs ends, so a run with many
+# local jobs (a mechanism built from a folder starts dozens of mode-follows) was cut off after
+# the ninth. The app's own check (`api/claude.py` `stop_check`) never loops: it blocks only
+# while a job of Claude's runs, or once after Claude did more work.
+STOP_HOOK_CAP_NAME = "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP"
+STOP_HOOK_CAP = 1000
+
+
 def environment() -> dict[str, str]:
     env = dict(os.environ)
+    env.setdefault(STOP_HOOK_CAP_NAME, str(STOP_HOOK_CAP))
     env["TERM"] = "xterm-256color"
     env["COLORTERM"] = "truecolor"
     # Started from inside another Claude Code session, the CLI would think it is nested.

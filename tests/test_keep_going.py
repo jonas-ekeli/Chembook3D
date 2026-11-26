@@ -100,6 +100,9 @@ def test_the_panel_writes_the_hook_only_while_claude_works_alone(tmp_path):
     assert hook["args"] == ["-m", "chembook3d.cli", "claude-stop", "--url", "http://127.0.0.1:8765"]
     assert hook["timeout"] > keep_going.WAIT + 60
     assert "45 minutes" in guide
+    # Claude Code's own cap of 9 blocked stops in a row would end a run with many jobs.
+    assert settings["env"] == {"CLAUDE_CODE_STOP_HOOK_BLOCK_CAP": "1000"}
+    assert claude_panel.environment()["CLAUDE_CODE_STOP_HOOK_BLOCK_CAP"] == "1000"
 
 
 @pytest.mark.usefixtures("stub_tools")

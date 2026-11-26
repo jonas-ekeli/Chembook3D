@@ -30,7 +30,10 @@ makes one. Never make, merge or discard a playground yourself.
    yourself with `merge_nodes` (here it goes without asking only for your own, D264c).
    Each distinct conformer is its own node; conformers of one intermediate go in one group;
    the same conformer at several levels is one node.
-4. **Link each TS**, cheapest evidence first, stopping at the first that settles it:
+4. **Link each TS**, cheapest evidence first, stopping at the first that settles it. Run a
+   and b on every TS first (seconds each) and propose what they settle (step 6) before you
+   start any mode-follow; mode-follows take minutes each on this computer, so start them only
+   for the TSs a and b leave unsettled:
    a. an IRC in the folder: `compare_structures` with its `irc_end` against the nodes;
    b. else `find_ts_partners` on the TS; never guess the two minima for
       `compare_structures` with `ts`. Its `check` "links" with one candidate per side (or the
@@ -39,9 +42,9 @@ makes one. Never make, merge or discard a playground yourself.
       link: say so in the evidence;
    c. when it finds nothing on a side, or says unclear or does not link:
       `start_local_follow_mode`, then `get_follow_mode_ends`; ends that each match one
-      structure are high, and also raise a medium link to high when time allows. When both
-      ends land on one structure, say so in the evidence and keep the bond check's result,
-      if any. Use `make_node_from_end` only for an end that matches nothing.
+      structure are high (raise a medium link to high this way only once nothing else
+      waits). When both ends land on one structure, say so in the evidence and keep the bond
+      check's result, if any. Use `make_node_from_end` only for an end that matches nothing.
    Start several mode-follows, then collect their ends. Work through every TS before
    summarising: do not stop while a TS is unsettled and a tool remains to try. A TS still
    unsettled is flagged, never guessed.
