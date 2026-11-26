@@ -268,7 +268,19 @@ export function ClaudePanel({
     current.term.focus()
   }, [open])
 
+  // D263a: the build this panel took, and how it tells the app the build is done with: once
+  // its line is typed, or its Claude Code ended first. A panel that goes away before then (the
+  // app remounts it for the playground) leaves the build for the panel that replaces it.
+  const takenBuild = useRef<BuildRun | null>(null)
+  const buildTaken = useRef(onBuildTaken)
+  useEffect(() => {
+    buildTaken.current = onBuildTaken
+  }, [onBuildTaken])
+
   const start = async (resume: boolean, typed?: string) => {
+    const handedOver = () => {
+      if (typed !== undefined) buildTaken.current?.()
+    }
     setPhase({ kind: 'starting' })
     const previous = session.current
     session.current = null
@@ -299,6 +311,7 @@ export function ClaudePanel({
           if (pending === null || session.current !== current) return
           send({ type: 'input', data: pending })
           pending = null
+          handedOver()
           window.setTimeout(() => send({ type: 'input', data: '\r' }), ENTER_AFTER)
         }, TYPE_AFTER_QUIET)
       }
@@ -316,11 +329,13 @@ export function ClaudePanel({
         } else {
           window.clearTimeout(quiet)
           current.ended = true
+          handedOver()
           if (session.current === current) setPhase({ kind: 'ended', message: 'Claude Code has ended.' })
         }
       }
       socket.onclose = (event) => {
         if (current.ended || session.current !== current) return
+        handedOver()
         setPhase({
           kind: 'ended',
           message:
@@ -343,6 +358,7 @@ export function ClaudePanel({
         return true
       })
     } catch (err) {
+      handedOver()
       setPhase({ kind: 'ended', message: errorText(err) })
       setStatus(null)
     }
@@ -380,15 +396,9 @@ export function ClaudePanel({
   // D263a: a build starts once: Work on its own at the build's limit (the person accepted its
   // warning in the start dialog, or had it on already), then a new conversation with the
   // build's line typed in.
-  const takenBuild = useRef<BuildRun | null>(null)
-  const buildTaken = useRef(onBuildTaken)
-  useEffect(() => {
-    buildTaken.current = onBuildTaken
-  }, [onBuildTaken])
   useEffect(() => {
     if (!build || !usable || autonomy === null || takenBuild.current === build) return
     takenBuild.current = build
-    buildTaken.current?.()
     const run = async () => {
       if (!autonomy.on || autonomy.job_limit !== build.jobLimit) {
         const current = session.current
@@ -403,6 +413,7 @@ export function ClaudePanel({
           )
         } catch (err) {
           if (current) current.ended = false
+          buildTaken.current?.()
           setPhase({ kind: 'ended', message: errorText(err) })
           return
         }
