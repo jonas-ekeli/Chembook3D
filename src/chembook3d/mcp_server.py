@@ -121,8 +121,10 @@ Rules:
   (steps, levels, energies, imaginary frequencies, which files end on the same geometry or
   restart another, what is imported already); compare_structures says what bonds change
   between two structures (whatever their atom order; a side may be a sum of species) and,
-  with a TS, whether it links two minima along its imaginary mode; group_structures sorts
-  many into isomers, conformers and duplicates. They change nothing; import with
+  with a TS, whether it links two minima along its imaginary mode; find_ts_partners starts
+  from a TS and finds the minima on each side of its mode among the nodes, with that check
+  of the best pair; group_structures sorts many into isomers, conformers and duplicates.
+  They change nothing; import with
   import_folder after showing the user the plan. A TS that no IRC and no bond check along
   its mode settles (D263c): start_local_follow_mode relaxes both ends of its mode briefly,
   get_follow_mode_ends matches them against the nodes (A184) and gives the verdict, and

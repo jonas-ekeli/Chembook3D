@@ -1223,6 +1223,35 @@ TOOLS: list[ToolSpec] = [
         },
     ),
     T(
+        "find_ts_partners",
+        "read",
+        "POST",
+        "/api/structures/ts-partners",
+        "Find the minima a transition state links, starting from the TS (D263c, A184, A186): "
+        "use it for every TS without an IRC instead of guessing the two minima for "
+        "compare_structures. From the TS's imaginary mode (a node's frequency job at its "
+        "geometry counts) it predicts the bonds that form and break on each side (`bonds`), "
+        "then tests every candidate (by default each true minimum and free species of the "
+        "open investigation, leaving out TSs, scan or constrained geometries and imaginary "
+        "frequencies (`left_out`), and each sum of one of them with a free species, for a "
+        "species that joins or leaves), whatever its atom order: the TS's atoms, its bonds "
+        "but for the mode's active pairs (A181), and the side of the mode it lies on. Per side "
+        "those holding a geometry at the TS's geometry level, compared at it (other levels "
+        "only when a side has none there, marked `other_level`), nearest the TS first "
+        "(atom-matched RMSD; for a sum over the larger species; energies are never read), "
+        "with level, group and `ref` to pass on; then `check`: "
+        "A184's bond check of the best pairs as compare_structures with ts gives it (links, "
+        "unclear or does not link, with reasons), and `next`. Changes nothing.",
+        help={
+            "ts": "The transition state, " + STRUCTURE_HELP,
+            "candidates": "The structures to search instead of the investigation's minima and "
+            "free species, each " + STRUCTURE_HELP + " A list of them is a sum of species.",
+            "species": "Free species a candidate may be summed with (default: the "
+            "investigation's free species; [] for none), each " + STRUCTURE_HELP,
+            "top": "How many candidates to list per side (default 3, at most 10).",
+        },
+    ),
+    T(
         "group_structures",
         "read",
         "POST",

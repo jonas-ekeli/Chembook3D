@@ -6,6 +6,16 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Claude finds the minima a transition state links starting from the TS (FR-MCP-25, A186):
+  `find_ts_partners` predicts from the TS's imaginary mode the bonds that form and break on each
+  side, searches the investigation's true minima and free species (and a minimum plus a free species,
+  for a species that joins or leaves; never TSs, scan or constrained geometries or structures with an
+  imaginary frequency) whatever their atom order, lists those at the TS's geometry level nearest
+  first (other levels only when a side has none, marked) and runs the bond check along the mode on
+  the best pair. The `/build-mechanism` playbook uses
+  it for every TS without an IRC instead of guessing partners, starts mode-follows in batches and
+  works through every TS, attaches files that duplicate a node's geometry, and goes on when Tidy
+  finds no page open.
 - Claude fills gaps in a mechanism it builds from a folder with MACE-OMOL-0 guesses (D265, FR-PANEL-10,
   FR-MCP-24): `find_gaps` lists the holes (a TS with no edge on a side, two minima one step apart with no
   TS, minima more than one step apart, an edge whose atoms do not balance, a cycle that does not give back

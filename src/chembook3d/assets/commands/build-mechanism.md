@@ -23,18 +23,28 @@ makes one. Never make, merge or discard a playground yourself.
    convergence, `geometry` and `starts_from`). Note the levels of theory and the reaction class.
 2. **Import** with `import_folder`, then `preview_folder_import` and `commit_folder_import`,
    so single points and restarts land on the node of their geometry. Look at the plan's rows
-   that need a choice before committing.
+   that need a choice before committing. A file the plan flags as a duplicate of a node's
+   geometry (W-DUP, within the duplicate tolerance) gets `duplicate_action` "attach", not a
+   new node, unless it is another conformer or another molecule.
 3. **Group** with `group_structures` (`all_nodes`). Merge true duplicates that you made
    yourself with `merge_nodes` (here it goes without asking only for your own, D264c).
    Each distinct conformer is its own node; conformers of one intermediate go in one group;
    the same conformer at several levels is one node.
 4. **Link each TS**, cheapest evidence first, stopping at the first that settles it:
    a. an IRC in the folder: `compare_structures` with its `irc_end` against the nodes;
-   b. the bond check along the mode: `compare_structures` with `ts` and the two minima
-      (A184: one to three bonds change, each along the mode, on opposite sides);
-   c. what is left: `start_local_follow_mode`, then `get_follow_mode_ends`; use
-      `make_node_from_end` only for an end that matches nothing.
-   A TS still unsettled is flagged, never guessed.
+   b. else `find_ts_partners` on the TS; never guess the two minima for
+      `compare_structures` with `ts`. Its `check` "links" with one candidate per side (or the
+      nearest of one molecule's conformers) is medium (A184 bond check). It searches true
+      minima at the TS's geometry level first; a candidate marked `other_level` is a weaker
+      link: say so in the evidence;
+   c. when it finds nothing on a side, or says unclear or does not link:
+      `start_local_follow_mode`, then `get_follow_mode_ends`; ends that each match one
+      structure are high, and also raise a medium link to high when time allows. When both
+      ends land on one structure, say so in the evidence and keep the bond check's result,
+      if any. Use `make_node_from_end` only for an end that matches nothing.
+   Start several mode-follows, then collect their ends. Work through every TS before
+   summarising: do not stop while a TS is unsettled and a tool remains to try. A TS still
+   unsettled is flagged, never guessed.
 5. **Link minima to minima** only for steps that have no TS on purpose (an association, the
    loss of a free species, a conformer exchange), and say so in the evidence.
 6. **Propose** the edges with `propose_mechanism`, each with:
@@ -47,7 +57,8 @@ makes one. Never make, merge or discard a playground yourself.
    One branch, unless file or folder names say there are several; flag each new branch.
    Lineage never comes from energies (D169, P5).
 7. **Fill gaps** (see Filling gaps), unless `--no-gaps`.
-8. **Tidy** the canvas with `tidy_canvas`.
+8. **Tidy** the canvas with `tidy_canvas`. When it answers that no page is open, say so in
+   the summary and go on.
 9. **Summarise** in a note pinned to the first node of the mechanism (`create_note`): what
    you built, what is unsure, and a review list of every flag below, the low and medium
    edges, each gap with what you built for it, the gaps left flagged, and the references
