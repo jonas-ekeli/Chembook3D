@@ -4,6 +4,7 @@ import { api, type ClaudeAutonomy, type ClaudeStatus, type LaunchQuestion as Que
 import { browserKey, openXterm, socketUrl, type Xterm } from '../terminal'
 import { LaunchQuestion } from './LaunchQuestion'
 import { Modal } from './Modal'
+import { MoreMenu } from './MoreMenu'
 import { errorText, limitText } from '../util'
 
 // D92: the Claude tab of the side panel (SidePanel.tsx), a terminal running the official
@@ -23,13 +24,16 @@ type Session = Xterm & {
   ended: boolean
 }
 
-/** D223: the warning shown before Claude may work on its own, with what it may start. */
-function AutonomyDialog({
+/** D223: the warning shown before Claude may work on its own, with what it may start. With
+ * `build` (D263a), for "Build mechanism from folder…": the job limit is the start dialog's, and
+ * Claude works in a playground only, so an investigation offers no "Turn on here". */
+export function AutonomyDialog({
   autonomy,
   playground,
   onCancel,
   onTurnOn,
   onPlaygroundFirst,
+  build,
 }: {
   autonomy: ClaudeAutonomy
   /** D235i: the open investigation is a playground. */
@@ -38,12 +42,16 @@ function AutonomyDialog({
   onTurnOn: (jobLimit: number, cloud: boolean) => void
   /** D235i: make a playground of this investigation and turn it on there instead. */
   onPlaygroundFirst?: (jobLimit: number, cloud: boolean) => Promise<void>
+  /** D263a: the build's own job limit, chosen in its start dialog. */
+  build?: { jobLimit: number }
 }) {
-  const [limit, setLimit] = useState(autonomy.job_limit)
+  const [limit, setLimit] = useState(build?.jobLimit ?? autonomy.job_limit)
   const [cloud, setCloud] = useState(false)
   const [making, setMaking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const first = !playground ? onPlaygroundFirst : undefined
+  // What Claude will change: a playground, also when one is made first for a build.
+  const copy = playground || (build !== undefined && first !== undefined)
   const makeFirst = () => {
     if (!first || making) return
     setMaking(true)
@@ -70,23 +78,25 @@ function AutonomyDialog({
               title="A working copy of this investigation, opened with this switch on; this one is not changed"
               onClick={makeFirst}
             >
-              {making ? 'Making…' : 'Make a playground first'}
+              {making ? 'Making…' : build ? 'Make a playground and start' : 'Make a playground first'}
             </button>
           )}
-          <button className="danger" disabled={making} onClick={() => onTurnOn(limit, cloud)}>
-            {first ? 'Turn on here' : 'Turn on'}
-          </button>
+          {!(build && first) && (
+            <button className="danger" disabled={making} onClick={() => onTurnOn(limit, cloud)}>
+              {build ? 'Turn on and start' : first ? 'Turn on here' : 'Turn on'}
+            </button>
+          )}
         </>
       }
     >
       <p>
-        While this is on, Claude changes this {playground ? 'playground' : 'investigation'} without asking you first. It creates and changes nodes,
+        While this is on, Claude changes this {copy ? 'playground' : 'investigation'} without asking you first. It creates and changes nodes,
         edges, steps, branches, groups and analyses, imports files, and starts calculations on this computer. It also
         makes choices the app otherwise leaves to you, such as which pathway to follow or which conformer represents a
         group, and notes each one as “Claude chose”. It also opens web pages without asking, and a page can mislead
         it.
       </p>
-      {playground ? (
+      {copy ? (
         <p>
           <strong>Claude can be wrong.</strong> Check its work before you rely on it: every change is marked “claude” in
           the history. Its original is not changed, so no backup is made; discard the playground if you do not want
@@ -98,7 +108,13 @@ function AutonomyDialog({
           the history, and a copy of the investigation is saved now, in its backups folder.
         </p>
       )}
-      {first && (
+      {build && first && (
+        <p>
+          <strong>Claude builds in a playground:</strong> a working copy of this investigation, made now and opened
+          with this switch on, while this one stays as it is.
+        </p>
+      )}
+      {first && !build && (
         <p>
           <strong>Or make a playground first:</strong> a working copy of this investigation, opened with this switch
           on, for Claude to work in while this one stays as it is. Start Claude there once it opens.
@@ -108,16 +124,20 @@ function AutonomyDialog({
         Still asked or switched off: deleting anything Claude did not make itself, everything on a server beyond new
         files where you allowed them, and shell and file tools. It turns off when the app restarts.
       </p>
-      <label>
-        Longest local job Claude may start{' '}
-        <select value={limit} onChange={(event) => setLimit(Number(event.target.value))}>
-          {autonomy.job_limits.map((seconds) => (
-            <option key={seconds} value={seconds}>
-              {limitText(seconds)}
-            </option>
-          ))}
-        </select>
-      </label>
+      {build ? (
+        <p>Longest local job Claude may start: {limitText(limit)}.</p>
+      ) : (
+        <label>
+          Longest local job Claude may start{' '}
+          <select value={limit} onChange={(event) => setLimit(Number(event.target.value))}>
+            {autonomy.job_limits.map((seconds) => (
+              <option key={seconds} value={seconds}>
+                {limitText(seconds)}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="check">
         <input type="checkbox" checked={cloud} onChange={(event) => setCloud(event.target.checked)} /> Also start
         cloud sessions (uses your Claude usage)
@@ -129,12 +149,24 @@ function AutonomyDialog({
 
 /** How often the panel looks for a cloud job's launch that waits for an answer (ms). */
 const QUESTION_POLL = 2500
+/** D263a: a request is typed once Claude Code's screen has been still this long (ms), so it
+ * lands in its prompt rather than in its start-up; Enter follows a moment later, so the line is
+ * not taken for a paste. */
+const TYPE_AFTER_QUIET = 800
+const ENTER_AFTER = 150
+
+/** D263a: what "Build mechanism from folder…" hands the panel: the line to type and how Claude
+ * is to work on its own for it. */
+export type BuildRun = { text: string; jobLimit: number; cloud: boolean }
 
 export function ClaudePanel({
   open,
   onAttention,
   playground = false,
   onPlaygroundFirst,
+  build = null,
+  onBuildTaken,
+  onBuildMechanism,
 }: {
   /** The panel is shown on this tab. */
   open: boolean
@@ -144,6 +176,13 @@ export function ClaudePanel({
   playground?: boolean
   /** D235i: "Make a playground first" on the Work on its own warning. */
   onPlaygroundFirst?: (jobLimit: number, cloud: boolean) => Promise<void>
+  /** D263a: a build to start here: Work on its own at its limit, then a new conversation with
+   * its line typed in, where the person sees it and can stop it. */
+  build?: BuildRun | null
+  /** The build was taken, so it starts once. */
+  onBuildTaken?: () => void
+  /** D263a: "Build mechanism from folder…" in the panel's menu. */
+  onBuildMechanism?: () => void
 }) {
   const [status, setStatus] = useState<ClaudeStatus | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
@@ -229,7 +268,19 @@ export function ClaudePanel({
     current.term.focus()
   }, [open])
 
-  const start = async (resume: boolean) => {
+  // D263a: the build this panel took, and how it tells the app the build is done with: once
+  // its line is typed, or its Claude Code ended first. A panel that goes away before then (the
+  // app remounts it for the playground) leaves the build for the panel that replaces it.
+  const takenBuild = useRef<BuildRun | null>(null)
+  const buildTaken = useRef(onBuildTaken)
+  useEffect(() => {
+    buildTaken.current = onBuildTaken
+  }, [onBuildTaken])
+
+  const start = async (resume: boolean, typed?: string) => {
+    const handedOver = () => {
+      if (typed !== undefined) buildTaken.current?.()
+    }
     setPhase({ kind: 'starting' })
     const previous = session.current
     session.current = null
@@ -251,6 +302,19 @@ export function ClaudePanel({
       const send = (message: object) => {
         if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message))
       }
+      // D263a: the line to type once Claude Code is ready for it.
+      let pending = typed ?? null
+      let quiet: number | undefined
+      const typeWhenQuiet = () => {
+        window.clearTimeout(quiet)
+        quiet = window.setTimeout(() => {
+          if (pending === null || session.current !== current) return
+          send({ type: 'input', data: pending })
+          pending = null
+          handedOver()
+          window.setTimeout(() => send({ type: 'input', data: '\r' }), ENTER_AFTER)
+        }, TYPE_AFTER_QUIET)
+      }
       socket.onopen = () => {
         setPhase({ kind: 'running' })
         term.focus()
@@ -259,14 +323,19 @@ export function ClaudePanel({
         const message = JSON.parse(String(event.data)) as
           | { type: 'output'; data: string }
           | { type: 'exit'; code: number | null }
-        if (message.type === 'output') term.write(message.data)
-        else {
+        if (message.type === 'output') {
+          term.write(message.data)
+          if (pending !== null) typeWhenQuiet()
+        } else {
+          window.clearTimeout(quiet)
           current.ended = true
+          handedOver()
           if (session.current === current) setPhase({ kind: 'ended', message: 'Claude Code has ended.' })
         }
       }
       socket.onclose = (event) => {
         if (current.ended || session.current !== current) return
+        handedOver()
         setPhase({
           kind: 'ended',
           message:
@@ -289,6 +358,7 @@ export function ClaudePanel({
         return true
       })
     } catch (err) {
+      handedOver()
       setPhase({ kind: 'ended', message: errorText(err) })
       setStatus(null)
     }
@@ -323,6 +393,38 @@ export function ClaudePanel({
     else setPhase({ kind: 'ended', message: 'Claude was stopped. It asks before each change again.' })
   }
 
+  // D263a: a build starts once: Work on its own at the build's limit (the person accepted its
+  // warning in the start dialog, or had it on already), then a new conversation with the
+  // build's line typed in.
+  useEffect(() => {
+    if (!build || !usable || autonomy === null || takenBuild.current === build) return
+    takenBuild.current = build
+    const run = async () => {
+      if (!autonomy.on || autonomy.job_limit !== build.jobLimit) {
+        const current = session.current
+        if (current) current.ended = true
+        try {
+          setAutonomy(
+            await api.setClaudeAutonomy({
+              on: true,
+              job_limit: build.jobLimit,
+              cloud: autonomy.on ? autonomy.cloud : build.cloud,
+            }),
+          )
+        } catch (err) {
+          if (current) current.ended = false
+          buildTaken.current?.()
+          setPhase({ kind: 'ended', message: errorText(err) })
+          return
+        }
+      }
+      await start(false, build.text)
+    }
+    void run()
+    // `start` is this render's; it reads only refs and setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [build, usable, autonomy])
+
   // A picture on the clipboard pastes no text; Claude Code reads it from the clipboard
   // itself when it gets Ctrl+V.
   const onPaste = (event: React.ClipboardEvent) => {
@@ -353,6 +455,19 @@ export function ClaudePanel({
           {phase.kind === 'running' ? 'Claude Code is running' : phase.kind === 'starting' ? 'Starting…' : ''}
         </span>
         <span className="spacer" />
+        {usable && onBuildMechanism && (
+          <MoreMenu
+            label="More for Claude"
+            items={[
+              {
+                label: 'Build mechanism from folder…',
+                icon: 'folder',
+                title: 'Claude builds the mechanism from a folder of outputs, in a playground, working on its own (D263)',
+                onSelect: onBuildMechanism,
+              },
+            ]}
+          />
+        )}
         {usable && autonomy && (
           <label
             className="check"

@@ -2,7 +2,16 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { ApiError } from '../src/api.ts'
-import { closesCycle, errorText, fileName, nameFilter, ranges, scientific, withDisplacements } from '../src/util.ts'
+import {
+  buildMechanismCommand,
+  closesCycle,
+  errorText,
+  fileName,
+  nameFilter,
+  ranges,
+  scientific,
+  withDisplacements,
+} from '../src/util.ts'
 
 // The examples the backend's `api/downloads.py` is tested on too (tests/test_downloads.py).
 const shared = JSON.parse(readFileSync(new URL('../../tests/fixtures/file-names.json', import.meta.url), 'utf8'))
@@ -82,4 +91,15 @@ test('errorText shows the blockers only when asked and when the backend sent som
   assert.equal(errorText(error, { blockers: true }), 'used by TS1; used by int2')
   assert.equal(errorText(new ApiError(400, 'Bad'), { blockers: true }), 'Bad')
   assert.equal(errorText('plain'), 'plain')
+})
+
+test('Build mechanism from folder types the playbook command with the folder (D263a, D263h)', () => {
+  assert.equal(buildMechanismCommand('/home/me/ru-caac', true), '/build-mechanism /home/me/ru-caac')
+  assert.equal(
+    buildMechanismCommand('C:\\Users\\Me\\Ru CAAC\\outputs', false),
+    '/build-mechanism "C:\\Users\\Me\\Ru CAAC\\outputs" --no-literature',
+  )
+  // A line break or escape in a typed path is never a key pressed in the terminal.
+  assert.equal(buildMechanismCommand(' /data/a\nb\x1b[A ', true), '/build-mechanism "/data/a b [A"')
+  assert.equal(buildMechanismCommand('/data/"odd" name', true), '/build-mechanism "/data/odd name"')
 })

@@ -6,6 +6,14 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- "Build mechanism from folder…" (D263a, FR-PANEL-09), in the Claude panel's menu, the command palette and
+  on the start page (for a new investigation): it asks for the folder of outputs, the longest local job
+  (4 hours) and whether to use the literature, shows the Work on its own warning, makes a playground,
+  turns the switch on there and starts Claude with `/build-mechanism <folder>` typed in, where it can be
+  followed and stopped. The command is the playbook (D263g, h): survey, import, group, link each TS
+  cheapest evidence first, propose the edges with their confidence and evidence, tidy and a summary note
+  with a review list; it keeps the energy rules, flags what it must not decide, and uses the literature
+  only where D263h says (none with `--no-literature`).
 - The notebook agent can check a Saga Gaussian job by its Slurm ID, distinguish cancellation
   from normal exit, and report convergence and frequencies from accessible output (D266).
 - Edges Claude proposes carry a confidence and evidence until you accept them (D264): in a playground

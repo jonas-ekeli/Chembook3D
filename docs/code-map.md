@@ -145,6 +145,13 @@ Where each feature lives: files, records, routes, MCP tools and the decisions be
 - Frontend: `api.ts` `Confidence`, `acceptProposal`, `acceptHighProposals`, `rejectProposal`, `fixProposal`; `Canvas.tsx` `TransitionData.proposal`, the badge button (`ProposalClick` selects the edge) and the "To review" filter (`Filters.review`, not saved with the view; `canvasView.ts` `hiddenCount`, `openProposals`); `FilterMenu.tsx`'s Review box, the canvas bar's "To review (N)" toggle and the palette command in `App.tsx`; `PathwayInspectors.tsx` `ProposalSection` (evidence, Accept, Fix…, Reject, Accept all high). Tokens `--proposal-{high,medium,low}-{text,bg,border}`.
 - Tests: `tests/test_proposals.py` (T-PANEL-11 to T-PANEL-15), `e2e/playgrounds.spec.ts` (T-UI-118).
 
+### Playbook and start action (D263 a, f, g, h)
+
+- The playbook is a Claude Code project command: `src/chembook3d/assets/commands/build-mechanism.md` (frontmatter `description`, `argument-hint`; `$ARGUMENTS` is the folder and `--no-literature`), copied by `claude_panel.write_commands` (`COMMANDS`, `COMMANDS_DIR`) into the panel's working folder at `.claude/commands/` on every start, so `/build-mechanism` loads it only for this task. It names the tools of PR 1–3 (`survey_folder`, `import_folder`, `group_structures`, `merge_nodes`, `compare_structures`, `start_local_follow_mode`, `get_follow_mode_ends`, `make_node_from_end`, `propose_mechanism`, `tidy_canvas`, `create_note`). `NOTEBOOK_GUIDE` has a three-line pointer to it.
+- The start action (FR-PANEL-09): `components/BuildMechanism.tsx` `BuildMechanismDialog` (the folder through `FolderPicker` in its `folder` mode, the job limit `BUILD_JOB_LIMIT` of 4 h from `autonomy.JOB_LIMITS`, the literature tick box; Start… shows `ClaudePanel.tsx`'s `AutonomyDialog` with `build`, which offers only "Make a playground and start" in an investigation and "Turn on and start" in a playground, and is skipped when the switch is on there already). `util.ts` `buildMechanismCommand` builds the line (the folder quoted when it has spaces, control characters taken out).
+- `App.tsx`: `building` (the dialog), opened from the Claude panel's menu (`ClaudePanel` `onBuildMechanism`, "More for Claude"), the palette and the start page's card (`StartPage.tsx` `onBuild`: New investigation first, `buildAfterCreate`); `startBuild` makes the playground through `makePlayground(..., alone, then)` (the backend turns Work on its own on there, `api/playgrounds.py`) and sets `buildRun` for the playground's folder. `ClaudePanel`'s `build` prop then turns the switch on at the build's limit if it is not already (`PUT /api/claude/autonomy`), starts a new conversation and types the line once the terminal has been quiet for `TYPE_AFTER_QUIET`, Enter `ENTER_AFTER` later, over the terminal WebSocket.
+- Tests: `tests/test_build_mechanism.py` (T-PANEL-16, T-PANEL-17), `frontend/tests/util.test.mjs`, `e2e/build-mechanism.spec.ts` (T-UI-119).
+
 ## Undoing an import (D102, A49)
 
 - `services/import_undo.py` reads back from the history what one imported file wrote. `imports.commit` writes it in a fixed order: the node created or the target's changed fields, a derived node, then each calculation with its incomplete tag, an ensemble's group last.
@@ -796,7 +803,8 @@ Routes for all of these are in `api/pathway.py`.
 - `claude_panel.py` writes the per-investigation working folder in the config folder:
   - `chembook3d-mcp.json` with only the chembook3d MCP server of D91 when the app has it;
   - `chembook3d-settings.json` pre-approving `mcp_tools.PANEL_ALLOWED` (its tools of kind "read", and `write_server_file`, whose go-ahead is a switch in the app, D126) and `WebSearch` (D230; `WebFetch` is left to ask per site, and is pre-approved only while Claude works on its own), and denying shell and editing tools;
-  - a CLAUDE.md with the notebook's rules.
+  - a CLAUDE.md with the notebook's rules;
+  - `.claude/commands/`, Claude Code's project slash commands, from `assets/commands/` (`write_commands`; `/build-mechanism`, D263g).
 - It runs only `claude` in a pseudo-terminal (`pty` on Linux, pywinpty on Windows).
   - On Linux the terminal is made the controlling terminal by a few lines of Python run as the program (`_TAKE_TERMINAL`, which then `execv`s it), never by a `preexec_fn`: Python run between fork and exec can deadlock in the threaded server, and JAX warns on every such fork (`tests/test_claude_panel.py`).
 - `api/claude.py` hands out one-time tokens and serves the terminal WebSocket, refusing anything not local (bind address, client, Host, Origin).

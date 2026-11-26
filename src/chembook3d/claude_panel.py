@@ -42,6 +42,10 @@ WEB_SEARCH = "WebSearch"
 WEB_FETCH = "WebFetch"
 SETTINGS_NAME = "chembook3d-settings.json"
 MCP_CONFIG_NAME = "chembook3d-mcp.json"
+# D263g: Claude Code's project slash commands, copied into the working folder's
+# `.claude/commands/` on every start; each file is a playbook loaded only for its task.
+COMMANDS = Path(__file__).parent / "assets" / "commands"
+COMMANDS_DIR = Path(".claude") / "commands"
 INSTALL_DOCS = "https://code.claude.com/docs/en/setup"
 INSTALL_COMMANDS = {
     "windows": "irm https://claude.ai/install.ps1 | iex",
@@ -170,6 +174,10 @@ does without importing it (did it converge, is it worth importing), `import_file
 output and `import_folder` every output in a folder at once, as the app's Import, Folder
 does. Show the person the rows of a folder's plan that need a choice (a possible duplicate,
 a file that names no basis set, a blocker) before `commit_folder_import`.
+
+The whole build (D263g): `/build-mechanism <folder>`, which the person types or starts with
+"Build mechanism from folder…" (that makes the working copy it runs in), loads the playbook
+for it: survey, import, group, link, propose, tidy and a summary note.
 
 Building a mechanism from a folder (D263): `survey_folder` reads every output in it first
 without importing (per step the level, energy, imaginary frequencies; files ending on the same
@@ -456,7 +464,17 @@ def prepare(
     _write(work / MCP_CONFIG_NAME, json.dumps({"mcpServers": servers}, indent=2) + "\n")
     _write(work / SETTINGS_NAME, json.dumps(settings, indent=2) + "\n")
     _write(work / "CLAUDE.md", guide)
+    write_commands(work)
     return work
+
+
+def write_commands(work: Path) -> None:
+    """D263g: the slash commands, such as `/build-mechanism`, as Claude Code's project commands
+    of the working folder. Written over on every start, so they follow the app's version."""
+    target = work / COMMANDS_DIR
+    target.mkdir(parents=True, exist_ok=True)
+    for source in sorted(COMMANDS.glob("*.md")):
+        _write(target / source.name, source.read_text(encoding="utf-8"))
 
 
 def stop_hook(app_url: str) -> dict:
