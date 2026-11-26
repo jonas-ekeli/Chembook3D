@@ -315,3 +315,6 @@ def test_decoys_near_the_ts_that_are_no_minima_or_at_another_level(open_client):
     assert "STO-3G" in minus["candidates"][0]["level"]
     assert fallen["check"]["a"]["other_level"] is True
     assert "no candidate at the TS's geometry level" in fallen["summary"]
+    # A link only through a structure at another level stays unclear (A186).
+    assert fallen["check"]["verdict"] == "unclear"
+    assert "another geometry level" in fallen["check"]["reasons"][0]

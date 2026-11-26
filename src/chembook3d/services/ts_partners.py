@@ -450,7 +450,20 @@ def _check(
             "changed": ts_check.get("changed", []),
         }
         if check["verdict"] == "links":
-            return check, count
+            if not (a[2].get("other_level") or b[2].get("other_level")):
+                return check, count
+            # A link only through a structure at another level is not a bond check at the
+            # TS's level: it stays unclear (validation on a real folder: such links were the
+            # wrong ones, e.g. an xTB conformer search's structures).
+            check["verdict"] = "unclear"
+            check["reasons"] = [
+                "It would link, but through a structure at another geometry level than the "
+                "TS's, so the bond check does not settle it.",
+                *check["reasons"],
+            ]
+            if first is None:
+                first = check
+            continue
         if first is None:
             first = check
     return first, len(pairs)
