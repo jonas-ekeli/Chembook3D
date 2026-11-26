@@ -1256,7 +1256,10 @@ TOOLS: list[ToolSpec] = [
         "there in the same direction is updated and opened again, not made twice. Optionally "
         "put nodes in reaction steps and conformers in groups, by name (made when missing); no "
         "branch is made or changed. All or nothing. The canvas is not laid out: call "
-        "tidy_canvas next.",
+        "tidy_canvas next. D265: an edge that fills a find_gaps hole names it (hole; low "
+        "confidence, evidence stored as “Filled by Claude (hole …)”), and filled lists per hole "
+        "the nodes you built for it, which become planned “(MACE guess)” nodes; at most 10 "
+        "holes are filled in a run, so the 11th is refused.",
     ),
     T(
         "list_proposals",
@@ -1266,6 +1269,22 @@ TOOLS: list[ToolSpec] = [
         "The edges you proposed that the user has not accepted yet (D264), with their "
         "confidence and evidence, and how many are open per confidence: for your summary and "
         "its review list.",
+    ),
+    T(
+        "find_gaps",
+        "read",
+        "GET",
+        "/api/mechanism/gaps",
+        "The holes in the mechanism you are building (D265), most useful first, each with a "
+        "stable id, its kind, the nodes in it, the bonds that change and a suggested fill: "
+        "ts_end (a TS with no edge on a side; what lies there from its finished mode-follow "
+        "or its IRC, else only the bonds its mode moves), missing_ts (two minima an edge or "
+        "the steps' order links, one to three bonds apart, with no TS), unbalanced (an edge "
+        "whose sides differ in atoms with no free species to balance them), "
+        "missing_intermediate (linked minima more than one step apart) and cycle (the last "
+        "minimum of the steps does not give back the first's catalyst). Only what edges and "
+        "steps already link is looked at. Also how many holes you filled in this run (at most "
+        "10). Changes nothing.",
     ),
     T(
         "read_pdf",

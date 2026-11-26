@@ -14,10 +14,15 @@
   stays open for the user to accept).
 - `counts` and `open_proposals` say what is still open, for the merge review's warning
   (`playground_merge.review`) and Claude's summary.
+- A gap Claude fills (D265): an edge names the hole it fills (`hole`, from find_gaps), so its
+  confidence is low and its evidence starts “Filled by Claude (hole …)” (A184); `filled` marks
+  the nodes built for a hole as planned MACE guesses (`gaps.mark_filled`); and at most 10 holes
+  are filled in a run (`gaps.check_bound`, D265d).
 """
 
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -31,8 +36,8 @@ from chembook3d.models import (
     ReactionStep,
     Transition,
 )
+from chembook3d.services import gaps, history
 from chembook3d.services import groups as group_service
-from chembook3d.services import history
 from chembook3d.services import nodes as node_service
 from chembook3d.services import species as species_service
 from chembook3d.services import steps as step_service
@@ -54,6 +59,7 @@ class Proposed:
     updated: int = 0
     steps: list[dict[str, Any]] = field(default_factory=list)
     groups: list[dict[str, Any]] = field(default_factory=list)
+    filled: list[dict[str, Any]] = field(default_factory=list)
 
 
 def in_playground(session: Session) -> bool:
@@ -111,6 +117,19 @@ def _edge(session: Session, item: Any) -> tuple[Transition, bool]:
         "evidence": _evidence(item.get("evidence")),
         "review": OPEN,
     }
+    hole = item.get("hole")
+    if not hole and gaps.is_filled_evidence(proposal["evidence"]):
+        raise RecordError(
+            "An edge “filled by Claude” names the hole it fills (hole, from find_gaps, D265)"
+        )
+    if hole:
+        hole = gaps.check_hole_id(hole)
+        if proposal["confidence"] != "low":
+            raise RecordError(
+                f"An edge that fills a gap ({hole}) is low confidence (A184, D265c), "
+                f"not {proposal['confidence']}"
+            )
+        proposal["evidence"] = gaps.filled_evidence(hole, proposal["evidence"])
     status = item.get("status")
     if status is not None:
         status = status_value(status)
@@ -185,14 +204,40 @@ def _place_in_group(session: Session, item: Any) -> dict[str, Any]:
     return {"id": group.id, "label": group.label, "created": False}
 
 
+def _holes(edges: list[Any], filled: list[Any]) -> set[str]:
+    found = {gaps.check_hole_id(e["hole"]) for e in edges if isinstance(e, dict) and e.get("hole")}
+    for item in filled:
+        if not isinstance(item, dict):
+            raise RecordError("Each filled gap must be an object with a hole and node_ids")
+        found.add(gaps.check_hole_id(item.get("hole")))
+    return found
+
+
+def _mark(session: Session, item: dict[str, Any]) -> dict[str, Any]:
+    hole = gaps.check_hole_id(item.get("hole"))
+    node_ids = item.get("node_ids") or []
+    if (
+        not node_ids
+        or not isinstance(node_ids, list)
+        or not all(isinstance(i, str) for i in node_ids)
+    ):
+        raise RecordError("A filled gap's node_ids lists the nodes built for it")
+    what = text_value("what", item.get("what") or "")
+    nodes = [gaps.mark_filled(session, hole, node_id, what) for node_id in node_ids]
+    return {"hole": hole, "nodes": [{"id": n.id, "label": n.label} for n in nodes]}
+
+
 def propose(
     session: Session,
     edges: list[Any],
     steps: list[Any] | None = None,
     groups: list[Any] | None = None,
+    filled: list[Any] | None = None,
+    since: datetime | None = None,
 ) -> Proposed:
     """D264a: write Claude's proposed edges, then place nodes in steps and groups; all or
-    nothing (the request's one transaction)."""
+    nothing (the request's one transaction). D265: `filled` marks the nodes built for each hole;
+    the holes named here and filled since `since` are at most 10."""
     if not in_playground(session):
         raise RecordError(
             "Edges are proposed only in a playground (D263a): build the mechanism in a "
@@ -200,6 +245,10 @@ def propose(
         )
     if not isinstance(edges, list):
         raise RecordError("edges must be a list")
+    filled = filled or []
+    holes = _holes(edges, filled)
+    if holes:
+        gaps.check_bound(session, holes, since)
     found = Proposed()
     seen: set[str] = set()
     for item in edges:
@@ -214,6 +263,8 @@ def propose(
         found.steps.append(_place_in_step(session, item))
     for item in groups or []:
         found.groups.append(_place_in_group(session, item))
+    for item in filled:
+        found.filled.append(_mark(session, item))
     session.flush()
     return found
 

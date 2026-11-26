@@ -1,6 +1,6 @@
 ---
 description: Build a mechanism in this playground from a folder of outputs (D263)
-argument-hint: <folder> [--no-literature]
+argument-hint: <folder> [--no-literature] [--no-gaps]
 ---
 
 # Build a mechanism from a folder (D263)
@@ -9,7 +9,8 @@ The person asked you to build the mechanism in this folder of outputs into the o
 playground: $ARGUMENTS
 
 The first argument is the folder (in double quotes when its path has spaces); read it without
-asking for this run. With `--no-literature`, leave the web out entirely (see Literature).
+asking for this run. With `--no-literature`, leave the web out entirely (see Literature); with
+`--no-gaps`, fill no gap and flag each one (see Filling gaps).
 Work in a playground only (your guide says "This is a playground" when it is one). If the
 open investigation is not one, stop and say that "Build mechanism from folder…" in the app
 makes one. Never make, merge or discard a playground yourself.
@@ -45,10 +46,12 @@ makes one. Never make, merge or discard a playground yourself.
      elimination …) and conformer groups.
    One branch, unless file or folder names say there are several; flag each new branch.
    Lineage never comes from energies (D169, P5).
-7. **Tidy** the canvas with `tidy_canvas`.
-8. **Summarise** in a note pinned to the first node of the mechanism (`create_note`): what
+7. **Fill gaps** (see Filling gaps), unless `--no-gaps`.
+8. **Tidy** the canvas with `tidy_canvas`.
+9. **Summarise** in a note pinned to the first node of the mechanism (`create_note`): what
    you built, what is unsure, and a review list of every flag below, the low and medium
-   edges, and the references you used. End your turn with the same summary.
+   edges, each gap with what you built for it, the gaps left flagged, and the references
+   you used. End your turn with the same summary.
 
 ## Rules
 
@@ -56,7 +59,7 @@ makes one. Never make, merge or discard a playground yourself.
   decide a connection. Energies from MACE or xTB runs on this computer are never used for
   the mechanism's energetics.
 - Invent no structure: build nothing the folder does not have, beyond an end that
-  `make_node_from_end` makes. Filling gaps comes in a later version; for now flag each gap.
+  `make_node_from_end` makes and the gap fills below.
 - A choice that changes the chemistry (which reaction class, which species leaves, whether
   two branches are one) is the person's: ask when they are there; while you work on your
   own, take the reading the files support best, build nothing on it beyond what they show,
@@ -71,15 +74,36 @@ Put these in the summary's review list and in the edge's evidence where there is
 - two ends that differ in atoms without a free species that balances them;
 - a link that rests on names only;
 - an ambiguous conformer group (pairs in `group_structures`' `near_cut`);
-- a gap: a TS end with no minimum, two minima with no TS between them, a cycle that does not
-  give back the catalyst.
+- a gap left unfilled (`find_gaps` lists them): over the 10, with `--no-gaps`, or one whose
+  fill needs a choice the files do not support.
+
+## Filling gaps (D265)
+
+Skip this with `--no-gaps`. After linking, call `find_gaps`; it lists the holes, most useful
+first, each with an id and a suggested fill. Fill at most 10 a run (the 11th is refused),
+cheapest and most certain first; flag the rest. Only between structures you have: never a new
+branch or a step the edges and steps do not already link.
+- A missing minimum: the end that matches nothing (`make_node_from_end`, or the IRC's end),
+  refined with `start_local_refine` at `mace-omol`.
+- A missing TS: a planned edge between the minima (if none), then `start_local_ts_guess`;
+  `correct` only when the person asked for the PBE correction (D239).
+- A missing intermediate: built with the structure tools (`build_structure` and its edits,
+  `create_node`), refined with `mace-omol`, then its TSs as above. When the reaction class
+  leaves it unclear, consult the literature first (unless `--no-literature`), else flag it.
+- A missing free species: from SMILES (`build_structure`), `create_node` with kind species,
+  refined with `mace-omol`.
+- Then `propose_mechanism`: each new edge with `hole` (low confidence; its evidence becomes
+  "Filled by Claude (hole …)"), and `filled` naming the nodes you built for each hole: they
+  become planned "(MACE guess)" nodes. They hold MACE results only: run no other level on
+  them, and never read their energies against DFT. Delete a direct edge of yours that a TS now
+  replaces (`delete_transition`). Call `find_gaps` again to check.
 
 ## Literature (D263h)
 
 With `--no-literature` in the arguments, do no search and open no page; only a PDF the person
 gives is still read.
-- Search only at the start, when the files leave the reaction class unclear, and when bond
-  changes fit no step you would expect.
+- Search only at the start, when the files leave the reaction class unclear, when bond
+  changes fit no step you would expect, and before filling a gap whose step it leaves unclear.
 - A PDF the person gives is always read (`read_pdf`).
 - Search with general words for the reaction class only (D230c): never names, structures,
   energies or file names from this folder.

@@ -6,6 +6,14 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Claude fills gaps in a mechanism it builds from a folder with MACE-OMOL-0 guesses (D265, FR-PANEL-10,
+  FR-MCP-24): `find_gaps` lists the holes (a TS with no edge on a side, two minima one step apart with no
+  TS, minima more than one step apart, an edge whose atoms do not balance, a cycle that does not give back
+  the catalyst), each with its bonds and a suggested fill; `propose_mechanism` takes the hole an edge fills
+  (low confidence, "Filled by Claude") and the nodes built for it, which become planned "(MACE guess)"
+  nodes holding MACE results only. At most 10 holes a run; the 11th is refused. The start dialog has "Fill
+  gaps with MACE guesses", on by default with a 6-hour job limit (A185); unticked, the command gets
+  `--no-gaps` and the limit stays 4 hours.
 - "Build mechanism from folder…" (D263a, FR-PANEL-09), in the Claude panel's menu, the command palette and
   on the start page (for a new investigation): it asks for the folder of outputs, the longest local job
   (4 hours) and whether to use the literature, shows the Work on its own warning, makes a playground,
