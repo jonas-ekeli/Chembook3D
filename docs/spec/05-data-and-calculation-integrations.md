@@ -194,6 +194,8 @@ In a separate live check, `list_server_files` listed the four files in that prep
 
 Once enrolled, the notebook agent can read files inside the pilot. With the app's write toggle enabled it can create new, safely named XYZ files directly in `geometries/`. The preparation uses only the exact XYZ selected during setup. Manual terminal, import and export actions continue to use the user's chosen location.
 
+With the write toggle off, Jonas reported that all three live `write_server_file` calls returned HTTP 409 (“Writing is off on Saga”). The calls targeted a new XYZ in `geometries/`, an XYZ at the pilot root and a text file in `geometries/`. No files were created. Checking the directory and filename restrictions with writes enabled remains pending.
+
 The helper records its attempt in the operator's home before it runs the wrapper. After a lost reply, repeat the same request. A completed attempt returns the checked input. If an attempt is incomplete or differs from the reference, inspect its directory and wrapper logs on Saga. Running setup again deliberately enrolls a fresh attempt. A missing or changed helper requires a matching copy from the workstation checkout.
 
 #### Project job descriptions
