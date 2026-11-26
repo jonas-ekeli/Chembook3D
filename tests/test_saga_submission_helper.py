@@ -220,6 +220,60 @@ class SagaSubmissionTest(unittest.TestCase):
         self.cli(request=submit, success=False)
         self.assertFalse((self.home / "calls").exists())
 
+    def test_saga_group_writable_installation_below_private_home(self):
+        target = self.wrapper.parent.parent / "source/job_submission/src/g16-C.01.sh"
+        target.parent.mkdir(parents=True)
+        self.wrapper.rename(target)
+        self.wrapper.symlink_to("../source/job_submission/src/g16-C.01.sh")
+        self.home.chmod(0o2700)
+        for parent in (self.wrapper.parent, *target.parents):
+            if parent == self.home:
+                break
+            parent.chmod(0o2775)
+        target.chmod(0o775)
+        before = set(self.control.iterdir())
+        self.assertEqual(
+            json.loads(self.cli("check-wrapper")),
+            {
+                "ok": True,
+                "wrapper": str(target),
+                "wrapper_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+            },
+        )
+        self.assertEqual(set(self.control.iterdir()), before)
+        self.assertFalse(self.folder.exists())
+        self.cli(request={"operation": "check-wrapper"}, success=False)
+        self.enable()
+        self.prepare()
+        submit = self.request(submit=True)
+        self.home.chmod(0o2710)
+        self.cli("check-wrapper", success=False)
+        self.cli(request=submit, success=False)
+        self.home.chmod(0o2700)
+        self.assertFalse((self.home / "calls").exists())
+        self.assertEqual(self.cli(request=submit)["state"], "submitted")
+        self.assertEqual((self.home / "calls").read_text(), "call\n")
+
+    def test_private_home_exception_stops_at_its_boundary(self):
+        self.home.chmod(0o2700)
+        self.wrapper.chmod(0o777)
+        self.cli("check-wrapper", success=False)
+        self.wrapper.chmod(0o775)
+        alias = self.home.parent / "also-accessible-outside-home"
+        os.link(self.wrapper, alias)
+        self.cli("check-wrapper", success=False)
+        alias.unlink()
+        self.wrapper.parent.chmod(0o777)
+        self.cli("check-wrapper", success=False)
+        self.wrapper.parent.chmod(0o775)
+        self.home.parent.chmod(0o770)
+        self.cli("check-wrapper", success=False)
+        self.home.parent.chmod(0o700)
+        self.wrapper.rename(alias)
+        self.wrapper.symlink_to(alias)
+        self.cli("check-wrapper", success=False)
+        self.assertFalse(self.marker.exists())
+
     def test_preexisting_staging_link_is_consumed_without_launch(self):
         self.enable()
         self.prepare()

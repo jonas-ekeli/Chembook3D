@@ -224,23 +224,39 @@ def private_read(path, limit=4096):
 
 
 def submission_wrapper(root):
+    home = Path.home()
     try:
-        path = (Path.home() / WRAPPER).resolve(strict=True)
+        path = (home / WRAPPER).resolve(strict=True)
     except RuntimeError as exc:  # Symlink loop on Python 3.8
         raise ValueError("Cannot resolve the configured submission wrapper.") from exc
     attrs = path.stat()
+    # The observed Saga installation inherits group write inside a 2700 home.
+    # Apply the exception only below the canonical, operator-only home directory.
+    home_attrs = home.lstat()
+    private_home = (
+        home in path.parents
+        and home == home.resolve(strict=True)
+        and home_attrs.st_uid == os.getuid()
+        and not home_attrs.st_mode & 0o077
+    )
+    forbidden_write = 0o002 if private_home else 0o022
     if (
         root in path.parents
         or not stat.S_ISREG(attrs.st_mode)
         or attrs.st_uid not in {0, os.getuid()}
-        or attrs.st_mode & 0o022
+        or attrs.st_mode & forbidden_write
+        or (attrs.st_mode & 0o020 and attrs.st_nlink != 1)
         or not os.access(path, os.X_OK)
     ):
         raise ValueError("Expected a trusted executable outside the pilot.")
     for parent in path.parents:
         attrs = parent.stat()
         sticky_root = attrs.st_uid == 0 and attrs.st_mode & stat.S_ISVTX
-        if attrs.st_uid not in {0, os.getuid()} or (attrs.st_mode & 0o022 and not sticky_root):
+        if parent == home:
+            forbidden_write = 0o022
+        if attrs.st_uid not in {0, os.getuid()} or (
+            attrs.st_mode & forbidden_write and not sticky_root
+        ):
             raise ValueError("The submission wrapper must be in a trusted installation.")
     return {"wrapper": str(path), "wrapper_sha256": digest(read_file(path, FILE_LIMIT))}
 
@@ -741,9 +757,16 @@ def main():
     if sys.argv[1:] == ["enable-submit"]:
         print("Enabled minimum submission for preparation", enable_submit())
         return
+    if sys.argv[1:] == ["check-wrapper"]:
+        policy = json.loads(private_read(checked_control() / MARKER))
+        root = Path(policy["work_root"])
+        check_root(root)
+        print(json.dumps({"ok": True, **submission_wrapper(root)}))
+        return
     if len(sys.argv) != 1:
         raise ValueError(
-            "Usage: python3 saga_prepare.py [setup /path/to/min-test-.../NAME.inp | enable-submit]"
+            "Usage: python3 saga_prepare.py [setup /path/to/min-test-.../NAME.inp "
+            "| check-wrapper | enable-submit]"
         )
     request = parse_request(sys.stdin.buffer.read(JSON_LIMIT + 1))
     policy = json.loads(read_file(control_dir() / MARKER, 4096))
