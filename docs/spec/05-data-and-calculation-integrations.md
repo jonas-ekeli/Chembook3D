@@ -190,6 +190,8 @@ An older keeper reports an unknown operation. At a convenient time, log out all 
 
 On 2026-11-26 Jonas reported that the first live agent request produced the expected input in a new `prepare-…` directory on Saga. Its full SHA-256 matched the enrolled manual input. The agent reported using `nosub` and submitting no job. A second tool call on the same enrollment returned the original preparation directory and the same SHA-256. The agent again reported no submission.
 
+In a separate live check, `list_server_files` listed the four files in that preparation directory, including the 39,735-byte Gaussian input. Listing the sibling `jobdescriptions` directory returned HTTP 409 with the message “This path is outside the pilot's approved results directory.” This check exercised directory listing. Direct file reads and writes are separate operations.
+
 Once enrolled, the notebook agent can read files inside the pilot. With the app's write toggle enabled it can create new, safely named XYZ files directly in `geometries/`. The preparation uses only the exact XYZ selected during setup. Manual terminal, import and export actions continue to use the user's chosen location.
 
 The helper records its attempt in the operator's home before it runs the wrapper. After a lost reply, repeat the same request. A completed attempt returns the checked input. If an attempt is incomplete or differs from the reference, inspect its directory and wrapper logs on Saga. Running setup again deliberately enrolls a fresh attempt. A missing or changed helper requires a matching copy from the workstation checkout.
