@@ -182,6 +182,14 @@ An older keeper reports an unknown operation. At a convenient time, log out all 
 
 ### Saga wrapper example
 
+#### Proposed next implementation under Q101
+
+The enrolled preparation runs through the fixed Saga helper. Agent listing, reads, downloads for import and new-file writes currently use the keeper's SFTP client. Output summaries and job follow-up also depend on those file operations. The live file-access checks in this section establish the behavior of the Chembook tools. The interactive connection still has the operator's account permissions.
+
+The proposed next local milestone routes these agent file operations through named requests to the Saga helper. The helper enforces its enrolled directories and file-creation rules on each request. Acceptance tests should call the helper directly as well as through the keeper, verify that a missing or refusing helper cannot trigger an ordinary SFTP fallback, and exercise manual import and XYZ export through the user's terminal session.
+
+Before enabling submission, settle whether the requirement also covers compromise of the desktop process holding the interactive SSH connection. That stronger requirement needs isolation from that connection and an independently restricted agent access path. The site feasibility of that design remains open under Q101.
+
 #### Reproducing a verified minimum through the agent
 
 1. On the workstation, update the testing checkout with `git pull --ff-only`. Log out older Chembook HPC sessions at a convenient time, allow at least a minute for the keeper to exit and restart Chembook from the updated checkout with `uv run chembook3d`.
