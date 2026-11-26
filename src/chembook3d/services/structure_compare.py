@@ -1015,7 +1015,8 @@ class _Bonds:
     loose: dict[tuple[str, str], np.ndarray]
 
 
-def _bond_counts(rows: Rows) -> _Bonds:
+def _adjacency(rows: Rows) -> tuple[np.ndarray, np.ndarray]:
+    """Bonded by the 3D view's rule, and within A181's outer reach."""
     elements = [r[0] for r in rows]
     coords = np.array([r[1:4] for r in rows], dtype=float)
     strict = atom_matching.bonds(coords, elements)
@@ -1024,6 +1025,15 @@ def _bond_counts(rows: Rows) -> _Bonds:
     d = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
     loose = (d <= reach) & (d > atom_matching.MIN_DISTANCE)
     np.fill_diagonal(loose, False)
+    return strict, loose
+
+
+def _bond_counts(rows: Rows) -> _Bonds:
+    return _counts([r[0] for r in rows], *_adjacency(rows))
+
+
+def _counts(elements: list[str], strict: np.ndarray, loose: np.ndarray) -> _Bonds:
+    """`_Bonds` of two adjacency matrices: bonded (`strict`) and within the outer reach."""
     kinds = np.array(elements)
     found: tuple[dict, dict] = ({}, {})
     for e in sorted(set(elements)):

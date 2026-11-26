@@ -1,7 +1,8 @@
 """Claude's read tools for building a mechanism from a folder (D263, FR-MCP-23): a folder of
 outputs surveyed without importing it, two structures compared, and many grouped into
-duplicates, conformers and isomers. The rules live in `services/folder_survey.py` and
-`services/structure_compare.py`; nothing is written.
+duplicates, conformers and isomers, and the minima a TS links searched from the TS (FR-MCP-25).
+The rules live in `services/folder_survey.py`, `services/structure_compare.py` and
+`services/ts_partners.py`; nothing is written.
 
 Like `api/local_files.py`, these read files on this computer, so only the app's own page or
 Claude on this computer may call them."""
@@ -14,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from chembook3d.api.jobs import _local_page_only
 from chembook3d.api.routes import DbSession, _investigation
-from chembook3d.services import batch_import, folder_survey, thermo_settings
+from chembook3d.services import batch_import, folder_survey, thermo_settings, ts_partners
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
 from chembook3d.services.records import RecordError
@@ -65,6 +66,13 @@ class CompareIn(BaseModel):
     count_weak: bool = False
 
 
+class PartnersIn(BaseModel):
+    ts: StructureRef
+    candidates: list[Side] | None = None
+    species: list[StructureRef] | None = None
+    top: int = Field(ts_partners.TOP, ge=1, le=ts_partners.MAX_TOP)
+
+
 class GroupIn(BaseModel):
     structures: list[StructureRef] = []
     all_nodes: bool = False
@@ -110,6 +118,40 @@ def compare_structures(body: CompareIn, request: Request, session: DbSession) ->
         b = _side(session, folder, body.b, tolerance)
         ts = _side(session, folder, body.ts, tolerance) if body.ts is not None else None
         return compare.compare(a, b, ts, body.count_weak, tolerance)
+    except (compare.StructureError, RecordError) as exc:
+        raise _refused(exc) from exc
+
+
+def _given(session: Any, folder: Path, ref: Side, tolerance: float) -> ts_partners.Candidate:
+    """A structure the caller named, with the reference to pass on (not XYZ text)."""
+    structure = _side(session, folder, ref, tolerance)
+    refs = [_ref(r) for r in ref] if isinstance(ref, list) else [_ref(ref)]
+    entry: dict[str, Any] = {"label": structure.label}
+    if not any("xyz" in r for r in refs):
+        entry["ref"] = refs if isinstance(ref, list) else refs[0]
+    if refs[0].get("node_id"):
+        entry["node_id"] = refs[0]["node_id"]
+    return ts_partners.Candidate(structure, entry)
+
+
+@router.post("/structures/ts-partners")
+def find_ts_partners(body: PartnersIn, request: Request, session: DbSession) -> dict[str, Any]:
+    """D263c, A184, A186: the minima on each side of a TS's imaginary mode, nearest first,
+    and A184's bond check of the best pair. Changes nothing."""
+    _local_page_only(request)
+    folder = _investigation(request).folder
+    tolerance = thermo_settings.settings(session).duplicate_tolerance
+    try:
+        ts = _side(session, folder, body.ts, tolerance)
+        known: tuple[list, list] = ([], [])
+        if body.candidates is None or body.species is None:
+            known = ts_partners.from_investigation(session, folder, tolerance, body.ts.node_id)
+        candidates, species = known
+        if body.candidates is not None:
+            candidates = [_given(session, folder, r, tolerance) for r in body.candidates]
+        if body.species is not None:
+            species = [_given(session, folder, r, tolerance) for r in body.species]
+        return ts_partners.find(ts, candidates, species, tolerance, body.top)
     except (compare.StructureError, RecordError) as exc:
         raise _refused(exc) from exc
 

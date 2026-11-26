@@ -1,6 +1,6 @@
-"""D263 a, f, g, h and D265 (FR-PANEL-09, FR-PANEL-10): the `/build-mechanism` playbook in the
-panel's working folder, and the job limit "Build mechanism from folder…" turns Work on its own
-on with (T-PANEL-16, T-PANEL-17)."""
+"""D263 a, f, g, h and D265 (FR-PANEL-09, FR-PANEL-10, FR-MCP-25): the `/build-mechanism`
+playbook in the panel's working folder, and the job limit "Build mechanism from folder…" turns
+Work on its own on with (T-PANEL-16, T-PANEL-17)."""
 
 import json
 
@@ -49,6 +49,7 @@ def test_the_panel_gets_the_build_mechanism_command(tmp_path, monkeypatch):
         "import_folder",
         "group_structures",
         "irc_end",
+        "find_ts_partners",
         "compare_structures` with `ts`",
         "start_local_follow_mode",
         "get_follow_mode_ends",
@@ -67,6 +68,20 @@ def test_the_panel_gets_the_build_mechanism_command(tmp_path, monkeypatch):
     assert "MACE or xTB" in flat and "Invent no structure" in flat
     assert "high from an IRC" in flat and "medium from the bond check alone" in flat
     assert "low from names only" in flat and "A TS still unsettled is flagged" in flat
+    # FR-MCP-25: the search from the TS before any guess, then the mode-follows in batches,
+    # every TS worked through; duplicates attached; Tidy without a page is no stop.
+    for line in (
+        "never guess the two minima",
+        '"links" with one candidate per side',
+        "is medium (A184 bond check)",
+        "raise a medium link to high",
+        "both ends land on one structure, say so in the evidence and keep the bond check's",
+        "Start several mode-follows, then collect their ends",
+        "do not stop while a TS is unsettled and a tool remains to try",
+        '`duplicate_action` "attach", not a new node, unless it is another conformer',
+        "no page is open, say so in the summary and go on",
+    ):
+        assert line in flat, line
     # What it flags rather than decides.
     for flag in (
         "match nothing, or both match the same minimum",

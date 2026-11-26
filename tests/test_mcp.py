@@ -44,6 +44,7 @@ READ_POSTS = {
     "/api/steric-profiles/{profile_id}/difference",
     "/api/structures/compare",  # D263: compares, stores nothing
     "/api/structures/group",
+    "/api/structures/ts-partners",  # FR-MCP-25: searches, stores nothing
 }
 # Changes that delete nothing and are undone at once, so they do not ask (A38).
 UNASKED_DELETES = {
