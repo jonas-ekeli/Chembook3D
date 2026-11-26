@@ -2,19 +2,34 @@
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import re
 import secrets
+import selectors
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
 JOB = "min-go_PBEPBE-GD3MBJ_DZ_singlet_CONVER9.jd"
 MARKER = ".prepare-minimum.json"
+SUBMIT_MARKER = ".submit-minimum.json"
+RESOURCES = {"nodes": 1, "cores": 40, "hours": 24}
+WRAPPER = "tools/uibkvant-tools/runnable/submit_job_g16-C.01"
+OUTPUT_LIMIT = 65_536
+SUBMIT_TIMEOUT = 60
+SLURM_REFUSAL = re.compile(
+    rb"(?:invalid (?:account|partition|qos|allocation|time limit|node count)\b|"
+    rb"job violates accounting/qos policy\b|requested node configuration is not available\b|"
+    rb"access/permission denied\b)",
+    re.I,
+)
 LIMIT = 256_000
 FILE_LIMIT = 1024**2
 JSON_LIMIT = 6 * FILE_LIMIT + 32_768  # One MiB of JSON-escaped text and its path/header
@@ -186,6 +201,316 @@ def prepare(request, policy):
         "reference_sha256": expected,
         "input": contents,
     }
+
+
+def checked_control():
+    directory = control_dir()
+    attrs = directory.stat()
+    if (
+        directory.resolve(strict=True) != directory
+        or not stat.S_ISDIR(attrs.st_mode)
+        or attrs.st_uid != os.getuid()
+        or attrs.st_mode & 0o022
+    ):
+        raise ValueError("Submission requires the operator's protected helper directory.")
+    return directory
+
+
+def private_read(path, limit=4096):
+    attrs = path.lstat()
+    if not stat.S_ISREG(attrs.st_mode) or attrs.st_uid != os.getuid() or attrs.st_mode & 0o077:
+        raise ValueError("Expected a private operator-owned control file.")
+    return read_file(path, limit)
+
+
+def submission_wrapper(root):
+    try:
+        path = (Path.home() / WRAPPER).resolve(strict=True)
+    except RuntimeError as exc:  # Symlink loop on Python 3.8
+        raise ValueError("Cannot resolve the configured submission wrapper.") from exc
+    attrs = path.stat()
+    if (
+        root in path.parents
+        or not stat.S_ISREG(attrs.st_mode)
+        or attrs.st_uid not in {0, os.getuid()}
+        or attrs.st_mode & 0o022
+        or not os.access(path, os.X_OK)
+    ):
+        raise ValueError("Expected a trusted executable outside the pilot.")
+    for parent in path.parents:
+        attrs = parent.stat()
+        sticky_root = attrs.st_uid == 0 and attrs.st_mode & stat.S_ISVTX
+        if attrs.st_uid not in {0, os.getuid()} or (attrs.st_mode & 0o022 and not sticky_root):
+            raise ValueError("The submission wrapper must be in a trusted installation.")
+    return {"wrapper": str(path), "wrapper_sha256": digest(read_file(path, FILE_LIMIT))}
+
+
+def enrolled_submission(policy):
+    if not (
+        re.fullmatch(r"[a-f0-9]{32}", policy["attempt"])
+        and re.fullmatch(r"[a-f0-9]{64}", policy["reference_sha256"])
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", policy["stem"])
+    ):
+        raise ValueError("Invalid preparation enrollment.")
+    return {"attempt": policy["attempt"], "revision": policy["reference_sha256"], **RESOURCES}
+
+
+def submit_policy(path):
+    try:
+        policy = json.loads(private_read(path))
+    except FileNotFoundError:
+        raise ValueError("The operator has not enabled minimum submission.") from None
+    if not isinstance(policy, dict) or not re.fullmatch(r"[a-f0-9]{64}", policy.get("key", "")):
+        raise ValueError("The enrolled submission policy is invalid.")
+    return policy
+
+
+def enable_submit():
+    # A permanent lock file serializes concurrent enables across login nodes. Exclusive
+    # flock on NFS needs a descriptor opened for writing.
+    import fcntl
+
+    control = checked_control()
+    lock = control / ".submit-minimum.lock"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
+    with os.fdopen(os.open(lock, flags, 0o600), "wb") as guard:
+        attrs = os.fstat(guard.fileno())
+        if not stat.S_ISREG(attrs.st_mode) or attrs.st_uid != os.getuid() or attrs.st_mode & 0o077:
+            raise ValueError("Expected a private submission policy lock.")
+        fcntl.flock(guard, fcntl.LOCK_EX)
+        policy = json.loads(private_read(control / MARKER))
+        expected = enrolled_submission(policy)
+        root = Path(policy["work_root"])
+        check_root(root)
+        expected.update(submission_wrapper(root))
+        marker = control / SUBMIT_MARKER
+        try:
+            current = json.loads(private_read(marker))
+        except FileNotFoundError:
+            current = {}
+        if not isinstance(current, dict):
+            raise ValueError("The enrolled submission policy is invalid.")
+        if current.get("attempt") == expected["attempt"]:
+            if any(current.get(k) != v for k, v in expected.items()) or not re.fullmatch(
+                r"[a-f0-9]{64}", current.get("key", "")
+            ):
+                raise ValueError("The enrolled submission wrapper or policy has changed.")
+        else:
+            atomic_write(marker, json.dumps({**expected, "key": secrets.token_hex(32)}).encode())
+            with open_directory(control, readable=True) as directory:
+                os.fsync(directory)
+    return expected["attempt"]
+
+
+def scheduler_output(args, cwd):
+    """Keep both streams bounded, including when a descendant inherits a pipe."""
+    deadline = time.monotonic() + SUBMIT_TIMEOUT
+    with subprocess.Popen(
+        args,
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    ) as process:
+        try:
+            outputs = [bytearray(), bytearray()]
+            with selectors.DefaultSelector() as selector:
+                for i, pipe in enumerate((process.stdout, process.stderr)):
+                    selector.register(pipe, selectors.EVENT_READ, outputs[i])
+                size = 0
+                while selector.get_map():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ValueError("Submission wrapper timed out.")
+                    for event, _ in selector.select(remaining):
+                        block = os.read(event.fd, 16_384)
+                        size += len(block)
+                        if size > OUTPUT_LIMIT:
+                            raise ValueError("Submission wrapper output exceeded its limit.")
+                        if block:
+                            event.data.extend(block)
+                        else:
+                            selector.unregister(event.fileobj)
+            process.wait(timeout=max(0, deadline - time.monotonic()))
+            return tuple(bytes(output) for output in outputs)
+        except BaseException:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raise
+
+
+def scheduler_outcome(stdout, stderr):
+    # Only the site's exact Slurm receipt on stdout identifies an accepted job. The
+    # wrapper may exit zero on sbatch failure, so process exit status is insufficient.
+    lines = stdout.splitlines()
+    receipts = [line for line in lines if line.startswith(b"Submitted batch job")]
+    prefix = b"sbatch: error: Batch job submission failed: "
+    failures = [
+        line[len(prefix) :] for line in lines + stderr.splitlines() if line.startswith(prefix)
+    ]
+    stderr_receipt = any(line.startswith(b"Submitted batch job") for line in stderr.splitlines())
+    if len(receipts) == 1 and not failures and not stderr_receipt:
+        match = re.fullmatch(rb"Submitted batch job ([1-9][0-9]{0,19})", receipts[0])
+        if match:
+            return "submitted", match[1].decode("ascii"), None
+    # sbatch also uses this prefix for transport failures after sending a request.
+    # Classify only recognized scheduler refusals as definitive.
+    if (
+        not receipts
+        and not stderr_receipt
+        and failures
+        and all(SLURM_REFUSAL.match(message) for message in failures)
+    ):
+        return "rejected", None, "Slurm reported that batch job submission failed."
+    return "uncertain", None, "The wrapper did not return one unambiguous Slurm receipt."
+
+
+def prepared_snapshot(folder, name, control, record):
+    if private_read(control / (record["attempt"] + ".done")) != record["revision"].encode():
+        raise ValueError("Missing a matching preparation receipt.")
+    with open_directory(folder) as directory:
+        data = read_file(Path("/proc/self/fd") / str(directory) / name)
+    if digest(data) != record["revision"]:
+        raise ValueError("The prepared input changed. Review a new preparation.")
+    return data
+
+
+def stage_and_submit(folder, name, data, wrapper):
+    # Hold the directories by descriptor across staging and launch. A pre-existing
+    # directory (including a link or matching checkpoint) consumes this claim safely.
+    try:
+        with open_directory(folder, readable=True) as parent:
+            attrs = os.fstat(parent)
+            if attrs.st_uid != os.getuid() or attrs.st_mode & 0o022:
+                return "rejected", None, "The preparation directory must be operator-controlled."
+            os.mkdir("submission", mode=0o700, dir_fd=parent)
+            fd = os.open("submission", os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY, dir_fd=parent)
+            try:
+                cwd = Path("/proc/self/fd") / str(fd)
+                with (cwd / name).open("xb") as stream:
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.fsync(fd)
+                os.fsync(parent)
+                args = [
+                    wrapper,
+                    name,
+                    "-n",
+                    str(RESOURCES["nodes"]),
+                    "-c",
+                    str(RESOURCES["cores"]),
+                    "-t",
+                    str(RESOURCES["hours"]),
+                ]
+                try:
+                    return scheduler_outcome(*scheduler_output(args, cwd))
+                except (OSError, ValueError, subprocess.TimeoutExpired):
+                    return "uncertain", None, "The wrapper did not return a verifiable receipt."
+            finally:
+                os.close(fd)
+    except OSError:
+        return "rejected", None, "Could not stage the approved input in a fresh directory."
+
+
+def authorize_minimum(request, expected, enabled):
+    if any(type(enabled.get(k)) is not type(v) or enabled[k] != v for k, v in expected.items()):
+        raise ValueError("Submission is not enabled for this preparation.")
+    keys = {"operation", "attempt", "revision"}
+    submit = request["operation"] == "submit_minimum"
+    if not submit and request["operation"] != "minimum_status":
+        raise ValueError("Unsupported minimum operation.")
+    if submit:
+        keys = keys.union(RESOURCES, {"signature"})
+    if set(request) != keys or any(
+        type(request[k]) is not type(expected[k]) or request[k] != expected[k]
+        for k in keys - {"operation", "signature"}
+    ):
+        raise ValueError("Request must match the enrolled attempt, input revision and resources.")
+    if submit:
+        signed = {k: v for k, v in request.items() if k != "signature"}
+        payload = json.dumps(signed, sort_keys=True, separators=(",", ":")).encode()
+        mac = hmac.digest(bytes.fromhex(enabled["key"]), payload, "sha256").hex()
+        supplied = request["signature"]
+        if (
+            not isinstance(supplied, str)
+            or not re.fullmatch(r"[a-f0-9]{64}", supplied)
+            or not hmac.compare_digest(mac, supplied)
+        ):
+            raise ValueError("Invalid submission authorization.")
+    return submit
+
+
+def saved_outcome(receipt, claim):
+    uncertain = {
+        "state": "uncertain",
+        "job_id": None,
+        "detail": "Submission was claimed. Reconcile the attempt before taking further action.",
+    }
+    try:
+        stored = json.loads(private_read(receipt))
+    except FileNotFoundError:
+        return uncertain if os.path.lexists(claim) else None
+    except (OSError, ValueError):
+        return uncertain
+    if not isinstance(stored, dict) or stored.keys() != {"state", "job_id", "detail"}:
+        return uncertain
+    if stored["detail"] is not None and not isinstance(stored["detail"], str):
+        return uncertain
+    if stored["state"] == "submitted":
+        if not isinstance(stored["job_id"], str) or not re.fullmatch(
+            r"[1-9][0-9]{0,19}", stored["job_id"]
+        ):
+            return uncertain
+    elif stored["state"] not in ("rejected", "uncertain") or stored["job_id"] is not None:
+        return uncertain
+    return stored
+
+
+def minimum_operation(request, policy):
+    control = checked_control()
+    if json.loads(private_read(control / MARKER)) != policy:
+        raise ValueError("The preparation enrollment changed.")
+    expected = enrolled_submission(policy)
+    enabled = submit_policy(control / SUBMIT_MARKER)
+    submit = authorize_minimum(request, expected, enabled)
+
+    attempt = expected["attempt"]
+    root = Path(policy["work_root"])
+    folder = root / ("prepare-" + attempt)
+    record = {**expected, "directory": str(folder / "submission"), "job_id": None, "detail": None}
+    receipt = control / (attempt + ".submit.done")
+    claim = control / (attempt + ".submit.claim")
+    stored = saved_outcome(receipt, claim)
+    if stored is not None:
+        return {**record, **stored}
+    check_root(root)
+    name = policy["stem"] + ".inp"
+    data = prepared_snapshot(folder, name, control, record)
+    if not submit:
+        return {**record, "state": "prepared"}
+    pin = submission_wrapper(root)
+    if any(enabled.get(k) != v for k, v in pin.items()):
+        raise ValueError("The enrolled submission wrapper has changed.")
+
+    with open_directory(control, readable=True) as directory:
+        try:
+            fd = os.open(claim.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=directory)
+        except FileExistsError:
+            return {**record, **saved_outcome(receipt, claim)}
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.fsync(directory)
+        state, job_id, detail = stage_and_submit(folder, name, data, pin["wrapper"])
+        outcome = {"state": state, "job_id": job_id, "detail": detail}
+        atomic_write(receipt, json.dumps(outcome).encode())
+        os.fsync(directory)
+    return {**record, **outcome}
 
 
 class Outside(ValueError):
@@ -413,12 +738,22 @@ def main():
     if len(sys.argv) == 3 and sys.argv[1] == "setup":
         print("Enrolled manual reference SHA-256:", install(Path(sys.argv[2])))
         return
+    if sys.argv[1:] == ["enable-submit"]:
+        print("Enabled minimum submission for preparation", enable_submit())
+        return
     if len(sys.argv) != 1:
-        raise ValueError("Usage: python3 saga_prepare.py setup /path/to/min-test-.../NAME.inp")
+        raise ValueError(
+            "Usage: python3 saga_prepare.py [setup /path/to/min-test-.../NAME.inp | enable-submit]"
+        )
     request = parse_request(sys.stdin.buffer.read(JSON_LIMIT + 1))
     policy = json.loads(read_file(control_dir() / MARKER, 4096))
     if isinstance(request, dict) and request.get("operation") == "prepare_minimum":
         result = prepare(request, policy)
+    elif isinstance(request, dict) and request.get("operation") in (
+        "submit_minimum",
+        "minimum_status",
+    ):
+        result = minimum_operation(request, policy)
     else:
         result = file_operation(request, policy)
     print(json.dumps({"ok": True, "result": result}))

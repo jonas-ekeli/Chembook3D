@@ -1,13 +1,16 @@
 """Local cluster helper (D266): only fixed operator scripts run on synthetic inputs."""
 
+import hashlib
 import secrets
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import pytest
+from fastapi import HTTPException
 
 from chembook3d import xyz
+from chembook3d.api import hpc_jobs
 from chembook3d.remote.job_pilot import _verify_input, signature
 from tests.fake_ssh_server import FakeSaga, enable_job_pilot
 from tests.hpc_pilot_runner import linked_minimum_input
@@ -33,6 +36,45 @@ def prepare(helper, **params):
 def submit(helper, record, **changes):
     fields = {k: record[k] for k in ("cores", "hours", "revision")}
     return call(helper, "submit", record["attempt"], **(fields | changes))
+
+
+def test_repeated_saga_preparation_cannot_rebind_another_investigation(tmp_path):
+    attempt = secrets.token_hex(16)
+    owners = [tmp_path / "first", tmp_path / "second"]
+    input_text = "#p HF/STO-3G Opt\n\nWater\n"
+    shared = {
+        "server_id": "saga",
+        "target": ["saga.sigma2.no", 22, ""],
+        "pilot": "saga_minimum",
+        "investigation_id": "original-investigation",
+        "input": input_text,
+        "revision": hashlib.sha256(input_text.encode()).hexdigest(),
+    }
+
+    def claim(owner):
+        try:
+            hpc_jobs._store_record(attempt, {**shared, "folder": str(owner)})
+        except HTTPException as exc:
+            assert exc.status_code == 409
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        claims = list(pool.map(claim, owners * 8))
+    winner = owners[0] if claims[0] else owners[1]
+    assert claims == [owner == winner for owner in owners * 8]
+    record, _key = hpc_jobs._record("saga", attempt, winner, shared["investigation_id"])
+    assert record == {**shared, "folder": str(winner)}
+    with pytest.raises(HTTPException, match="Open the investigation") as other:
+        hpc_jobs._record(
+            "saga",
+            attempt,
+            next(owner for owner in owners if owner != winner),
+            shared["investigation_id"],
+        )
+    assert other.value.status_code == 409
+    with pytest.raises(HTTPException, match="Open the investigation"):
+        hpc_jobs._record("saga", attempt, winner, "new-investigation-in-the-same-folder")
 
 
 @pytest.mark.parametrize(

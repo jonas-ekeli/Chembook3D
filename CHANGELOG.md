@@ -6,6 +6,11 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The Saga pilot can submit one operator-enabled Gaussian minimum after the user
+  reviews the input, account and resources in the app. Looking up the same
+  attempt recovers its Slurm receipt after a lost reply. The submission workflow
+  has been exercised locally with a scheduler stand-in (D266, 05 §9).
+
 - On enrolled Saga accounts, the cluster helper now enforces the notebook agent's
   file permissions for listing, reading results, importing and creating new XYZ
   files. Existing enrollments can update the helper in place (D266, 05 §9).

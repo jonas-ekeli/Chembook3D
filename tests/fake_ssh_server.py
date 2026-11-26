@@ -25,7 +25,7 @@ import socketserver
 import subprocess
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -51,6 +51,7 @@ class Record:
     commands: list[str | None] = field(default_factory=list)  # each session's command
     displays: list[str | None] = field(default_factory=list)  # each session's X11 display
     saga_prepare_requests: list[bytes] = field(default_factory=list)
+    saga_minimum_requests: list[dict] = field(default_factory=list)
     saga_file_requests: list[dict] = field(default_factory=list)
     sftp_paths: list[str] = field(default_factory=list)
 
@@ -103,6 +104,14 @@ class _SFTPServer(asyncssh.SFTPServer):
         self._record.sftp_paths.append(os.fsdecode(path))
         return super().map_path(path)
 
+    def lstat(self, path):
+        attrs = super().lstat(path)
+        if sys.platform == "win32" and posixpath.basename(path) == b".submit-minimum.json":
+            # A Linux Saga account exposes POSIX mode bits, including on this Windows fixture.
+            attrs = asyncssh.SFTPAttrs.from_local(attrs)
+            attrs.permissions &= ~0o077
+        return attrs
+
 
 class FakeSaga:
     def __init__(self, root: Path, real_shell: bool = False, port: int = 0, x11: bool = True):
@@ -111,6 +120,7 @@ class FakeSaga:
         self.job_pilot = None
         self.drop_submit_reply = False
         self.saga_prepare_reply: dict | None = None
+        self.saga_minimum: Callable[[dict], dict] | None = None
         self.saga_file_error: str | None = None
         self.port = port
         self.x11 = x11
@@ -212,6 +222,24 @@ class FakeSaga:
                     process.stdout.write(json.dumps(self.saga_prepare_reply).encode())
                     process.exit(0)
                     return
+            if self.saga_minimum and operation in {
+                "prepare_minimum",
+                "submit_minimum",
+                "minimum_status",
+            }:
+                self.record.saga_minimum_requests.append(envelope)
+                try:
+                    result = await asyncio.to_thread(self.saga_minimum, envelope)
+                    if self.drop_submit_reply and operation == "submit_minimum":
+                        self.drop_submit_reply = False
+                        process.exit(1)  # receipt is durable, but no bytes reached the keeper
+                        return
+                    reply, status = {"ok": True, "result": result}, 0
+                except (OSError, ValueError) as exc:
+                    reply, status = {"ok": False, "error": str(exc)}, 1
+                process.stdout.write(json.dumps(reply).encode())
+                process.exit(status)
+                return
             await self._pinned(process, saga_access.LAUNCHER, request)
             return
         if process.command == probe.COMMAND:
@@ -291,7 +319,8 @@ class FakeSaga:
         path = request["path"]
         if path.startswith("/"):
             request = {**request, "path": str(self.root) + path}
-        policy = {**policy, "work_root": str(self.root) + policy["work_root"]}
+        if not Path(policy["work_root"]).is_relative_to(self.root):
+            policy = {**policy, "work_root": str(self.root) + policy["work_root"]}
         result = helper["file_operation"](request, policy)
         for key in ("path", "agent_read_root", "free"):
             if isinstance(result.get(key), str):
@@ -665,6 +694,124 @@ def enable_job_pilot(fake: FakeSaga, config: Path, server_id: str) -> None:
         40,
         24,
     )
+
+
+def enable_saga_minimum(fake: FakeSaga, remote_root: str, contents: str, monkeypatch) -> None:
+    """Enroll a synthetic manual minimum and a scheduler which only writes local test files."""
+    work = fake.root / remote_root.lstrip("/")
+    home = fake.root / HOME.lstrip("/")
+    control = fake.saga_control
+    control.mkdir(mode=0o700, parents=True)
+    (control / "saga_prepare.py").write_bytes(Path(saga_prepare.__file__).read_bytes())
+    wrapper = home / "tools/uibkvant-tools/runnable/submit_job_g16-C.01"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_bytes(
+        b"#!/usr/bin/env python3\n"
+        b"from pathlib import Path\n"
+        b"import os, sys\n"
+        b"stage = Path('.') if sys.platform == 'linux' else Path(os.environ['SAGA_FIXTURE_CWD'])\n"
+        b"assert sys.argv[1:] == ['sample.inp', '-n', '1', '-c', '40', '-t', '24']\n"
+        b"assert (stage / 'sample.inp').is_file()\n"
+        b"with (stage / 'scheduler-calls.txt').open('a') as calls:\n"
+        b"    print(' '.join(sys.argv[1:]), file=calls)\n"
+        b"(stage / 'sample.log').write_text('Starting job 72410 on test-node on Saga "
+        b"at Tue Nov 24 09:00:00 CET 2026\\nJobName: sample\\n')\n"
+        b"print('Submitted batch job 72410')\n"
+    )
+    wrapper.chmod(0o700)
+    marker = ".submit-minimum.json"
+    if sys.platform == "linux":
+        # This pytest process owns the synthetic remote. The keeper is a separate process.
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setattr(saga_prepare, "PROJECTS", work.parents[2])
+        reference = work / "min-test-reference/sample.inp"
+        reference.parent.mkdir(parents=True)
+        reference.write_bytes(contents.encode())
+        reference.with_suffix(".xyz").write_bytes(b"2\nSynthetic H2\nH 0 0 0\nH 0 0 0.74\n")
+        job = work.parent / "jobdescriptions" / saga_prepare.JOB
+        job.parent.mkdir()
+        job.write_bytes(b"synthetic job description\n")
+        generator = home / "tools/scripts/submit_all_DFT.sh"
+        generator.parent.mkdir(parents=True)
+        generator.write_bytes(
+            b'#!/bin/sh\n[ "$3" = nosub ] && cp ../min-test-reference/sample.inp sample.inp\n'
+        )
+        generator.chmod(0o700)
+        saga_prepare.install(reference)
+        policy = json.loads((control / saga_prepare.MARKER).read_bytes())
+        saga_prepare.prepare({"operation": "prepare_minimum"}, policy)
+        saga_prepare.enable_submit()
+
+        def operation(request):
+            if request["operation"] == "prepare_minimum":
+                result = saga_prepare.prepare(request, policy)
+            else:
+                result = saga_prepare.minimum_operation(request, policy)
+            return {**result, "directory": result["directory"].removeprefix(str(fake.root))}
+
+    else:
+        # Saga's fd-based helper requires Linux. Supply its wire replies on other hosts.
+        attempt, revision = "19" * 16, saga_prepare.digest(contents.encode())
+        directory = f"{remote_root}/prepare-{attempt}"
+        prepared = {
+            "state": "prepared",
+            "directory": directory,
+            "input_name": "sample.inp",
+            "input": contents,
+            "sha256": revision,
+            "reference_sha256": revision,
+        }
+        policy = {"work_root": remote_root, "attempt": attempt, "reference_sha256": revision}
+        resources = {"nodes": 1, "cores": 40, "hours": 24}
+        authorization = {
+            "attempt": attempt,
+            "revision": revision,
+            "key": "71" * 32,
+            **resources,
+            "wrapper": HOME + "/tools/uibkvant-tools/runnable/submit_job_g16-C.01",
+            "wrapper_sha256": saga_prepare.digest(wrapper.read_bytes()),
+        }
+        saga_prepare.atomic_write(control / marker, json.dumps(authorization).encode())
+        saga_prepare.atomic_write(control / saga_prepare.MARKER, json.dumps(policy).encode())
+        stage = work / ("prepare-" + attempt) / "submission"
+        stage.parent.mkdir(parents=True)
+        (stage.parent / "sample.inp").write_bytes(contents.encode())
+        receipt = {
+            "attempt": attempt,
+            "revision": revision,
+            "state": "prepared",
+            "directory": directory + "/submission",
+            "job_id": None,
+            "detail": None,
+            **resources,
+        }
+
+        def operation(request):
+            if request["operation"] == "prepare_minimum":
+                return prepared
+            if request["operation"] == "submit_minimum" and receipt["state"] == "prepared":
+                stage.mkdir()
+                (stage / "sample.inp").write_bytes((stage.parent / "sample.inp").read_bytes())
+                subprocess.run(
+                    [sys.executable, str(wrapper), "sample.inp", "-n", "1", "-c", "40", "-t", "24"],
+                    # CreateProcess rejects long current directories on Windows.
+                    env={**os.environ, "SAGA_FIXTURE_CWD": str(stage)},
+                    check=True,
+                    capture_output=True,
+                    timeout=10,
+                )
+                receipt.update(state="submitted", job_id="72410")
+            return receipt.copy()
+
+    # The fake SFTP server starts at its chroot. Expose the remote names in that namespace.
+    sftp_control = fake.root / ".local/lib/chembook3d"
+    sftp_control.mkdir(parents=True, mode=0o700)
+    saga_prepare.atomic_write(sftp_control / marker, (control / marker).read_bytes())
+    saga_prepare.atomic_write(
+        sftp_control / saga_prepare.MARKER,
+        json.dumps({**policy, "work_root": remote_root}).encode(),
+    )
+    fake.saga_minimum = operation
 
 
 def main() -> None:

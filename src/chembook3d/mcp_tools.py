@@ -689,7 +689,8 @@ TOOLS: list[ToolSpec] = [
         "/api/hpc-jobs/{server_id}/prepare-minimum",
         "Prepare the single operator-enrolled minimum on Saga using nosub. The helper selects "
         "the verified XYZ, job description and work directory. Returns the checked Gaussian "
-        "input and SHA-256. Repeating returns the same successful preparation. No submission.",
+        "input and SHA-256. When submission is enrolled, the result also includes the attempt "
+        "ID and resources for submit_prepared_job. Repeating recovers the same preparation.",
     ),
     T(
         "prepare_gaussian_job",
@@ -705,7 +706,7 @@ TOOLS: list[ToolSpec] = [
         "read",
         "GET",
         "/api/hpc-jobs/{server_id}/attempts/{attempt}",
-        "Recover the durable state of a local HPC pilot attempt, including after a lost "
+        "Read the state of an enrolled Saga or local HPC pilot attempt, including after a lost "
         "submission reply. A receipt includes the arguments for check_server_job. "
         "For an uncertain attempt reconcile it with the scheduler before any new submission.",
     ),
@@ -2051,8 +2052,8 @@ TOOLS += [
 # ---------- deleting: the app asks the user (D91) ----------
 
 CONFIRM_DESCRIPTIONS = {
-    "submit_prepared_job": "Submit one reviewed Gaussian input on the local HPC pilot using "
-    "its prepared resource request. Only a confirmation in the app authorizes the attempt.",
+    "submit_prepared_job": "Ask the user to submit a prepared Gaussian input on the enrolled Saga "
+    "or local HPC pilot. The app shows the input, destination and resources for confirmation.",
     "delete_node": "Delete a node (or free species) with its calculations, notes and every "
     "edge touching it.",
     "delete_group": "Delete a group with its contents: its members, their calculations and "

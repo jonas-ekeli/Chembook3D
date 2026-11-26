@@ -23,7 +23,7 @@ from chembook3d.app import create_app
 from chembook3d.mcp_server import Bridge
 from chembook3d.mcp_tools import BY_NAME, PANEL_ALLOWED, READ_ONLY_TOOLS, TOOLS, input_schema
 from chembook3d.parsers import orca
-from chembook3d.remote import client, keeper, saga_access, saga_prepare
+from chembook3d.remote import client, job_pilot, keeper, saga_access, saga_prepare, servers
 from tests.fake_ssh_server import (
     CODE,
     HOME,
@@ -32,8 +32,10 @@ from tests.fake_ssh_server import (
     FakeSaga,
     FakeXServer,
     enable_job_pilot,
+    enable_saga_minimum,
     free_display,
 )
+from tests.hpc_pilot_runner import linked_minimum_input
 
 APP = "http://127.0.0.1:8765"
 ORIGIN = {"origin": APP}
@@ -1366,6 +1368,124 @@ def test_saga_preparation_uses_only_the_fixed_command_on_the_existing_login(at_w
     assert saga.record.saga_prepare_requests == [b'{"operation":"prepare_minimum"}\n'] * 3
     assert saga.record.answers == [[PASSWORD], [CODE]]
     assert saga.record.logins == 1
+
+
+@pytest.mark.parametrize("drop_reply", [False, True])
+def test_enrolled_saga_minimum_requires_review_and_recovers_one_receipt(
+    at_work, saga, monkeypatch, drop_reply
+):
+    preview = linked_minimum_input("sample", ["H 0 0 0", "H 0 0 0.74"])
+    revision = hashlib.sha256(preview.encode()).hexdigest()
+    enable_saga_minimum(saga, SAGA_WORK, preview, monkeypatch)
+    marker = json.loads((saga.saga_control / ".submit-minimum.json").read_bytes())
+    attempt = marker["attempt"]
+    stage_path = f"{SAGA_WORK}/prepare-{attempt}/submission"
+    stage = saga.root / stage_path.lstrip("/")
+    saga.drop_submit_reply = drop_reply
+    before = len(saga.record.commands)
+    ids = {"server_id": "saga", "attempt": attempt}
+    resources = {"nodes": 1, "cores": 40, "hours": 24}
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            bridge = Bridge(APP, http=http)
+            for _ in range(2):
+                prepared = await bridge.call("prepare_saga_minimum", {"server_id": "saga"})
+                assert not prepared.is_error, prepared.content
+                job = json.loads(prepared.content[0].text)
+                assert job["submission_enabled"] and job["attempt"] == attempt
+                assert job["input"] == preview
+                assert job["revision"] == job["reference_sha256"] == revision
+                assert {field: job[field] for field in resources} == resources
+                assert marker["key"] not in prepared.content[0].text
+            url = f"/api/hpc-jobs/saga/attempts/{attempt}/submit"
+            assert (await http.post(url, headers=ORIGIN)).status_code == 403
+            extra = {"action": "submit_prepared_job", "params": {**ids, "cores": 4}}
+            assert (await http.post("/api/confirmations", json=extra)).status_code == 422
+            if drop_reply:
+                # The general "Work on its own" setting still requires this specific review.
+                autonomy = await http.put("/api/claude/autonomy", json={"on": True}, headers=ORIGIN)
+                assert autonomy.is_success and autonomy.json()["on"]
+
+            async def decide(choice):
+                task = asyncio.create_task(bridge.call("submit_prepared_job", ids))
+                try:
+                    with anyio.fail_after(10):
+                        while True:
+                            pending = (await http.get("/api/live")).json()["confirmations"]
+                            if pending:
+                                break
+                            if task.done():
+                                pytest.fail(str((await task).content))
+                            await asyncio.sleep(0.02)
+                    [dialog] = pending
+                    assert dialog["preview"] == preview
+                    for item in ("sample.inp", stage_path, revision, "1 node, 40 cores, 24 h"):
+                        assert item in dialog["summary"], dialog["summary"]
+                    answer = f"/api/confirmations/{dialog['id']}/answer"
+                    body = {"confirm": choice != "refuse"}
+                    for headers in ({}, {**ORIGIN, "X-Chembook-Client": "claude"}):
+                        assert (
+                            await http.post(answer, json=body, headers=headers)
+                        ).status_code == 403
+                    if choice == "change target":
+                        saved = servers.load()
+                        servers.save([servers.Server("saga", "Saga", "127.0.0.1", 1, USER)])
+                    try:
+                        action = await http.post(answer, json=body, headers=ORIGIN)
+                    finally:
+                        if choice == "change target":
+                            servers.save(saved)
+                    assert action.is_success, action.text
+                    return action.json()["status"], await task
+                finally:
+                    task.cancel()
+
+            for choice, expected in (("refuse", "refused"), ("change target", "failed")):
+                status, _ = await decide(choice)
+                assert status == expected
+                assert not any(
+                    r["operation"] == "submit_minimum" for r in saga.record.saga_minimum_requests
+                )
+                assert not stage.exists()
+            initial = await bridge.call("get_prepared_job", ids)
+            assert (
+                not initial.is_error and json.loads(initial.content[0].text)["state"] == "prepared"
+            )
+            status, submitted = await decide("confirm")
+            assert status == ("failed" if drop_reply else "done"), submitted.content
+            assert submitted.is_error == drop_reply
+            follow_up = {"server_id": "saga", "job_id": "72410", "path": stage_path}
+            for repeat in (False, True):
+                if repeat:
+                    status, submitted = await decide("confirm")
+                    assert status == "done" and not submitted.is_error
+                found = await bridge.call("get_prepared_job", ids)
+                assert not found.is_error, found.content
+                result = json.loads(found.content[0].text)
+                assert result["state"] == "submitted" and result["revision"] == revision
+                assert result["follow_up"] == follow_up
+            checked = await bridge.call("check_server_job", follow_up)
+            assert (
+                not checked.is_error and json.loads(checked.content[0].text)["state"] == "started"
+            )
+
+    anyio.run(exercise)
+    payload = {"operation": "submit_minimum", "attempt": attempt, "revision": revision, **resources}
+    signed = {**payload, "signature": job_pilot.signature(bytes.fromhex(marker["key"]), payload)}
+    submissions = [
+        r for r in saga.record.saga_minimum_requests if r["operation"] == "submit_minimum"
+    ]
+    assert submissions == [signed, signed]
+    reads = [r for r in saga.record.saga_minimum_requests if r["operation"] == "minimum_status"]
+    assert reads == [{"operation": "minimum_status", "attempt": attempt, "revision": revision}] * 3
+    assert (stage / "scheduler-calls.txt").read_text().splitlines() == [
+        "sample.inp -n 1 -c 40 -t 24"
+    ]
+    assert (stage / "sample.inp").read_bytes() == preview.encode()
+    assert saga.record.logins == 1 and set(saga.record.commands[before:]) == {saga_access.COMMAND}
 
 
 def _assert_only_enrollment_sftp(saga, start):

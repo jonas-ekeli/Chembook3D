@@ -866,9 +866,12 @@ class Keeper:
             if reply["ok"]:
                 session.used = time.monotonic()
             return reply
-        if op == "saga_prepare_minimum":
-            if msg.keys() - {"op", "token", "server"}:
-                return {"ok": False, "error": "The preparation accepts only a saved server ID."}
+        if op in {"saga_prepare_minimum", "saga_minimum_job"}:
+            fields = {"op", "token", "server"}
+            if op == "saga_minimum_job":
+                fields.update(("target", "key_id", "request"))
+            if msg.keys() != fields:
+                return {"ok": False, "error": "Invalid fields for the Saga job request."}
             session = self.sessions.get(str(msg.get("server")))
             if session is None or not saga_access.is_saga(session.server["host"]):
                 return {"ok": False, "error": "Connect to the enrolled Saga server in the HPC tab."}
@@ -879,8 +882,29 @@ class Keeper:
                         "ok": False,
                         "error": "Enroll the verified manual minimum on Saga first.",
                     }
-                reply = await saga_access.prepare(session.conn, session.saga_work)
-            except (Outside, OSError, asyncssh.Error) as exc:
+                target = [session.server[k] for k in ("host", "port", "username")]
+                policy = await saga_access.submission_policy(await session.files())
+                if op == "saga_prepare_minimum":
+                    reply = await saga_access.prepare(session.conn, session.saga_work)
+                    if reply["ok"] and policy is not None:
+                        result = reply["result"]
+                        directory = posixpath.join(session.saga_work, "prepare-" + policy.attempt)
+                        if result["directory"] == directory and result["sha256"] == policy.revision:
+                            result.update(
+                                submission_enabled=True,
+                                attempt=policy.attempt,
+                                revision=policy.revision,
+                                key_id=policy.key_id,
+                                **saga_access.RESOURCES,
+                            )
+                            reply["target"] = target
+                else:
+                    if policy is None or msg["target"] != target or msg["key_id"] != policy.key_id:
+                        return {"ok": False, "error": "The Saga submission enrollment has changed."}
+                    reply = await saga_access.minimum_job(
+                        session.conn, session.saga_work, policy, msg["request"]
+                    )
+            except (ValueError, OSError, asyncssh.Error) as exc:
                 return {"ok": False, "error": _reason(exc)}
             if reply["ok"]:
                 session.used = time.monotonic()

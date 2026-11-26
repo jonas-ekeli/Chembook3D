@@ -1,4 +1,4 @@
-"""Trusted keeper side of the preparation-only Saga deployment (D266)."""
+"""Trusted keeper side of the enrolled Saga workflow (D266)."""
 
 import base64
 import hashlib
@@ -6,11 +6,12 @@ import json
 import posixpath
 import re
 import shlex
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import asyncssh
 
-from chembook3d.remote import saga_prepare
+from chembook3d.remote import job_pilot, saga_prepare
 
 
 def is_saga(host: str) -> bool:
@@ -36,28 +37,84 @@ if hashlib.sha256(source).hexdigest() != "{_sha}":
 exec(compile(source, str(path), "exec"), {{"__name__": "__main__"}})
 """
 COMMAND = "python3 -I -S -c " + shlex.quote(LAUNCHER)
+CONTROL = ".local/lib/chembook3d/"
+SUBMISSION_MARKER = ".submit-minimum.json"
 
 
-async def enrolled_root(sftp, username: str) -> str | None:
-    marker = ".local/lib/chembook3d/" + saga_prepare.MARKER
+async def _policy(sftp, name: str) -> dict | None:
+    marker = CONTROL + name
     try:
         attrs = await sftp.lstat(marker)
     except asyncssh.SFTPNoSuchFile:
         return None
     if attrs.type != asyncssh.FILEXFER_TYPE_REGULAR or attrs.size is None or attrs.size > 4096:
-        raise ValueError("Invalid Saga preparation enrollment.")
+        raise ValueError("Invalid Saga enrollment file.")
+    if name == SUBMISSION_MARKER and (attrs.permissions is None or attrs.permissions & 0o077):
+        raise ValueError("The Saga submission policy must be private to its owner.")
     async with sftp.open(marker, "rb") as stream:
         data = await stream.read(4097)
     try:
-        if len(data) > 4096:
+        policy = json.loads(data)
+        if len(data) > 4096 or not isinstance(policy, dict):
             raise ValueError
-        root = json.loads(data)["work_root"]
+        return policy
+    except (ValueError, RecursionError) as exc:
+        raise ValueError("Invalid Saga enrollment file.") from exc
+
+
+async def enrolled_root(sftp, username: str) -> str | None:
+    policy = await _policy(sftp, saga_prepare.MARKER)
+    if policy is None:
+        # A surviving signing key still needs protection when a preparation
+        # enrollment is missing, including on a new login or saved host alias.
+        try:
+            await sftp.lstat(CONTROL + SUBMISSION_MARKER)
+        except asyncssh.SFTPNoSuchFile:
+            return None
+        raise ValueError("Missing preparation enrollment for this Saga submission policy.")
+    try:
+        root = policy["work_root"]
         pattern = r"/cluster/projects/[a-zA-Z0-9_-]+/" + re.escape(username) + "/chembook3d-pilot"
         if not re.fullmatch(pattern, root) or await sftp.realpath(root) != root:
             raise ValueError
     except (KeyError, TypeError, ValueError, RecursionError) as exc:
         raise ValueError("Invalid Saga preparation enrollment.") from exc
     return root
+
+
+@dataclass(frozen=True)
+class SubmissionPolicy:
+    attempt: str
+    revision: str
+    key: bytes = field(repr=False)
+
+    @property
+    def key_id(self) -> str:
+        return hashlib.sha256(self.key).hexdigest()
+
+
+RESOURCES = {"nodes": 1, "cores": 40, "hours": 24}
+
+
+def _resources_match(data: dict) -> bool:
+    return all(type(data.get(k)) is int and data[k] == v for k, v in RESOURCES.items())
+
+
+async def submission_policy(sftp) -> SubmissionPolicy | None:
+    policy = await _policy(sftp, SUBMISSION_MARKER)
+    if policy is None:
+        return None
+    try:
+        if (
+            not job_pilot.ATTEMPT.fullmatch(policy["attempt"])
+            or not re.fullmatch(r"[0-9a-f]{64}", policy["revision"])
+            or not re.fullmatch(r"[0-9a-f]{64}", policy["key"])
+            or not _resources_match(policy)
+        ):
+            raise ValueError
+        return SubmissionPolicy(policy["attempt"], policy["revision"], bytes.fromhex(policy["key"]))
+    except (KeyError, ValueError, TypeError):
+        raise ValueError("Invalid Saga submission enrollment.") from None
 
 
 async def _request(connection, request: dict) -> dict:
@@ -98,7 +155,9 @@ async def prepare(connection, root: str) -> dict:
         contents = result["input"].encode("utf-8")
         sha = hashlib.sha256(contents).hexdigest()
         if (
-            result["state"] != "prepared"
+            result.keys()
+            != {"state", "directory", "input_name", "sha256", "reference_sha256", "input"}
+            or result["state"] != "prepared"
             or not 0 < len(contents) <= saga_prepare.LIMIT
             or not sha == result["sha256"] == result["reference_sha256"]
             or posixpath.dirname(result["directory"]) != root
@@ -109,6 +168,55 @@ async def prepare(connection, root: str) -> dict:
         return {"ok": True, "result": result}
     except (AttributeError, KeyError, TypeError, ValueError, RecursionError):
         return {"ok": False, "error": "The Saga helper returned an invalid preparation result."}
+
+
+async def minimum_job(connection, root: str, policy: SubmissionPolicy, request: dict) -> dict:
+    """Sign only the fixed submit operation for this enrollment. Status needs no signature."""
+    if not isinstance(request, dict) or request.get("operation") not in (
+        "submit_minimum",
+        "minimum_status",
+    ):
+        return {"ok": False, "error": "Unknown Saga job operation."}
+    submitting = request["operation"] == "submit_minimum"
+    fields = {"operation", "attempt", "revision"}
+    if submitting:
+        fields.update(RESOURCES)
+    if (
+        request.keys() != fields
+        or request["attempt"] != policy.attempt
+        or request["revision"] != policy.revision
+        or (submitting and not _resources_match(request))
+    ):
+        return {"ok": False, "error": "The request does not match the enrolled minimum."}
+    if submitting:
+        request = {**request, "signature": job_pilot.signature(policy.key, request)}
+    answer = await _request(connection, request)
+    if not answer["ok"]:
+        return answer
+    result = answer["result"]
+    expected_dir = posixpath.join(root, "prepare-" + policy.attempt, "submission")
+    try:
+        state = result["state"]
+        if (
+            result.keys()
+            != {"attempt", "revision", "state", "directory", "job_id", "detail", *RESOURCES}
+            or result["attempt"] != policy.attempt
+            or result["revision"] != policy.revision
+            or result["directory"] != expected_dir
+            or not _resources_match(result)
+            or state not in ("prepared", "submitted", "rejected", "uncertain")
+            or (submitting and state == "prepared")
+            or (result["detail"] is not None and not isinstance(result["detail"], str))
+        ):
+            raise ValueError
+        if state == "submitted":
+            if not re.fullmatch(r"[1-9][0-9]{0,19}", result["job_id"]):
+                raise ValueError
+        elif result["job_id"] is not None:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        return {"ok": False, "error": "The Saga helper returned an invalid submission result."}
+    return answer
 
 
 async def file_request(connection, request: dict, root: str) -> dict:

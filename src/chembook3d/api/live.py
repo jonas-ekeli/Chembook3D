@@ -1106,7 +1106,11 @@ async def answer(request: Request, confirmation_id: str, body: AnswerIn):
     """The user's Confirm or Refuse, from the app's page. A browser always sends the page's
     origin with this request; the MCP server sends none and offers no way to answer."""
     origin = request.headers.get("origin")
-    if not origin or urlsplit(origin).hostname not in LOOPBACK:
+    if (
+        request.headers.get(CLIENT_HEADER) == AGENT
+        or not origin
+        or urlsplit(origin).hostname not in LOOPBACK
+    ):
         raise HTTPException(403, "Only the app's own page can answer a request")
     state = live_state(request)
     state.settle(_folder(request))
