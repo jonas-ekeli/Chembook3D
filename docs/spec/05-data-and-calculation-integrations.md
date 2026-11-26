@@ -134,6 +134,31 @@ The fixed read directory is `/cluster/work/gaussian-pilot`. The existing agent f
 
 Use `get_prepared_job` with the attempt ID after a lost reply. A recorded numeric receipt supplies `check_server_job` with its directory and job ID. The demo wrapper produces a start log. A missing receipt after the wrapper has run leaves the attempt uncertain and blocks replay. SDF, checkpoint-based restarts, constrained inputs, scans, IRC and deployment on Saga are later milestones.
 
+### Testing access on Saga (Q101)
+
+Sigma2 documents SSH connection reuse after interactive 2FA and user installation of software in a home or project area. OpenSSH registers a named subsystem in the server configuration. Installing a helper file in a user's home directory does not register it as a subsystem. The published guidance establishes neither an installed Chembook subsystem nor an isolated agent identity on Saga. [Sigma2 2FA](https://documentation.sigma2.no/getting_help/two_factor_authentication.html) · [User software](https://documentation.sigma2.no/software/userinstallsw.html) · [OpenSSH Subsystem](https://man.openbsd.org/sshd_config#Subsystem)
+
+The alternative under investigation is a one-shot helper. The trusted desktop component would select one fixed executable and pass named requests on standard input. In the loopback test, a file-transfer channel stays open on the same authenticated connection while four requests reach the probe over SSH exec channels. The stand-in maps the fixed launcher to the local Python interpreter. Only the capabilities request succeeds. A separate test exercises the installed pilot and verifies that a missing subsystem produces an error without a shell fallback.
+
+**First live check.** As the user, place the reviewed repository file `scripts/hpc_capability_probe.py` at `~/.local/lib/chembook3d/hpc_capability_probe.py` on Saga using your usual file transfer. Choose a fresh destination outside the agent's writable directories. The file needs read permission for your account and Python 3. From your own logged-in terminal run:
+
+```sh
+printf '%s\n' '{"operation":"capabilities"}' | python3 -I "$HOME/.local/lib/chembook3d/hpc_capability_probe.py"
+printf '%s\n' '{"operation":"submit"}' | python3 -I "$HOME/.local/lib/chembook3d/hpc_capability_probe.py"
+```
+
+Expect `chembook3d-probe-v1` and a list containing only `capabilities` for the first request. The second should print `Unsupported request` and exit with status 1. The probe only reads stdin and writes the reply. These checks establish interpreter availability, file placement and request handling in an interactive login.
+
+**Second live check.** Test the same fixed launcher through an ordinary non-interactive SSH exec channel. For example, from an interactive PowerShell window, substitute your Saga login for `USERNAME`:
+
+```powershell
+'{"operation":"capabilities"}' | ssh -T USERNAME@saga.sigma2.no 'python3 -I .local/lib/chembook3d/hpc_capability_probe.py'
+```
+
+This separate SSH client can prompt for 2FA. Record the reply and exit status. Success demonstrates fixed-command execution for that login. Reuse of Chembook's own connection on Saga is a subsequent integration test. The keeper currently enables job requests only for the loopback pilot.
+
+**What remains before job submission.** Validate file scopes for every agent tool on the chosen deployment and confirm the agent cannot change the helper, scripts, job files, dependencies or authorization records. A helper can reject requests it receives. The process that owns an ordinary interactive SSH connection retains the user's account privileges. If the requirement includes protection against that process being compromised, a separate server-enforced access boundary is necessary. Record this decision under Q101, then test the actual generator with `nosub` before considering a scheduler submission.
+
 ### Saga wrapper example
 
 An ordinary minimum from the supplied project job file is one scheduler job with five Gaussian steps. The first HF single point takes the XYZ coordinates and inline basis and effective core potential. A DFT single point and wavefunction stability step precede the geometry optimization. A frequency step follows it. The last four steps read the geometry, basis and guess from the checkpoint produced earlier in the same input. A successful stability step alone does not establish that the geometry has converged.

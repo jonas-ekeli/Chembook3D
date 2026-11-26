@@ -1241,6 +1241,20 @@ def test_user_can_export_and_import_outside_the_pilot_area(at_work, saga, config
     assert imported.is_success and imported.json()["node_id"]
 
 
+def test_missing_job_subsystem_never_falls_back_to_shell(at_work, saga, config_dir):
+    enable_job_pilot(saga, config_dir, "saga")
+    pilot = saga.job_pilot
+    saga.job_pilot = None  # client configured, helper unavailable on the server
+    before = len(saga.record.commands)
+    response = at_work.post(
+        "/api/hpc-jobs/saga/prepare",
+        json={"geometry": "water.xyz", "job_file": "minimum.jd", "cores": 1, "hours": 1},
+    )
+    assert response.status_code == 409
+    assert saga.record.commands[before:] == [None]  # one subsystem request, no exec fallback
+    assert saga.record.logins == 1 and not (pilot.state / "attempts.sqlite").exists()
+
+
 @pytest.mark.parametrize("drop_reply", [False, True])
 def test_local_preparation_submission_and_follow_up_through_mcp(
     at_work, saga, config_dir, drop_reply
