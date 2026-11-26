@@ -1248,7 +1248,7 @@ def test_local_preparation_submission_and_follow_up_through_mcp(
     # The app, bridge, real keeper and loopback SSH helper exercise the production routes.
     args = {
         "server_id": "saga",
-        "job_file": "minimum.jd",
+        "job_file": "linked-minimum.jd" if drop_reply else "minimum.jd",
         "geometry": "water.xyz",
         "cores": 40,
         "hours": 24,
@@ -1280,7 +1280,8 @@ def test_local_preparation_submission_and_follow_up_through_mcp(
             assert not prepared.is_error, prepared.content
             record = json.loads(prepared.content[0].text)
             ids = {"attempt": record["attempt"], "server_id": "saga"}
-            assert record["state"] == "prepared" and "#p HF/STO-3G Opt" in record["input"]
+            assert record["state"] == "prepared"
+            assert record["input"].count("--Link1--") == (4 if drop_reply else 0)
             url = f"/api/hpc-jobs/saga/attempts/{record['attempt']}/submit"
             assert (await http.post(url)).status_code == 403
             for approved in (False, True):
@@ -1312,6 +1313,7 @@ def test_local_preparation_submission_and_follow_up_through_mcp(
             assert saga.record.logins == 1
             calls = saga.job_pilot.work / record["attempt"] / "submission" / "scheduler-calls.txt"
             assert calls.read_text().splitlines() == ["water.inp 1 40 24"]
+            assert calls.with_name("water.inp").read_bytes() == record["input"].encode()
 
     anyio.run(exercise)
 

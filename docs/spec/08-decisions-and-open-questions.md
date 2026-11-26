@@ -517,7 +517,7 @@ Jonas confirmed all proposals on 2026-09-29 (D51). They keep their P-IDs so cita
 
 ## 4. Open questions
 
-The first preparation and submission milestone under D266 runs locally with a synthetic job file, generator and scheduler. Its implementation assumes a fresh Cartesian XYZ optimization, one explicit approval per attempt and no inherited checkpoint. The demonstration limits of 40 cores and 24 hours are fixture settings. The site deployment question Q101 and the chemistry-edit examples in Q100 remain open.
+The first preparation and submission milestone under D266 runs locally with one explicit approval per attempt. The supplied project minimum starts from Cartesian XYZ coordinates and creates a checkpoint for later steps within the same Gaussian input (05 §9). The pilot supports this five-step sequence and a single-step optimization. Reading a previous attempt's checkpoint remains a separate workflow. The demonstration limits of 40 cores and 24 hours are fixture settings. The site deployment question Q101 and the chemistry-edit examples in Q100 remain open.
 
 | ID | Question | Blocks | Recommendation |
 |---|---|---|---|

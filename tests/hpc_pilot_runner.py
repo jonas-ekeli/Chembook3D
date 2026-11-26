@@ -4,6 +4,22 @@ import sys
 from pathlib import Path
 
 
+def linked_minimum_input(stem: str, atoms: list[str]) -> str:
+    """Synthetic five-step minimum; the job fixture owns the routes and inline basis."""
+    first = (
+        f"%chk={stem}\n#p HF/Gen\n# SP\n\nStart\n\n0 1\n"
+        + "\n".join(atoms)
+        + "\n\nH O 0\nS 1 1.0\n 1.0 1.0\n****\n\n"
+    )
+    steps = [first]
+    for job in ["SP", "Stable=(Opt,RRHF)", "Opt=Tight", "Freq"]:
+        steps.append(
+            f"%chk={stem}\n#p B3LYP/ChkBasis\n# Geom=Check Guess=Read\n# {job}"
+            "\n\nContinue\n\n0 1\n\n"
+        )
+    return "--Link1--\n".join(steps)
+
+
 def main(args: list[str]) -> None:
     operation, mode, *fields = args
     if operation == "prepare":
@@ -16,10 +32,13 @@ def main(args: list[str]) -> None:
         if mode == "wrong-geometry":
             atoms = ["He 0 0 0"]
         route = Path(jd).read_text("ascii").strip()
-        path.with_suffix(".inp").write_text(
-            f"%chk={path.stem}\n{route}\n\nLocal pilot\n\n0 1\n" + "\n".join(atoms) + "\n\n",
-            encoding="ascii",
-        )
+        if route == "linked-minimum":
+            contents = linked_minimum_input(path.stem, atoms)
+        else:
+            contents = (
+                f"%chk={path.stem}\n{route}\n\nLocal pilot\n\n0 1\n" + "\n".join(atoms) + "\n\n"
+            )
+        path.with_suffix(".inp").write_text(contents, encoding="ascii")
         return
     inp, n, nodes, c, cores, t, hours = fields
     assert operation == "submit" and (n, nodes, c, t) == ("-n", "1", "-c", "-t")

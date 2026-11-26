@@ -136,6 +136,10 @@ Use `get_prepared_job` with the attempt ID after a lost reply. A recorded numeri
 
 ### Saga wrapper example
 
+An ordinary minimum from the supplied project job file is one scheduler job with five Gaussian steps. The first HF single point takes the XYZ coordinates and inline basis and effective core potential. A DFT single point and wavefunction stability step precede the geometry optimization. A frequency step follows it. The last four steps read the geometry, basis and guess from the checkpoint produced earlier in the same input. A successful stability step alone does not establish that the geometry has converged.
+
+The local pilot accepts this sequence and the original single-step optimization. Each linked step must name the same attempt-local checkpoint. The later steps must retain the charge and multiplicity and take their geometry and guess from that checkpoint. The app reviews and submits the complete file, including its basis data, dispersion parameters and all five routes. The local stand-in also offers `linked-minimum.jd` with synthetic water data to exercise this case.
+
 Jonas's two-step example, 2026-11-25. Both invocations use the submission workspace as their working directory. The geometry and generated input share a filename stem.
 
 | Operation | Example invocation | Result |

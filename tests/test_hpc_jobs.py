@@ -7,8 +7,10 @@ from dataclasses import replace
 
 import pytest
 
-from chembook3d.remote.job_pilot import signature
+from chembook3d import xyz
+from chembook3d.remote.job_pilot import _verify_input, signature
 from tests.fake_ssh_server import FakeSaga, enable_job_pilot
+from tests.hpc_pilot_runner import linked_minimum_input
 
 
 @pytest.fixture
@@ -95,6 +97,37 @@ def test_first_workflow_requires_a_fresh_optimization(pilot, keywords):
     (pilot.jobs / "minimum.jd").write_text("#p HF/STO-3G " + keywords, encoding="ascii")
     with pytest.raises(ValueError, match="unconstrained"):
         prepare(pilot)
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("HF/Gen", "HF/ChkBasis"),
+        ("# SP", "# SP Guess=Read"),
+        ("# SP", "# SP Guess=(Mix,Read)"),
+        ("# SP", "# SP\n@prior-file"),
+        ("O 0 0 0", "O 0 0 1"),
+        ("****", "****\n@basis-from-disk"),
+        ("****", "****\n--Link1-- trailing data"),
+        ("--Link1--\n%chk=water", "--Link1--\n%chk=water.chk"),
+        ("--Link1--\n%chk=water", "--Link1--\n%oldchk=outside\n%chk=water"),
+        ("--Link1--\n%chk=water", "--Link1--\n%chk=../water"),
+        ("Geom=Check", "Geom=AllCheck"),
+        ("B3LYP/ChkBasis", "B3LYP/STO-3G"),
+        ("Geom=Check", "Geom=Connectivity Geom=Check"),
+        ("Continue\n\n0 1", "Continue\n\n0 2"),
+        ("Continue\n\n0 1", "Continue\n\n0 1\nHe 0 0 0"),
+        ("Opt=Tight", "Stable=Opt"),
+        ("Opt=Tight", "Opt=(Tight,ModRedundant)"),
+        ("Freq", "IRC"),
+    ],
+)
+def test_linked_generation_rejects_changed_step(before, after):
+    rows = ["O 0 0 0", "H 0 0 1", "H 0 1 0"]
+    original = linked_minimum_input("water", rows)
+    assert before in original
+    with pytest.raises(ValueError):
+        _verify_input(original.replace(before, after, 1), xyz.parse_xyz("\n".join(rows)), "water")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation requires Windows privilege")
