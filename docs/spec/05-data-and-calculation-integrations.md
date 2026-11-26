@@ -178,17 +178,17 @@ An older keeper reports an unknown operation. At a convenient time, log out all 
 
 **Saga result.** The first CLI attempt reached an older keeper and stopped locally. After following the reconnect procedure, Jonas reported `ok: true` from `chembook3d saga-probe`. The updated keeper ran the fixed helper over the existing authenticated SSH connection. The probe exercised no Slurm operations.
 
-**What remains before job submission.** Validate file scopes for every agent tool on the chosen deployment and confirm the agent cannot change the helper, scripts, job files, dependencies or authorization records. A helper can reject requests it receives. The process that owns an ordinary interactive SSH connection retains the user's account privileges. If the requirement includes protection against that process being compromised, a separate server-enforced access boundary is necessary. Record this decision under Q101. The manual Saga preparation below provides the reference for testing an agent-requested preparation through the restricted helper.
+**Before live job submission**, verify the installed helper enforces the enrolled file scopes and that all agent paths to job inputs, results and imports use its named operations. The helper, scripts, job descriptions, dependencies and authorization records stay outside the agent's writable directory.
 
 ### Saga wrapper example
 
-#### Proposed next implementation under Q101
+#### Agent file access through the Saga helper (D266, Q101)
 
-The enrolled preparation runs through the fixed Saga helper. Agent listing, reads, downloads for import and new-file writes currently use the keeper's SFTP client. Output summaries and job follow-up also depend on those file operations. The live file-access checks in this section establish the behavior of the Chembook tools. The interactive connection still has the operator's account permissions.
+Jonas confirmed that the desktop keeper is trusted. It reuses the operator's authenticated connection and controls the user-facing write permission. The notebook agent can request named operations. Saga independently checks each operation, its arguments and its file scope against the operator's enrollment. The operator's own terminal, import and XYZ export continue to use the interactive connection.
 
-The proposed next local milestone routes these agent file operations through named requests to the Saga helper. The helper enforces its enrolled directories and file-creation rules on each request. Acceptance tests should call the helper directly as well as through the keeper, verify that a missing or refusing helper cannot trigger an ordinary SFTP fallback, and exercise manual import and XYZ export through the user's terminal session.
+The keeper reads the enrollment marker, then sends file requests to the pinned helper. Directory listings use `list_files`. File inspection, summaries and import use `read_file`, which returns bounded portions of a file. New-file writes use `create_xyz` and require the write toggle in the desktop app. The helper limits creation to a fresh XYZ filename directly under `geometries/`. A missing, mismatched or refusing helper ends the agent operation.
 
-Before enabling submission, settle whether the requirement also covers compromise of the desktop process holding the interactive SSH connection. That stronger requirement needs isolation from that connection and an independently restricted agent access path. The site feasibility of that design remains open under Q101.
+**Updating an existing enrollment.** Update the workstation checkout and transfer its `src/chembook3d/remote/saga_prepare.py` to `~/saga_prepare.py` on Saga. Run `install -m 600 -- ~/saga_prepare.py ~/.local/lib/chembook3d/saga_prepare.py` in the Saga terminal to replace just the helper. This preserves the enrolled reference and the earlier preparation receipt. At a convenient time, log out of the older Chembook HPC sessions, close the app, wait at least a minute for the keeper to exit, then start the updated app and log in. For acceptance, repeat the directory and direct-read checks below and use a fresh XYZ name for the write check. The recorded Saga results below came from the earlier version with desktop file checks. Live verification of the new helper is pending.
 
 #### Reproducing a verified minimum through the agent
 

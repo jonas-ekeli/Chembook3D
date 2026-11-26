@@ -1,5 +1,6 @@
 """Trusted keeper side of the preparation-only Saga deployment (D266)."""
 
+import base64
 import hashlib
 import json
 import posixpath
@@ -59,26 +60,45 @@ async def enrolled_root(sftp, username: str) -> str | None:
     return root
 
 
-async def prepare(connection, root: str) -> dict:
+async def _request(connection, request: dict) -> dict:
     try:
         reply = await connection.run(
-            COMMAND, input='{"operation":"prepare_minimum"}\n', encoding="utf-8", timeout=105
+            COMMAND,
+            input=json.dumps(request, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+            timeout=105,
         )
         if reply.exit_status in {3, 4}:
             return {
                 "ok": False,
-                "error": "Install the matching preparation helper from this checkout.",
+                "error": "Install the matching Saga helper from this checkout.",
             }
         answer = json.loads(reply.stdout)
         if reply.exit_status == 1 and answer.get("ok") is False:
-            return {"ok": False, "error": str(answer.get("error", "Preparation failed."))[:500]}
+            return {"ok": False, "error": str(answer.get("error", "Saga request failed."))[:500]}
+        if (
+            reply.exit_status != 0
+            or answer["ok"] is not True
+            or not isinstance(answer["result"], dict)
+        ):
+            raise ValueError
+        return {"ok": True, "result": answer["result"]}
+    except (AttributeError, KeyError, TypeError, ValueError, RecursionError):
+        return {"ok": False, "error": "The Saga helper returned an invalid response."}
+    except (OSError, TimeoutError, asyncssh.Error):
+        return {"ok": False, "error": "The Saga helper channel closed before the result arrived."}
+
+
+async def prepare(connection, root: str) -> dict:
+    answer = await _request(connection, {"operation": "prepare_minimum"})
+    if not answer["ok"]:
+        return answer
+    try:
         result = answer["result"]
         contents = result["input"].encode("utf-8")
         sha = hashlib.sha256(contents).hexdigest()
         if (
-            reply.exit_status != 0
-            or answer["ok"] is not True
-            or result["state"] != "prepared"
+            result["state"] != "prepared"
             or not 0 < len(contents) <= saga_prepare.LIMIT
             or not sha == result["sha256"] == result["reference_sha256"]
             or posixpath.dirname(result["directory"]) != root
@@ -89,8 +109,55 @@ async def prepare(connection, root: str) -> dict:
         return {"ok": True, "result": result}
     except (AttributeError, KeyError, TypeError, ValueError, RecursionError):
         return {"ok": False, "error": "The Saga helper returned an invalid preparation result."}
-    except (OSError, TimeoutError, asyncssh.Error):
-        return {
-            "ok": False,
-            "error": "The preparation channel closed. Recheck the same enrollment.",
-        }
+
+
+async def file_request(connection, request: dict, root: str) -> dict:
+    """Use only the pinned launcher. Treat a partial or malformed reply as failure."""
+    operation = request["operation"]
+    if operation not in {"list_files", "read_file", "create_xyz"}:
+        return {"ok": False, "error": "Unknown Saga file operation."}
+    answer = await _request(connection, request)
+    if not answer["ok"]:
+        return answer
+    try:
+        result = answer["result"]
+        path = result["path"]
+        if posixpath.normpath(path) != path or (path != root and not path.startswith(root + "/")):
+            raise ValueError
+        if operation == "list_files":
+            entries = result["entries"]
+            if (
+                result["agent_read_root"] != root
+                or not isinstance(entries, list)
+                or len(entries) > 2000
+            ):
+                raise ValueError
+            for entry in entries:
+                name = entry["name"]
+                if not isinstance(name, str) or name in {"", ".", ".."} or "/" in name:
+                    raise ValueError
+                if entry["kind"] not in {"directory", "file", "outside"}:
+                    raise ValueError
+        elif operation == "read_file":
+            size = result["size"]
+            if type(size) is not int or size < 0 or type(result["modified"]) is not int:
+                raise ValueError
+            if not re.fullmatch(r"[0-9a-f]{64}", result["version"]):
+                raise ValueError
+            offset = request["offset"]
+            start = max(size + offset, 0) if offset < 0 else min(offset, size)
+            count = min(request["length"], size - start)
+            if type(result["offset"]) is not int or result["offset"] != start:
+                raise ValueError
+            data = base64.b64decode(result["data"], validate=True)
+            if len(data) != count:
+                raise ValueError
+        elif path != request["path"] or type(result["written"]) is not bool:
+            raise ValueError
+        elif result["written"] and result["size"] != len(
+            request["text"].replace("\r\n", "\n").encode("utf-8")
+        ):
+            raise ValueError
+        return {**result, "ok": True}
+    except (AttributeError, KeyError, TypeError, ValueError, RecursionError):
+        return {"ok": False, "error": "The Saga helper returned an invalid file result."}

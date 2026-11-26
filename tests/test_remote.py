@@ -23,7 +23,7 @@ from chembook3d.app import create_app
 from chembook3d.mcp_server import Bridge
 from chembook3d.mcp_tools import BY_NAME, PANEL_ALLOWED, READ_ONLY_TOOLS, TOOLS, input_schema
 from chembook3d.parsers import orca
-from chembook3d.remote import client, keeper
+from chembook3d.remote import client, keeper, saga_access, saga_prepare
 from tests.fake_ssh_server import (
     CODE,
     HOME,
@@ -935,7 +935,7 @@ def _text(response) -> str:
     return response.text
 
 
-def test_claude_sees_the_servers_and_the_files_in_the_terminals_directory(at_work):
+def test_claude_sees_the_servers_and_the_files_in_the_terminals_directory(at_work, saga):
     # No Origin, as Claude's MCP server sends.
     listed = at_work.get("/api/server-files").json()["servers"]
     assert listed == [
@@ -961,6 +961,11 @@ def test_claude_sees_the_servers_and_the_files_in_the_terminals_directory(at_wor
         assert "outside the terminal's current directory" in response.json()["detail"]
     foreign = {"origin": "https://evil.example"}
     assert at_work.get("/api/server-files/saga/files", headers=foreign).status_code == 403
+    text = at_work.get("/api/server-files/saga/read", params={"path": "job.gjf"})
+    assert text.is_success and "#P B3LYP/6-31G(d) Opt" in text.text
+    assert f"{WORK}/old" in saga.record.sftp_paths
+    assert f"{WORK}/job.gjf" in saga.record.sftp_paths
+    assert saga.record.saga_file_requests == []
 
 
 def test_claude_reads_pages_the_end_and_searches_without_changing_anything(at_work, saga):
@@ -1281,13 +1286,14 @@ def test_saga_probe_reuses_the_keepers_login(at_work, saga, capsys):
 
 
 SAGA_WORK = f"/cluster/projects/nn0000k/{USER}/chembook3d-pilot"
+SAGA_CONTROL = ".local/lib/chembook3d"
+SAGA_MARKER = f"{SAGA_CONTROL}/{saga_prepare.MARKER}"
 
 
-def _enroll_saga(saga) -> Path:
-    marker = ".local/lib/chembook3d/.prepare-minimum.json"
+def _enroll_saga(saga, *, install_helper=False) -> Path:
     # The fixture's SFTP home is its root, and the launcher uses the SSH account's HOME.
     for login_home in (saga.root, saga.root / HOME.lstrip("/")):
-        manifest = login_home / marker
+        manifest = login_home / SAGA_MARKER
         manifest.parent.mkdir(parents=True, exist_ok=True)
         with os.fdopen(
             os.open(manifest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600),
@@ -1297,12 +1303,14 @@ def _enroll_saga(saga) -> Path:
             json.dump({"work_root": SAGA_WORK}, stream)
     work = saga.root / SAGA_WORK.lstrip("/")
     (work / "geometries").mkdir(parents=True)
+    if install_helper:
+        (saga.saga_control / "saga_prepare.py").write_bytes(
+            Path(saga_prepare.__file__).read_bytes()
+        )
     return work
 
 
 def test_saga_preparation_uses_only_the_fixed_command_on_the_existing_login(at_work, saga):
-    from chembook3d.remote import saga_access
-
     tool = BY_NAME["prepare_saga_minimum"]
     schema = input_schema(tool)
     assert set(schema["properties"]) == {"server_id"}
@@ -1360,33 +1368,233 @@ def test_saga_preparation_uses_only_the_fixed_command_on_the_existing_login(at_w
     assert saga.record.logins == 1
 
 
-def test_saga_enrollment_scopes_legacy_agent_files_but_preserves_manual_transfers(at_work, saga):
-    work = _enroll_saga(saga)
+def _assert_only_enrollment_sftp(saga, start):
+    assert {p.lstrip("/") for p in saga.record.sftp_paths[start:]} <= {
+        ".",
+        SAGA_MARKER,
+        SAGA_WORK.lstrip("/"),
+    }
+
+
+def test_saga_enrollment_routes_agent_files_through_the_pinned_helper(at_work, saga):
+    work = _enroll_saga(saga, install_helper=True)
     (work / "results").mkdir()
     (work / "results" / "sample.txt").write_text("fixture result", encoding="utf-8")
-    assert _allow(at_work).is_success
-    assert _write(at_work, "manual.xyz", WATER).status_code == 409
-    assert _write(at_work, f"{SAGA_WORK}/results/other.xyz", WATER).status_code == 409
-    assert _write(at_work, f"{SAGA_WORK}/geometries/deep/other.xyz", WATER).status_code == 409
-    assert _write(at_work, f"{SAGA_WORK}/geometries/other.inp", WATER).status_code == 409
-    assert _write(at_work, f"{SAGA_WORK}/geometries/other.xyz", WATER).is_success
-    assert (work / "geometries" / "other.xyz").read_bytes() == WATER.encode()
-
+    before_exec, before_sftp = len(saga.record.commands), len(saga.record.sftp_paths)
     files = "/api/server-files/saga"
+    results = f"{SAGA_WORK}/results"
+    geometry = f"{SAGA_WORK}/geometries/other.xyz"
+
+    response = at_work.get(f"{files}/files", params={"path": results})
+    assert response.is_success, response.text
+    listing = response.json()
+    assert listing["path"] == results and SAGA_WORK in listing["cwd_note"]
+    assert [(e["name"], e["kind"], e["size"]) for e in listing["entries"]] == [
+        ("sample.txt", "file", len("fixture result")),
+    ]
+    read = at_work.get(f"{files}/read", params={"path": f"{results}/sample.txt"})
+    assert read.is_success and "fixture result" in read.text
+
+    assert _write(at_work, geometry, WATER).status_code == 409
+    assert [r["operation"] for r in saga.record.saga_file_requests] == ["list_files", "read_file"]
+    assert _allow(at_work).is_success
+    text = WATER.replace("\n", "\r\n").replace("water\r\n", "water\r\r\n")
+    expected = WATER.replace("water\n", "water\r\n").encode()
+    written = _write(at_work, geometry, text)
+    assert written.is_success, written.text
+    assert written.json()["path"] == f"saga:{geometry}"
+    assert written.json()["folders"] == [] and written.json()["size"] == len(expected)
+    assert saga.record.saga_file_requests[-1] == {
+        "operation": "create_xyz",
+        "path": geometry,
+        "text": text,
+    }
+    assert _write(at_work, geometry, WATER.replace("water", "duplicate")).status_code == 409
+    assert (work / "geometries" / "other.xyz").read_bytes() == expected
+    assert [entry["path"] for entry in _status(at_work)["claude_written"]] == [geometry]
+
+    for path in (
+        "manual.xyz",
+        f"{results}/other.xyz",
+        f"{SAGA_WORK}/geometries/deep/other.xyz",
+        f"{SAGA_WORK}/geometries/other.inp",
+    ):
+        assert _write(at_work, path, WATER).status_code == 409, path
     assert at_work.get(f"{files}/files", params={"path": WORK}).status_code == 409
     assert at_work.get(f"{files}/read", params={"path": f"{WORK}/job.gjf"}).status_code == 409
-    result = at_work.get(f"{files}/read", params={"path": f"{SAGA_WORK}/results/sample.txt"})
-    assert result.is_success and "fixture result" in result.text
+    assert at_work.post(f"{files}/import", json={"paths": [f"{WORK}/{TS}"]}).status_code == 409
+    assert not (saga.root / WORK.lstrip("/") / "manual.xyz").exists()
+    assert not (work / "geometries" / "deep").exists()
+    assert sorted(p.name for p in (work / "results").iterdir()) == ["sample.txt"]
+    assert saga.record.commands[before_exec:] == [saga_access.COMMAND] * len(
+        saga.record.saga_file_requests
+    )
+    _assert_only_enrollment_sftp(saga, before_sftp)
+    assert saga.record.logins == 1
 
+
+def test_saga_agent_import_copies_an_output_in_bounded_helper_reads(at_work, saga):
+    work = _enroll_saga(saga, install_helper=True)
+    output = (FIXTURES / TS).read_bytes()
+    (work / "results").mkdir()
+    (work / "results" / TS).write_bytes(output)
+    path = f"{SAGA_WORK}/results/{TS}"
+    before_exec, before_sftp = len(saga.record.commands), len(saga.record.sftp_paths)
+    plan = at_work.post("/api/server-files/saga/import", json={"paths": [path]})
+    assert plan.is_success, plan.text
+    assert plan.json()["origin"] == {"device": "Saga", "path": f"saga:{path}", "name": TS}
+    imported = at_work.post(f"/api/imports/{plan.json()['token']}/commit", json={})
+    assert imported.is_success, imported.text
+    node_id = imported.json()["node_id"]
+    source = at_work.get(f"/api/nodes/{node_id}/calculations").json()[0]["source_file"]
+    assert at_work.get(f"/api/source-files/{source['id']}/download").content == output
+
+    assert all(
+        r["operation"] == "read_file" and r["path"] == path for r in saga.record.saga_file_requests
+    )
+    chunks = [(r["offset"], r["length"]) for r in saga.record.saga_file_requests if r["length"]]
+    assert chunks == [
+        (start, min(keeper.MAX_READ, len(output) - start))
+        for start in range(0, len(output), keeper.MAX_READ)
+    ]
+    assert saga.record.commands[before_exec:] == [saga_access.COMMAND] * len(
+        saga.record.saga_file_requests
+    )
+    _assert_only_enrollment_sftp(saga, before_sftp)
+
+
+def test_saga_download_discards_chunks_when_output_is_replaced(
+    at_work, saga, tmp_path, monkeypatch
+):
+    work = _enroll_saga(saga, install_helper=True)
+    output = work / "growing.out"
+    output.write_bytes(b"a" * (keeper.MAX_READ + 10))
+    replacement = work / "replacement"
+    replacement.write_bytes(b"b" * output.stat().st_size)
+    stamp = output.stat().st_mtime_ns
+    os.utime(replacement, ns=(stamp, stamp))
+    original = saga._saga_files
+
+    async def file_request(process, request):
+        if request["operation"] == "read_file" and request["offset"] == keeper.MAX_READ:
+            replacement.replace(output)
+        return await original(process, request)
+
+    monkeypatch.setattr(saga, "_saga_files", file_request)
+    destination = tmp_path / "copies"
+    destination.mkdir()
+    existing = destination / output.name
+    existing.write_bytes(b"previous copy")
+    reply = asyncio.run(
+        client.call(
+            "download",
+            server="saga",
+            paths=[f"{SAGA_WORK}/{output.name}"],
+            folder=str(destination),
+            within=True,
+        )
+    )
+    assert not reply["files"] and "changed" in reply["failed"][0]["reason"]
+    assert list(destination.iterdir()) == [existing]
+    assert existing.read_bytes() == b"previous copy"
+
+
+@pytest.mark.parametrize("failure", ["missing", "wrong pin", "refusal"])
+def test_saga_agent_file_helper_failures_never_fall_back_to_sftp(at_work, saga, tmp_path, failure):
+    work = _enroll_saga(saga, install_helper=failure == "refusal")
+    if failure == "wrong pin":
+        (saga.saga_control / "saga_prepare.py").write_text(
+            "raise AssertionError()", encoding="utf-8"
+        )
+    if failure == "refusal":
+        saga.saga_file_error = "Fixture helper refused the request."
+    (work / "results").mkdir()
+    (work / "results" / TS).write_bytes((FIXTURES / TS).read_bytes())
+    results = f"{SAGA_WORK}/results"
+    path = f"{results}/{TS}"
+    geometry = f"{SAGA_WORK}/geometries/failed.xyz"
+    assert _allow(at_work).is_success
+    before_exec, before_sftp = len(saga.record.commands), len(saga.record.sftp_paths)
+    files = "/api/server-files/saga"
+    for response in (
+        at_work.get(f"{files}/files", params={"path": results}),
+        at_work.get(f"{files}/read", params={"path": path}),
+        _write(at_work, geometry, WATER),
+    ):
+        assert response.status_code == 409, response.text
+        expected = saga.saga_file_error or "Install the matching Saga helper"
+        assert expected in response.json()["detail"]
+    folder = tmp_path / "copy"
+    folder.mkdir()
+    copied = asyncio.run(
+        client.call("download", server="saga", paths=[path], folder=str(folder), within=True)
+    )
+    assert copied["files"] == [] and [item["path"] for item in copied["failed"]] == [path]
+    assert not list(folder.iterdir()) and not list((work / "geometries").iterdir())
+    assert [r["operation"] for r in saga.record.saga_file_requests] == [
+        "list_files",
+        "read_file",
+        "create_xyz",
+        "read_file",
+    ]
+    assert saga.record.commands[before_exec:] == [saga_access.COMMAND] * 4
+    _assert_only_enrollment_sftp(saga, before_sftp)
+    assert saga.record.logins == 1
+
+
+@pytest.mark.parametrize("capability", [None, False])
+def test_older_keeper_cannot_offer_agent_file_operations(at_work, saga, monkeypatch, capability):
+    _enroll_saga(saga, install_helper=True)
+    assert _allow(at_work).is_success
+    call = client.call
+    operations = []
+
+    async def old_keeper(operation, **fields):
+        operations.append(operation)
+        result = await call(operation, **fields)
+        if operation == "ping":
+            if capability is None:
+                result.pop("saga_file_operations", None)
+            else:
+                result["saga_file_operations"] = capability
+        return result
+
+    monkeypatch.setattr(client, "call", old_keeper)
+    files = "/api/server-files/saga"
+    path = f"{SAGA_WORK}/geometries/old.xyz"
+    for response in (
+        at_work.get(f"{files}/files", params={"path": SAGA_WORK}),
+        at_work.get(f"{files}/read", params={"path": path}),
+        _write(at_work, path, WATER),
+        at_work.post(f"{files}/import", json={"paths": [path]}),
+    ):
+        assert response.status_code == 409
+        assert "older version" in response.json()["detail"]
+    assert operations == ["ping"] * 4
+    assert not saga.record.saga_file_requests and saga.record.logins == 1
+
+
+def test_saga_enrollment_preserves_manual_transfers_outside_the_pilot(at_work, saga):
+    _enroll_saga(saga)  # manual transfers still work with the helper missing
     node = _node(at_work, "manual")
     sent = at_work.post("/api/remote/servers/saga/send", json={"node_id": node}, headers=ORIGIN)
     assert sent.json() == {"path": f"{WORK}/manual.xyz", "sent": True, "exists": False}
+    url = "/api/remote/servers/saga/files"
+    listing = at_work.get(url)
+    assert listing.is_success, listing.text
+    assert "manual.xyz" in {entry["name"] for entry in listing.json()["entries"]}
+    before_sftp = len(saga.record.sftp_paths)
+    agent = at_work.get(url, headers={"X-Chembook-Client": "claude"})
+    assert agent.status_code == 403 and len(saga.record.sftp_paths) == before_sftp
     plan = at_work.post(
         "/api/remote/servers/saga/import", json={"paths": [f"{WORK}/{TS}"]}, headers=ORIGIN
     )
     assert plan.is_success, plan.text
     imported = at_work.post(f"/api/imports/{plan.json()['token']}/commit", json={})
     assert imported.is_success and imported.json()["node_id"]
+    assert f"{WORK}/manual.xyz" in saga.record.sftp_paths
+    assert f"{WORK}/{TS}" in saga.record.sftp_paths
+    assert saga.record.saga_file_requests == []
     assert saga.record.logins == 1
 
 
@@ -1597,6 +1805,8 @@ def test_a_new_file_and_its_folders_are_written_and_listed(at_work, saga):
     assert deep.json()["folders"] == [f"{WORK}/conformers", f"{WORK}/conformers/c01"]
     assert (work / "conformers" / "c01" / "c01.xyz").read_text(encoding="utf-8") == WATER
     assert _write(at_work, "conformers/c02.xyz", WATER).json()["folders"] == []
+    assert f"{WORK}/conformers/c01/c01.xyz" in saga.record.sftp_paths
+    assert saga.record.saga_file_requests == []
 
     listed = _status(at_work)["claude_written"]
     assert [w["path"] for w in listed] == [

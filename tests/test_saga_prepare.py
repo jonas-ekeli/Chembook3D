@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 import os
@@ -14,6 +15,7 @@ import pytest
 
 from chembook3d.remote import saga_prepare as helper
 
+linux = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Saga runs Linux")
 XYZ = b"2\nsynthetic geometry\nH 0 0 0\nH 0 0 0.74\n"
 REFERENCE = b"# HF/STO-3G Opt\n\nSynthetic hydrogen reference\n\n0 1\nH 0 0 0\nH 0 0 0.74\n\n"
 REQUEST = {"operation": "prepare_minimum"}
@@ -342,9 +344,31 @@ def run_cli(enrollment, request, script_path=helper.__file__):
     )
 
 
+@pytest.fixture
+def deployed_script(enrollment):
+    script = enrollment.marker.with_name("saga_prepare.py")
+    source = Path(helper.__file__).read_text(encoding="utf-8")
+    project_root = 'PROJECTS = Path("/cluster/projects")'
+    assert project_root in source
+    script.write_text(
+        source.replace(project_root, f"PROJECTS = Path({str(enrollment.root.parents[2])!r})"),
+        encoding="utf-8",
+    )
+    return script
+
+
 @pytest.mark.parametrize(
     ("request_data", "error"),
-    [(b'{"operation":"submit"}', "Only the enrolled minimum"), (b" " * 257, "too large")],
+    [
+        (b'{"operation":"submit"}', "Only the enrolled minimum"),
+        (b" " * 257, "too large"),
+        (b" " * 256 + json.dumps(REQUEST).encode(), "too large"),
+        (b'{"operation":"list_files","operation":"prepare_minimum"}', "Duplicate"),
+        (b'{"operation":"list_files","path":"relative"}', "absolute"),
+        (b'{"operation":"list_files","path":"/","work_root":"/"}', "Unexpected fields"),
+        (b'{"operation":"read_file","path":"/etc/passwd","offset":0}', "Unexpected fields"),
+        (b'{"operation":"create_xyz","path":"/","text":"","replace":true}', "Unexpected fields"),
+    ],
 )
 def test_command_emits_only_one_json_error_line(enrollment, request_data, error):
     result = run_cli(enrollment, request_data)
@@ -359,7 +383,7 @@ def test_command_emits_only_one_json_error_line(enrollment, request_data, error)
 
 
 @pytest.mark.skipif(os.name != "posix", reason="The real generator fixture uses /bin/sh")
-def test_command_emits_one_json_success_line_without_generator_output(enrollment):
+def test_command_emits_one_json_success_line_without_generator_output(enrollment, deployed_script):
     enrollment.generator.write_bytes(
         b"#!/bin/sh\n"
         b'[ $# -eq 3 ] && [ -f "$1" ] && [ "$2" = sample.xyz ] '
@@ -370,16 +394,7 @@ def test_command_emits_one_json_success_line_without_generator_output(enrollment
     )
     enrollment.generator.chmod(0o700)
     enrollment.policy["generator_sha256"] = sha256(enrollment.generator.read_bytes())
-    script = enrollment.marker.with_name("saga_prepare.py")
-    source = Path(helper.__file__).read_text(encoding="utf-8")
-    project_root = 'PROJECTS = Path("/cluster/projects")'
-    assert project_root in source
-    script.write_text(
-        source.replace(project_root, f"PROJECTS = Path({str(enrollment.root.parents[2])!r})"),
-        encoding="utf-8",
-    )
-
-    result = run_cli(enrollment, json.dumps(REQUEST).encode(), script)
+    result = run_cli(enrollment, json.dumps(REQUEST).encode(), deployed_script)
 
     assert result.returncode == 0, result.stdout
     assert result.stderr == b""
@@ -395,3 +410,190 @@ def test_command_emits_one_json_success_line_without_generator_output(enrollment
             "input": REFERENCE.decode(),
         },
     }
+
+
+def test_request_byte_limit_covers_ascii_escaped_text_and_bounds_the_envelope():
+    request = {
+        "operation": "create_xyz",
+        "path": "/example.xyz",
+        "text": "\x01" * helper.FILE_LIMIT,
+    }
+    assert helper.parse_request(json.dumps(request).encode()) == request
+    with pytest.raises(ValueError, match="too large"):
+        helper.parse_request(b" " * (helper.JSON_LIMIT + 1))
+
+
+@linux
+def test_cli_reads_from_protected_marker_with_no_caller_supplied_root(enrollment, deployed_script):
+    request = {
+        "operation": "read_file",
+        "path": str(enrollment.reference),
+        "offset": -6,
+        "length": 5,
+    }
+    result = run_cli(enrollment, json.dumps(request).encode(), deployed_script)
+    assert result.returncode == 0, result.stdout
+    assert result.stderr == b""
+    assert json.loads(result.stdout) == {
+        "ok": True,
+        "result": {
+            "path": str(enrollment.reference),
+            "size": len(REFERENCE),
+            "modified": int(enrollment.reference.stat().st_mtime),
+            "version": helper.file_version(enrollment.reference.stat()),
+            "offset": len(REFERENCE) - 6,
+            "data": base64.b64encode(REFERENCE[-6:-1]).decode(),
+        },
+    }
+
+
+@linux
+def test_list_and_read_follow_only_internal_links_and_skip_special_files(enrollment):
+    root = enrollment.root
+    (root / "internal").symlink_to(enrollment.reference)
+    (root / "internal-dir").symlink_to(enrollment.baseline)
+    (root / "external").symlink_to(enrollment.job)
+    (root / "broken").symlink_to(root / "missing")
+    os.mkfifo(root / "fifo")
+    (root / "fifo-link").symlink_to("fifo")
+
+    listing = helper.file_operation(
+        {"operation": "list_files", "path": str(root)}, enrollment.policy
+    )
+    assert listing["agent_read_root"] == listing["path"] == str(root)
+    entries = {entry["name"]: entry for entry in listing["entries"]}
+    assert set(entries) == {"min-test-reference", "internal", "internal-dir", "external"}
+    assert entries["external"] == {"name": "external", "kind": "outside"}
+    assert entries["internal-dir"]["kind"] == "directory"
+    assert entries["internal"]["kind"] == "file"
+    assert entries["internal"]["size"] == len(REFERENCE)
+    assert entries["internal"]["modified"] == int(enrollment.reference.stat().st_mtime)
+    request = {
+        "operation": "read_file",
+        "path": str(root / "internal"),
+        "offset": -999,
+        "length": 3,
+    }
+    result = helper.file_operation(request, enrollment.policy)
+    assert result["path"] == str(enrollment.reference)
+    assert result["offset"] == 0
+    assert base64.b64decode(result["data"]) == REFERENCE[:3]
+    end = helper.file_operation({**request, "offset": 999, "length": 0}, enrollment.policy)
+    assert end["offset"] == len(REFERENCE) and end["data"] == ""
+    for path in (root / "external", enrollment.job, root / ".." / "jobdescriptions" / helper.JOB):
+        with pytest.raises(ValueError):
+            helper.file_operation({**request, "path": str(path)}, enrollment.policy)
+    for name in ("fifo", "fifo-link", "internal-dir"):
+        with pytest.raises(ValueError, match="regular file"):
+            helper.file_operation({**request, "path": str(root / name)}, enrollment.policy)
+
+
+@pytest.mark.parametrize(
+    "offset,length", [(True, 2), (0, False), (1.2, 0), (0, -1), (0, helper.FILE_LIMIT + 1)]
+)
+def test_read_rejects_invalid_ranges(enrollment, offset, length):
+    with pytest.raises(ValueError, match="integer offset"):
+        helper.read_range(enrollment.root, enrollment.geometry, offset, length)
+
+
+@linux
+def test_create_collision_is_exclusive_even_for_a_dangling_link(enrollment):
+    inbox = enrollment.root / "geometries"
+    inbox.mkdir()
+    path = inbox / "sample.xyz"
+    request = {"operation": "create_xyz", "path": str(path), "text": "2\r\nÅ\r\n"}
+    data = "2\nÅ\n".encode()
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(
+            pool.map(lambda _: helper.file_operation(request, enrollment.policy), range(4))
+        )
+    assert results.count({"path": str(path), "written": True, "size": len(data)}) == 1
+    alternative = inbox / "sample_v2.xyz"
+    assert results.count({"path": str(path), "written": False, "free": str(alternative)}) == 3
+    assert path.read_bytes() == data
+    assert set(inbox.iterdir()) == {path}
+    alternative.symlink_to(enrollment.root / "missing")
+    expected_free = str(inbox / "sample_v3.xyz")
+    for target in (path, alternative):
+        result = helper.file_operation(
+            {**request, "text": "other", "path": str(target)}, enrollment.policy
+        )
+        assert result == {"path": str(target), "written": False, "free": expected_free}
+    assert path.read_bytes() == data
+    assert alternative.is_symlink()
+    assert not (enrollment.root / "missing").exists()
+
+
+@linux
+def test_create_and_read_limits_and_failed_create_cleanup(enrollment, monkeypatch):
+    inbox = enrollment.root / "geometries"
+    inbox.mkdir()
+    path = inbox / "full.xyz"
+    request = {"operation": "create_xyz", "path": str(path), "text": "Å" * (helper.FILE_LIMIT // 2)}
+    with pytest.raises(ValueError, match="1 MiB"):
+        helper.file_operation({**request, "text": request["text"] + "x"}, enrollment.policy)
+    with pytest.raises(ValueError, match="Only text"):
+        helper.file_operation({**request, "text": "x\0y"}, enrollment.policy)
+    with monkeypatch.context() as patch:
+        patch.setattr(helper.os, "fsync", Mock(side_effect=OSError("failed to sync")))
+        with pytest.raises(OSError, match="failed to sync"):
+            helper.file_operation(request, enrollment.policy)
+    assert list(inbox.iterdir()) == []
+    assert helper.file_operation(request, enrollment.policy)["size"] == helper.FILE_LIMIT
+    result = helper.file_operation(
+        {
+            "operation": "read_file",
+            "path": str(path),
+            "offset": 0,
+            "length": helper.FILE_LIMIT,
+        },
+        enrollment.policy,
+    )
+    assert base64.b64decode(result["data"]) == request["text"].encode()
+
+
+@linux
+def test_only_new_flat_xyz_in_the_actual_geometries_directory_can_be_written(enrollment, tmp_path):
+    root = enrollment.root
+    inbox = root / "geometries"
+    outside = tmp_path / "other"
+    outside.mkdir()
+    inbox.symlink_to(outside, target_is_directory=True)
+    for path in (
+        root / "bad.xyz",
+        inbox / "bad.inp",
+        inbox / ".bad.xyz",
+        inbox / "sub" / "bad.xyz",
+        inbox / ".." / "bad.xyz",
+        inbox / "valid.xyz",
+        outside / "valid.xyz",
+    ):
+        with pytest.raises((ValueError, OSError)):
+            helper.file_operation(
+                {"operation": "create_xyz", "path": str(path), "text": "x"}, enrollment.policy
+            )
+    assert list(outside.iterdir()) == []
+    assert not (root / "bad.xyz").exists()
+
+
+@linux
+def test_read_rechecks_directory_components_after_resolution(enrollment, monkeypatch):
+    real_resolve = helper.resolved_inside
+
+    def swap_directory(root, path):
+        resolved = real_resolve(root, path)
+        enrollment.baseline.rename(root / "old")
+        enrollment.baseline.symlink_to(enrollment.job.parent, target_is_directory=True)
+        return resolved
+
+    monkeypatch.setattr(helper, "resolved_inside", swap_directory)
+    with pytest.raises(OSError):
+        helper.file_operation(
+            {
+                "operation": "read_file",
+                "path": str(enrollment.baseline / helper.JOB),
+                "offset": 0,
+                "length": helper.FILE_LIMIT,
+            },
+            enrollment.policy,
+        )

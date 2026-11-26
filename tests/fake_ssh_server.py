@@ -13,11 +13,13 @@ Run as a script for the UI tests: `python -m tests.fake_ssh_server --port 8767 -
 
 import argparse
 import asyncio
+import base64
 import contextlib
 import fnmatch
 import json
 import os
 import posixpath
+import re
 import socket
 import socketserver
 import subprocess
@@ -30,13 +32,14 @@ from pathlib import Path
 import asyncssh
 from asyncssh.x11 import walk_xauth
 
-from chembook3d.remote import probe
+from chembook3d.remote import probe, saga_access, saga_prepare
 from chembook3d.remote.job_pilot import LOCAL_WORK, SUBSYSTEM, JobPilot
 
 USER = "jonas"
 PASSWORD = "correct horse"
 CODE = "123456"
 HOME = "/cluster/home/jonas"
+SAGA_FILE_OPERATIONS = {"list_files", "read_file", "create_xyz"}
 
 
 @dataclass
@@ -48,6 +51,8 @@ class Record:
     commands: list[str | None] = field(default_factory=list)  # each session's command
     displays: list[str | None] = field(default_factory=list)  # each session's X11 display
     saga_prepare_requests: list[bytes] = field(default_factory=list)
+    saga_file_requests: list[dict] = field(default_factory=list)
+    sftp_paths: list[str] = field(default_factory=list)
 
 
 class _Server(asyncssh.SSHServer):
@@ -89,6 +94,16 @@ class _Server(asyncssh.SSHServer):
         return False
 
 
+class _SFTPServer(asyncssh.SFTPServer):
+    def __init__(self, chan, fake: "FakeSaga"):
+        super().__init__(chan, chroot=os.fsencode(fake.root))
+        self._record = fake.record
+
+    def map_path(self, path: bytes) -> bytes:
+        self._record.sftp_paths.append(os.fsdecode(path))
+        return super().map_path(path)
+
+
 class FakeSaga:
     def __init__(self, root: Path, real_shell: bool = False, port: int = 0, x11: bool = True):
         self.root = root
@@ -96,6 +111,7 @@ class FakeSaga:
         self.job_pilot = None
         self.drop_submit_reply = False
         self.saga_prepare_reply: dict | None = None
+        self.saga_file_error: str | None = None
         self.port = port
         self.x11 = x11
         self.xauthority = root / ".Xauthority"  # the cookies of the forwarded displays
@@ -113,14 +129,13 @@ class FakeSaga:
         return self.key.export_public_key("openssh").decode().split()[1]
 
     async def start_async(self) -> None:
-        root = str(self.root)
         self._server = await asyncssh.create_server(
             lambda: _Server(self),
             "127.0.0.1",
             self.port,
             server_host_keys=[self.key],
             process_factory=self._session,
-            sftp_factory=lambda chan: asyncssh.SFTPServer(chan, chroot=root.encode()),
+            sftp_factory=lambda chan: _SFTPServer(chan, self),
             encoding=None,
             line_editor=False,
             x11_forwarding=self.x11,
@@ -179,34 +194,28 @@ class FakeSaga:
             self._thread.join(5)
 
     async def _session(self, process: asyncssh.SSHServerProcess) -> None:
-        from chembook3d.remote import saga_access
-
         self.record.commands.append(process.command)
         self.record.displays.append(process.channel.get_x11_display())
-        if process.command in (probe.COMMAND, saga_access.COMMAND):
-            request = await process.stdin.read(257)
-            if process.command == saga_access.COMMAND:
+        if process.command == saga_access.COMMAND:
+            request = await process.stdin.read()
+            envelope = None
+            with contextlib.suppress(ValueError):
+                envelope = json.loads(request)
+            operation = envelope.get("operation") if isinstance(envelope, dict) else None
+            if isinstance(operation, str) and operation in SAGA_FILE_OPERATIONS:
+                self.record.saga_file_requests.append(envelope)
+                if await self._saga_files(process, envelope):
+                    return
+            elif operation == "prepare_minimum":
                 self.record.saga_prepare_requests.append(request)
                 if self.saga_prepare_reply is not None:
                     process.stdout.write(json.dumps(self.saga_prepare_reply).encode())
                     process.exit(0)
                     return
-                launcher = saga_access.LAUNCHER
-            else:
-                launcher = probe.PROBE_SOURCE
-            # Run the keeper's exact pinned launcher in the stand-in account's home.
-            home = str(self.root / HOME.lstrip("/"))
-            result = await asyncio.to_thread(
-                subprocess.run,
-                [sys.executable, "-I", "-S", "-c", launcher],
-                env={**os.environ, "HOME": home, "USERPROFILE": home},
-                input=request,
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )
-            process.stdout.write(result.stdout)
-            process.exit(result.returncode)
+            await self._pinned(process, saga_access.LAUNCHER, request)
+            return
+        if process.command == probe.COMMAND:
+            await self._pinned(process, probe.PROBE_SOURCE, await process.stdin.read(257))
             return
         if process.subsystem == SUBSYSTEM and self.job_pilot is not None:
             try:
@@ -229,6 +238,126 @@ class FakeSaga:
             await _real(process)
         else:
             await _FakeShell(self.root, process, self.xauthority).run()
+
+    @property
+    def saga_control(self) -> Path:
+        return self.root / HOME.lstrip("/") / ".local/lib/chembook3d"
+
+    async def _pinned(
+        self, process: asyncssh.SSHServerProcess, launcher: str, request: bytes
+    ) -> None:
+        """Run the keeper's exact pinned launcher in the stand-in account's home."""
+        home = str(self.root / HOME.lstrip("/"))
+        result = await asyncio.to_thread(
+            subprocess.run,
+            [sys.executable, "-I", "-S", "-c", launcher],
+            env={**os.environ, "HOME": home, "USERPROFILE": home},
+            input=request,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        process.stdout.write(result.stdout)
+        process.exit(result.returncode)
+
+    async def _saga_files(self, process: asyncssh.SSHServerProcess, request: dict) -> bool:
+        """Project helper filesystem operations into the fixture's SFTP namespace."""
+        installed = self.saga_control / "saga_prepare.py"
+        if not installed.is_file():
+            return False  # the real launcher reports the missing install
+        source = installed.read_bytes().replace(b"\r\n", b"\n")
+        if source != Path(saga_prepare.__file__).read_bytes().replace(b"\r\n", b"\n"):
+            return False  # the real launcher reports the pin mismatch
+        try:
+            if self.saga_file_error is not None:
+                raise ValueError(self.saga_file_error)
+            policy = json.loads((self.saga_control / saga_prepare.MARKER).read_bytes())
+            if sys.platform == "linux":
+                result = await asyncio.to_thread(self._linux_saga_files, source, request, policy)
+            else:
+                result = self._portable_saga_files(request, policy["work_root"])
+            reply, status = {"ok": True, "result": result}, 0
+        except (OSError, ValueError) as exc:
+            reply, status = {"ok": False, "error": str(exc)}, 1
+        process.stdout.write(json.dumps(reply).encode())
+        process.exit(status)
+        return True
+
+    def _linux_saga_files(self, source: bytes, request: dict, policy: dict) -> dict:
+        # Give this execution its own globals so other fake servers keep their own root.
+        helper = {"__name__": "_fake_saga_prepare"}
+        exec(compile(source, str(self.saga_control / "saga_prepare.py"), "exec"), helper)
+        helper["PROJECTS"] = self.root / "cluster/projects"
+        path = request["path"]
+        if path.startswith("/"):
+            request = {**request, "path": str(self.root) + path}
+        policy = {**policy, "work_root": str(self.root) + policy["work_root"]}
+        result = helper["file_operation"](request, policy)
+        for key in ("path", "agent_read_root", "free"):
+            if isinstance(result.get(key), str):
+                result[key] = result[key].removeprefix(str(self.root))
+        return result
+
+    def _portable_saga_files(self, request: dict, root: str) -> dict:
+        """Stand in for the helper on test hosts without Linux's filesystem interfaces."""
+        path = request["path"]
+        operation = request["operation"]
+        relative = path[len(root) + 1 :] if path.startswith(root + "/") else ""
+        parts = relative.split("/") if relative else []
+        if (path != root and not parts) or any(
+            not p or p in (".", "..") or "\\" in p or ":" in p for p in parts
+        ):
+            raise ValueError("This path is outside the pilot's approved results directory.")
+        target = self.root / root.lstrip("/")
+        for part in parts:
+            target /= part
+            if target.is_symlink():
+                raise ValueError("Links are outside the pilot's approved results directory.")
+        if operation == "list_files":
+            entries = []
+            for child in target.iterdir():
+                if child.is_symlink():
+                    entries.append({"name": child.name, "kind": "outside"})
+                elif child.is_dir() or child.is_file():
+                    info = child.stat()
+                    entries.append(
+                        {
+                            "name": child.name,
+                            "kind": "directory" if child.is_dir() else "file",
+                            "size": info.st_size,
+                            "modified": int(info.st_mtime),
+                        }
+                    )
+            return {"path": path, "entries": entries, "agent_read_root": root}
+        if operation == "read_file":
+            with target.open("rb") as stream:
+                info = os.fstat(stream.fileno())
+                offset = request["offset"]
+                size = info.st_size
+                start = max(0, size + offset) if offset < 0 else min(size, offset)
+                stream.seek(start)
+                data = stream.read(request["length"])
+            return {
+                "path": path,
+                "size": size,
+                "modified": int(info.st_mtime),
+                "version": saga_prepare.file_version(info),
+                "offset": start,
+                "data": base64.b64encode(data).decode("ascii"),
+            }
+        if (
+            len(parts) != 2
+            or parts[0] != "geometries"
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\.xyz", parts[1])
+        ):
+            raise ValueError("Only flat, named XYZ files may be created in geometries.")
+        data = request["text"].replace("\r\n", "\n").encode("utf-8")
+        try:
+            with target.open("xb") as stream:
+                stream.write(data)
+        except FileExistsError:
+            return {"path": path, "written": False, "free": None}
+        return {"path": path, "written": True, "size": len(data)}
 
 
 class _FakeShell:

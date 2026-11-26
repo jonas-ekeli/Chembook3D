@@ -27,6 +27,7 @@ import posixpath
 import re
 import secrets
 import sys
+import tempfile
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -329,6 +330,7 @@ class Session:
     pilot_scope: bool = False
     saga_work: str | None = None
     written: list[dict] = field(default_factory=list)  # what Claude wrote in this login
+    write_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def files(self) -> asyncssh.SFTPClient:
         """The SFTP client on this connection, opened the first time it is needed."""
@@ -509,6 +511,22 @@ async def refresh_saga_scope(session: Session) -> None:
     session.saga_work = root
 
 
+def _saga_path(session: Session, path: object) -> str:
+    """Translate terminal-relative names for the helper, which opens the path on Saga."""
+    if session.shell is None or not session.shell.cwd or not session.shell.cwd.startswith("/"):
+        raise Outside("The terminal has not reported its current directory.")
+    if path is not None and not isinstance(path, str):
+        raise Outside("The path must be text.")
+    target = posixpath.join(session.shell.cwd, path or ".")
+    if ".." in target.split("/"):
+        raise Outside("Use a path inside the enrolled directory without '..'.")
+    target = posixpath.normpath(target)
+    root = session.saga_work
+    if root is None or (target != root and not target.startswith(root + "/")):
+        raise Outside("This path is outside the pilot's approved results directory.")
+    return target
+
+
 async def within(session: Session, sftp: asyncssh.SFTPClient, path: object) -> str:
     """D124: the full path `path` names (relative to the shell's current directory, symlinks
     followed by the server's realpath), refused unless it is that directory or below it."""
@@ -520,8 +538,8 @@ async def within(session: Session, sftp: asyncssh.SFTPClient, path: object) -> s
         )
     if path is not None and not isinstance(path, str):
         raise Outside("The path must be text.")
-    if session.pilot_scope or session.saga_work:
-        approved = session.saga_work or LOCAL_WORK
+    if session.pilot_scope:
+        approved = LOCAL_WORK
         base = await sftp.realpath(approved)
         target = await sftp.realpath(posixpath.join(shell.cwd, path or "."))
         if base != approved or (target != base and not target.startswith(base + "/")):
@@ -751,11 +769,17 @@ class Keeper:
 
     async def dispatch(self, op: str, msg: dict) -> dict:
         if op == "ping":
-            return {"ok": True, "protocol": PROTOCOL, "pid": os.getpid()}
+            return {
+                "ok": True,
+                "protocol": PROTOCOL,
+                "pid": os.getpid(),
+                "saga_file_operations": True,
+            }
         if op == "status":
             return {
                 "ok": True,
                 "protocol": PROTOCOL,
+                "saga_file_operations": True,
                 "sessions": await self._status(),
                 "lost": dict(self.lost),
             }
@@ -925,9 +949,10 @@ class Keeper:
                         session, msg.get("path"), msg.get("offset"), msg.get("length")
                     )
                 if op == "write":
-                    return await self._write(
-                        session, msg.get("path"), msg.get("text"), msg.get("based_on")
-                    )
+                    async with session.write_lock:
+                        return await self._write(
+                            session, msg.get("path"), msg.get("text"), msg.get("based_on")
+                        )
                 return await self._download(session, msg.get("paths"), msg.get("folder"), inside)
             except Outside as exc:
                 return {"ok": False, "error": str(exc), "outside": True}
@@ -943,6 +968,12 @@ class Keeper:
         """The files in a directory, by default the shell's current one (D122e). `inside`
         (D124): only that directory or one below it, and a link out of it is listed without
         following it."""
+        if inside and session.saga_work is not None:
+            return await saga_access.file_request(
+                session.conn,
+                {"operation": "list_files", "path": _saga_path(session, path)},
+                session.saga_work,
+            )
         sftp = await session.files()
         if inside:
             path = await within(session, sftp, path)
@@ -976,8 +1007,8 @@ class Keeper:
                 {"name": name, "kind": kind, "size": attrs.size, "modified": attrs.mtime}
             )
         result = {"ok": True, "path": path, "entries": entries}
-        if inside and (session.pilot_scope or session.saga_work):
-            result["agent_read_root"] = session.saga_work or LOCAL_WORK
+        if inside and session.pilot_scope:
+            result["agent_read_root"] = LOCAL_WORK
         return result
 
     async def _download(
@@ -989,7 +1020,8 @@ class Keeper:
             return {"ok": False, "error": "Name the files to copy."}
         if not isinstance(folder, str) or not Path(folder).is_dir():
             return {"ok": False, "error": "The folder to copy into is not there."}
-        sftp = await session.files()
+        enrolled = inside and session.saga_work is not None
+        sftp = None if enrolled else await session.files()
         total = 0
         copied, failed = [], []
         for path in paths:
@@ -998,19 +1030,28 @@ class Keeper:
                 failed.append({"path": path, "reason": "not a full path to a file"})
                 continue
             try:
-                if inside:
-                    path = await within(session, sftp, path)
-                    name = posixpath.basename(path)
-                attrs = await sftp.stat(path)
-                size = attrs.size or 0
+                if enrolled:
+                    meta = await self._read(session, path, 0, 0)
+                    if not meta["ok"]:
+                        raise OSError(meta["error"])
+                    path = meta["path"]
+                    size, modified = meta["size"], meta["modified"]
+                else:
+                    if inside:
+                        path = await within(session, sftp, path)
+                    attrs = await sftp.stat(path)
+                    size, modified = attrs.size or 0, attrs.mtime
                 total += size
                 if total > MAX_DOWNLOAD:
                     failed.append({"path": path, "reason": "more than 2 GB in one import"})
                     continue
                 # A POSIX basename may still be a Windows path, device or alternate
                 # data stream. Keep ordinary names (including ORCA companions) intact.
-                local = _download_destination(Path(folder), name)
-                await sftp.get(path, str(local))
+                local = _download_destination(Path(folder), posixpath.basename(path))
+                if enrolled:
+                    await self._copy_saga_file(session, path, local, size, meta["version"])
+                else:
+                    await sftp.get(path, str(local))
             except Outside as exc:
                 failed.append({"path": path, "reason": str(exc)})
                 continue
@@ -1018,10 +1059,39 @@ class Keeper:
                 failed.append({"path": path, "reason": _reason(exc)})
                 continue
             session.used = time.monotonic()
-            copied.append(
-                {"path": path, "local": str(local), "size": size, "modified": attrs.mtime}
-            )
+            item = {"path": path, "local": str(local), "size": size, "modified": modified}
+            if enrolled:
+                item["version"] = meta["version"]
+            copied.append(item)
         return {"ok": True, "files": copied, "failed": failed}
+
+    async def _copy_saga_file(
+        self, session: Session, path: str, local: Path, size: int, version: str
+    ) -> None:
+        """Publish a complete local file only after each bounded helper read succeeds."""
+        temporary = tempfile.NamedTemporaryFile(dir=local.parent, delete=False)
+        try:
+            with temporary:
+                for offset in range(0, size, MAX_READ):
+                    length = min(MAX_READ, size - offset)
+                    chunk = await self._read(session, path, offset, length)
+                    if not chunk["ok"]:
+                        raise OSError(chunk["error"])
+                    if (chunk["path"], chunk["size"], chunk["version"], chunk["offset"]) != (
+                        path,
+                        size,
+                        version,
+                        offset,
+                    ):
+                        raise OSError("The remote file changed during the copy.")
+                    data = base64.b64decode(chunk["data"], validate=True)
+                    if len(data) != length:
+                        raise OSError("The remote file could not be read completely.")
+                    temporary.write(data)
+            os.replace(temporary.name, local)
+        except BaseException:
+            Path(temporary.name).unlink(missing_ok=True)
+            raise
 
     async def _read(self, session: Session, path: object, offset: object, length: object) -> dict:
         """D124: bytes of a file in the shell's current directory or below, for Claude: at most
@@ -1029,16 +1099,31 @@ class Keeper:
         `length` of 0 reads only those."""
         if not isinstance(path, str) or not path:
             return {"ok": False, "error": "Name the file to read."}
+        start = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
+        count = length if isinstance(length, int) and not isinstance(length, bool) else MAX_READ
+        count = max(0, min(count, MAX_READ))
+        if session.saga_work is not None:
+            reply = await saga_access.file_request(
+                session.conn,
+                {
+                    "operation": "read_file",
+                    "path": _saga_path(session, path),
+                    "offset": start,
+                    "length": count,
+                },
+                session.saga_work,
+            )
+            if reply["ok"] and reply["data"]:
+                session.used = time.monotonic()
+            return reply
         sftp = await session.files()
         path = await within(session, sftp, path)
         attrs = await sftp.stat(path)
         if attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY:
             return {"ok": False, "error": f"{path} is a directory."}
         size = attrs.size or 0
-        start = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
         start = max(size + start, 0) if start < 0 else min(start, size)
-        count = length if isinstance(length, int) and not isinstance(length, bool) else MAX_READ
-        count = max(0, min(count, MAX_READ, size - start))
+        count = min(count, size - start)
         data = b""
         if count:
             async with sftp.open(path, "rb") as handle:
@@ -1138,10 +1223,20 @@ class Keeper:
             raise Outside(f"The {name} terminal has not reported its current directory.")
         if not isinstance(path, str) or not path.strip():
             return {"ok": False, "error": "Name the file to write."}
+        if session.saga_work is not None:
+            target = _saga_path(session, path)
+            reply = await saga_access.file_request(
+                session.conn,
+                {"operation": "create_xyz", "path": target, "text": text},
+                session.saga_work,
+            )
+            if not reply["ok"] or not reply["written"]:
+                return reply
+            return self._record_write(session, shell, target, reply["size"], based_on, [])
         sftp = await session.files()
         root = await sftp.realpath(shell.cwd)
-        if session.pilot_scope or session.saga_work:
-            approved = (session.saga_work or LOCAL_WORK) + "/geometries"
+        if session.pilot_scope:
+            approved = LOCAL_WORK + "/geometries"
             if await sftp.realpath(approved) != approved:
                 raise Outside("Invalid pilot geometry directory.")
             # Resolve relative requests against the terminal, then create files only
@@ -1151,19 +1246,11 @@ class Keeper:
                 raise Outside(
                     "Agent file creation on the pilot is limited to its geometries directory."
                 )
-            if session.saga_work and not re.fullmatch(
-                r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\.xyz", path[len(approved) + 1 :]
-            ):
-                raise Outside(
-                    "Agent writes on this deployment are limited to flat, named XYZ files."
-                )
             root = approved
         relative = path
         if path.startswith("/"):
             for base in (
-                [root]
-                if session.pilot_scope or session.saga_work
-                else [shell.cwd.rstrip("/"), root.rstrip("/")]
+                [root] if session.pilot_scope else [shell.cwd.rstrip("/"), root.rstrip("/")]
             ):
                 if path.startswith(base + "/"):
                     relative = path[len(base) + 1 :]
@@ -1217,17 +1304,28 @@ class Keeper:
                     "free": await _free(sftp, target),
                 }
             raise
+        return self._record_write(session, shell, target, len(data), based_on, made)
+
+    def _record_write(
+        self,
+        session: Session,
+        shell: Shell,
+        target: str,
+        size: int,
+        based_on: object,
+        folders: list[str],
+    ) -> dict:
         session.used = time.monotonic()
         record = {
             "path": target,
-            "size": len(data),
+            "size": size,
             "time": time.time(),
             "based_on": based_on if isinstance(based_on, str) else None,
-            "folders": made,
+            "folders": folders,
         }
         session.written.append(record)
         shell._send({"type": "written", **record})
-        log.info("Claude wrote %d bytes on %s", len(data), session.server["host"])
+        log.info("Claude wrote %d bytes on %s", size, session.server["host"])
         return {"ok": True, "written": True, **record}
 
     async def _status(self) -> list[dict]:

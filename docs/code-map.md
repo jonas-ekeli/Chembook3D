@@ -722,7 +722,10 @@ Routes for all of these are in `api/pathway.py`.
 - `prepare_saga_minimum` in `mcp_tools.py` calls `api/hpc_jobs.py`. The keeper uses
   `remote/saga_access.py` to check the enrolled directory and launch the pinned helper
   over the existing SSH connection. `remote/saga_prepare.py` is the standalone file
-  the operator copies to Saga. Its setup and acceptance procedure are in 05 §9.
+  the operator copies to Saga. The same helper checks scoped agent listings, byte
+  reads for inspection and import, and exclusive XYZ creation. The keeper's
+  `saga_file_operations` capability identifies sessions supporting this route.
+  Its setup, upgrade and acceptance procedure are in 05 §9.
   `tests/test_saga_prepare.py` covers the cluster helper and `tests/test_remote.py`
   covers the agent interface, login reuse and file scopes.
 

@@ -6,6 +6,10 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- On enrolled Saga accounts, the cluster helper now enforces the notebook agent's
+  file permissions for listing, reading results, importing and creating new XYZ
+  files. Existing enrollments can update the helper in place (D266, 05 §9).
+
 - The notebook agent can reproduce one manually verified Gaussian minimum input through
   an existing Saga login. The operator enrolls the reference on Saga. The helper runs the
   generator with `nosub` and checks the full input against its SHA-256 digest (D266).

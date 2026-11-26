@@ -679,8 +679,8 @@ TOOLS: list[ToolSpec] = [
         "GET",
         "/api/server-files",
         "The SSH servers (Saga, ...) the app knows: whether the user is logged in and the "
-        "current directory of the server's terminal in the app. Only that directory and the "
-        "ones below it can be read; the user moves it with cd. You cannot log in.",
+        "current directory of the server's terminal in the app. Enrolled pilots have a fixed "
+        "read scope. Other servers allow reads in the current directory and below.",
     ),
     T(
         "prepare_saga_minimum",
@@ -731,8 +731,8 @@ TOOLS: list[ToolSpec] = [
         "read",
         "GET",
         "/api/server-files/{server_id}/files",
-        "The files in the server terminal's current directory (or a directory below it): "
-        "name, kind, size, time.",
+        "List names, types, sizes and modification times in the agent's allowed directory. "
+        "Use the enrolled pilot path on Saga.",
         help={
             "server_id": "Id of a logged-in server, from list_servers (e.g. 'saga').",
             "path": "A directory relative to the terminal's current directory (or a full path "
@@ -823,7 +823,8 @@ TOOLS: list[ToolSpec] = [
         "write",
         "POST",
         "/api/server-files/{server_id}/write",
-        "Write a NEW text file (an input, a job script, an xyz, notes) in the server terminal's "
+        "On enrolled Saga, create a new XYZ directly under the pilot's geometries directory. "
+        "On ordinary servers, write a NEW text file in the server terminal's "
         "current directory or a folder below it (new folders are made), only after the user "
         "turned on 'Let Claude write new files here' in the app's server tab (list_servers "
         "shows `writes`). An existing file is never replaced, edited or deleted: to change one, "

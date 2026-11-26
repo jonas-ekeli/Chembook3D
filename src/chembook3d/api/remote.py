@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from chembook3d.api import downloads
 from chembook3d.api.claude import BUSY, POLICY, TOKEN_LIFETIME, _refusal, _size
+from chembook3d.api.live import AGENT, CLIENT_HEADER
 from chembook3d.api.routes import _investigation, _staging
 from chembook3d.parsers import orca
 from chembook3d.remote import client, keeper, servers
@@ -363,6 +364,10 @@ def _saved(server_id: str) -> servers.Server:
 async def list_files(server_id: str, request: Request, path: str | None = None) -> RemoteListing:
     """The files in the terminal's current directory, or in `path`."""
     _check(request, page_only=False)
+    # Browsers may omit Origin on a same-origin GET. The notebook bridge always
+    # identifies its requests and must use the scoped server-files endpoint.
+    if request.headers.get(CLIENT_HEADER) == AGENT:
+        raise HTTPException(403, "Use the scoped list_server_files tool.")
     _saved(server_id)
     answer = await _keeper("list", server=server_id, path=path)
     entries = [
