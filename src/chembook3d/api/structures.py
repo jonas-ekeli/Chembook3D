@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from chembook3d.api.jobs import _local_page_only
 from chembook3d.api.routes import DbSession, _investigation
-from chembook3d.models import Node
+from chembook3d.models import Node, Role
 from chembook3d.services import batch_import, folder_survey, irc_ends, thermo_settings, ts_partners
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
@@ -261,6 +261,29 @@ def group_structures(body: GroupIn, request: Request, session: DbSession) -> dic
         )
     try:
         structures = [compare.resolve(session, folder, ref, tolerance) for ref in refs]
-        return compare.group(structures, tolerance, body.count_weak)
+        found = compare.group(structures, tolerance, body.count_weak)
     except (compare.StructureError, RecordError) as exc:
         raise _refused(exc) from exc
+    _name_nodes(session, found, refs)
+    return found
+
+
+def _name_nodes(session: Any, found: dict[str, Any], refs: list[dict[str, Any]]) -> None:
+    """A193: each member that is a node carries its id (a TS marked), so the conformer groups
+    can be proposed from the answer at once, before any linking."""
+    for formula in found["formulas"]:
+        for molecule in formula["molecules"]:
+            for conformer in molecule["conformers"]:
+                for member in conformer["members"]:
+                    node_id = refs[member["index"] - 1].get("node_id")
+                    node = session.get(Node, node_id) if node_id else None
+                    if node is None:
+                        continue
+                    member["node_id"] = node.id
+                    if node.role == Role.TRANSITION_STATE:
+                        member["ts"] = True
+    found["next"] = (
+        "Make the conformer groups now, before linking (the linking tools treat a group as "
+        "one structure): one propose_mechanism with only groups, each a molecule's minima "
+        "(members without ts) as member_ids, when it has more than one."
+    )
