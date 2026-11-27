@@ -265,6 +265,8 @@ The workspace `.log` is the submission wrapper's job record. It reports the sepa
 
 For agent follow-up, consult the wrapper log for job state and the Gaussian output for scientific progress or termination. The cluster helper must verify a reported run directory against the approved read scope and its association with this job before retrieving files (D266). Report unavailable output explicitly if that check fails or the files are gone.
 
+An earlier completed run can exercise result reading while the live trial runs. The operator can copy its matching wrapper `.log` and Gaussian `.out` into a fresh directory beneath the pilot, preserving their original filenames and modification times. Use the Slurm ID from the archived log and the copied log path with `check_server_job`. Record the wrapper outcome, optimization convergence and frequency results against the archived ID. If only the Gaussian output is available, `summarize_server_file` exercises the chemistry parser alone. The live trial still needs follow-up against its own receipt and output.
+
 ### Behaviour of the supplied preparation and submission scripts
 
 `submit_all_DFT.sh` explicitly handles XYZ and SDF and invokes the configured Java generator's `PrepareInputGaussian` task, writing its output messages to `<stem>.accLog`. With one selected geometry, the `nosub` branch exits successfully without checking the generator's status or validating the new input. For agent preparation, supply one geometry and one trusted project job file in a fresh attempt directory. Verify that this invocation produced a usable input before offering it for review or submission.
