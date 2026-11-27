@@ -48,13 +48,13 @@ def test_the_panel_gets_the_build_mechanism_command(tmp_path, monkeypatch):
         "survey_folder",
         "import_folder",
         "group_structures",
+        "propose_mechanism",  # A193: the conformer groups at once, before any linking
         "irc_end",
         "find_ts_partners",
         "compare_structures` with `ts`",
         "start_local_follow_mode",
         "get_follow_mode_ends",
         "find_direct_links",  # FR-MCP-27: the steps with no TS, after the TSs
-        "propose_mechanism",
         "tidy_canvas",
         "create_note",
     ]
@@ -90,8 +90,13 @@ def test_the_panel_gets_the_build_mechanism_command(tmp_path, monkeypatch):
         # Validation run 4 (A190, A192): species, conformer groups, direct links, the note.
         "goes into its TS's IRC, never a node of its own",
         "a free species right after the import (`set_node_kind`, kind species)",
-        "for each molecule `group_structures` gives with more than one conformer",
-        "medium when its `confidence` says so",
+        # Validation run 5 (A193): groups before linking, medium direct links at once.
+        "right after the import, before any linking",
+        "with only `groups` (`edges` [])",
+        "for each molecule it gives with more than one minimum",
+        "propose each association it rates medium at once",
+        "it waits for no chemistry choice",
+        "settled `as` conformer is another conformer of a node you have",
         '"no TS: direct link?") only where no TS you have links them, low',
         "rewrite that note (`update_note`) so it matches what is built now",
     ):

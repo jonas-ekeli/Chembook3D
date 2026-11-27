@@ -1,5 +1,5 @@
 """Steps between minima with no TS: a species joining or leaving, a conformation change
-(FR-MCP-27, A190, T-MCP-53, T-MCP-54).
+(FR-MCP-27, A190, A193, T-MCP-53 to T-MCP-55).
 
 Synthetic structures: a ruthenium carbene with two chlorides (A, "the 14-electron complex"),
 ethene, and two π-complexes of them, the ethene's C=C along y (B) or along x (B2, turned
@@ -8,6 +8,7 @@ ethene, and two π-complexes of them, the ethene's C=C along y (B) or along x (B
 import json
 
 import anyio
+import numpy as np
 
 from chembook3d.claude_panel import NOTEBOOK_GUIDE
 from chembook3d.mcp_server import INSTRUCTIONS
@@ -78,21 +79,22 @@ def test_associations_and_a_turn_with_no_ts_are_listed(open_client):
 
     found = links(open_client)
     pairs = found["pairs"]
-    association = [p for p in pairs if p["kind"] == "association"]
-    assert {(p["a"]["node_id"], p["b"]["node_id"]) for p in association} == {(a, b), (a, b2)}
-    for p in association:
-        assert p["species"] == {"label": "ethene", "node_id": ethene, "make_species": True}
-        assert len(p["bonds_to_core"]) == 2
-        assert all("Ru" in bond and "C" in bond for bond in p["bonds_to_core"])
-        assert p["core_rmsd"] < direct_links.MEDIUM_RMSD and p["confidence"] == "medium"
-    assert association[0]["alike"] == [1, 2] and association[1]["alike"] == [2, 2]
+    # A193: B and B2 are conformers of one molecule, so one line, the nearest pair.
+    (association,) = [p for p in pairs if p["kind"] == "association"]
+    assert association["a"]["node_id"] == a and association["b"]["node_id"] in (b, b2)
+    assert association["species"] == {"label": "ethene", "node_id": ethene, "make_species": True}
+    assert len(association["bonds_to_core"]) == 2
+    assert all("Ru" in bond for bond in association["bonds_to_core"])
+    assert association["core_rmsd"] < direct_links.MEDIUM_RMSD
+    assert association["confidence"] == "medium" and association["other_pairs"] == 1
     (turn,) = [p for p in pairs if p["kind"] == "same_atoms"]
     assert {turn["a"]["node_id"], turn["b"]["node_id"]} == {b, b2}
     assert turn["note"] == "no TS: direct link?" and turn["confidence"] == "low"
-    assert turn["rmsd"] > 0.05 and "metal_bonds" not in turn
-    assert found["counts"] == {"association": 2, "same_atoms": 1}
+    assert turn["rmsd"] > 0.05 and "metal_bonds" not in turn and "other_pairs" not in turn
+    assert found["counts"] == {"association": 1, "same_atoms": 1}
     assert found["make_species"] == ["ethene"] and "more" not in found
     assert "should be free species" in found["summary"]
+    assert "no chemistry choice" in found["next"]
     only = links(open_client, kind="same_atoms")
     assert [p["kind"] for p in only["pairs"]] == ["same_atoms"]
 
@@ -105,7 +107,7 @@ def test_associations_and_a_turn_with_no_ts_are_listed(open_client):
         direct_links.MAX_ANSWER = first
     assert len(paged["pairs"]) == 1 and paged["more"]["offset"] == 1
     rest = links(open_client, offset=1)
-    assert len(rest["pairs"]) == 2 and "more" not in rest
+    assert len(rest["pairs"]) == 1 and "more" not in rest
 
     # Ethene a free species, A + ethene → B with it joining, B → B2: nothing is left to link.
     kind = open_client.put(f"/api/nodes/{ethene}/kind", json={"kind": "species"})
@@ -121,6 +123,72 @@ def test_associations_and_a_turn_with_no_ts_are_listed(open_client):
     open_client.post("/api/transitions", json={"source_id": b, "target_id": b2})
     found = links(open_client)
     assert found["pairs"] == [] and found["of"] == 0
+
+
+# A metallacyclobutane of A and ethene: the ethene's carbons bonded to the ruthenium and one
+# to the carbene carbon (a C–C bond, so no association: a cycloaddition, with a TS).
+METALLACYCLE = [
+    ("Ru", 0.0, 0.0, 0.0),
+    ("Cl", 2.35, 0.0, 0.0),
+    ("Cl", -2.35, 0.0, 0.0),
+    ("C", 0.0, 0.0, 1.95),
+    ("H", 0.9, -0.5, 2.4),
+    ("H", -0.9, -0.5, 2.4),
+    ("C", 0.0, 1.95, 0.0),
+    ("C", 0.0, 1.55, 1.45),
+    ("H", 0.9, 2.5, -0.4),
+    ("H", -0.9, 2.5, -0.4),
+    ("H", 0.9, 2.0, 1.9),
+    ("H", -0.9, 2.0, 1.9),
+]
+
+
+def turned_by(degrees: float) -> list[tuple]:
+    """The π-complex with its ethene turned about z by `degrees`."""
+    c, s = np.cos(np.radians(degrees)), np.sin(np.radians(degrees))
+    core = [(e, x * 1.02, y, z + (0.03 if e == "Cl" else 0.0)) for e, x, y, z in CORE]
+    olefin = [(e, c * x - s * y, s * x + c * y, z) for e, x, y, z in bound(False)]
+    return [*core, *olefin]
+
+
+def test_an_association_bonds_to_a_metal_and_one_line_per_molecule_pair(open_client):
+    """T-MCP-55 (A193): a metallacyclobutane of A and ethene (a C–C bond to the core) is no
+    association; three π-complex conformers are one line with 2 other pairs, two of them
+    grouped a line each (a group counts as its own molecule); group_structures names each
+    node's id and marks a TS, and says to group before linking."""
+    a = node(open_client, "A", CORE)
+    ethene = node(open_client, "ethene", ETHENE)
+    open_client.put(f"/api/nodes/{ethene}/kind", json={"kind": "species"})
+    node(open_client, "MCB", METALLACYCLE)
+    b = [node(open_client, f"B{n}", turned_by(angle)) for n, angle in enumerate((0, 45, 90))]
+
+    found = links(open_client, kind="association")
+    (line,) = found["pairs"]
+    assert line["b"]["node_id"] in b and line["other_pairs"] == 2
+    assert found["of"] == 1
+
+    grouped = open_client.post("/api/groups/reconnect", json={"member_ids": b[:2], "label": "Bs"})
+    assert grouped.status_code == 201, grouped.text
+    found = links(open_client, kind="association")
+    ends = sorted((p["b"].get("group") or "", p["b"]["node_id"]) for p in found["pairs"])
+    assert len(ends) == 2 and ends[0] == ("", b[2]) and ends[1][0] == "Bs"
+    assert all("other_pairs" not in p for p in found["pairs"])
+
+    ts = node(open_client, "TS", turned_by(20), role="transition_state")
+    group = open_client.post("/api/structures/group", json={"all_nodes": True})
+    assert group.status_code == 200, group.text
+    group = group.json()
+    members = [
+        m
+        for f in group["formulas"]
+        for mol in f["molecules"]
+        for c in mol["conformers"]
+        for m in c["members"]
+    ]
+    by_id = {m["node_id"]: m for m in members}
+    assert set(b) | {a, ts} <= set(by_id)
+    assert by_id[ts]["ts"] is True and "ts" not in by_id[b[0]]
+    assert "before linking" in group["next"]
 
 
 def test_the_tool_over_mcp_and_in_the_guides(tmp_path):

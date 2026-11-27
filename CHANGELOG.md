@@ -24,6 +24,16 @@ artifacts and publishes nothing.
   and XYZ geometry. The app shows the input and resources for approval and retains the
   attempt so a lost submission reply can be checked without submitting twice (D266).
 
+- Building from a folder, from what validation run 5 showed (A193): `find_direct_links` no
+  longer offers a metallacyclobutane as an olefin association (a bond between the species and a
+  non-metal atom of the core is a cycloaddition, which has a TS) and lists one line per pair of
+  molecules, the nearest conformers with `other_pairs` counting the rest; on the run's playground
+  after the import it gave 13 lines where it gave 433. `group_structures` names each member's node
+  and marks a TS, and the playbook makes the conformer groups right after the import, before any
+  linking, and proposes the direct links rated medium without waiting for a chemistry choice. A
+  mode-follow end that matches nothing within 0.5 Å but has the bonds of a node within 1.0 Å is
+  taken as another conformer of it (medium), and no node is made from it unless asked anyway;
+  a node of no role at a TS's structure (a single point on it) is never an end's match.
 - Building from a folder, from what validation run 4 showed (A190–A192): `find_direct_links`
   lists the steps between minima with no TS (a free species joining or leaving, ranked by the
   RMSD of the complex without it; a coordination or conformation change, "no TS: direct

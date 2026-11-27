@@ -1360,7 +1360,8 @@ TOOLS: list[ToolSpec] = [
         "Pairs of minima a step with no TS may join (FR-MCP-27, A190), for the steps "
         "find_ts_partners cannot find: `association` (minimum B has the atoms of minimum A and "
         "one free species together, and B's bonds are theirs but for the species' bonds to A's "
-        "atoms, A181; read as A + species → B, or B → A + species when it leaves), ranked by "
+        "metal, A181, A193: a bond to another atom of A is a cycloaddition, with a TS; read "
+        "as A + species → B, or B → A + species when it leaves), ranked by "
         "the atom-matched RMSD of A against B without the species (`core_rmsd`), with a "
         "suggested confidence (medium when that RMSD is small, else low); and `same_atoms` "
         "(the same atoms, bonds differing only at a metal or not at all: a coordination mode "
@@ -1368,7 +1369,8 @@ TOOLS: list[ToolSpec] = [
         "closed-shell molecule imported as an ordinary node counts as a species and is named "
         "in `make_species`: make it a free species (set_node_kind) before proposing. Pairs an "
         "edge or one TS already joins, and pairs in one group, are left out; per pair of "
-        "groups the nearest members. As many as fit in about 20,000 characters, then `more` "
+        "molecules (a group counts as its own) only the nearest conformers, `other_pairs` "
+        "counting the rest (A193). As many as fit in about 20,000 characters, then `more` "
         "with the offset to call again with. Changes nothing.",
     ),
     T(
@@ -1840,8 +1842,9 @@ TOOLS: list[ToolSpec] = [
         "Make a node from an end of a mode-follow job that matches nothing (D263c): its "
         "coordinates only (a partial relaxation is a guess, so no calculation), a planned "
         "minimum labelled '<TS> end +' or 'end −' beside the TS on its canvas, with the TS's "
-        "charge and multiplicity. Refused when the end matches a node (it names it) unless "
-        "anyway is true. Only when get_follow_mode_ends says the end matches nothing and the "
+        "charge and multiplicity. Refused when the end matches a node, or has a node's bonds "
+        "within 1.0 Å (another conformer of it, A193), naming it, unless anyway is true. "
+        "Only when get_follow_mode_ends says the end matches nothing and the "
         "mechanism needs it.",
         help={"end": "+ or - (plus or minus)."},
     ),
