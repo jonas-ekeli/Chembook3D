@@ -2437,7 +2437,7 @@ export type BatchRow = {
   skipped: 'imported_before' | 'same_file' | null
   skipped_detail: string | null
   order: number | null
-  match: 'geometry' | 'first_geometry' | 'name' | 'name_close' | 'new' | 'chosen' | 'duplicate' | 'none' | 'irc'
+  match: 'geometry' | 'first_geometry' | 'name' | 'name_close' | 'new' | 'chosen' | 'duplicate' | 'none' | 'irc' | 'irc_end'
   target: BatchTarget | null
   mode: 'new' | 'planned' | 'onto' | null
   derived: boolean

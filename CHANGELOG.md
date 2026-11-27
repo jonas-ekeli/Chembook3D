@@ -24,6 +24,59 @@ artifacts and publishes nothing.
   and XYZ geometry. The app shows the input and resources for approval and retains the
   attempt so a lost submission reply can be checked without submitting twice (D266).
 
+- Building from a folder, from what validation run 4 showed (A190–A192): `find_direct_links`
+  lists the steps between minima with no TS (a free species joining or leaving, ranked by the
+  RMSD of the complex without it; a coordination or conformation change, "no TS: direct
+  link?"), naming small molecules imported as nodes that should be free species; on the run's
+  playground it listed 15 of the 18 reachable minimum-to-minimum steps of the answer key in about
+  10 s. The batch import sends an IRC end's optimization into its TS's IRC (its name and first
+  or final structure show it), and such a node is never another TS's partner. A mode-follow
+  end over one group's conformers stands for the group, over ungrouped conformers for the
+  nearest (medium), and a soft mode's end may match within 1.0 Å (medium). The playbook makes
+  small molecules free species, groups conformers, proposes the direct links and rewrites its
+  summary note at the end.
+- Faster and more reliable building from a folder, from what validation run 3 showed (A187–A189):
+  `find_ts_partners` takes several TSs at once (`tss`, or `all_ts` "unlinked"/"all") and answers
+  each in a few lines, about a minute for 47 TSs of a real folder where one call took 2–5 minutes
+  before (FR-MCP-26); Match atoms stops a TS search at the first match that keeps the bonds off the
+  mode, and the bond check matches a pair through the TS, which no longer swaps an olefin's two
+  carbons into a false "does not link". Long tool answers keep one value per line, so Claude can
+  read a saved answer in parts. Mode-follows start 0.4 Å along the mode and relax for up to 60
+  steps (before 0.1 Å and 40, which often sent both ends to one structure); an end is never matched
+  to a TS, a scan or constrained geometry or a structure with an imaginary frequency, an end still at
+  the TS along the mode "returned to the TS", and a folder's outputs are read once while they do not
+  change. A batch import takes an IRC sent to the TS file of the same batch, as its plan shows it, and
+  never attaches a minimum's file to a TS node as its duplicate, nor a TS's to a minimum.
+- Fixed: while working on its own, Claude stopped after nine of its local jobs had ended, because
+  Claude Code ends a turn after its Stop hook has blocked nine times in a row (D231). The panel now
+  raises that cap. `/build-mechanism` runs the TS partner search on every TS before it starts any
+  mode-follow.
+- Claude finds the minima a transition state links starting from the TS (FR-MCP-25, A186):
+  `find_ts_partners` predicts from the TS's imaginary mode the bonds that form and break on each
+  side, searches the investigation's true minima and free species (and a minimum plus a free species,
+  for a species that joins or leaves; never TSs, scan or constrained geometries or structures with an
+  imaginary frequency) whatever their atom order, lists those at the TS's geometry level nearest
+  first (other levels only when a side has none, marked) and runs the bond check along the mode on
+  the best pair. The `/build-mechanism` playbook uses
+  it for every TS without an IRC instead of guessing partners, starts mode-follows in batches and
+  works through every TS, attaches files that duplicate a node's geometry, and goes on when Tidy
+  finds no page open.
+- Claude fills gaps in a mechanism it builds from a folder with MACE-OMOL-0 guesses (D265, FR-PANEL-10,
+  FR-MCP-24): `find_gaps` lists the holes (a TS with no edge on a side, two minima one step apart with no
+  TS, minima more than one step apart, an edge whose atoms do not balance, a cycle that does not give back
+  the catalyst), each with its bonds and a suggested fill; `propose_mechanism` takes the hole an edge fills
+  (low confidence, "Filled by Claude") and the nodes built for it, which become planned "(MACE guess)"
+  nodes holding MACE results only. At most 10 holes a run; the 11th is refused. The start dialog has "Fill
+  gaps with MACE guesses", on by default with a 6-hour job limit (A185); unticked, the command gets
+  `--no-gaps` and the limit stays 4 hours.
+- "Build mechanism from folder…" (D263a, FR-PANEL-09), in the Claude panel's menu, the command palette and
+  on the start page (for a new investigation): it asks for the folder of outputs, the longest local job
+  (4 hours) and whether to use the literature, shows the Work on its own warning, makes a playground,
+  turns the switch on there and starts Claude with `/build-mechanism <folder>` typed in, where it can be
+  followed and stopped. The command is the playbook (D263g, h): survey, import, group, link each TS
+  cheapest evidence first, propose the edges with their confidence and evidence, tidy and a summary note
+  with a review list; it keeps the energy rules, flags what it must not decide, and uses the literature
+  only where D263h says (none with `--no-literature`).
 - The notebook agent can check a Saga Gaussian job by its Slurm ID, distinguish cancellation
   from normal exit, and report convergence and frequencies from accessible output (D266).
 - Edges Claude proposes carry a confidence and evidence until you accept them (D264): in a playground

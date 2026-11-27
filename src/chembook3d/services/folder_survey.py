@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from chembook3d import xyz
 from chembook3d.parsers import crest
 from chembook3d.parsers.common import ParsedStep
-from chembook3d.services import batch_import, imports, thermo_settings
+from chembook3d.services import batch_import, imports, irc_ends, thermo_settings
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
 from chembook3d.services.geometry import Rows
@@ -141,16 +141,23 @@ class Final:
     rows: Rows
     charge: int | None
     multiplicity: int | None
+    role: str = "unspecified"  # the role the file suggests (a TS's is no mode-follow end, A188)
+    irc_end: str | None = None  # A192: an IRC end's optimization: its IRC file's stem
 
 
 def final_structures(
-    folder: Path, recursive: bool = True, investigation: Path | None = None
+    folder: Path,
+    recursive: bool = True,
+    investigation: Path | None = None,
+    tolerance: float = 0.05,
 ) -> list[Final]:
     """D263c: the final structure of each output in `folder` (the last step with one), read
-    as the survey reads them; nothing is staged for the app or written."""
+    as the survey reads them, an IRC end's optimization marked (`irc_end`, A192, within the
+    duplicate `tolerance`); nothing is staged for the app or written."""
     staging = imports.Staging()
     try:
         batch = batch_import.scan(staging, folder, recursive, investigation)
+        ends = irc_ends.batch_ends(batch.files, tolerance)
         found = []
         for item in batch.files:
             if isinstance(item.staged.parsed, crest.Ensemble):
@@ -158,7 +165,13 @@ def final_structures(
             last = batch_import._final(item.staged)
             rows = imports._rows(last.final_geometry) if last is not None else None
             if last is not None and rows:
-                found.append(Final(item.relative, last.index, rows, last.charge, last.multiplicity))
+                role = str(imports._suggested_role(item.staged.parsed.steps))
+                end = irc_ends.stem(item.staged.original_name) if item.id in ends else None
+                found.append(
+                    Final(
+                        item.relative, last.index, rows, last.charge, last.multiplicity, role, end
+                    )
+                )
         return found
     finally:
         staging.clear()

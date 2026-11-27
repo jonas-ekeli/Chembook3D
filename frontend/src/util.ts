@@ -127,6 +127,20 @@ export function scientific(value: number | null): string {
   return `${mantissa} × 10${power}`
 }
 
+/** D263a: what "Build mechanism from folder…" types into the Claude panel: the playbook's
+ * command (`.claude/commands/build-mechanism.md`), the folder in double quotes when it has
+ * spaces, `--no-literature` when the start dialog's literature box is off (D263h) and
+ * `--no-gaps` when its gaps box is off (D265d). One line,
+ * without control characters; the panel presses Enter after it. */
+export function buildMechanismCommand(folder: string, literature: boolean, gaps = true): string {
+  // No control characters: each would be a key pressed in the terminal.
+  const path = Array.from(folder, (c) => (c < ' ' || c === '\x7f' ? ' ' : c))
+    .join('')
+    .trim()
+  const quoted = /\s/.test(path) ? `"${path.replace(/"/g, '')}"` : path
+  return `/build-mechanism ${quoted}${literature ? '' : ' --no-literature'}${gaps ? '' : ' --no-gaps'}`
+}
+
 /** D223: a job limit in words, as the backend's `autonomy.limit_text`. */
 export function limitText(seconds: number): string {
   if (seconds < 3600) return `${Math.round(seconds / 60)} minutes`

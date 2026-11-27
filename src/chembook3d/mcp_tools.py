@@ -1252,6 +1252,43 @@ TOOLS: list[ToolSpec] = [
         },
     ),
     T(
+        "find_ts_partners",
+        "read",
+        "POST",
+        "/api/structures/ts-partners",
+        "Find the minima a transition state links, starting from the TS (D263c, A184, A186): "
+        "use it for every TS without an IRC instead of guessing the two minima for "
+        "compare_structures. From the TS's imaginary mode (a node's frequency job at its "
+        "geometry counts) it predicts the bonds that form and break on each side (`bonds`), "
+        "then tests every candidate (by default each true minimum and free species of the "
+        "open investigation, leaving out TSs, scan or constrained geometries and imaginary "
+        "frequencies (`left_out`), and each sum of one of them with a free species, for a "
+        "species that joins or leaves), whatever its atom order: the TS's atoms, its bonds "
+        "but for the mode's active pairs (A181), and the side of the mode it lies on. Per side "
+        "those holding a geometry at the TS's geometry level, compared at it (other levels "
+        "only when a side has none there, marked `other_level`), nearest the TS first "
+        "(atom-matched RMSD; for a sum over the larger species; energies are never read), "
+        "with level, group and `ref` to pass on; then `check`: "
+        "A184's bond check of the best pairs as compare_structures with ts gives it (links, "
+        "unclear or does not link, with reasons), and `next`. Several TSs at once (A187): "
+        '`tss`, or `all_ts` ("unlinked": every TS missing an edge on a side; "all"), '
+        "answered in a few lines per TS (the mode's bonds, the nearest candidate per side "
+        "with its RMSD, the verdict and why), as many as fit, then `more` with the offset to "
+        'call again with; start a build with all_ts "unlinked". Changes nothing.',
+        help={
+            "ts": "The transition state, " + STRUCTURE_HELP,
+            "tss": "Several transition states, each " + STRUCTURE_HELP,
+            "all_ts": 'Every TS node: "unlinked" (missing an edge on either side) or '
+            '"all". Name ts, tss or all_ts.',
+            "offset": "With tss or all_ts: skip this many TSs (the `more` of the last answer).",
+            "candidates": "The structures to search instead of the investigation's minima and "
+            "free species, each " + STRUCTURE_HELP + " A list of them is a sum of species.",
+            "species": "Free species a candidate may be summed with (default: the "
+            "investigation's free species; [] for none), each " + STRUCTURE_HELP,
+            "top": "How many candidates to list per side (default 3, at most 10).",
+        },
+    ),
+    T(
         "group_structures",
         "read",
         "POST",
@@ -1285,7 +1322,10 @@ TOOLS: list[ToolSpec] = [
         "there in the same direction is updated and opened again, not made twice. Optionally "
         "put nodes in reaction steps and conformers in groups, by name (made when missing); no "
         "branch is made or changed. All or nothing. The canvas is not laid out: call "
-        "tidy_canvas next.",
+        "tidy_canvas next. D265: an edge that fills a find_gaps hole names it (hole; low "
+        "confidence, evidence stored as “Filled by Claude (hole …)”), and filled lists per hole "
+        "the nodes you built for it, which become planned “(MACE guess)” nodes; at most 10 "
+        "holes are filled in a run, so the 11th is refused.",
     ),
     T(
         "list_proposals",
@@ -1295,6 +1335,41 @@ TOOLS: list[ToolSpec] = [
         "The edges you proposed that the user has not accepted yet (D264), with their "
         "confidence and evidence, and how many are open per confidence: for your summary and "
         "its review list.",
+    ),
+    T(
+        "find_gaps",
+        "read",
+        "GET",
+        "/api/mechanism/gaps",
+        "The holes in the mechanism you are building (D265), most useful first, each with a "
+        "stable id, its kind, the nodes in it, the bonds that change and a suggested fill: "
+        "ts_end (a TS with no edge on a side; what lies there from its finished mode-follow "
+        "or its IRC, else only the bonds its mode moves), missing_ts (two minima an edge or "
+        "the steps' order links, one to three bonds apart, with no TS), unbalanced (an edge "
+        "whose sides differ in atoms with no free species to balance them), "
+        "missing_intermediate (linked minima more than one step apart) and cycle (the last "
+        "minimum of the steps does not give back the first's catalyst). Only what edges and "
+        "steps already link is looked at. Also how many holes you filled in this run (at most "
+        "10). Changes nothing.",
+    ),
+    T(
+        "find_direct_links",
+        "read",
+        "GET",
+        "/api/mechanism/direct-links",
+        "Pairs of minima a step with no TS may join (FR-MCP-27, A190), for the steps "
+        "find_ts_partners cannot find: `association` (minimum B has the atoms of minimum A and "
+        "one free species together, and B's bonds are theirs but for the species' bonds to A's "
+        "atoms, A181; read as A + species → B, or B → A + species when it leaves), ranked by "
+        "the atom-matched RMSD of A against B without the species (`core_rmsd`), with a "
+        "suggested confidence (medium when that RMSD is small, else low); and `same_atoms` "
+        "(the same atoms, bonds differing only at a metal or not at all: a coordination mode "
+        'or conformation change no TS links, "no TS: direct link?", low). A small '
+        "closed-shell molecule imported as an ordinary node counts as a species and is named "
+        "in `make_species`: make it a free species (set_node_kind) before proposing. Pairs an "
+        "edge or one TS already joins, and pairs in one group, are left out; per pair of "
+        "groups the nearest members. As many as fit in about 20,000 characters, then `more` "
+        "with the offset to call again with. Changes nothing.",
     ),
     T(
         "read_pdf",
@@ -1730,11 +1805,11 @@ TOOLS: list[ToolSpec] = [
         "/api/local/follow-mode",
         "Follow a transition state's imaginary mode both ways on this computer (D263c, A184), "
         "to find which minima it links: from its frequency calculation's structure at any "
-        "level (a DFT file included; it needs stored normal modes), displaced 0.1 Å along the "
-        "lowest imaginary mode on each side (the atom moving most) and each end relaxed for at "
-        "most 40 steps with MACE-OMOL-0 (method mace-omol, the default, when installed) or "
-        "GFN2-xTB (gfn2). Use it only for a TS that no IRC in the folder and no bond check "
-        "along the mode (compare_structures with ts) settled: cheapest evidence first. folder "
+        "level (a DFT file included; it needs stored normal modes), displaced 0.4 Å along the "
+        "lowest imaginary mode on each side (the atom moving most, A188) and each end relaxed "
+        "for at most 60 steps with MACE-OMOL-0 (method mace-omol, the default, when installed) "
+        "or GFN2-xTB (gfn2). Use it only for a TS that no IRC in the folder and no bond check "
+        "along the mode (find_ts_partners) settled: cheapest evidence first. folder "
         "names the folder of outputs whose final structures the ends are also matched "
         "against. The result is never imported: when it has finished, get_follow_mode_ends "
         "matches the ends; an end that matches nothing may become a node with "
@@ -1749,10 +1824,13 @@ TOOLS: list[ToolSpec] = [
         "whether it converged and in how many steps, the bonds formed and broken against the "
         "TS, the nodes it matches (the same bonds, weak and metal–hydrogen contacts left out, "
         "and atom-matched RMSD under 0.5 Å, whatever the atom order; nearest first) and the "
-        "files of the job's folder it matches; with `verdict`: links two structures (both ends "
-        "each match exactly one: high confidence), one end matches, no end matches, or both "
-        "ends match the same structure (flagged). A TS left unsettled is flagged, never "
-        "guessed. Changes nothing.",
+        "files of the job's folder it matches; never a TS, a scan or constrained geometry or "
+        "a structure with an imaginary frequency (A188); `side` (the side of the mode the end "
+        "lies on) and `returned_to_ts` (its distances along the mode still the TS's: it "
+        "matches nothing); with `verdict`: links two structures (both ends each match "
+        "exactly one: high confidence), one end matches, no end matches, both ends returned to "
+        "a TS, or both ends match the same structure (flagged). A TS left unsettled is "
+        "flagged, never guessed. Changes nothing.",
     ),
     T(
         "make_node_from_end",

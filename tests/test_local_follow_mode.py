@@ -140,13 +140,13 @@ def test_both_ends_of_the_mode_are_relaxed_and_matched(open_client, tmp_path):
     assert done["kind"] == "follow_mode" and done["method"] == "stub-saddle"
     spec = done["follow_mode"]
     assert spec["calculation_id"] == frequency["id"] and spec["ts_node_id"] == ts_id
-    assert spec["shift"] == 0.1 and spec["steps"] == 40 and spec["wavenumber"] == -500.0
+    assert spec["shift"] == 0.4 and spec["steps"] == 60 and spec["wavenumber"] == -500.0  # A188
     assert spec["folder"] == str(outputs) and "mode" not in spec
     assert done["nothing_to_import"] and not done["importable"] and not done["awaiting_choice"]
     found = done["result"]["follow_mode"]
     assert set(found["ends"]) == {"+", "-"}
-    assert all(0 < e["cycles"] <= 41 for e in found["ends"].values())
-    assert [e["shift"] for e in found["ends"].values()] == [0.1, -0.1]
+    assert all(0 < e["cycles"] <= 61 for e in found["ends"].values())
+    assert [e["shift"] for e in found["ends"].values()] == [0.4, -0.4]
 
     refused = open_client.post(f"/api/local/jobs/{done['id']}/import")
     assert refused.status_code == 422 and "never imported" in refused.json()["detail"]
@@ -175,7 +175,7 @@ def test_an_end_that_matches_nothing_becomes_a_node(open_client):
     """T-LOC-52: with no minimum there, no end matches; the − end is made a planned minimum
     beside the TS (coordinates only, the TS's charge and multiplicity), which it then matches,
     so a second one is refused unless asked anyway; with node A the TS links A and the new
-    node, and a duplicate of the new node makes the − end ambiguous."""
+    node, and a duplicate of the new node makes the − end the nearest of two (A191: medium)."""
     ts_id, _ = import_ts(open_client)
     done = follow(open_client, ts_id)
     matched = ends(open_client, done["id"])
@@ -216,9 +216,11 @@ def test_an_end_that_matches_nothing_becomes_a_node(open_client):
         f"/api/local/jobs/{done['id']}/ends/-/node", json={"label": "B2", "anyway": True}
     )
     assert anyway.status_code == 201 and anyway.json()["label"] == "B2"
-    matched = ends(open_client, done["id"])
-    assert matched["outcome"] == "ambiguous"
-    assert "matches 2 structures" in matched["flags"][0]
+    matched = ends(open_client, done["id"])  # A191: the nearest of one molecule's two
+    assert matched["outcome"] == "links" and matched["confidence"] == "medium"
+    assert matched["ends"]["-"]["settled"]["as"] == "nearest"
+    assert "matches 2 conformers of one molecule" in matched["flags"][0]
+    assert "and 1 other conformer of the same molecule" in matched["verdict"]
 
 
 @pytest.mark.usefixtures("stub_tools")
@@ -332,3 +334,112 @@ def test_the_tools_are_offered_and_named_in_the_guides(tmp_path):
         assert refused.is_error and made["id"]
 
     anyio.run(run)
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_a_ts_is_never_an_end_and_an_end_at_the_ts_returned(open_client, tmp_path):
+    """T-LOC-55 (A188): at the + end's structure lie a TS node, a folder's TS output and a
+    single point on it; none is the + end's match (`ts_matches`, flagged), while the − end
+    matches B; each end has its side. With both ends set back to the TS's coordinates, they
+    returned to it: no matches, outcome "returned"."""
+    import json
+
+    from chembook3d import local_jobs
+
+    ts_id, _ = import_ts(open_client)
+    other = make_node(open_client, "other TS", shifted(0.5))
+    open_client.patch(f"/api/nodes/{other}", json={"role": "transition_state"})
+    b_id = make_node(open_client, "B", shifted(-0.5))
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    ts_there = g.output(
+        g.step(
+            "#P B3LYP/6-31G(d) Freq",
+            [shifted(0.5)],
+            -77.0,
+            after=[*frequency_lines([-400.0, 300.0, 600.0, 900.0, 1200.0, 3000.0], MODES, TS)],
+        )
+    )
+    (outputs / "ts2.log").write_text(ts_there, encoding="utf-8")
+    (outputs / "ts2_sp.log").write_text(
+        g.output(g.step("#P PBE0/def2TZVP SP", [shifted(0.5)])), encoding="utf-8"
+    )
+    done = follow(open_client, ts_id, folder=str(outputs))
+    matched = ends(open_client, done["id"])
+    plus, minus = matched["ends"]["+"], matched["ends"]["-"]
+    assert plus["matches"] == [] and plus["files"] == []
+    assert {m.get("node_id") or m.get("path") for m in plus["ts_matches"]} == {
+        other,
+        "ts2.log",
+        "ts2_sp.log",
+    }
+    assert [m["node_id"] for m in minus["matches"]] == [b_id]
+    assert (plus["side"], minus["side"]) == ("+", "−")
+    assert not plus["returned_to_ts"] and not minus["returned_to_ts"]
+    assert matched["outcome"] == "one_end"
+    assert any("“other TS”" in f and "never an end's match" in f for f in matched["flags"])
+
+    result = local_jobs.job_dir(folder_of(open_client), done["id"]) / local_jobs.RESULT
+    data = json.loads(result.read_text(encoding="utf-8"))
+    start = [[x, y, z] for _, _, x, y, z in TS]
+    for end in data["follow_mode"]["ends"].values():
+        end["coordinates"] = start
+    result.write_text(json.dumps(data), encoding="utf-8")
+    back = ends(open_client, done["id"])
+    assert back["outcome"] == "returned" and back["confidence"] is None
+    for end in back["ends"].values():
+        assert end["returned_to_ts"] and end["side"] == "none" and end["matches"] == []
+    assert sum("returned to the TS" in f for f in back["flags"]) == 2
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_an_end_on_a_conformer_group_and_a_soft_modes_wider_match(open_client):
+    """T-LOC-56 (A191): the + end lies within 0.5 Å of two conformers in one group, so it
+    stands for the group and the link stays high; ungrouped they are the nearest "and 1 other
+    conformer" (medium)."""
+    ts_id, _ = import_ts(open_client)
+    a1 = make_node(open_client, "A1", shifted(0.5))
+    near = [
+        (e, n, x, y + (0.2 if k == 2 else 0.0), z) for k, (e, n, x, y, z) in enumerate(shifted(0.5))
+    ]
+    a2 = make_node(open_client, "A2", near)
+    b_id = make_node(open_client, "B", shifted(-0.5))
+    done = follow(open_client, ts_id)
+    matched = ends(open_client, done["id"])
+    assert matched["ends"]["+"]["settled"]["as"] == "nearest"
+    assert matched["outcome"] == "links" and matched["confidence"] == "medium"
+    assert "and 1 other conformer of the same molecule" in matched["verdict"]
+    grouped = open_client.post(
+        "/api/groups/reconnect", json={"member_ids": [a1, a2], "label": "As"}
+    )
+    assert grouped.status_code == 201, grouped.text
+    matched = ends(open_client, done["id"])
+    settled = matched["ends"]["+"]["settled"]
+    assert settled["as"] == "group" and settled["label"] == "As" and settled["members"] == 2
+    assert matched["outcome"] == "links" and matched["confidence"] == "high"
+    assert matched["verdict"] == "Followed the mode of “TS”: links the group “As” and “B”"
+    assert matched["links"][1]["node_id"] == b_id
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_a_soft_modes_end_takes_the_nearest_minimum_within_one_angstrom(open_client):
+    """T-LOC-56 (A191): a soft mode (50i cm⁻¹) whose + end changes no bond and matches
+    nothing within 0.5 Å takes the nearest minimum with its bonds within 1.0 Å (medium)."""
+    far = make_node(open_client, "far", shifted(1.9))
+    make_node(open_client, "B", shifted(-0.5))
+    soft_ts, _ = import_ts(open_client, ts_output((-50.0, 300.0, 600.0, 900.0, 1200.0, 3000.0)))
+    soft = ends(open_client, follow(open_client, soft_ts)["id"])
+    plus = soft["ends"]["+"]
+    assert plus["settled"]["as"] == "soft" and plus["matches"][0]["node_id"] == far
+    assert plus["matches"][0]["soft"] and 0.5 <= plus["matches"][0]["rmsd"] < 1.0
+    assert soft["outcome"] == "links" and soft["confidence"] == "medium"
+    assert any("soft mode" in f and "1.0 Å" in f for f in soft["flags"])
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_a_hard_modes_end_keeps_the_narrow_window(open_client):
+    """T-LOC-56 (A191): the same minimum, with the mode at 500i cm⁻¹, is no match."""
+    make_node(open_client, "far", shifted(1.9))
+    ts_id, _ = import_ts(open_client)
+    hard = ends(open_client, follow(open_client, ts_id)["id"])
+    assert hard["ends"]["+"]["matches"] == [] and "settled" not in hard["ends"]["+"]

@@ -42,6 +42,10 @@ WEB_SEARCH = "WebSearch"
 WEB_FETCH = "WebFetch"
 SETTINGS_NAME = "chembook3d-settings.json"
 MCP_CONFIG_NAME = "chembook3d-mcp.json"
+# D263g: Claude Code's project slash commands, copied into the working folder's
+# `.claude/commands/` on every start; each file is a playbook loaded only for its task.
+COMMANDS = Path(__file__).parent / "assets" / "commands"
+COMMANDS_DIR = Path(".claude") / "commands"
 INSTALL_DOCS = "https://code.claude.com/docs/en/setup"
 INSTALL_COMMANDS = {
     "windows": "irm https://claude.ai/install.ps1 | iex",
@@ -182,12 +186,21 @@ output and `import_folder` every output in a folder at once, as the app's Import
 does. Show the person the rows of a folder's plan that need a choice (a possible duplicate,
 a file that names no basis set, a blocker) before `commit_folder_import`.
 
+The whole build (D263g): `/build-mechanism <folder>`, which the person types or starts with
+"Build mechanism from folder…" (that makes the working copy it runs in), loads the playbook
+for it: survey, import, group, link, propose, tidy and a summary note.
+
 Building a mechanism from a folder (D263): `survey_folder` reads every output in it first
 without importing (per step the level, energy, imaginary frequencies; files ending on the same
 geometry; restarts; what is imported already). `compare_structures` says which bonds change
 between two structures, whatever their atom order (a side may be a list: a sum of species),
-and with a TS whether it links two minima along its imaginary mode; `group_structures` sorts
-many into isomers, conformers and duplicates. Then `import_folder`, showing the plan first.
+and with a TS whether it links two minima along its imaginary mode; `find_ts_partners` starts
+from a TS and finds the minima on each side of its mode among the nodes, with that check of the
+best pair (`all_ts` "unlinked": every TS missing an edge, a few lines each);
+`find_direct_links` lists the steps with no TS between minima (a free species joining or
+leaving, a conformation or coordination change), by the core's RMSD;
+`group_structures` sorts many into isomers, conformers and duplicates. Then
+`import_folder`, showing the plan first.
 A TS that neither an IRC nor the bond check along its mode settles (D263c):
 `start_local_follow_mode` relaxes both ends of its mode briefly, `get_follow_mode_ends` matches
 them against the nodes (A184) with a verdict, and `make_node_from_end` makes a node only from
@@ -452,6 +465,7 @@ def prepare(
     settings: dict = {"permissions": {"allow": allow, "deny": list(DENIED_TOOLS)}}
     if alone is not None:
         settings["hooks"] = stop_hook(app_url)
+        settings["env"] = {STOP_HOOK_CAP_NAME: str(STOP_HOOK_CAP)}
     guide = NOTEBOOK_GUIDE.format(name=name.replace("\n", " "))
     if playground is not None:
         guide += PLAYGROUND_GUIDE.format(
@@ -467,7 +481,17 @@ def prepare(
     _write(work / MCP_CONFIG_NAME, json.dumps({"mcpServers": servers}, indent=2) + "\n")
     _write(work / SETTINGS_NAME, json.dumps(settings, indent=2) + "\n")
     _write(work / "CLAUDE.md", guide)
+    write_commands(work)
     return work
+
+
+def write_commands(work: Path) -> None:
+    """D263g: the slash commands, such as `/build-mechanism`, as Claude Code's project commands
+    of the working folder. Written over on every start, so they follow the app's version."""
+    target = work / COMMANDS_DIR
+    target.mkdir(parents=True, exist_ok=True)
+    for source in sorted(COMMANDS.glob("*.md")):
+        _write(target / source.name, source.read_text(encoding="utf-8"))
 
 
 def stop_hook(app_url: str) -> dict:
@@ -507,8 +531,18 @@ def command(executable: str, resume: bool) -> list[str]:
     return argv
 
 
+# D231: Claude Code ends a turn anyway after a Stop hook has blocked it 9 times in a row. While
+# Claude works on its own, the app wakes it each time one of its jobs ends, so a run with many
+# local jobs (a mechanism built from a folder starts dozens of mode-follows) was cut off after
+# the ninth. The app's own check (`api/claude.py` `stop_check`) never loops: it blocks only
+# while a job of Claude's runs, or once after Claude did more work.
+STOP_HOOK_CAP_NAME = "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP"
+STOP_HOOK_CAP = 1000
+
+
 def environment() -> dict[str, str]:
     env = dict(os.environ)
+    env.setdefault(STOP_HOOK_CAP_NAME, str(STOP_HOOK_CAP))
     env["TERM"] = "xterm-256color"
     env["COLORTERM"] = "truecolor"
     # Started from inside another Claude Code session, the CLI would think it is nested.

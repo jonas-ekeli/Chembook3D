@@ -470,16 +470,18 @@ def end_match(
     other: Rows,
     prints: tuple[Print, Print] | None = None,
     counts: tuple["_Bonds", "_Bonds"] | None = None,
+    window: float = END_RMSD,
 ) -> Same | None:
     """A184: whether `other` is the structure a mode-follow end (or an IRC end) relaxed to:
     the same bonds by A181's rule with weak contacts, metal–hydrogen ones included, left out
-    (`split`), and an atom-matched RMSD under END_RMSD, whatever the order of its atoms. Ruled
+    (`split`), and an atom-matched RMSD under END_RMSD (`window`; A191's wider one for a soft
+    mode), whatever the order of its atoms. Ruled
     out cheaply first by the order-independent bound and the bond counts; then the same
     numbering, the numbering by position and Match atoms are tried in that order."""
     if not same_atoms(end, other):
         return None
     pa, pb = prints or (signature(end), signature(other))
-    if lower_bound(pa, pb) >= END_RMSD:
+    if lower_bound(pa, pb) >= window:
         return None
     ca, cb = counts or (_bond_counts(end), _bond_counts(other))
     if not _could_be_same(ca, cb, False):
@@ -492,7 +494,7 @@ def end_match(
             return None
         tried.add(key)
         rmsd = geometry.aligned_rmsd(end, [other[j] for j in mapping])
-        if rmsd is None or rmsd >= END_RMSD:
+        if rmsd is None or rmsd >= window:
             return None
         formed, broken = atom_matching.changes(end, other, mapping)
         real_formed, real_broken, _, _ = split(end, other, mapping, formed, broken)
@@ -508,8 +510,17 @@ def end_match(
     found = check(_by_position(end, other)[1])
     if found is not None:
         return found
+
+    def enough(mapping: list[int]) -> bool:  # A188: Match atoms ends at the first that fits
+        rmsd = geometry.aligned_rmsd(end, [other[j] for j in mapping])
+        if rmsd is None or rmsd >= window:
+            return False
+        formed, broken = atom_matching.changes(end, other, mapping)
+        real_formed, real_broken, _, _ = split(end, other, mapping, formed, broken)
+        return not (real_formed or real_broken)
+
     try:
-        matched = atom_matching.match(end, other)
+        matched = atom_matching.match(end, other, enough=enough)
     except Exception:  # noqa: BLE001 - a match that cannot be made matches nothing
         return None
     return check(matched.mapping)
@@ -716,9 +727,12 @@ def compare(
     ts: Structure | None = None,
     count_weak: bool = False,
     tolerance: float = 0.05,
+    mappings: tuple[list[int], list[int]] | None = None,
 ) -> dict[str, Any]:
     """D263: B matched onto A's numbering and what changes (see the module's docstring).
-    `tolerance` is the investigation's duplicate tolerance (D62)."""
+    `tolerance` is the investigation's duplicate tolerance (D62). `mappings`: B's and the TS's
+    atom for each of A's, when already known (a TS search's, through the TS, A187), so Match
+    atoms is not run again."""
     out: dict[str, Any] = {"a": a.describe(), "b": b.describe()}
     notes: list[str] = []
     out["notes"] = notes
@@ -735,7 +749,10 @@ def compare(
         notes.append(f"A has charge {a.charge} and B {b.charge}.")
     if None not in (a.multiplicity, b.multiplicity) and a.multiplicity != b.multiplicity:
         notes.append(f"A has multiplicity {a.multiplicity} and B {b.multiplicity}.")
-    match = atom_matching.match(a.rows, b.rows)
+    if mappings is not None:
+        match = atom_matching.assessed(a.rows, b.rows, mappings[0])
+    else:
+        match = atom_matching.match(a.rows, b.rows)
     mapping = match.mapping
     formed, broken, weak_formed, weak_broken = split(
         a.rows, b.rows, mapping, match.formed, match.broken
@@ -899,7 +916,16 @@ def compare(
         break
 
     if ts is not None:
-        out["ts_check"] = _links(a, b, ts, mapping, b_in_a, formed + broken, count_weak)
+        out["ts_check"] = _links(
+            a,
+            b,
+            ts,
+            mapping,
+            b_in_a,
+            formed + broken,
+            count_weak,
+            mappings[1] if mappings is not None else None,
+        )
         notes.append(out["ts_check"]["summary"])
     return out
 
@@ -912,6 +938,7 @@ def _links(
     b_in_a: Rows,
     changed: list[tuple[int, int]],
     count_weak: bool,
+    ts_mapping: list[int] | None = None,
 ) -> dict[str, Any]:
     """A184: whether the TS links minima A and B: one to three bonds change between them,
     each along the TS's imaginary mode, and A and B lie on opposite sides of it."""
@@ -930,7 +957,10 @@ def _links(
     for name, s in (("A", a), ("B", b)):
         if s.imaginary:
             reasons.append(f"{name} has an imaginary frequency, so it is not a minimum.")
-    ts_match = atom_matching.match(a.rows, ts.rows)
+    if ts_mapping is not None:
+        ts_match = atom_matching.assessed(a.rows, ts.rows, ts_mapping)
+    else:
+        ts_match = atom_matching.match(a.rows, ts.rows)
     ts_in_a = [ts.rows[j] for j in ts_match.mapping]
     mode = _active(ts, ts_match.mapping)
     if ts_match.doubts:
@@ -1015,7 +1045,8 @@ class _Bonds:
     loose: dict[tuple[str, str], np.ndarray]
 
 
-def _bond_counts(rows: Rows) -> _Bonds:
+def _adjacency(rows: Rows) -> tuple[np.ndarray, np.ndarray]:
+    """Bonded by the 3D view's rule, and within A181's outer reach."""
     elements = [r[0] for r in rows]
     coords = np.array([r[1:4] for r in rows], dtype=float)
     strict = atom_matching.bonds(coords, elements)
@@ -1024,6 +1055,15 @@ def _bond_counts(rows: Rows) -> _Bonds:
     d = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
     loose = (d <= reach) & (d > atom_matching.MIN_DISTANCE)
     np.fill_diagonal(loose, False)
+    return strict, loose
+
+
+def _bond_counts(rows: Rows) -> _Bonds:
+    return _counts([r[0] for r in rows], *_adjacency(rows))
+
+
+def _counts(elements: list[str], strict: np.ndarray, loose: np.ndarray) -> _Bonds:
+    """`_Bonds` of two adjacency matrices: bonded (`strict`) and within the outer reach."""
     kinds = np.array(elements)
     found: tuple[dict, dict] = ({}, {})
     for e in sorted(set(elements)):

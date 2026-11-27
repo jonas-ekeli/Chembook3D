@@ -611,6 +611,25 @@ def _already_imported(session: Session, checksum: str) -> list[dict[str, Any]]:
     return found
 
 
+ROLE_NAMES = {Role.MINIMUM: "a minimum", Role.TRANSITION_STATE: "a transition state"}
+
+
+def _role_conflict(target: Node | None, steps: list[ParsedStep]) -> str | None:
+    """A189, as D262b refuses merging them: a file whose structure is a minimum is never
+    attached to a TS node as its duplicate, nor a TS's to a minimum (unspecified goes with
+    either)."""
+    if target is None:
+        return None
+    mine = _suggested_role(steps)
+    if Role.UNSPECIFIED in (mine, target.role) or mine == target.role:
+        return None
+    return (
+        f"“{target.label or 'Untitled node'}” is {ROLE_NAMES[Role(target.role)]} and this "
+        f"file's structure {ROLE_NAMES[Role(mine)]}: a minimum and a TS are never one node "
+        "(D262b), so create a new node for it"
+    )
+
+
 def _suggested_role(written: list[ParsedStep]) -> str:
     """The role the file's last optimization, else its last frequency job, suggests. D157: a
     constrained one (a scan, frozen coordinates or atoms) suggests none: its structure is no
@@ -995,6 +1014,9 @@ def _plan_steps(
             if options.duplicate_action == "attach":
                 node_id = options.duplicate_node_id or duplicates[0]["node_id"]
                 target = session.get(Node, node_id)
+                crossed = _role_conflict(target, steps)
+                if crossed:
+                    blockers.append(crossed)
                 chosen_duplicate = next((d for d in duplicates if d["node_id"] == node_id), None)
                 if target is not None and chosen_duplicate and chosen_duplicate["atom_map"]:
                     # D263: a duplicate numbered otherwise is attached in the node's numbering,

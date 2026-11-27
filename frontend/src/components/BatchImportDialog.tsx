@@ -26,6 +26,7 @@ const MATCHES: Record<BatchRow['match'], string> = {
   duplicate: 'possible duplicate, attached',
   none: 'needs your choice',
   irc: 'starts from it',
+  irc_end: 'optimized from its IRC end', // A192
 }
 
 function where(row: BatchRow): string {
@@ -34,7 +35,7 @@ function where(row: BatchRow): string {
   const name = target.kind === 'file' ? `the node from ${target.file}` : `“${nodeName(target)}”`
   if (target.kind === 'group') return `New group “${target.label}”`
   if (target.kind === 'new') return `New node “${target.label}”`
-  if (row.kind === 'irc') return `Into the IRC of ${name}` // D134
+  if (row.kind === 'irc' || row.match === 'irc_end') return `Into the IRC of ${name}` // D134, A192
   if (row.mode === 'planned') return `Finishes ${name}`
   return `Adds to ${name}${row.derived ? ', with a derived node for its other geometry' : ''}`
 }

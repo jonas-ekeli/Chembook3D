@@ -1,11 +1,14 @@
 """Claude's read tools for building a mechanism from a folder (D263, FR-MCP-23): a folder of
 outputs surveyed without importing it, two structures compared, and many grouped into
-duplicates, conformers and isomers. The rules live in `services/folder_survey.py` and
-`services/structure_compare.py`; nothing is written.
+duplicates, conformers and isomers, and the minima a TS links searched from the TS (FR-MCP-25).
+The rules live in `services/folder_survey.py`, `services/structure_compare.py` and
+`services/ts_partners.py`; nothing is written.
 
 Like `api/local_files.py`, these read files on this computer, so only the app's own page or
 Claude on this computer may call them."""
 
+import json
+import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -14,7 +17,8 @@ from pydantic import BaseModel, Field
 
 from chembook3d.api.jobs import _local_page_only
 from chembook3d.api.routes import DbSession, _investigation
-from chembook3d.services import batch_import, folder_survey, thermo_settings
+from chembook3d.models import Node
+from chembook3d.services import batch_import, folder_survey, irc_ends, thermo_settings, ts_partners
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
 from chembook3d.services.records import RecordError
@@ -65,6 +69,16 @@ class CompareIn(BaseModel):
     count_weak: bool = False
 
 
+class PartnersIn(BaseModel):
+    ts: StructureRef | None = None
+    tss: list[StructureRef] | None = None
+    all_ts: Literal["all", "unlinked"] | None = None
+    offset: int = Field(0, ge=0)
+    candidates: list[Side] | None = None
+    species: list[StructureRef] | None = None
+    top: int = Field(ts_partners.TOP, ge=1, le=ts_partners.MAX_TOP)
+
+
 class GroupIn(BaseModel):
     structures: list[StructureRef] = []
     all_nodes: bool = False
@@ -112,6 +126,114 @@ def compare_structures(body: CompareIn, request: Request, session: DbSession) ->
         return compare.compare(a, b, ts, body.count_weak, tolerance)
     except (compare.StructureError, RecordError) as exc:
         raise _refused(exc) from exc
+
+
+def _given(
+    session: Any, folder: Path, ref: Side, tolerance: float, level: ts_partners.Level | None
+) -> ts_partners.Candidate:
+    """A structure the caller named, with the reference to pass on (not XYZ text); a node
+    with the geometry levels it holds (A186)."""
+    if isinstance(ref, StructureRef) and set(_ref(ref)) == {"node_id"}:
+        node = session.get(Node, ref.node_id)
+        if node is not None and node.geometry:
+            return ts_partners.node_candidate(session, folder, node, tolerance, level)
+    structure = _side(session, folder, ref, tolerance)
+    refs = [_ref(r) for r in ref] if isinstance(ref, list) else [_ref(ref)]
+    entry: dict[str, Any] = {"label": structure.label}
+    if not any("xyz" in r for r in refs):
+        entry["ref"] = refs if isinstance(ref, list) else refs[0]
+    if refs[0].get("node_id"):
+        entry["node_id"] = refs[0]["node_id"]
+    return ts_partners.Candidate(structure, entry)
+
+
+class _Partners:
+    """The candidates of one call, made once for every TS at the same geometry level (A187)."""
+
+    def __init__(self, session: Any, folder: Path, tolerance: float, body: PartnersIn):
+        self.session, self.folder, self.tolerance, self.body = session, folder, tolerance, body
+        self.made: dict[str | None, tuple[list, list, dict[str, int]]] = {}
+        self.ends: dict[str, str] | None = None  # A192: IRC end nodes, by node: their TS
+
+    def irc_ends_of_others(self, ts_id: str | None) -> set[str]:
+        """A192: the nodes made from another TS's IRC end optimization, never its partners."""
+        if self.ends is None:
+            self.ends = irc_ends.end_nodes(self.session, self.folder, self.tolerance)
+        return {n for n, ts in self.ends.items() if ts != ts_id}
+
+    def find(self, ref: StructureRef) -> dict[str, Any]:
+        session, folder, tolerance, body = self.session, self.folder, self.tolerance, self.body
+        ts = _side(session, folder, ref, tolerance)
+        level = ts_partners.ts_level(session, _ref(ref))
+        key = level.id if level is not None else None
+        if key not in self.made:
+            candidates: list[ts_partners.Candidate] = []
+            species: list[ts_partners.Candidate] = []
+            skipped: dict[str, int] = {}
+            if body.candidates is None or body.species is None:
+                candidates, species, skipped = ts_partners.from_investigation(
+                    session, folder, tolerance, None, level
+                )
+            if body.candidates is not None:
+                candidates = [_given(session, folder, r, tolerance, level) for r in body.candidates]
+                skipped = {}
+            if body.species is not None:
+                species = [_given(session, folder, r, tolerance, level) for r in body.species]
+            self.made[key] = (candidates, species, skipped)
+        candidates, species, skipped = self.made[key]
+        node = session.get(Node, ref.node_id) if ref.node_id is not None else None
+        if body.candidates is None:
+            others = self.irc_ends_of_others(node.id if node is not None else None)
+            candidates = [c for c in candidates if c.entry.get("node_id") not in others]
+        if node is not None:  # never the TS itself, nor counted as left out
+            candidates = [c for c in candidates if c.entry.get("node_id") != node.id]
+            species = [c for c in species if c.entry.get("node_id") != node.id]
+            why = ts_partners.left_out(node, tolerance) if node.geometry else None
+            if why is not None and skipped.get(why):
+                skipped = {**skipped, why: skipped[why] - 1}
+                skipped = {k: v for k, v in skipped.items() if v}
+        return ts_partners.find(ts, candidates, species, tolerance, body.top, level, skipped)
+
+
+@router.post("/structures/ts-partners")
+def find_ts_partners(body: PartnersIn, request: Request, session: DbSession) -> dict[str, Any]:
+    """D263c, A184, A186: the minima on each side of a TS's imaginary mode, those at the TS's
+    geometry level and nearest first, and A184's bond check of the best pair. A187: several
+    TSs (`tss`, or `all_ts`) in one call, a few lines each. Changes nothing."""
+    _local_page_only(request)
+    folder = _investigation(request).folder
+    tolerance = thermo_settings.settings(session).duplicate_tolerance
+    named = [body.ts is not None, body.tss is not None, body.all_ts is not None]
+    if sum(named) != 1:
+        raise HTTPException(422, "Name the TS (ts), several (tss), or all_ts: all or unlinked")
+    search = _Partners(session, folder, tolerance, body)
+    if body.ts is not None:
+        try:
+            return search.find(body.ts)
+        except (compare.StructureError, RecordError) as exc:
+            raise _refused(exc) from exc
+    if body.tss is not None:
+        refs = body.tss
+    else:
+        chosen = ts_partners.all_ts if body.all_ts == "all" else ts_partners.unlinked
+        refs = [StructureRef(node_id=n.id) for n in chosen(session)]
+    started = time.perf_counter()
+    blocks: list[dict[str, Any]] = []
+    size = 0
+    for ref in refs[body.offset :]:
+        try:
+            block = ts_partners.brief(search.find(ref))
+        except (compare.StructureError, RecordError) as exc:
+            node = session.get(Node, ref.node_id) if ref.node_id else None
+            label = ref.label or (node.label if node is not None else None) or "the TS"
+            block = {"ts": label, "verdict": "error", "why": str(exc)}
+        if ref.node_id is not None:
+            block = {"ts": block.pop("ts"), "node_id": ref.node_id, **block}
+        size += len(json.dumps(block, ensure_ascii=False)) + 2
+        if blocks and size > ts_partners.MAX_ANSWER:
+            break
+        blocks.append(block)
+    return ts_partners.batch(blocks, len(refs), body.offset, time.perf_counter() - started)
 
 
 @router.post("/structures/group")
