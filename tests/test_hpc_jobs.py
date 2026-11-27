@@ -38,6 +38,15 @@ def submit(helper, record, **changes):
     return call(helper, "submit", record["attempt"], **(fields | changes))
 
 
+def test_record_filename_preserves_canonical_attempt_id():
+    attempt = "000000000000000000000000000000ab"
+    assert hpc_jobs._record_path(attempt).name == attempt + ".json"
+    for invalid in (attempt.upper(), "ab", attempt + "0"):
+        with pytest.raises(HTTPException) as refused:
+            hpc_jobs._record_path(invalid)
+        assert refused.value.status_code == 422
+
+
 def test_repeated_saga_preparation_cannot_rebind_another_investigation(tmp_path):
     attempt = secrets.token_hex(16)
     owners = [tmp_path / "first", tmp_path / "second"]

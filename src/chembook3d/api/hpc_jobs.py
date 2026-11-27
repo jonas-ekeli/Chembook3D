@@ -109,7 +109,8 @@ def _local_key(server_id: str, target: list) -> bytes:
 def _record_path(attempt: str) -> Path:
     if not job_pilot.ATTEMPT.fullmatch(attempt):
         raise HTTPException(422, "Invalid prepared attempt ID.")
-    return servers.folder() / "prepared-jobs" / f"{attempt}.json"
+    # Generate the filename from the 128-bit ID, preserving existing zero-padded names.
+    return servers.folder() / "prepared-jobs" / f"{int(attempt, 16):032x}.json"
 
 
 def _store_record(attempt: str, record: dict) -> None:
