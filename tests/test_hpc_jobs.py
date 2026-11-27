@@ -1,6 +1,7 @@
 """Local cluster helper (D266): only fixed operator scripts run on synthetic inputs."""
 
 import hashlib
+import re
 import secrets
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -11,7 +12,7 @@ from fastapi import HTTPException
 
 from chembook3d import xyz
 from chembook3d.api import hpc_jobs
-from chembook3d.remote.job_pilot import _verify_input, signature
+from chembook3d.remote.job_pilot import _freeze_optimization_distance, _verify_input, signature
 from tests.fake_ssh_server import FakeSaga, enable_job_pilot
 from tests.hpc_pilot_runner import linked_minimum_input
 
@@ -181,6 +182,77 @@ def test_linked_generation_rejects_changed_step(before, after):
         _verify_input(original.replace(before, after, 1), xyz.parse_xyz("\n".join(rows)), "water")
 
 
+def test_freeze_distance_changes_only_the_linked_optimization(pilot):
+    options = {"job_file": "linked-minimum.jd"}
+    ordinary = prepare(pilot, **options)["input"].split("--Link1--")
+    record = prepare(pilot, **options, freeze_distance=[1, 2])
+    constrained = record["input"].split("--Link1--")
+
+    assert record["freeze_distance"] == [1, 2]
+    assert record["revision"] == hashlib.sha256(record["input"].encode()).hexdigest()
+    assert len(constrained) == len(ordinary) == 5
+    assert constrained[:3] == ordinary[:3] and constrained[4] == ordinary[4]
+    assert "modredundant" not in "".join(ordinary).lower()
+    original_sections = re.split(r"(?:\r?\n){2,}", ordinary[3].strip())
+    modified_sections = re.split(r"(?:\r?\n){2,}", constrained[3].strip())
+    route, title, molecule, constraints = modified_sections
+    assert (title, molecule, constraints) == (original_sections[1], "0 1", "B 1 2 F")
+    opt = re.search(r"\bOpt=\(([^)]+)\)", route, re.I)
+    assert opt is not None
+    assert {item.strip().lower() for item in opt.group(1).split(",")} == {"tight", "modredundant"}
+    assert (route[: opt.start()] + "Opt=Tight" + route[opt.end() :]) == original_sections[0]
+
+
+@pytest.mark.parametrize(
+    ("opt", "replacement", "newline"),
+    [
+        ("Opt", "Opt=ModRedundant", "\n"),
+        (
+            "Opt=(RecalcFC=50,MaxCycles=150,Tight)",
+            "Opt=(RecalcFC=50,MaxCycles=150,Tight,ModRedundant)",
+            "\r\n",
+        ),
+    ],
+)
+def test_freeze_distance_preserves_existing_opt_options_and_line_endings(opt, replacement, newline):
+    original = linked_minimum_input("water", ["O 0 0 0", "H 0 0 1", "H 0 1 0"])
+    original = original.replace("Opt=Tight", opt).replace("\n", newline)
+    steps = original.split("--Link1--")
+    steps[3] = steps[3].replace(opt, replacement) + f"B 2 3 F{newline}{newline}"
+
+    assert _freeze_optimization_distance(original, [2, 3]) == "--Link1--".join(steps)
+
+
+def test_freeze_distance_rejects_multiple_optimization_keywords():
+    text = linked_minimum_input("water", ["O 0 0 0", "H 0 0 1", "H 0 1 0"])
+    text = text.replace("Opt=Tight", "Opt Opt=Tight")
+
+    with pytest.raises(ValueError, match="optimization keyword"):
+        _freeze_optimization_distance(text, [1, 2])
+
+
+@pytest.mark.parametrize(
+    "pair",
+    [[], [1], [1, 2, 3], [True, 2], [1.0, 2], ["1", 2], [1, 1], [0, 2], [1, 4]],
+)
+def test_helper_rejects_invalid_freeze_distance(pilot, pair):
+    with pytest.raises(ValueError):
+        prepare(pilot, job_file="linked-minimum.jd", freeze_distance=pair)
+
+
+@pytest.mark.parametrize("option", ["Cartesian", "Z-Matrix", "ReadFreeze"])
+def test_freeze_refuses_unsupported_optimizer_settings(option):
+    original = linked_minimum_input("water", ["O 0 0 0", "H 0 0 1", "H 0 1 0"])
+    text = original.replace("Opt=Tight", f"Opt=({option},Tight)")
+    with pytest.raises(ValueError, match=option.upper()):
+        _freeze_optimization_distance(text, [1, 2])
+
+
+def test_helper_rejects_freeze_distance_for_single_step_minimum(pilot):
+    with pytest.raises(ValueError, match="linked"):
+        prepare(pilot, freeze_distance=[1, 2])
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation requires Windows privilege")
 def test_link_to_geometry_outside_the_area(pilot, tmp_path):
     outside = tmp_path / "outside.xyz"
@@ -191,17 +263,25 @@ def test_link_to_geometry_outside_the_area(pilot, tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("mode", "expected"),
+    ("mode", "expected", "preparation"),
     [
-        ("ok", "submitted"),
-        ("reject", "rejected"),
-        ("lost-receipt", "uncertain"),
-        ("conflicting-receipt", "uncertain"),
+        ("ok", "submitted", {}),
+        ("reject", "rejected", {}),
+        ("lost-receipt", "uncertain", {}),
+        ("conflicting-receipt", "uncertain", {}),
+        pytest.param(
+            "ok",
+            "submitted",
+            {"job_file": "linked-minimum.jd", "freeze_distance": [1, 2]},
+            id="freeze-distance",
+        ),
     ],
 )
-def test_one_wrapper_invocation_across_retries_and_helper_restart(pilot, mode, expected):
+def test_one_wrapper_invocation_across_retries_and_helper_restart(
+    pilot, mode, expected, preparation
+):
     helper = replace(pilot, submitter=(*pilot.submitter[:-1], mode))
-    record = prepare(helper)
+    record = prepare(helper, **preparation)
     with ThreadPoolExecutor(max_workers=3) as pool:
         list(pool.map(lambda _: submit(helper, record), range(3)))
     # New helper instance reading the same durable state; a lost reply is recovered by ID.

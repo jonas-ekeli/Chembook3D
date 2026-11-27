@@ -6,6 +6,9 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- In the local HPC pilot, the agent can freeze one distance in a five-step Gaussian
+  pre-optimization. The app shows the selected atom pair and revised input for approval.
+
 - The Saga pilot can submit one operator-enabled Gaussian minimum after the user
   reviews the input, account and resources in the app. Looking up the same
   attempt recovers its Slurm receipt after a lost reply. The submission workflow

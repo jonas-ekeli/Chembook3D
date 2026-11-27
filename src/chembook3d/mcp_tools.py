@@ -697,9 +697,13 @@ TOOLS: list[ToolSpec] = [
         "write",
         "POST",
         "/api/hpc-jobs/{server_id}/prepare",
-        "Prepare one ordinary Gaussian optimization on the configured local HPC pilot. "
-        "Select an approved .jd and .xyz by filename. Uses one node. Returns the complete "
+        "Prepare a Gaussian optimization on the configured local HPC pilot. Select an approved "
+        ".jd and .xyz by filename. For a five-step linked minimum, optionally freeze one "
+        "distance at its starting value during optimization. Uses one node. Returns the complete "
         "input for review, revision digest and attempt ID. Preparation never submits.",
+        help={
+            "freeze_distance": "Two distinct 1-based atom indices from the selected XYZ.",
+        },
     ),
     T(
         "get_prepared_job",
@@ -2131,7 +2135,8 @@ TOOLS += [
 
 CONFIRM_DESCRIPTIONS = {
     "submit_prepared_job": "Ask the user to submit a prepared Gaussian input on the enrolled Saga "
-    "or local HPC pilot. The app shows the input, destination and resources for confirmation.",
+    "or local HPC pilot. The app shows the input, destination, resources and any frozen distance "
+    "for confirmation.",
     "delete_node": "Delete a node (or free species) with its calculations, notes and every "
     "edge touching it.",
     "delete_group": "Delete a group with its contents: its members, their calculations and "

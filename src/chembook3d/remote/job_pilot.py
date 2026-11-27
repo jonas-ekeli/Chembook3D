@@ -140,6 +140,44 @@ def _verify_input(text: str, geometry: list[xyz.Atom], stem: str) -> None:
             )
 
 
+def _freeze_optimization_distance(text: str, pair: list[int]) -> str:
+    """Edit the fourth step of an already verified project minimum (05 §9)."""
+    links = list(re.finditer(r"^[ \t]*--link1--[ \t]*\r?\n", text, re.I | re.M))
+    if len(links) != 4:
+        raise ValueError("A distance freeze requires the five-step linked minimum.")
+    start, end = links[2].end(), links[3].start()
+    step = text[start:end]
+    # Locate only the route. Titles and basis data may also contain keyword text.
+    route_start = re.search(r"^[ \t]*#", step, re.M).start()
+    route, rest = re.split(r"(?=\r?\n[ \t]*\r?\n)", step[route_start:], maxsplit=1)
+    # Match only the supported top-level Opt, Opt=Tight and Opt=(...) forms.
+    words = split_route_words(re.sub(r"\s*=\s*", "=", route))
+    opt_words = [word for word in words if keyword_of(word)[0] == "OPT"]
+    matches = list(
+        re.finditer(
+            r"(?<![^\s#])(opt)(?:[ \t]*=[ \t]*(?:\(([^()\r\n]+)\)|([a-z0-9]+)))?"
+            r"(?=[\s#]|$)(?!\s*[=(])",
+            route,
+            re.I,
+        )
+    )
+    if len(matches) != 1 or opt_words != [re.sub(r"\s*=\s*", "=", matches[0][0])]:
+        raise ValueError("Expected one supported optimization keyword for the distance freeze.")
+    # The pilot knows the optimizer settings of the project's pre-optimization.
+    # Other options can change the coordinate system or require extra input sections.
+    for option in keyword_of(opt_words[0])[1]:
+        if not re.fullmatch(r"TIGHT|(?:RECALCFC|MAXCYCLES)=[0-9]+", option):
+            raise ValueError(f"Unsupported optimization option for the distance freeze: {option}")
+    match = matches[0]
+    existing = match[2] or match[3]
+    options = f"({existing},ModRedundant)" if existing else "ModRedundant"
+    route = route[: match.start()] + f"{match[1]}={options}" + route[match.end() :]
+    newline = "\r\n" if "\r\n" in step else "\n"
+    constraint = f"B {pair[0]} {pair[1]} F"
+    revised = step[:route_start] + route + rest.rstrip(" \t\r\n") + newline * 2
+    return text[:start] + revised + constraint + newline * 2 + text[end:]
+
+
 @dataclass(frozen=True)
 class JobPilot:
     """Paths, tools and limits come from the operator, never from a client request.
@@ -181,6 +219,8 @@ class JobPilot:
             "submit": {"revision", "cores", "hours"},
             "status": set(),
         }
+        if operation == "prepare" and "freeze_distance" in payload:
+            fields["prepare"].add("freeze_distance")
         if (
             not isinstance(operation, str)
             or operation not in fields
@@ -227,6 +267,16 @@ class JobPilot:
         atoms = xyz.parse_xyz(_read_input(geometry))
         if not all(math.isfinite(v) for a in atoms for v in (a.x, a.y, a.z)):
             raise ValueError("XYZ coordinates must be finite.")
+        pair = request.get("freeze_distance")
+        if "freeze_distance" in request and (
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or any(type(i) is not int or not 1 <= i <= len(atoms) for i in pair)
+            or pair[0] == pair[1]
+        ):
+            raise ValueError(
+                "Choose two distinct atom indices from the XYZ geometry, starting at 1."
+            )
         folder = self.work / attempt
         folder.mkdir(mode=0o700, parents=False, exist_ok=False)
         (folder / geometry.name).write_text(xyz.format_xyz(atoms), encoding="ascii", newline="\n")
@@ -246,13 +296,22 @@ class JobPilot:
         path = _file(folder, geometry.stem + ".inp", ".inp")
         contents = _read_input(path)
         _verify_input(contents, atoms, geometry.stem)
+        if pair is not None:
+            contents = _freeze_optimization_distance(contents, pair)
+            data = contents.encode()
+            if len(data) > MAX_INPUT:
+                raise ValueError("Constrained input is too large for the pilot.")
+            path.write_bytes(data)
         revision = hashlib.sha256(contents.encode()).hexdigest()
         with db:
             db.execute(
                 "INSERT INTO attempts VALUES (?,?,?,?,?,?,'prepared',NULL,NULL)",
                 (attempt, jd.name, geometry.name, cores, hours, revision),
             )
-        return {**self._status(db, attempt), "input": contents}
+        result = {**self._status(db, attempt), "input": contents}
+        if pair is not None:
+            result["freeze_distance"] = pair
+        return result
 
     def _submit(self, db: sqlite3.Connection, row: sqlite3.Row, request: dict) -> None:
         if any(request[k] != row[k] for k in ("revision", "cores", "hours")):

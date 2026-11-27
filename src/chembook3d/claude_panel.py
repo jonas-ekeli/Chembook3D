@@ -159,6 +159,9 @@ attempt so they can review the input, destination and resources in the app. Use 
 the enrolled pilot for file tools. Its geometries directory accepts new XYZ files when the
 user enables writing. The scope on this account stays fixed when the terminal changes directory.
 For the configured local HPC pilot, prepare_gaussian_job returns the input for review.
+For a constrained pre-optimization, select the five-step project minimum and pass freeze_distance
+as two distinct 1-based atom indices from the selected XYZ. Treat the result as a TS guess.
+Omit freeze_distance for an unconstrained optimization.
 Use its approved results directory for reads and its geometries directory for new XYZ files.
 Use submit_prepared_job for that attempt after review. For either pilot, if the reply is lost, use
 get_prepared_job on the same attempt and pass its follow_up arguments to check_server_job.

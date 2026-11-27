@@ -7,9 +7,10 @@ import re
 import secrets
 import tempfile
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from chembook3d.api.remote import _check, _saved
 from chembook3d.api.routes import _investigation
@@ -88,6 +89,16 @@ class PrepareIn(BaseModel):
     job_file: str = Field(max_length=83)
     cores: int = Field(ge=1)
     hours: int = Field(ge=1)
+    freeze_distance: list[Annotated[int, Field(ge=1)]] | None = Field(
+        default=None, min_length=2, max_length=2
+    )
+
+    @field_validator("freeze_distance")
+    @classmethod
+    def _distinct_atoms(cls, pair: list[int] | None) -> list[int] | None:
+        if pair is not None and pair[0] == pair[1]:
+            raise ValueError("Specify two distinct atom indices.")
+        return pair
 
 
 def _local_key(server_id: str, target: list) -> bytes:
@@ -171,10 +182,14 @@ def _summary(record: dict) -> str:
             f"port {port}), {record['nodes']} node, {record['cores']} cores, {record['hours']} h. "
             f"Directory {record['directory']}. Prepared input SHA-256 {record['revision']}"
         )
+    freeze = ""
+    if pair := record.get("freeze_distance"):
+        first, second = pair
+        freeze = f"Freeze the distance between atoms {first} and {second} at its starting value. "
     return (
         f"Submit {record['geometry']} using {record['job_file']} on {record['server_id']} "
         f"(local pilot), 1 node, {record['cores']} cores, {record['hours']} h. "
-        f"Directory {record['directory']}. Prepared input SHA-256 {record['revision']}"
+        f"{freeze}Directory {record['directory']}. Prepared input SHA-256 {record['revision']}"
     )
 
 
@@ -231,14 +246,19 @@ async def prepare(server_id: str, body: PrepareIn, request: Request):
     target = _target(server_id)
     key = _local_key(server_id, target)
     attempt = secrets.token_hex(16)
+    options = body.model_dump(exclude_none=True)
     result = await _call(
-        server_id, {"operation": "prepare", "attempt": attempt, **body.model_dump()}, target, key
+        server_id, {"operation": "prepare", "attempt": attempt, **options}, target, key
     )
     revision = hashlib.sha256(result["input"].encode()).hexdigest()
-    if revision != result["revision"] or result["state"] != "prepared":
+    if (
+        revision != result["revision"]
+        or result["state"] != "prepared"
+        or result.get("freeze_distance") != body.freeze_distance
+    ):
         raise HTTPException(409, "Helper did not return a verified prepared input.")
     record = {
-        **body.model_dump(),
+        **options,
         "input": result["input"],
         "revision": revision,
         "directory": result["directory"],
@@ -271,7 +291,10 @@ async def _action(request: Request, server_id: str, attempt: str, operation: str
             payload.update(operation="submit_minimum", nodes=record["nodes"])
         else:
             payload.update(operation="minimum_status", revision=record["revision"])
-    return await _call(server_id, payload, record["target"], key, record["key_id"])
+    result = await _call(server_id, payload, record["target"], key, record["key_id"])
+    if "freeze_distance" in record:
+        result["freeze_distance"] = record["freeze_distance"]
+    return result
 
 
 @router.get("/{server_id}/attempts/{attempt}")

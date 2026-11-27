@@ -107,6 +107,33 @@ Conversion constants are defined once, in one module, from CODATA 2018 (P17).
 
 ## 9. Gaussian HPC wrapper workflow (D266)
 
+### From a node request to a reaction-wide task (scoping)
+
+Jonas wants to give the agent a scientific task in an investigation, ranging from work on one node to completing a set of calculations for a reaction. Choosing a default geometry from the viewer is still open. The investigation already exposes nodes, stored geometries, their levels of theory and calculation steps. A request can explicitly identify a displayed frame when that is the intended starting point.
+
+Jonas's representative request is “Find a verified transition state for node X using this project's method.” The requested result includes a converged DFT TS optimization with one confirmed imaginary mode and a completed project single point on that optimized geometry. The node should retain the calculations and starting-geometry provenance so another request can reuse a valid TS or run just a missing single point.
+
+| Stage | Agent action and evidence |
+|---|---|
+| Find a guess | Inspect X, its charge and multiplicity, project method, existing calculations and the adjacent intermediates. Reuse an appropriate guess or use the notebook's existing local ML or semiempirical guess tools. For example, `start_local_ts_guess` can use compatible endpoint structures. Record the source and atom mapping for the chosen guess. |
+| Improve the guess | For a rough guess, pre-optimize with the relevant distances, angles or torsions held. Inspect the modes at that geometry. A mode moving the atoms along the intended coordinate is evidence to try an unconstrained project DFT TS optimization. A constrained structure remains a guess. |
+| Recover a difficult TS | If the pre-optimization lacks a useful mode, or the TS search fails, use the preceding results to choose a revised constraint target or a scan along the relevant coordinate(s). Select a promising scan geometry for the next attempt and record why. Retry and resource limits remain open. |
+| Verify and complete X | Check convergence and normal termination, then inspect the frequency result on the same unconstrained geometry at the project's TS level. Proposed interpretation of “verified”: exactly one imaginary mode whose atomic displacements support the intended elementary step. Record the frequency and evidence for that interpretation. `get_vibrational_modes` and `compare_structures` already provide relevant evidence for imported calculations. An ambiguous mode needs further evidence before the agent claims success. Run the project single point on the verified geometry in the correct electronic state and associate the successful result with X. |
+
+For a set of alternating intermediates and transition states, the agent should inventory missing work and run independent jobs in parallel within the user's allocation. A difficult TS can depend on usable geometries from one or both adjacent intermediates. As soon as the needed geometries are ready it can proceed, while unrelated nodes continue. A TS single point depends on verification of its own TS. The set-level report should distinguish completed, pending and blocked nodes and give the outstanding calculation or scientific question for each.
+
+#### Evidence from the three-stage Gaussian example (Q100)
+
+The example uses three separate submissions. In the five-step preparation, the fourth step enables `ModRedundant` and freezes one interatomic distance at its starting value. The fifth step computes frequencies. The subsequent project TS job reads its geometry, basis and wavefunction guess from a checkpoint, releases the distance, optimizes and computes frequencies. The project single point reads the optimized geometry and guess from a checkpoint and supplies its own larger basis. In both handoffs the atom sequence and printed Cartesian coordinates agree after alignment. The wrapper logs identify the formatted checkpoint staged under each receiving job's name. They do not identify which earlier artifact supplied those bytes.
+
+The constrained and unconstrained structures each have one imaginary vibrational frequency. The relative displacement of the selected atoms lies mainly along their separation in both modes. The constrained result supports the choice of starting geometry. For this node, Jonas accepted the converged, unconstrained TS because its sole imaginary mode opens and closes the selected bond. This evidence is sufficient to proceed to the project single point. For other nodes, use the intended elementary step to identify the motion to check. Where several bond changes matter, inspect their relative directions together, allowing for reversal of the whole mode.
+
+If the expected motion is unclear from the node and its neighbors, the agent can consult project PDFs, search the literature, or look up a primary source online. When a source informs the assignment, record the citation and which motion it suggests, alongside the displacements observed in this calculation. If those displacements still leave the assignment ambiguous, keep the TS unverified.
+
+The local pilot implements the first increment. In `prepare_gaussian_job`, pass `freeze_distance` as two distinct 1-based atom indices from the selected XYZ. The helper verifies the generated five-step minimum, adds `ModRedundant` to the optimization and inserts a single distance freeze at its starting value. The review shows the atom pair, complete revised input and its SHA-256 digest. Approval submits those bytes. Checkpoint handoff is the next increment: select the producing attempt and artifact, then record and verify its digest when staging it under the receiving job's expected name.
+
+Use synthetic fixtures in CI for the three-stage sequence. In the successful case the unconstrained optimization converges and its sole imaginary mode opens and closes the specified bond, which permits the single point. Change only the displacement vectors so the same imaginary frequency belongs to unrelated motion and verify that the single point stays pending. Check that the freeze applies only to the preparation, a constrained result cannot authorize a TS single point, and each child uses its selected parent's checkpoint. Cover a missing or changed checkpoint and a single point that starts from the pre-optimized geometry instead of the verified TS. Scans, ambiguous-mode follow-up, intermediate completion criteria, and authorization for concurrent work and retries remain open.
+
 ### Running the first workflow locally
 
 From a checkout with development dependencies installed, run:
@@ -130,9 +157,11 @@ uv run chembook3d --port 8875
 
 Open a local test investigation. In that app's server settings edit its Saga entry to host `127.0.0.1`, port `8767` and user `jonas`. Connect with the fixture password `correct horse` and code `123456`. Ask the agent to prepare `water.xyz` using `minimum.jd` on one node with 40 cores and 24 hours. The input, resources and attempt ID are available before submission. Request submission, expand **Review Gaussian input** in the app, then choose **Submit job** or **Refuse**.
 
+To try a constrained pre-optimization in the same fixture, ask the agent to prepare `water.xyz` with `linked-minimum.jd` and freeze the distance between atoms 1 and 2. In the preview, step 4 should contain `Opt=(Tight,ModRedundant)` and `B 1 2 F`. Step 5 should still request frequencies. For the freeze, the helper supports bare `Opt` and the reviewed project options `Tight`, `RecalcFC=n` and `MaxCycles=n`. If it encounters another option, it identifies it before review.
+
 The fixed read directory is `/cluster/work/gaussian-pilot`. The existing agent file-write toggle permits new files under its `geometries` subdirectory. The helper chooses a fresh attempt folder, verifies atom order and coordinates, and stages the approved revision in its own submission directory. The project job files and authorization records live outside the fake server's SFTP tree. Moving the user's terminal does not change either agent boundary.
 
-Use `get_prepared_job` with the attempt ID after a lost reply. A recorded numeric receipt supplies `check_server_job` with its directory and job ID. The demo wrapper produces a start log. A missing receipt after the wrapper has run leaves the attempt uncertain and blocks replay. SDF, checkpoint-based restarts, constrained inputs, scans, IRC and deployment on Saga are later milestones.
+Use `get_prepared_job` with the attempt ID after a lost reply. A recorded numeric receipt supplies `check_server_job` with its directory and job ID. The demo wrapper produces a start log. A missing receipt after the wrapper has run leaves the attempt uncertain and blocks replay. The live Saga pilot supports the enrolled minimum. Constrained preparation on Saga, follow-on jobs from a checkpoint, SDF, scans and IRC are later milestones.
 
 ### Testing access on Saga (Q101)
 

@@ -1722,18 +1722,27 @@ def test_saga_enrollment_preserves_manual_transfers_outside_the_pilot(at_work, s
     assert saga.record.logins == 1
 
 
-@pytest.mark.parametrize("drop_reply", [False, True])
+@pytest.mark.parametrize(
+    ("job_file", "drop_reply", "freeze_distance"),
+    [
+        pytest.param("minimum.jd", False, None, id="ordinary"),
+        pytest.param("linked-minimum.jd", True, None, id="linked-lost-reply"),
+        pytest.param("linked-minimum.jd", False, [1, 2], id="frozen-distance"),
+    ],
+)
 def test_local_preparation_submission_and_follow_up_through_mcp(
-    at_work, saga, config_dir, drop_reply
+    at_work, saga, config_dir, job_file, drop_reply, freeze_distance
 ):
     # The app, bridge, real keeper and loopback SSH helper exercise the production routes.
     args = {
         "server_id": "saga",
-        "job_file": "linked-minimum.jd" if drop_reply else "minimum.jd",
+        "job_file": job_file,
         "geometry": "water.xyz",
         "cores": 40,
         "hours": 24,
     }
+    if freeze_distance is not None:
+        args["freeze_distance"] = freeze_distance
     assert (
         at_work.post(
             "/api/hpc-jobs/saga/prepare", json={k: v for k, v in args.items() if k != "server_id"}
@@ -1762,10 +1771,16 @@ def test_local_preparation_submission_and_follow_up_through_mcp(
             record = json.loads(prepared.content[0].text)
             ids = {"attempt": record["attempt"], "server_id": "saga"}
             assert record["state"] == "prepared"
-            assert record["input"].count("--Link1--") == (4 if drop_reply else 0)
+            steps = record["input"].split("--Link1--")
+            assert len(steps) == (5 if job_file == "linked-minimum.jd" else 1)
+            if freeze_distance:
+                assert record["freeze_distance"] == freeze_distance
+                assert "B 1 2 F" in steps[3].splitlines()
+            else:
+                assert "modredundant" not in record["input"].lower()
             url = f"/api/hpc-jobs/saga/attempts/{record['attempt']}/submit"
             assert (await http.post(url)).status_code == 403
-            for approved in (False, True):
+            for approved in (False, True, True) if freeze_distance else (False, True):
                 task = asyncio.create_task(bridge.call("submit_prepared_job", ids))
                 try:
                     with anyio.fail_after(10):
@@ -1778,6 +1793,8 @@ def test_local_preparation_submission_and_follow_up_through_mcp(
                     assert record["revision"] in dialog["summary"]
                     assert dialog["preview"] == record["input"]
                     assert "40 cores, 24 h" in dialog["summary"]
+                    if freeze_distance:
+                        assert "distance between atoms 1 and 2" in dialog["summary"]
                     answer = f"/api/confirmations/{dialog['id']}/answer"
                     assert (await http.post(answer, json={"confirm": True})).status_code == 403
                     response = await http.post(answer, json={"confirm": approved}, headers=ORIGIN)
@@ -1789,6 +1806,8 @@ def test_local_preparation_submission_and_follow_up_through_mcp(
                 status = await bridge.call("get_prepared_job", ids)
                 observed = json.loads(status.content[0].text)
                 assert observed["state"] == ("submitted" if approved else "prepared")
+                if freeze_distance:
+                    assert observed["freeze_distance"] == freeze_distance
             checked = await bridge.call("check_server_job", observed["follow_up"])
             assert json.loads(checked.content[0].text)["state"] == "started"
             assert saga.record.logins == 1
@@ -1797,6 +1816,19 @@ def test_local_preparation_submission_and_follow_up_through_mcp(
             assert calls.with_name("water.inp").read_bytes() == record["input"].encode()
 
     anyio.run(exercise)
+
+
+def test_local_preparation_api_rejects_invalid_freeze_distance(at_work, saga, config_dir):
+    enable_job_pilot(saga, config_dir, "saga")
+    args = {"job_file": "linked-minimum.jd", "geometry": "water.xyz", "cores": 40, "hours": 24}
+    url = "/api/hpc-jobs/saga/prepare"
+    for pair in ([], [1], [1, 2, 3], [True, 2], [1.0, 2], ["1", 2], [1, 1], [0, 2]):
+        response = at_work.post(url, json={**args, "freeze_distance": pair})
+        assert response.status_code == 422, response.text
+    for job_file, pair in (("linked-minimum.jd", [1, 4]), ("minimum.jd", [1, 2])):
+        response = at_work.post(url, json={**args, "job_file": job_file, "freeze_distance": pair})
+        assert response.status_code == 409, response.text
+    assert not list(saga.job_pilot.work.glob("*/submission"))
 
 
 # ---------- T-SSH-23 Claude imports outputs from the terminal's directory (D225) ----------
