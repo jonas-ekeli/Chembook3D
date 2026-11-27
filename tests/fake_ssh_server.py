@@ -667,6 +667,7 @@ def enable_job_pilot(fake: FakeSaga, config: Path, server_id: str) -> None:
     jobs.mkdir(parents=True, exist_ok=True)
     (jobs / "minimum.jd").write_text("#p HF/STO-3G Opt", encoding="ascii")
     (jobs / "linked-minimum.jd").write_text("linked-minimum", encoding="ascii")
+    (jobs / "ts.jd").write_text("checkpoint-ts", encoding="ascii")
     tool = (sys.executable, str(Path(__file__).with_name("hpc_pilot_runner.py").resolve()))
     profile = config / "remote" / "local-job-pilot.json"
     profile.parent.mkdir(parents=True, exist_ok=True)

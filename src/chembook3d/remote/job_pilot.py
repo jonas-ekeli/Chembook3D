@@ -13,6 +13,7 @@ from pathlib import Path
 
 from chembook3d import xyz
 from chembook3d.parsers.gaussian import keyword_of, split_route_words
+from chembook3d.remote import checkpoint_ts, preopt_modes
 from chembook3d.remote.saga_prepare import scheduler_outcome
 
 SUBSYSTEM = "chembook3d-jobs-v1"
@@ -20,6 +21,10 @@ LOCAL_WORK = "/cluster/work/gaussian-pilot"
 MAX_INPUT = 256_000
 ATTEMPT = re.compile(r"[a-f0-9]{32}")
 SAFE_STEM = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}")
+
+
+def ts_stem(parent_geometry: str) -> str:
+    return Path(parent_geometry).stem[:77] + "-ts"
 
 
 def signature(key: bytes, payload: dict) -> str:
@@ -179,6 +184,16 @@ def _freeze_optimization_distance(text: str, pair: list[int]) -> str:
 
 
 @dataclass(frozen=True)
+class _Preoptimization:
+    geometry: str
+    job_id: str
+    atoms: list[xyz.Atom]
+    charge_spin: list[str]
+    settings: set[str]
+    inspection: dict
+
+
+@dataclass(frozen=True)
 class JobPilot:
     """Paths, tools and limits come from the operator, never from a client request.
 
@@ -216,11 +231,15 @@ class JobPilot:
         operation = payload.get("operation")
         fields = {
             "prepare": {"job_file", "geometry", "cores", "hours"},
+            "prepare_ts": {"parent_attempt", "mode_index", "output_sha256", "cores", "hours"},
+            "inspect_modes": set(),
             "submit": {"revision", "cores", "hours"},
             "status": set(),
         }
         if operation == "prepare" and "freeze_distance" in payload:
             fields["prepare"].add("freeze_distance")
+        if operation == "submit" and "checkpoint_sha256" in payload:
+            fields["submit"].add("checkpoint_sha256")
         if (
             not isinstance(operation, str)
             or operation not in fields
@@ -238,8 +257,25 @@ class JobPilot:
             db.execute("""CREATE TABLE IF NOT EXISTS attempts (
                 attempt TEXT PRIMARY KEY, job_file TEXT, geometry TEXT, cores INTEGER,
                 hours INTEGER, revision TEXT, state TEXT, job_id TEXT, detail TEXT)""")
-            if operation == "prepare":
-                return self._prepare(db, attempt, payload)
+            db.execute("""CREATE TABLE IF NOT EXISTS ts_handoffs (
+                attempt TEXT PRIMARY KEY, parent_attempt TEXT NOT NULL, parent_job_id TEXT NOT NULL,
+                checkpoint_name TEXT NOT NULL, checkpoint_sha256 TEXT NOT NULL,
+                mode_index INTEGER NOT NULL, mode_evidence TEXT NOT NULL)""")
+            if operation in {"prepare", "prepare_ts"}:
+                self._resources(payload)
+                if operation == "prepare":
+                    return self._prepare(db, attempt, payload)
+                return self._prepare_ts(db, attempt, payload)
+            if operation == "inspect_modes":
+                parent = self._inspect(db, attempt)
+                return {
+                    "attempt": attempt,
+                    "parent_job_id": parent.job_id,
+                    **{
+                        k: parent.inspection[k]
+                        for k in ("freeze_distance", "output_sha256", "modes")
+                    },
+                }
             row = db.execute("SELECT * FROM attempts WHERE attempt=?", (attempt,)).fetchone()
             if row is None:
                 raise ValueError("Unknown prepared attempt.")
@@ -250,19 +286,27 @@ class JobPilot:
     def _status(self, db: sqlite3.Connection, attempt: str) -> dict:
         result = dict(db.execute("SELECT * FROM attempts WHERE attempt=?", (attempt,)).fetchone())
         result["directory"] = f"{self.remote_work.rstrip('/')}/{attempt}/submission"
+        handoff = db.execute("SELECT * FROM ts_handoffs WHERE attempt=?", (attempt,)).fetchone()
+        if handoff:
+            result.update(dict(handoff))
+            result["mode_evidence"] = json.loads(result["mode_evidence"])
         if result["state"] == "uncertain":
             result["detail"] = result["detail"] or (
                 "Submission started. Check this attempt for a receipt before taking further action."
             )
         return result
 
-    def _prepare(self, db: sqlite3.Connection, attempt: str, request: dict) -> dict:
+    def _resources(self, request: dict) -> None:
         cores, hours = request["cores"], request["hours"]
         if type(cores) is not int or not 1 <= cores <= self.max_cores:
             raise ValueError("Core count exceeds the configured range.")
         if type(hours) is not int or not 1 <= hours <= self.max_hours:
             raise ValueError("Wall time exceeds the configured range.")
+
+    def _prepare(self, db: sqlite3.Connection, attempt: str, request: dict) -> dict:
         jd = _file(self.jobs, request["job_file"], ".jd")
+        if jd.name.lower() == "ts.jd":
+            raise ValueError("The TS job requires a reviewed parent mode and checkpoint.")
         geometry = _file(self.geometries, request["geometry"], ".xyz")
         atoms = xyz.parse_xyz(_read_input(geometry))
         if not all(math.isfinite(v) for a in atoms for v in (a.x, a.y, a.z)):
@@ -277,24 +321,7 @@ class JobPilot:
             raise ValueError(
                 "Choose two distinct atom indices from the XYZ geometry, starting at 1."
             )
-        folder = self.work / attempt
-        folder.mkdir(mode=0o700, parents=False, exist_ok=False)
-        (folder / geometry.name).write_text(xyz.format_xyz(atoms), encoding="ascii", newline="\n")
-        try:
-            result = subprocess.run(
-                [*self.generator, str(jd), geometry.name, "nosub"],
-                cwd=folder,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=60,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise ValueError("The generator did not finish preparing this input.") from exc
-        if result.returncode:
-            raise ValueError("Preparation failed. Inspect the generator's .accLog in the attempt.")
-        path = _file(folder, geometry.stem + ".inp", ".inp")
-        contents = _read_input(path)
+        path, contents = self._generate(attempt, jd, geometry.name, atoms)
         _verify_input(contents, atoms, geometry.stem)
         if pair is not None:
             contents = _freeze_optimization_distance(contents, pair)
@@ -306,24 +333,135 @@ class JobPilot:
         with db:
             db.execute(
                 "INSERT INTO attempts VALUES (?,?,?,?,?,?,'prepared',NULL,NULL)",
-                (attempt, jd.name, geometry.name, cores, hours, revision),
+                (attempt, jd.name, geometry.name, request["cores"], request["hours"], revision),
             )
         result = {**self._status(db, attempt), "input": contents}
         if pair is not None:
             result["freeze_distance"] = pair
         return result
 
+    def _generate(self, attempt: str, jd: Path, geometry: str, atoms: list[xyz.Atom]):
+        folder = self.work / attempt
+        try:
+            folder.mkdir(mode=0o700, exist_ok=False)
+        except FileExistsError as exc:
+            raise ValueError("This attempt directory already exists.") from exc
+        (folder / geometry).write_text(xyz.format_xyz(atoms), encoding="ascii", newline="\n")
+        try:
+            result = subprocess.run(
+                [*self.generator, str(jd), geometry, "nosub"],
+                cwd=folder,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=60,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ValueError("The generator did not finish preparing this input.") from exc
+        if result.returncode:
+            raise ValueError("Preparation failed. Inspect the generator's .accLog in the attempt.")
+        path = folder / (Path(geometry).stem + ".inp")
+        data, _ = checkpoint_ts.read_snapshot(path, MAX_INPUT)
+        if b"\x00" in data:
+            raise ValueError("Generated input contains binary data.")
+        return path, data.decode("utf-8")
+
+    def _inspect(self, db: sqlite3.Connection, attempt: str) -> _Preoptimization:
+        if not isinstance(attempt, str) or not ATTEMPT.fullmatch(attempt):
+            raise ValueError("Invalid parent attempt ID.")
+        parent = db.execute("SELECT * FROM attempts WHERE attempt=?", (attempt,)).fetchone()
+        if parent is None or parent["state"] != "submitted" or not parent["job_id"]:
+            raise ValueError("Choose a submitted pre-optimization with a recorded scheduler ID.")
+        folder = self.work / attempt / "submission"
+        stem = Path(parent["geometry"]).stem
+        data, _ = checkpoint_ts.read_snapshot(folder / (stem + ".inp"), MAX_INPUT)
+        if hashlib.sha256(data).hexdigest() != parent["revision"]:
+            raise ValueError("The submitted parent input differs from its approved revision.")
+        atoms, pair, charge_spin, settings = checkpoint_ts.parent_geometry(data.decode(), stem)
+        inspection = preopt_modes.inspect_preoptimization(
+            folder, stem, parent["job_id"], pair, submitted_input=data
+        )
+        return _Preoptimization(
+            parent["geometry"], parent["job_id"], atoms, charge_spin, settings, inspection
+        )
+
+    def _source(
+        self, db: sqlite3.Connection, parent_attempt: str, mode_index: int, output_sha256: str
+    ):
+        if type(mode_index) is not int or mode_index < 1:
+            raise ValueError("Select an eligible imaginary mode by its one-based mode index.")
+        parent = self._inspect(db, parent_attempt)
+        inspection = parent.inspection
+        if output_sha256 != inspection["output_sha256"]:
+            raise ValueError("The parent output changed. Inspect the modes again.")
+        mode = next((m for m in inspection["modes"] if m["mode_index"] == mode_index), None)
+        if not mode or not mode["eligible"]:
+            raise ValueError("Select an imaginary mode aligned with the parent's frozen distance.")
+        evidence = {
+            **mode,
+            **{key: inspection[key] for key in ("output_sha256", "freeze_distance")},
+        }
+        stem = Path(parent.geometry).stem
+        path = self.work / parent_attempt / "submission" / (stem + ".fchk.gz")
+        checkpoint = checkpoint_ts.checkpoint_bytes(path, inspection, parent.charge_spin)
+        return parent, evidence, checkpoint
+
+    def _prepare_ts(self, db: sqlite3.Connection, attempt: str, request: dict) -> dict:
+        parent_id, mode = request["parent_attempt"], request["mode_index"]
+        parent, evidence, checkpoint = self._source(db, parent_id, mode, request["output_sha256"])
+        stem = ts_stem(parent.geometry)
+        geometry = stem + ".xyz"
+        jd = _file(self.jobs, "ts.jd", ".jd")
+        _, contents = self._generate(attempt, jd, geometry, parent.atoms)
+        checkpoint_ts.verify_ts_input(contents, stem, parent.charge_spin, parent.settings)
+        revision = hashlib.sha256(contents.encode()).hexdigest()
+        with db:
+            db.execute(
+                "INSERT INTO attempts VALUES (?,?,?,?,?,?,'prepared',NULL,NULL)",
+                (attempt, jd.name, geometry, request["cores"], request["hours"], revision),
+            )
+            db.execute(
+                "INSERT INTO ts_handoffs VALUES (?,?,?,?,?,?,?)",
+                (
+                    attempt,
+                    parent_id,
+                    parent.job_id,
+                    stem + ".fchk.gz",
+                    hashlib.sha256(checkpoint).hexdigest(),
+                    mode,
+                    json.dumps(evidence),
+                ),
+            )
+        return {**self._status(db, attempt), "input": contents}
+
     def _submit(self, db: sqlite3.Connection, row: sqlite3.Row, request: dict) -> None:
+        self._resources(request)
         if any(request[k] != row[k] for k in ("revision", "cores", "hours")):
             raise ValueError("Authorization does not match the prepared revision and resources.")
+        attempt = row["attempt"]
+        handoff = db.execute("SELECT * FROM ts_handoffs WHERE attempt=?", (attempt,)).fetchone()
+        if (handoff is None and "checkpoint_sha256" in request) or (
+            handoff and request.get("checkpoint_sha256") != handoff["checkpoint_sha256"]
+        ):
+            raise ValueError("Authorization does not match the reviewed checkpoint digest.")
         if row["state"] != "prepared":
             return
-        attempt = row["attempt"]
         folder = self.work / attempt
-        path = _file(folder, Path(row["geometry"]).stem + ".inp", ".inp")
-        snapshot = _read_input(path).encode()
+        path = folder / (Path(row["geometry"]).stem + ".inp")
+        snapshot, _ = checkpoint_ts.read_snapshot(path, MAX_INPUT)
         if hashlib.sha256(snapshot).hexdigest() != row["revision"]:
             raise ValueError("The prepared input changed. Prepare a new attempt for review.")
+        if handoff:
+            reviewed = json.loads(handoff["mode_evidence"])
+            parent, evidence, checkpoint = self._source(
+                db, handoff["parent_attempt"], handoff["mode_index"], reviewed["output_sha256"]
+            )
+            if (
+                parent.job_id != handoff["parent_job_id"]
+                or evidence != reviewed
+                or hashlib.sha256(checkpoint).hexdigest() != handoff["checkpoint_sha256"]
+            ):
+                raise ValueError("Parent evidence or checkpoint changed since TS preparation.")
         # Commit before crossing the scheduler boundary. Even process death cannot replay it.
         with db:
             claimed = db.execute(
@@ -339,6 +477,9 @@ class JobPilot:
             folder.mkdir(mode=0o700)
             with (folder / path.name).open("xb") as input_file:
                 input_file.write(snapshot)
+            if handoff:
+                with (folder / handoff["checkpoint_name"]).open("xb") as output:
+                    output.write(checkpoint)
         except OSError:
             with db:
                 db.execute(

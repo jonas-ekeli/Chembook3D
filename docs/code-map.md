@@ -762,6 +762,10 @@ Routes for all of these are in `api/pathway.py`.
   `api/live.py` to the keeper's fixed SSH subsystem. `remote/job_pilot.py` validates
   files, applies an optional one-distance freeze to the linked optimization step,
   guards the one-time submission in SQLite and records the receipt.
+  `remote/preopt_modes.py` inspects the attributed pre-optimization result.
+  `remote/checkpoint_ts.py` compares the formatted checkpoint geometry and electronic
+  state with the parent result and validates the receiving TS input. See the scientific
+  cases in `tests/test_preopt_modes.py` and staging checks in `tests/test_hpc_jobs.py`.
   `tests/fake_ssh_server.py` provisions the fixture and `tests/hpc_pilot_runner.py`
   implements the synthetic wrappers. See 05 §9 for an interactive local run.
 

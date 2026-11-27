@@ -6,6 +6,10 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The local HPC pilot can inspect imaginary modes from a constrained pre-optimization
+  and prepare a transition-state job using the producing attempt's checkpoint.
+  Submission review includes the parent job, selected mode and checkpoint digest.
+
 - In the local HPC pilot, the agent can freeze one distance in a five-step Gaussian
   pre-optimization. The app shows the selected atom pair and revised input for approval.
 

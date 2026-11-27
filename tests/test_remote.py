@@ -1722,6 +1722,35 @@ def test_saga_enrollment_preserves_manual_transfers_outside_the_pilot(at_work, s
     assert saga.record.logins == 1
 
 
+async def _review_local_job(http, bridge, record, approve):
+    ids = {"server_id": "saga", "attempt": record["attempt"]}
+    task = asyncio.create_task(bridge.call("submit_prepared_job", ids))
+    try:
+        with anyio.fail_after(10):
+            while not (pending := (await http.get("/api/live")).json()["confirmations"]):
+                if task.done():
+                    pytest.fail(str((await task).content))
+                await asyncio.sleep(0.02)
+        [dialog] = pending
+        assert dialog["preview"] == record["input"]
+        for value in (record["revision"], f"{record['cores']} cores, {record['hours']} h"):
+            assert value in dialog["summary"]
+        if pair := record.get("freeze_distance"):
+            assert f"distance between atoms {pair[0]} and {pair[1]}" in dialog["summary"]
+        if "checkpoint_sha256" in record:
+            for key in ("checkpoint_sha256", "parent_attempt", "parent_job_id", "checkpoint_name"):
+                assert str(record[key]) in dialog["summary"]
+        answer = f"/api/confirmations/{dialog['id']}/answer"
+        body = {"confirm": approve}
+        assert (await http.post(answer, json=body)).status_code == 403
+        response = await http.post(answer, json=body, headers=ORIGIN)
+        assert response.is_success, response.text
+        await task
+        return response.json()["status"]
+    finally:
+        task.cancel()
+
+
 @pytest.mark.parametrize(
     ("job_file", "drop_reply", "freeze_distance"),
     [
@@ -1781,35 +1810,17 @@ def test_local_preparation_submission_and_follow_up_through_mcp(
             url = f"/api/hpc-jobs/saga/attempts/{record['attempt']}/submit"
             assert (await http.post(url)).status_code == 403
             for approved in (False, True, True) if freeze_distance else (False, True):
-                task = asyncio.create_task(bridge.call("submit_prepared_job", ids))
-                try:
-                    with anyio.fail_after(10):
-                        while True:
-                            pending = (await http.get("/api/live")).json()["confirmations"]
-                            if pending:
-                                break
-                            await asyncio.sleep(0.02)
-                    dialog = pending[0]
-                    assert record["revision"] in dialog["summary"]
-                    assert dialog["preview"] == record["input"]
-                    assert "40 cores, 24 h" in dialog["summary"]
-                    if freeze_distance:
-                        assert "distance between atoms 1 and 2" in dialog["summary"]
-                    answer = f"/api/confirmations/{dialog['id']}/answer"
-                    assert (await http.post(answer, json={"confirm": True})).status_code == 403
-                    response = await http.post(answer, json={"confirm": approved}, headers=ORIGIN)
-                    expected = ("failed" if drop_reply else "done") if approved else "refused"
-                    assert response.json()["status"] == expected, response.text
-                    await task
-                finally:
-                    task.cancel()
+                expected = ("failed" if drop_reply else "done") if approved else "refused"
+                assert await _review_local_job(http, bridge, record, approved) == expected
                 status = await bridge.call("get_prepared_job", ids)
                 observed = json.loads(status.content[0].text)
                 assert observed["state"] == ("submitted" if approved else "prepared")
                 if freeze_distance:
                     assert observed["freeze_distance"] == freeze_distance
             checked = await bridge.call("check_server_job", observed["follow_up"])
-            assert json.loads(checked.content[0].text)["state"] == "started"
+            assert json.loads(checked.content[0].text)["state"] == (
+                "completed" if freeze_distance else "started"
+            )
             assert saga.record.logins == 1
             calls = saga.job_pilot.work / record["attempt"] / "submission" / "scheduler-calls.txt"
             assert calls.read_text().splitlines() == ["water.inp 1 40 24"]
@@ -1829,6 +1840,90 @@ def test_local_preparation_api_rejects_invalid_freeze_distance(at_work, saga, co
         response = at_work.post(url, json={**args, "job_file": job_file, "freeze_distance": pair})
         assert response.status_code == 409, response.text
     assert not list(saga.job_pilot.work.glob("*/submission"))
+
+
+def test_preoptimization_checkpoint_to_ts_through_mcp(at_work, saga, config_dir, tmp_path):
+    enable_job_pilot(saga, config_dir, "saga")
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            bridge = Bridge(APP, http=http)
+
+            async def result(tool, **params):
+                reply = await bridge.call(tool, {"server_id": "saga", **params})
+                assert not reply.is_error, reply.content
+                return json.loads(reply.content[0].text)
+
+            parent = await result(
+                "prepare_gaussian_job",
+                job_file="linked-minimum.jd",
+                geometry="water.xyz",
+                freeze_distance=[1, 2],
+                cores=2,
+                hours=1,
+            )
+            source = {"parent_attempt": parent["attempt"]}
+            args = {"server_id": "saga", **source}
+            assert (await bridge.call("inspect_preoptimization_modes", args)).is_error
+            assert await _review_local_job(http, bridge, parent, True) == "done"
+            observed = await result("get_prepared_job", attempt=parent["attempt"])
+            evidence = await result("inspect_preoptimization_modes", **source)
+            [mode] = evidence["modes"]
+            assert mode["mode_index"] == 1 and mode["frequency_cm1"] == -425.0 and mode["eligible"]
+            selection = {"cores": 2, "hours": 1, "output_sha256": evidence["output_sha256"]}
+            wrong = await bridge.call(
+                "prepare_ts_from_preoptimization", {**args, **selection, "mode_index": 2}
+            )
+            assert wrong.is_error
+            stale = await bridge.call(
+                "prepare_ts_from_preoptimization",
+                {**args, **selection, "mode_index": 1, "output_sha256": "0" * 64},
+            )
+            assert stale.is_error
+            child = await result(
+                "prepare_ts_from_preoptimization", **source, **selection, mode_index=1
+            )
+            assert child["parent_job_id"] == observed["job_id"]
+            assert child["parent_attempt"] == parent["attempt"] and child["mode_index"] == 1
+            assert child["state"] == "prepared" and child["job_id"] is None
+            assert child["input"].count("--Link1--") == 1
+            assert "modredundant" not in child["input"].lower()
+            root = saga.job_pilot.work
+            source_bytes = (root / parent["attempt"] / "submission" / "water.fchk.gz").read_bytes()
+            assert hashlib.sha256(source_bytes).hexdigest() == child["checkpoint_sha256"]
+            stage = root / child["attempt"] / "submission"
+            assert await _review_local_job(http, bridge, child, False) == "refused"
+            assert not stage.exists()
+            saga.drop_submit_reply = True
+            assert await _review_local_job(http, bridge, child, True) == "failed"
+            receipt = await result("get_prepared_job", attempt=child["attempt"])
+            assert receipt["state"] == "submitted" and receipt["job_id"] != observed["job_id"]
+            assert receipt["checkpoint_sha256"] == child["checkpoint_sha256"]
+            assert (stage / "water-ts.fchk.gz").read_bytes() == source_bytes
+            assert (stage / "water-ts.inp").read_bytes() == child["input"].encode()
+            assert (stage / "scheduler-calls.txt").read_text().splitlines() == [
+                "water-ts.inp 1 2 1"
+            ]
+            report = await result(
+                "check_server_job",
+                **{key: value for key, value in receipt["follow_up"].items() if key != "server_id"},
+            )
+            assert report["state"] == "started"
+
+            other = await http.post(
+                "/api/investigations", json={"folder": str(tmp_path / "other"), "name": "Other"}
+            )
+            assert other.is_success, other.text
+            assert (await bridge.call("inspect_preoptimization_modes", args)).is_error
+            assert (
+                await bridge.call(
+                    "prepare_ts_from_preoptimization", {**args, **selection, "mode_index": 1}
+                )
+            ).is_error
+
+    anyio.run(exercise)
 
 
 # ---------- T-SSH-23 Claude imports outputs from the terminal's directory (D225) ----------
