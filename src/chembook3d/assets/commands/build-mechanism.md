@@ -26,13 +26,17 @@ makes one. Never make, merge or discard a playground yourself.
    that need a choice before committing. A file the plan flags as a duplicate of a node's
    geometry (W-DUP, within the duplicate tolerance) gets `duplicate_action` "attach", not a
    new node, unless it is another conformer or another molecule. An IRC row whose TS is in
-   the batch keeps the target the plan shows (`file:<its id>`).
+   the batch keeps the target the plan shows (`file:<its id>`); an IRC end's optimization
+   (its row matched as an IRC end) goes into its TS's IRC, never a node of its own (A192).
+   Make each small closed-shell molecule (an olefin, a released ligand) a free species right
+   after the import (`set_node_kind`, kind species), before it is on any edge or in any group.
 3. **Group** with `group_structures` (`all_nodes`). Merge true duplicates that you made
    yourself with `merge_nodes` (here it goes without asking only for your own, D264c).
-   Each distinct conformer is its own node; conformers of one intermediate go in one group;
-   the same conformer at several levels is one node. Never merge a minimum and a TS (a
-   node's role and its frequencies say which, not its name), nor attach one's file to the
-   other.
+   Each distinct conformer is its own node; make a conformer group (the proposal's `groups`,
+   step 6) for each molecule `group_structures` gives with more than one conformer, unless
+   the person's names already group them (rot, par, perp); the same conformer at several
+   levels is one node. Never merge a minimum and a TS (a node's role and its frequencies say
+   which, not its name), nor attach one's file to the other.
 4. **Link each TS**, cheapest evidence first, stopping at the first that settles it. Run a
    and b on every TS first and propose what they settle (step 6) before you start any
    mode-follow; mode-follows take minutes each on this computer, so start them only for the
@@ -53,8 +57,14 @@ makes one. Never make, merge or discard a playground yourself.
    Start several mode-follows, then collect their ends. Work through every TS before
    summarising: do not stop while a TS is unsettled and a tool remains to try. A TS still
    unsettled is flagged, never guessed.
-5. **Link minima to minima** only for steps that have no TS on purpose (an association, the
-   loss of a free species, a conformer exchange), and say so in the evidence.
+5. **Link minima to minima** for the steps that have no TS (an association, the loss of a
+   free species, a conformer or coordination change): call `find_direct_links` (again with
+   `offset` while it answers `more`) and propose each pair that fits the reaction, the
+   species joining (A + species → B) or leaving (B → A + species): medium when its
+   `confidence` says so (the bonds balance and the core RMSD is small), low otherwise; a
+   `same_atoms` pair ("no TS: direct link?") only where no TS you have links them, low. Make
+   each molecule in its `make_species` a free species first. Name the core RMSD and the
+   bonds to the core in the evidence.
 6. **Propose** the edges with `propose_mechanism`, each with:
    - confidence (A184): high from an IRC, or a mode-follow whose two ends each match one
      structure; medium from the bond check alone; low from names only;
@@ -70,7 +80,9 @@ makes one. Never make, merge or discard a playground yourself.
 9. **Summarise** in a note pinned to the first node of the mechanism (`create_note`): what
    you built, what is unsure, and a review list of every flag below, the low and medium
    edges, each gap with what you built for it, the gaps left flagged, and the references
-   you used. End your turn with the same summary.
+   you used. Before you end, rewrite that note (`update_note`) so it matches what is built
+   now (the steps, edges and groups `list_proposals` and the canvas show), never a note
+   written earlier in the run. End your turn with the same summary.
 
 ## Rules
 

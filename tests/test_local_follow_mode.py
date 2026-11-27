@@ -175,7 +175,7 @@ def test_an_end_that_matches_nothing_becomes_a_node(open_client):
     """T-LOC-52: with no minimum there, no end matches; the − end is made a planned minimum
     beside the TS (coordinates only, the TS's charge and multiplicity), which it then matches,
     so a second one is refused unless asked anyway; with node A the TS links A and the new
-    node, and a duplicate of the new node makes the − end ambiguous."""
+    node, and a duplicate of the new node makes the − end the nearest of two (A191: medium)."""
     ts_id, _ = import_ts(open_client)
     done = follow(open_client, ts_id)
     matched = ends(open_client, done["id"])
@@ -216,9 +216,11 @@ def test_an_end_that_matches_nothing_becomes_a_node(open_client):
         f"/api/local/jobs/{done['id']}/ends/-/node", json={"label": "B2", "anyway": True}
     )
     assert anyway.status_code == 201 and anyway.json()["label"] == "B2"
-    matched = ends(open_client, done["id"])
-    assert matched["outcome"] == "ambiguous"
-    assert "matches 2 structures" in matched["flags"][0]
+    matched = ends(open_client, done["id"])  # A191: the nearest of one molecule's two
+    assert matched["outcome"] == "links" and matched["confidence"] == "medium"
+    assert matched["ends"]["-"]["settled"]["as"] == "nearest"
+    assert "matches 2 conformers of one molecule" in matched["flags"][0]
+    assert "and 1 other conformer of the same molecule" in matched["verdict"]
 
 
 @pytest.mark.usefixtures("stub_tools")
@@ -388,3 +390,56 @@ def test_a_ts_is_never_an_end_and_an_end_at_the_ts_returned(open_client, tmp_pat
     for end in back["ends"].values():
         assert end["returned_to_ts"] and end["side"] == "none" and end["matches"] == []
     assert sum("returned to the TS" in f for f in back["flags"]) == 2
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_an_end_on_a_conformer_group_and_a_soft_modes_wider_match(open_client):
+    """T-LOC-56 (A191): the + end lies within 0.5 Å of two conformers in one group, so it
+    stands for the group and the link stays high; ungrouped they are the nearest "and 1 other
+    conformer" (medium)."""
+    ts_id, _ = import_ts(open_client)
+    a1 = make_node(open_client, "A1", shifted(0.5))
+    near = [
+        (e, n, x, y + (0.2 if k == 2 else 0.0), z) for k, (e, n, x, y, z) in enumerate(shifted(0.5))
+    ]
+    a2 = make_node(open_client, "A2", near)
+    b_id = make_node(open_client, "B", shifted(-0.5))
+    done = follow(open_client, ts_id)
+    matched = ends(open_client, done["id"])
+    assert matched["ends"]["+"]["settled"]["as"] == "nearest"
+    assert matched["outcome"] == "links" and matched["confidence"] == "medium"
+    assert "and 1 other conformer of the same molecule" in matched["verdict"]
+    grouped = open_client.post(
+        "/api/groups/reconnect", json={"member_ids": [a1, a2], "label": "As"}
+    )
+    assert grouped.status_code == 201, grouped.text
+    matched = ends(open_client, done["id"])
+    settled = matched["ends"]["+"]["settled"]
+    assert settled["as"] == "group" and settled["label"] == "As" and settled["members"] == 2
+    assert matched["outcome"] == "links" and matched["confidence"] == "high"
+    assert matched["verdict"] == "Followed the mode of “TS”: links the group “As” and “B”"
+    assert matched["links"][1]["node_id"] == b_id
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_a_soft_modes_end_takes_the_nearest_minimum_within_one_angstrom(open_client):
+    """T-LOC-56 (A191): a soft mode (50i cm⁻¹) whose + end changes no bond and matches
+    nothing within 0.5 Å takes the nearest minimum with its bonds within 1.0 Å (medium)."""
+    far = make_node(open_client, "far", shifted(1.9))
+    make_node(open_client, "B", shifted(-0.5))
+    soft_ts, _ = import_ts(open_client, ts_output((-50.0, 300.0, 600.0, 900.0, 1200.0, 3000.0)))
+    soft = ends(open_client, follow(open_client, soft_ts)["id"])
+    plus = soft["ends"]["+"]
+    assert plus["settled"]["as"] == "soft" and plus["matches"][0]["node_id"] == far
+    assert plus["matches"][0]["soft"] and 0.5 <= plus["matches"][0]["rmsd"] < 1.0
+    assert soft["outcome"] == "links" and soft["confidence"] == "medium"
+    assert any("soft mode" in f and "1.0 Å" in f for f in soft["flags"])
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_a_hard_modes_end_keeps_the_narrow_window(open_client):
+    """T-LOC-56 (A191): the same minimum, with the mode at 500i cm⁻¹, is no match."""
+    make_node(open_client, "far", shifted(1.9))
+    ts_id, _ = import_ts(open_client)
+    hard = ends(open_client, follow(open_client, ts_id)["id"])
+    assert hard["ends"]["+"]["matches"] == [] and "settled" not in hard["ends"]["+"]

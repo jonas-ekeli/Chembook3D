@@ -10,8 +10,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from chembook3d.api import structures
 from chembook3d.models import Calculation, SourceFile
 from chembook3d.parsers import gaussian, orca
+from chembook3d.services import folder_survey, follow_mode, irc_ends
 from chembook3d.services import irc as irc_service
 from tests import gaussian_text as g
 from tests.test_import import calculations, commit, copied_files, node, preview, upload
@@ -596,3 +598,84 @@ def test_a_batch_irc_sent_to_the_ts_file_of_the_batch_goes_into_its_irc(open_cli
     ).json()
     row = next(r for r in preview["rows"] if r["path"] == "irc-forward.out")
     assert row["blockers"] == ["The file chosen for it is not in this batch"]
+
+
+def test_a_batch_sends_an_irc_end_optimization_into_its_ts(open_client, tmp_path):
+    """T-IMP-84 (A192): a file named as an IRC's and starting on its last point goes into the
+    TS's IRC as that end's optimization, in the same batch and in a later one; the same file
+    under another name, or made a node by choice, is a node, and such a node is never offered
+    to another TS (find_ts_partners, a mode-follow's ends) while its own TS keeps it."""
+    first = tmp_path / "first"
+    first.mkdir()
+    files = {
+        "TS.out": g.checkpoint_ts(-0.01),
+        "TS_IRC_forward.out": g.irc(points=6, ending="max_points"),
+        "TS_IRC_forward_END_opt.out": g.end_point_opt_freq("forward", 6, -52.46),
+        "end_opt.out": g.end_point_opt_freq("forward", 6, -52.4601),  # no IRC in its name
+    }
+    for name, text in files.items():
+        (first / name).write_text(text, encoding="utf-8")
+    plan = open_client.post("/api/batch-imports", json={"folder": str(first)}).json()
+    preview = open_client.post(f"/api/batch-imports/{plan['token']}/preview", json={}).json()
+    rows = {r["path"]: r for r in preview["rows"]}
+    end = rows["TS_IRC_forward_END_opt.out"]
+    assert end["blockers"] == [] and end["match"] == "irc_end" and end["kind"] == "steps"
+    assert end["target"]["file_id"] == rows["TS.out"]["id"]
+    assert end["order"] > rows["TS_IRC_forward.out"]["order"]
+    assert rows["end_opt.out"]["match"] != "irc_end"
+    result = open_client.post(f"/api/batch-imports/{plan['token']}/commit", json={})
+    assert result.status_code == 200, result.text
+    labels = {n["label"]: n["id"] for n in open_client.get("/api/canvas").json()["nodes"]}
+    assert set(labels) == {"TS", "end_opt"}
+    ts = labels["TS"]
+    found = read(open_client, ts)
+    with open_client.app.state.investigation.sessions.begin() as session:
+        held = session.query(Calculation).filter(Calculation.node_id == ts).all()
+        assert {(c.irc_part, c.irc_direction) for c in held if c.irc_part} == {
+            ("path", "forward"),
+            ("end_opt", "forward"),
+            ("end_freq", "forward"),
+        }
+    assert found is not None
+
+    # A later batch: the IRC is in the TS already; a copy made a node by choice stays one.
+    later = tmp_path / "later"
+    later.mkdir()
+    (later / "TS_IRC_forward_END_opt2.out").write_text(
+        g.end_point_opt_freq("forward", 6, -52.4602), encoding="utf-8"
+    )
+    (later / "TS_IRC_forward_END_opt3.out").write_text(
+        g.end_point_opt_freq("forward", 6, -52.4603), encoding="utf-8"
+    )
+    plan = open_client.post("/api/batch-imports", json={"folder": str(later)}).json()
+    ids = {r["path"]: r["id"] for r in plan["rows"]}
+    chosen = {"rows": {ids["TS_IRC_forward_END_opt3.out"]: {"target": "new"}}}
+    preview = open_client.post(f"/api/batch-imports/{plan['token']}/preview", json=chosen).json()
+    rows = {r["path"]: r for r in preview["rows"]}
+    assert rows["TS_IRC_forward_END_opt2.out"]["match"] == "irc_end"
+    assert rows["TS_IRC_forward_END_opt2.out"]["target"]["node_id"] == ts
+    assert rows["TS_IRC_forward_END_opt3.out"]["match"] == "chosen"
+    result = open_client.post(f"/api/batch-imports/{plan['token']}/commit", json=chosen)
+    assert result.status_code == 200, result.text
+    made = next(
+        n["id"]
+        for n in open_client.get("/api/canvas").json()["nodes"]
+        if n["label"] == "TS_IRC_forward_END_opt3"
+    )
+
+    investigation = open_client.app.state.investigation
+    with investigation.sessions.begin() as session:
+        assert irc_ends.end_nodes(session, investigation.folder, 0.05) == {made: ts}
+        body = structures.PartnersIn(all_ts="all")
+        search = structures._Partners(session, investigation.folder, 0.05, body)
+        assert search.irc_ends_of_others("another TS") == {made}
+        assert search.irc_ends_of_others(ts) == set()
+        others = follow_mode._node_candidates(session, "another TS", investigation.folder)
+        own = follow_mode._node_candidates(session, ts, investigation.folder)
+        assert made not in {c.entry["node_id"] for c in others}
+        assert made in {c.entry["node_id"] for c in own}
+    finals = {f.path: f for f in folder_survey.final_structures(first)}
+    assert finals["TS_IRC_forward_END_opt.out"].irc_end == "ts_irc"
+    assert finals["end_opt.out"].irc_end is None
+    assert irc_ends.stem("Ru-3_IRC_reverse_b2_12_END.out") == "ru-3_irc"
+    assert irc_ends.stem("circle_opt.out") is None

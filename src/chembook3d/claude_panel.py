@@ -186,6 +186,8 @@ between two structures, whatever their atom order (a side may be a list: a sum o
 and with a TS whether it links two minima along its imaginary mode; `find_ts_partners` starts
 from a TS and finds the minima on each side of its mode among the nodes, with that check of the
 best pair (`all_ts` "unlinked": every TS missing an edge, a few lines each);
+`find_direct_links` lists the steps with no TS between minima (a free species joining or
+leaving, a conformation or coordination change), by the core's RMSD;
 `group_structures` sorts many into isomers, conformers and duplicates. Then
 `import_folder`, showing the plan first.
 A TS that neither an IRC nor the bond check along its mode settles (D263c):

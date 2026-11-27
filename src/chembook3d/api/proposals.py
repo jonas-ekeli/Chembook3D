@@ -2,20 +2,22 @@
 `services/proposals.py`.
 
 `POST /api/mechanism/propose` is Claude's write tool `propose_mechanism` (a playground only);
-`GET /api/mechanism/gaps` its read tool `find_gaps`, the holes of D265 (`services/gaps.py`).
+`GET /api/mechanism/gaps` its read tool `find_gaps`, the holes of D265 (`services/gaps.py`);
+`GET /api/mechanism/direct-links` its read tool `find_direct_links`, steps between minima with
+no TS (FR-MCP-27, `services/direct_links.py`).
 Accept, Accept all high, Reject and Fix are the user's buttons: only the app's own page may
 press them, never Claude, which does not accept its own proposals."""
 
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
 from chembook3d.api.pathway import TransitionOut, _transition_out
 from chembook3d.api.playgrounds import _from_the_page
 from chembook3d.api.routes import DbSession, _investigation
-from chembook3d.services import gaps, proposals
+from chembook3d.services import direct_links, gaps, proposals
 
 router = APIRouter(prefix="/api")
 
@@ -177,6 +179,25 @@ def find_gaps(request: Request, session: DbSession) -> dict[str, Any]:
     """D265a: the holes in the mechanism, most useful first, with a suggested fill each;
     nothing is written."""
     return gaps.find(session, _investigation(request).folder, _since(request))
+
+
+@router.get("/mechanism/direct-links")
+def find_direct_links(
+    session: DbSession,
+    kind: Literal["all", "association", "same_atoms"] = Query(
+        "all",
+        description="Which pairs: all, association (a species joins or leaves) or "
+        "same_atoms (coordination mode or conformation).",
+    ),
+    offset: int = Query(
+        0, ge=0, description="Skip this many pairs (the `more` of the last answer)."
+    ),
+) -> dict[str, Any]:
+    """FR-MCP-27, A190: pairs of minima a step with no TS may join (a free species joining or
+    leaving, or a change of coordination mode or conformation), nearest first; nothing is
+    written."""
+    kinds = direct_links.KINDS if kind == "all" else (kind,)
+    return direct_links.find(session, kinds, offset)
 
 
 @router.get("/proposals", response_model=ProposalsOut)

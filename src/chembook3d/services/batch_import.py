@@ -20,7 +20,7 @@ import re
 import shutil
 import unicodedata
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePath
 from typing import Any
@@ -36,12 +36,13 @@ from chembook3d.models import (
     GroupNode,
     Node,
     NodeKind,
+    Role,
     SourceFile,
     SubInvestigation,
     new_id,
 )
 from chembook3d.parsers import cml, crest, gaussian, orca, xtb
-from chembook3d.services import geometry, history, imports, thermo_settings
+from chembook3d.services import geometry, history, imports, irc_ends, thermo_settings
 from chembook3d.services import nodes as node_service
 from chembook3d.services.layout import COLUMN_WIDTH, ROW_HEIGHT
 
@@ -494,19 +495,45 @@ def _made_by_file(
     return None, ["The file chosen for it is not in this batch"]
 
 
-def _order(batch: Batch) -> list[BatchFile]:
+def _order(batch: Batch, ends: Collection[str] = ()) -> list[BatchFile]:
     """Files with an optimization first, so the files that create or finish nodes come before
-    the files that attach to them (D97), IRCs last, after the TSs they go to (D134); then by
-    path."""
+    the files that attach to them (D97), IRCs last, after the TSs they go to (D134), and the
+    optimizations of an IRC's end after their IRC (`ends`, A192); then by path."""
     return sorted(
         batch.files,
         key=lambda f: (
-            _is_irc(f.staged),
+            2 if f.id in ends else 1 if _is_irc(f.staged) else 0,
             0 if _has_optimization(f.staged) else 1,
             isinstance(f.staged.parsed, crest.Ensemble),
             f.relative.lower(),
         ),
     )
+
+
+def _irc_end_target(
+    session: Session,
+    folder: Path,
+    item: BatchFile,
+    ends: dict[str, irc_ends.BatchEnd],
+    created: dict[str, str],
+    ts_ircs: list | None,
+    tolerance: float,
+) -> tuple[tuple[Node, str] | None, list | None]:
+    """A192: the TS node and IRC direction a file is plainly the end point's job of: an IRC of
+    the batch it was run from (once that IRC has gone into its TS), else an IRC a TS node
+    holds already (an IRC of the batch skipped as imported before); and the TS nodes' IRCs,
+    read at most once per batch."""
+    found = ends.get(item.id)
+    if found is not None and found.irc_file_id in created:
+        node = session.get(Node, created[found.irc_file_id])
+        if node is not None and node.role == Role.TRANSITION_STATE:
+            return (node, found.direction), ts_ircs
+    steps = getattr(item.staged.parsed, "steps", None)
+    if not steps or irc_ends.stem(item.staged.original_name) is None:
+        return None, ts_ircs
+    if ts_ircs is None:
+        ts_ircs = irc_ends.ts_ircs(session, folder)
+    return irc_ends.node_end(item.staged.original_name, steps, ts_ircs, tolerance), ts_ircs
 
 
 NAME_BLOCKERS = ("Give the custom basis set a name", "Give the custom dispersion a name")
@@ -530,7 +557,11 @@ def run(
         else batch.device or settings.last_device
     ).strip()
     skipped = _skipped(session, batch)
-    ordered = _order(batch)
+    duplicate = thermo_settings.settings(session).duplicate_tolerance
+    # A192: an IRC end's optimization in the batch goes into its TS's IRC, after its IRC.
+    ends = irc_ends.batch_ends(batch.files, duplicate)
+    ordered = _order(batch, ends)
+    ts_ircs: list | None = None  # the IRCs imported before, read once when needed
     by_id = {f.id: f for f in batch.files}
 
     def choice(item: BatchFile) -> RowChoice:
@@ -614,7 +645,14 @@ def run(
             match = "new"
             nodes = node_service.list_nodes(session)
 
-            if is_ensemble:
+            end_of: tuple[Node, str] | None = None
+            if not is_ensemble and not is_irc and target_text == "auto":
+                end_of, ts_ircs = _irc_end_target(
+                    session, folder, item, ends, created, ts_ircs, duplicate
+                )
+            if end_of is not None:
+                target, match = end_of[0], "irc_end"
+            elif is_ensemble:
                 match = "new"
             elif is_irc:
                 # D134: an IRC goes into the IRC of the TS it starts from, or of the one chosen.
@@ -720,7 +758,8 @@ def run(
                 pos_x=pos[0],
                 pos_y=pos[1],
                 canvas_id=options.canvas_id,
-                irc_part="path" if is_irc else None,
+                irc_part="path" if is_irc else "end" if end_of is not None else None,
+                irc_direction=end_of[1] if end_of is not None else None,
             )
             plan_: imports.Plan | None = None
             if not blockers:
