@@ -8,7 +8,9 @@ record pointing at it move onto B, which keeps its id, label, role, status, plac
   centre, or a local or cloud job naming A is not imported yet. *Warned* when a real bond forms
   or breaks (within 1.2 × the covalent radii in one geometry and beyond 1.5 × in the other,
   A181), when Match atoms has other doubts, and when the two nodes' geometries at one geometry
-  level differ by more than the duplicate tolerance (D62).
+  level differ by more than the duplicate tolerance (D62). `runs` names the levels at which
+  both hold an optimization of their own (A194: two runs that ended on one structure, which the
+  import keeps as two nodes, D246); Claude's merge of such a pair waits for `anyway`.
 - *Atom map* (D262c): A's per-atom data in the database are written in B's numbering; each
   moved calculation stores the map to its file's numbering (`Calculation.atom_map`), which is
   never rewritten, and frames read from the file go through it (`atom_maps.mapped_step`).
@@ -142,6 +144,7 @@ class Merge:
     edges_dropped: list[str] = field(default_factory=list)
     ops: list[Callable[[Session], None]] = field(default_factory=list)
     new_geometry: list[Any] | None = None  # None: B keeps its own
+    runs: list[str] = field(default_factory=list)  # A194: levels both optimized at
 
     @property
     def blocked(self) -> bool:
@@ -188,6 +191,7 @@ class Merge:
             "edges_moved": self.edges_moved,
             "edges_dropped": self.edges_dropped,
             "changes": self.changes,
+            "runs": self.runs,
             "branch": self.options.branch,
             "branch_choice": self._branch_choice,
             "can_merge": not self.refusals,
@@ -195,6 +199,17 @@ class Merge:
 
     _session: Session = field(default=None, repr=False)  # type: ignore[assignment]
     _branch_choice: bool = False  # the two are on two different branches (D262f)
+
+
+def runs(a: Node, b: Node) -> list[str]:
+    """A194: the levels at which both nodes hold an optimization of their own (not an IRC
+    part): two runs that ended on one structure, which the import keeps as two nodes (D246)."""
+
+    def held(node: Node) -> dict[str, Any]:
+        return {c.level_id: c.level for c in levels.optimizations(node) if c.irc_part is None}
+
+    mine, theirs = held(a), held(b)
+    return sorted(levels.label(level) or "a level" for k, level in mine.items() if k in theirs)
 
 
 def _node_dict(node: Node) -> dict[str, Any]:
@@ -336,6 +351,12 @@ def plan(
     _plan_calculations(session, merge, tolerance)
     if merge.refusals:
         return merge
+    merge.runs = runs(into, source)
+    if merge.runs:
+        merge.changes.append(
+            "Both hold an optimization at " + ", ".join(merge.runs) + ": two runs that ended on "
+            "one structure, which the import keeps as two nodes (D246, A194)"
+        )
     _plan_energies(merge, settings)
     _plan_geometry(merge, settings, tolerance)
     _plan_fields(session, merge)

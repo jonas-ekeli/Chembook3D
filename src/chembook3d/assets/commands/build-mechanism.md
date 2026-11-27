@@ -25,8 +25,10 @@ makes one. Never make, merge or discard a playground yourself.
    so single points and restarts land on the node of their geometry. Look at the plan's rows
    that need a choice before committing. A file the plan flags as a duplicate of a node's
    geometry (W-DUP, within the duplicate tolerance) gets `duplicate_action` "attach", not a
-   new node, unless it is another conformer or another molecule. An IRC row whose TS is in
-   the batch keeps the target the plan shows (`file:<its id>`); an IRC end's optimization
+   new node, unless it is another conformer or another molecule, or another run: an
+   optimisation at the level its duplicate is optimised at (the rows' `level_label`) gets
+   "new" (A194). An IRC row whose TS is in the batch keeps the target the plan shows
+   (`file:<its id>`); an IRC end's optimization
    (its row matched as an IRC end) goes into its TS's IRC, never a node of its own (A192).
    Make each small closed-shell molecule (an olefin, a released ligand) a free species right
    after the import (`set_node_kind`, kind species), before it is on any edge or in any group.
@@ -35,8 +37,10 @@ makes one. Never make, merge or discard a playground yourself.
    with only `groups` (`edges` []): a conformer group for each molecule it gives with more
    than one minimum (minima only), or one per family where the names split its conformers
    (par, perp, rot). Each distinct conformer is its own node; the same conformer at several
-   levels is one node. Merge true duplicates that you made yourself with `merge_nodes` (here
-   it goes without asking only for your own, D264c). Never merge a minimum and a TS (a
+   levels is one node, and so is a single point or frequency job that landed on a node of its
+   own: merge that one into its duplicate with `merge_nodes` (without asking only for your
+   own, D264c). Two optimisations at one level are two runs, kept as two nodes in the group
+   (a conformer's `runs`; `merge_nodes` refuses them, A194). Never merge a minimum and a TS (a
    node's role and its frequencies say which, not its name), nor attach one's file to the
    other.
 4. **Link each TS**, cheapest evidence first, stopping at the first that settles it. Run a
@@ -49,12 +53,15 @@ makes one. Never make, merge or discard a playground yourself.
       when you need it; never guess the two minima for `compare_structures` with `ts`. A
       "links" (one candidate per side, or the nearest of one molecule's conformers) is medium
       (A184 bond check). It searches true minima at the TS's geometry level first; a
-      candidate marked `other_level` is a weaker link: say so in the evidence;
+      candidate marked `other_level` is a weaker link: say so in the evidence. A "one side"
+      TS that c leaves unsettled: propose its side's candidate (not `other_level`) at low,
+      and flag the empty side;
    c. only for a TS b leaves at "one side", "no side", unclear or does not link:
       `start_local_follow_mode`, then `get_follow_mode_ends`; ends that each match one
       structure are high (raise a medium link to high this way only once nothing else
-      waits). When both ends land on one structure or return to the TS (`returned_to_ts`),
-      say so in the evidence and keep the bond check's result, if any. Use
+      waits); take the `confidence` the answer gives (low for an end only at a lower kind of
+      method, an xTB conformer, A194). When both ends land on one structure or return to the
+      TS (`returned_to_ts`), say so in the evidence and keep the bond check's result, if any. Use
       `make_node_from_end` only for an end that matches nothing and left the TS (an end
       settled `as` conformer is another conformer of a node you have: link that).
    Start several mode-follows, then collect their ends. Work through every TS before
@@ -62,12 +69,12 @@ makes one. Never make, merge or discard a playground yourself.
    unsettled is flagged, never guessed.
 5. **Link minima to minima** for the steps that have no TS (an association, the loss of a
    free species, a conformer or coordination change): call `find_direct_links` (again with
-   `offset` while it answers `more`) and propose each association it rates medium at once,
-   the species joining (A + species → B) or leaving (B → A + species): the atom balance
-   fixes the species, so it waits for no chemistry choice; one rated low only where it fits
-   the reaction, low; a `same_atoms` pair ("no TS: direct link?") only where no TS you have
-   links them, low. Make each molecule in its `make_species` a free species first. Name the
-   core RMSD and the bonds to the core in the evidence.
+   `offset` while it answers `more`) and propose every association it lists at once, at the
+   confidence it gives, with its `edge` (a grouped end is the group, never the two nodes it
+   names, A194; reversed for the species leaving): the atom balance fixes the species, so it
+   waits for no chemistry choice. A `same_atoms` pair ("no TS: direct link?") only where no
+   TS you have links them, low. Make each molecule in its `make_species` a free species
+   first. Name the core RMSD and the bonds to the core in the evidence.
 6. **Propose** the edges with `propose_mechanism`, each with:
    - confidence (A184): high from an IRC, or a mode-follow whose two ends each match one
      structure; medium from the bond check alone; low from names only;
@@ -78,8 +85,9 @@ makes one. Never make, merge or discard a playground yourself.
    One branch, unless file or folder names say there are several; flag each new branch.
    Lineage never comes from energies (D169, P5).
 7. **Fill gaps** (see Filling gaps), unless `--no-gaps`.
-8. **Tidy** the canvas with `tidy_canvas`. When it answers that no page is open, say so in
-   the summary and go on.
+8. **Tidy** the canvas with `tidy_canvas`. When it answers that no page is open, say so in the
+   summary and go on: the person tidies it when they open the playground; do not ask them to
+   open a page.
 9. **Summarise** in a note pinned to the first node of the mechanism (`create_note`): what
    you built, what is unsure, and a review list of every flag below, the low and medium
    edges, each gap with what you built for it, the gaps left flagged, and the references

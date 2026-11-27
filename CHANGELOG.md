@@ -6,6 +6,15 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Building from a folder, from what validation run 6 showed (A194): two optimizations at one
+  level that end on one structure are two runs, kept as two nodes in one conformer group
+  (`group_structures` names them in `runs`, the merge preview too, and Claude's own merge of
+  them is refused unless `anyway`); each association `find_direct_links` lists carries the edge
+  to propose, a grouped end as its group; a conformer search's structure, or a node only at xTB
+  or another lower kind of method under a DFT TS, is a weaker match (`other_level`; a
+  mode-follow link through one is low). The playbook proposes every association listed and a
+  "one side" TS's candidate at low, and no longer asks the person to open a page for Tidy.
+
 - A mirror image is another molecule (D267): no mechanism tool counts a match that turns a
   stereocentre into its mirror image as the same structure or a link (`find_ts_partners`, A184's
   bond check, mode-follow and IRC end matching, `find_direct_links`, `group_structures`, the

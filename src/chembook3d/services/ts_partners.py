@@ -155,6 +155,7 @@ def node_candidate(
     (`levels.geometry_at_level`), else its own geometry."""
     structure = compare.resolve(session, folder, {"node_id": node.id}, tolerance)
     held = {c.level_id: c.level for c in levels.geometry_sources(node) if c.level is not None}
+    every = held or held_levels(node)
     entry: dict[str, Any] = {
         "label": structure.label,
         "node_id": node.id,
@@ -173,7 +174,17 @@ def node_candidate(
         entry["kind"] = "species"
     if groups and node.group_id in groups:
         entry["group"] = groups[node.group_id]
-    return Candidate(structure, entry, frozenset(held) or None)
+    return Candidate(structure, entry, frozenset(every) or None)
+
+
+def held_levels(node: Node) -> dict[str, Any]:
+    """The levels a node's structure is at: its geometry sources' (D100), else (A194) those of
+    any calculation holding a geometry, as a conformer search's member is at the search's
+    level, so at another level than a DFT TS's. Empty when none is known."""
+    held = {c.level_id: c.level for c in levels.geometry_sources(node) if c.level is not None}
+    return held or {
+        c.level_id: c.level for c in node.calculations if c.level is not None and c.geometry
+    }
 
 
 def from_investigation(
