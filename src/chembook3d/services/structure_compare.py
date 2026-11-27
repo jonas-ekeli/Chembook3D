@@ -508,8 +508,17 @@ def end_match(
     found = check(_by_position(end, other)[1])
     if found is not None:
         return found
+
+    def enough(mapping: list[int]) -> bool:  # A188: Match atoms ends at the first that fits
+        rmsd = geometry.aligned_rmsd(end, [other[j] for j in mapping])
+        if rmsd is None or rmsd >= END_RMSD:
+            return False
+        formed, broken = atom_matching.changes(end, other, mapping)
+        real_formed, real_broken, _, _ = split(end, other, mapping, formed, broken)
+        return not (real_formed or real_broken)
+
     try:
-        matched = atom_matching.match(end, other)
+        matched = atom_matching.match(end, other, enough=enough)
     except Exception:  # noqa: BLE001 - a match that cannot be made matches nothing
         return None
     return check(matched.mapping)
@@ -716,9 +725,12 @@ def compare(
     ts: Structure | None = None,
     count_weak: bool = False,
     tolerance: float = 0.05,
+    mappings: tuple[list[int], list[int]] | None = None,
 ) -> dict[str, Any]:
     """D263: B matched onto A's numbering and what changes (see the module's docstring).
-    `tolerance` is the investigation's duplicate tolerance (D62)."""
+    `tolerance` is the investigation's duplicate tolerance (D62). `mappings`: B's and the TS's
+    atom for each of A's, when already known (a TS search's, through the TS, A187), so Match
+    atoms is not run again."""
     out: dict[str, Any] = {"a": a.describe(), "b": b.describe()}
     notes: list[str] = []
     out["notes"] = notes
@@ -735,7 +747,10 @@ def compare(
         notes.append(f"A has charge {a.charge} and B {b.charge}.")
     if None not in (a.multiplicity, b.multiplicity) and a.multiplicity != b.multiplicity:
         notes.append(f"A has multiplicity {a.multiplicity} and B {b.multiplicity}.")
-    match = atom_matching.match(a.rows, b.rows)
+    if mappings is not None:
+        match = atom_matching.assessed(a.rows, b.rows, mappings[0])
+    else:
+        match = atom_matching.match(a.rows, b.rows)
     mapping = match.mapping
     formed, broken, weak_formed, weak_broken = split(
         a.rows, b.rows, mapping, match.formed, match.broken
@@ -899,7 +914,16 @@ def compare(
         break
 
     if ts is not None:
-        out["ts_check"] = _links(a, b, ts, mapping, b_in_a, formed + broken, count_weak)
+        out["ts_check"] = _links(
+            a,
+            b,
+            ts,
+            mapping,
+            b_in_a,
+            formed + broken,
+            count_weak,
+            mappings[1] if mappings is not None else None,
+        )
         notes.append(out["ts_check"]["summary"])
     return out
 
@@ -912,6 +936,7 @@ def _links(
     b_in_a: Rows,
     changed: list[tuple[int, int]],
     count_weak: bool,
+    ts_mapping: list[int] | None = None,
 ) -> dict[str, Any]:
     """A184: whether the TS links minima A and B: one to three bonds change between them,
     each along the TS's imaginary mode, and A and B lie on opposite sides of it."""
@@ -930,7 +955,10 @@ def _links(
     for name, s in (("A", a), ("B", b)):
         if s.imaginary:
             reasons.append(f"{name} has an imaginary frequency, so it is not a minimum.")
-    ts_match = atom_matching.match(a.rows, ts.rows)
+    if ts_mapping is not None:
+        ts_match = atom_matching.assessed(a.rows, ts.rows, ts_mapping)
+    else:
+        ts_match = atom_matching.match(a.rows, ts.rows)
     ts_in_a = [ts.rows[j] for j in ts_match.mapping]
     mode = _active(ts, ts_match.mapping)
     if ts_match.doubts:

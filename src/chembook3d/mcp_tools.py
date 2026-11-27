@@ -1241,9 +1241,17 @@ TOOLS: list[ToolSpec] = [
         "(atom-matched RMSD; for a sum over the larger species; energies are never read), "
         "with level, group and `ref` to pass on; then `check`: "
         "A184's bond check of the best pairs as compare_structures with ts gives it (links, "
-        "unclear or does not link, with reasons), and `next`. Changes nothing.",
+        "unclear or does not link, with reasons), and `next`. Several TSs at once (A187): "
+        '`tss`, or `all_ts` ("unlinked": every TS missing an edge on a side; "all"), '
+        "answered in a few lines per TS (the mode's bonds, the nearest candidate per side "
+        "with its RMSD, the verdict and why), as many as fit, then `more` with the offset to "
+        'call again with; start a build with all_ts "unlinked". Changes nothing.',
         help={
             "ts": "The transition state, " + STRUCTURE_HELP,
+            "tss": "Several transition states, each " + STRUCTURE_HELP,
+            "all_ts": 'Every TS node: "unlinked" (missing an edge on either side) or '
+            '"all". Name ts, tss or all_ts.',
+            "offset": "With tss or all_ts: skip this many TSs (the `more` of the last answer).",
             "candidates": "The structures to search instead of the investigation's minima and "
             "free species, each " + STRUCTURE_HELP + " A list of them is a sum of species.",
             "species": "Free species a candidate may be summed with (default: the "
@@ -1749,11 +1757,11 @@ TOOLS: list[ToolSpec] = [
         "/api/local/follow-mode",
         "Follow a transition state's imaginary mode both ways on this computer (D263c, A184), "
         "to find which minima it links: from its frequency calculation's structure at any "
-        "level (a DFT file included; it needs stored normal modes), displaced 0.1 Å along the "
-        "lowest imaginary mode on each side (the atom moving most) and each end relaxed for at "
-        "most 40 steps with MACE-OMOL-0 (method mace-omol, the default, when installed) or "
-        "GFN2-xTB (gfn2). Use it only for a TS that no IRC in the folder and no bond check "
-        "along the mode (compare_structures with ts) settled: cheapest evidence first. folder "
+        "level (a DFT file included; it needs stored normal modes), displaced 0.4 Å along the "
+        "lowest imaginary mode on each side (the atom moving most, A188) and each end relaxed "
+        "for at most 60 steps with MACE-OMOL-0 (method mace-omol, the default, when installed) "
+        "or GFN2-xTB (gfn2). Use it only for a TS that no IRC in the folder and no bond check "
+        "along the mode (find_ts_partners) settled: cheapest evidence first. folder "
         "names the folder of outputs whose final structures the ends are also matched "
         "against. The result is never imported: when it has finished, get_follow_mode_ends "
         "matches the ends; an end that matches nothing may become a node with "
@@ -1768,10 +1776,13 @@ TOOLS: list[ToolSpec] = [
         "whether it converged and in how many steps, the bonds formed and broken against the "
         "TS, the nodes it matches (the same bonds, weak and metal–hydrogen contacts left out, "
         "and atom-matched RMSD under 0.5 Å, whatever the atom order; nearest first) and the "
-        "files of the job's folder it matches; with `verdict`: links two structures (both ends "
-        "each match exactly one: high confidence), one end matches, no end matches, or both "
-        "ends match the same structure (flagged). A TS left unsettled is flagged, never "
-        "guessed. Changes nothing.",
+        "files of the job's folder it matches; never a TS, a scan or constrained geometry or "
+        "a structure with an imaginary frequency (A188); `side` (the side of the mode the end "
+        "lies on) and `returned_to_ts` (its distances along the mode still the TS's: it "
+        "matches nothing); with `verdict`: links two structures (both ends each match "
+        "exactly one: high confidence), one end matches, no end matches, both ends returned to "
+        "a TS, or both ends match the same structure (flagged). A TS left unsettled is "
+        "flagged, never guessed. Changes nothing.",
     ),
     T(
         "make_node_from_end",

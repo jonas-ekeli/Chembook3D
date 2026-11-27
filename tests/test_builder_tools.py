@@ -328,7 +328,10 @@ def test_schemas_without_null_and_a_brief_node_list(tmp_path):
 
     anyio.run(run)
     many = [{"id": n, "label": "x" * 40} for n in range(400)]
-    assert "\n" not in mcp_server._json_text(many) and "\n" in mcp_server._json_text(many[:2])
+    long, short = mcp_server._json_text(many), mcp_server._json_text(many[:2])
+    assert "\n " not in long and "\n " in short  # no indentation when long (D149)
+    assert long.count("\n") > 400  # A187: still one value per line, readable in parts
+    assert json.loads(long) == many
 
 
 def test_a_clash_drawn_as_a_bond_is_still_a_contact(client):

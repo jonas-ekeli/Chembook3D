@@ -520,8 +520,9 @@ class FollowModeIn(BaseModel):
 @router.post("/follow-mode")
 def start_follow_mode(body: FollowModeIn, request: Request, session: DbSession) -> dict[str, Any]:
     """D263c, A184: follow a TS's imaginary mode both ways: the frequency calculation's
-    structure displaced 0.1 Å along the mode on each side, each end relaxed for at most 40
-    steps. The result is information, never imported: GET /jobs/{id}/ends matches the ends."""
+    structure displaced 0.4 Å along the mode on each side, each end relaxed for at most 60
+    steps (A188). The result is information, never imported: GET /jobs/{id}/ends matches
+    the ends."""
     _local_page_only(request)
     folder = _investigation(request).folder
     node = get(session, Node, body.node_id, "Node")

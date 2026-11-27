@@ -141,6 +141,7 @@ class Final:
     rows: Rows
     charge: int | None
     multiplicity: int | None
+    role: str = "unspecified"  # the role the file suggests (a TS's is no mode-follow end, A188)
 
 
 def final_structures(
@@ -158,7 +159,10 @@ def final_structures(
             last = batch_import._final(item.staged)
             rows = imports._rows(last.final_geometry) if last is not None else None
             if last is not None and rows:
-                found.append(Final(item.relative, last.index, rows, last.charge, last.multiplicity))
+                role = str(imports._suggested_role(item.staged.parsed.steps))
+                found.append(
+                    Final(item.relative, last.index, rows, last.charge, last.multiplicity, role)
+                )
         return found
     finally:
         staging.clear()

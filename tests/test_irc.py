@@ -562,3 +562,37 @@ def test_a_batch_import_puts_irc_files_into_their_ts(open_client, tmp_path):
     sides = sides_of(read(open_client, ts))
     assert sides["forward"]["points"] == 6 and sides["reverse"]["points"] == 5
     assert open_client.get(f"/api/nodes/{ts}/irc/summary").json()["count"] == 2
+
+
+def test_a_batch_irc_sent_to_the_ts_file_of_the_batch_goes_into_its_irc(open_client, tmp_path):
+    """T-IMP-82 (A187): an IRC row's target named as the plan shows it, the TS file of the same
+    batch (`file:<id>`), is taken (validation run 3: refused with "choose the TS")."""
+    for name in ("TS.out", "irc-forward.out", "irc-reverse.out"):
+        (tmp_path / name).write_text(g.IRC_FILES[name](), encoding="utf-8")
+    plan = open_client.post("/api/batch-imports", json={"folder": str(tmp_path)}).json()
+    rows = {r["path"]: r for r in plan["rows"]}
+    ts_file = rows["TS.out"]["id"]
+    chosen = {
+        rows[name]["id"]: {"target": f"file:{ts_file}"}
+        for name in ("irc-forward.out", "irc-reverse.out")
+    }
+    preview = open_client.post(
+        f"/api/batch-imports/{plan['token']}/preview", json={"rows": chosen}
+    ).json()
+    for row in preview["rows"]:
+        if row["kind"] == "irc":
+            assert row["blockers"] == [] and row["match"] == "chosen"
+            assert row["target"]["file_id"] == ts_file
+    result = open_client.post(f"/api/batch-imports/{plan['token']}/commit", json={"rows": chosen})
+    assert result.status_code == 200, result.text
+    (ts,) = [n["id"] for n in open_client.get("/api/canvas").json()["nodes"]]
+    assert open_client.get(f"/api/nodes/{ts}/irc/summary").json()["count"] == 2
+    # A file that is not in the batch is still refused, with why.
+    plan = open_client.post("/api/batch-imports", json={"folder": str(tmp_path)}).json()
+    irc_row = next(r for r in plan["rows"] if r["path"] == "irc-forward.out")
+    preview = open_client.post(
+        f"/api/batch-imports/{plan['token']}/preview",
+        json={"rows": {irc_row["id"]: {"target": "file:elsewhere", "included": True}}},
+    ).json()
+    row = next(r for r in preview["rows"] if r["path"] == "irc-forward.out")
+    assert row["blockers"] == ["The file chosen for it is not in this batch"]

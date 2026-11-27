@@ -68,17 +68,20 @@ def test_the_panel_gets_the_build_mechanism_command(tmp_path, monkeypatch):
     assert "MACE or xTB" in flat and "Invent no structure" in flat
     assert "high from an IRC" in flat and "medium from the bond check alone" in flat
     assert "low from names only" in flat and "A TS still unsettled is flagged" in flat
-    # FR-MCP-25: the search from the TS before any guess, then the mode-follows in batches,
+    # FR-MCP-25/26: the search from the TS before any guess, then the mode-follows in batches,
     # every TS worked through; duplicates attached; Tidy without a page is no stop.
     for line in (
         "never guess the two minima",
-        '"links" with one candidate per side',
+        'A "links" (one candidate per side',
         "is medium (A184 bond check)",
+        '`all_ts` "unlinked" once for all of them',  # FR-MCP-26, A187
+        "Never merge a minimum and a TS",  # A189
+        "keeps the target the plan shows (`file:<its id>`)",
         "true minima at the TS's geometry level first",
         "`other_level` is a weaker link",
         "raise a medium link to high",
         "propose what they settle (step 6) before you start any mode-follow",
-        "both ends land on one structure, say so in the evidence and keep the bond check's",
+        "both ends land on one structure or return to the TS (`returned_to_ts`)",
         "Start several mode-follows, then collect their ends",
         "do not stop while a TS is unsettled and a tool remains to try",
         '`duplicate_action` "attach", not a new node, unless it is another conformer',

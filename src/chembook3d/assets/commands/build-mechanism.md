@@ -25,26 +25,31 @@ makes one. Never make, merge or discard a playground yourself.
    so single points and restarts land on the node of their geometry. Look at the plan's rows
    that need a choice before committing. A file the plan flags as a duplicate of a node's
    geometry (W-DUP, within the duplicate tolerance) gets `duplicate_action` "attach", not a
-   new node, unless it is another conformer or another molecule.
+   new node, unless it is another conformer or another molecule. An IRC row whose TS is in
+   the batch keeps the target the plan shows (`file:<its id>`).
 3. **Group** with `group_structures` (`all_nodes`). Merge true duplicates that you made
    yourself with `merge_nodes` (here it goes without asking only for your own, D264c).
    Each distinct conformer is its own node; conformers of one intermediate go in one group;
-   the same conformer at several levels is one node.
+   the same conformer at several levels is one node. Never merge a minimum and a TS (a
+   node's role and its frequencies say which, not its name), nor attach one's file to the
+   other.
 4. **Link each TS**, cheapest evidence first, stopping at the first that settles it. Run a
-   and b on every TS first (seconds each) and propose what they settle (step 6) before you
-   start any mode-follow; mode-follows take minutes each on this computer, so start them only
-   for the TSs a and b leave unsettled:
+   and b on every TS first and propose what they settle (step 6) before you start any
+   mode-follow; mode-follows take minutes each on this computer, so start them only for the
+   TSs a and b leave unsettled:
    a. an IRC in the folder: `compare_structures` with its `irc_end` against the nodes;
-   b. else `find_ts_partners` on the TS; never guess the two minima for
-      `compare_structures` with `ts`. Its `check` "links" with one candidate per side (or the
-      nearest of one molecule's conformers) is medium (A184 bond check). It searches true
-      minima at the TS's geometry level first; a candidate marked `other_level` is a weaker
-      link: say so in the evidence;
-   c. when it finds nothing on a side, or says unclear or does not link:
+   b. `find_ts_partners` with `all_ts` "unlinked" once for all of them (about a minute; call
+      again with `offset` while it answers `more`), then with `ts` for one TS's full answer
+      when you need it; never guess the two minima for `compare_structures` with `ts`. A
+      "links" (one candidate per side, or the nearest of one molecule's conformers) is medium
+      (A184 bond check). It searches true minima at the TS's geometry level first; a
+      candidate marked `other_level` is a weaker link: say so in the evidence;
+   c. only for a TS b leaves at "one side", "no side", unclear or does not link:
       `start_local_follow_mode`, then `get_follow_mode_ends`; ends that each match one
       structure are high (raise a medium link to high this way only once nothing else
-      waits). When both ends land on one structure, say so in the evidence and keep the bond
-      check's result, if any. Use `make_node_from_end` only for an end that matches nothing.
+      waits). When both ends land on one structure or return to the TS (`returned_to_ts`),
+      say so in the evidence and keep the bond check's result, if any. Use
+      `make_node_from_end` only for an end that matches nothing and left the TS.
    Start several mode-follows, then collect their ends. Work through every TS before
    summarising: do not stop while a TS is unsettled and a tool remains to try. A TS still
    unsettled is flagged, never guessed.

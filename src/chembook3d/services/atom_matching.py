@@ -29,7 +29,7 @@ of the full structure (D75); inside, 0-based.
 
 import itertools
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -189,6 +189,18 @@ class _Matcher:
             a = np.array(self.lab_p[round_])
             b = np.array(self.lab_q[round_])
             self.label_rounds += a[:, None] != b[None, :]
+        # What `_assign` needs on every call, made once.
+        self.label_cost = LABEL_PENALTY * np.minimum(self.label_rounds, 2)
+        self.bonds_p = self.adj_p.astype(float)
+        self.bonds_q = self.adj_q.astype(float)
+        self.degree_sum = self.bonds_p.sum(axis=1)[:, None] + self.bonds_q.sum(axis=0)[None, :]
+        self.by_element = {
+            element: (
+                [i for i, e in enumerate(self.elements) if e == element],
+                [j for j, e in enumerate(self.end_elements) if e == element],
+            )
+            for element in sorted(set(self.elements))
+        }
 
     def changes(self, mapping: list[int]) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
         order = np.array(mapping)
@@ -284,22 +296,20 @@ class _Matcher:
         the squared distance plus the surroundings that differ and the neighbours (under
         `mapping`) that would not stay neighbours."""
         diff = self.p[:, None, :] - placed[None, :, :]
-        cost = (diff * diff).sum(axis=2) + LABEL_PENALTY * np.minimum(self.label_rounds, 2)
+        cost = (diff * diff).sum(axis=2) + self.label_cost
         if mapping:
             n = len(self.elements)
             permutation = np.zeros((n, n))
             rows = list(mapping)
             permutation[rows, [mapping[i] for i in rows]] = 1.0
-            a = self.adj_p.astype(float)
-            b = self.adj_q.astype(float)
-            common = a @ permutation @ b
-            missed = a.sum(axis=1)[:, None] + b.sum(axis=0)[None, :] - 2 * common
+            common = self.bonds_p @ permutation @ self.bonds_q
+            missed = self.degree_sum - 2 * common
             cost = cost + NEIGHBOUR_PENALTY * missed
         result = dict(keep)
         used = set(keep.values())
-        for element in sorted(set(self.elements)):
-            rows = [i for i, e in enumerate(self.elements) if e == element and i not in keep]
-            cols = [j for j, e in enumerate(self.end_elements) if e == element and j not in used]
+        for every_row, every_col in self.by_element.values():
+            rows = [i for i in every_row if i not in keep]
+            cols = [j for j in every_col if j not in used]
             if not rows:
                 continue
             for r, c in zip(*linear_sum_assignment(cost[np.ix_(rows, cols)]), strict=True):
@@ -355,12 +365,19 @@ def check_atoms(start: Rows, end: Rows) -> None:
 
 
 def match(
-    start: Rows, end: Rows, fixed: Iterable[tuple[int, int]] = (), loose: Iterable[int] = ()
+    start: Rows,
+    end: Rows,
+    fixed: Iterable[tuple[int, int]] = (),
+    loose: Iterable[int] = (),
+    enough: Callable[[list[int]], bool] | None = None,
 ) -> Match:
     """D113: the end's atoms matched to the start's, with the pairs in `fixed` (0-based
     (start atom, end atom)) kept. `loose` end atoms (0-based) may turn their neighbours the
     other way round, as a metal that gains or loses a ligand may (D120): they are never
-    counted as mirror images."""
+    counted as mirror images. `enough(mapping)` ends the search over starting orientations as
+    soon as a match it accepts is found (as a TS search that only needs the bonds off its
+    mode to stay, A187): the match always changes some bonds there, so the search would
+    otherwise try every orientation; when it accepts none, the best is given unrepaired."""
     check_atoms(start, end)
     pinned: dict[int, int] = {}
     for i, j in fixed:
@@ -392,23 +409,59 @@ def match(
         return scores[key]
 
     candidates: list[list[int]] = []
+    refined: dict[tuple[int, ...], list[int]] = {}
+    judged: dict[tuple[int, ...], bool] = {}
+    accepted: list[int] | None = None
     for seed in [None, *_seed_frames(m.q, m.p)]:
         grown = m.complete(m.grow(anchors, seed), seed)
-        for mapping in (grown, m.refine(grown)):
+        key = tuple(grown)
+        if key not in refined:  # most orientations grow the same pairs: refine each once
+            refined[key] = m.refine(grown)
+        tried = (grown, refined[key])
+        for mapping in tried:
             if tuple(mapping) not in scores:
                 candidates.append(mapping)
                 score(mapping)
         changed, rmsd = min(scores.values())
         if changed == 0 and rmsd < GOOD_ENOUGH:
             break
+        if enough is not None:
+            for mapping in tried:
+                if tuple(mapping) not in judged:
+                    judged[tuple(mapping)] = enough(mapping)
+                if judged[tuple(mapping)]:
+                    accepted = mapping
+                    break
+            if accepted is not None:
+                break
 
-    best = m.repair(min(candidates, key=score), score)  # the first of equals
+    best = accepted or min(candidates, key=score)  # the first of equals
+    if enough is None or accepted is not None:
+        # A search `enough` accepted nothing in ends here: putting mirror-image centres right
+        # swaps like neighbours, it does not undo the bond changes that ruled them all out.
+        best = m.repair(best, score)
+        if accepted is not None and enough is not None and not enough(best):
+            best = accepted
     same = False
     identity = list(range(len(start)))
-    if m.elements == m.end_elements and all(i == j for i, j in pinned.items()):
+    if accepted is not None:
+        same = best == identity
+    elif m.elements == m.end_elements and all(i == j for i, j in pinned.items()):
         if score(identity)[0] <= score(best)[0]:
             best, same = identity, True
+    return _result(m, start, best, pinned, same)
 
+
+def assessed(start: Rows, end: Rows, mapping: list[int]) -> Match:
+    """A mapping found elsewhere (as a TS search's, through the TS, A187) as a Match: its bonds
+    formed and broken, RMSD, mirror-image centres and doubts, as `match` gives them."""
+    check_atoms(start, end)
+    m = _Matcher(start, end, {})
+    same = m.elements == m.end_elements and mapping == list(range(len(start)))
+    return _result(m, start, list(mapping), {}, same)
+
+
+def _result(m: _Matcher, start: Rows, best: list[int], pinned: dict[int, int], same: bool) -> Match:
     formed, broken = m.changes(best)
     rmsd = m.rmsd(best)
     doubts = []

@@ -23,6 +23,11 @@ that geometry), other levels only when a side has none there (`other_level`), ea
 atom-matched RMSD to the TS (for a sum, over the larger species' atoms); energies are never
 read. The best pairs are then checked by A184's bond check (`structure_compare.compare` with the
 TS), and the first that links is given, else the best pair's verdict. Nothing is written.
+
+A187: Match atoms stops at the first starting orientation whose match keeps the bonds off the
+mode, the bond check maps each pair through the TS (the mappings that placed each candidate on
+it), and several TSs are searched in one call (`all_ts`, `unlinked`, `brief`, `batch`), the
+candidates made once per geometry level by the route.
 """
 
 import time
@@ -55,6 +60,13 @@ class Candidate:
     structure: compare.Structure
     entry: dict[str, Any]
     levels: frozenset[str] | None = None
+    _counts: Any = None
+
+    def counts(self) -> Any:
+        """Its bond counts, made once for every TS searched (A187)."""
+        if self._counts is None:
+            self._counts = compare._bond_counts(self.structure.rows)
+        return self._counts
 
 
 @dataclass
@@ -249,11 +261,23 @@ def _off_mode(ts_rows: Rows, rows: Rows, mapping: list[int], active: set) -> tup
     return len(real), sum(p not in active for p in real)
 
 
+@dataclass
+class Found:
+    """A candidate on one side of the mode: its sort key, the answer's entry and its atom for
+    each of the TS's."""
+
+    key: tuple
+    candidate: Candidate
+    entry: dict[str, Any]
+    mapping: list[int]
+
+
 def _mapping(ts_rows: Rows, rows: Rows, active: set) -> list[int] | None:
     """The candidate's atom for each of the TS's under which only active pairs change bonds:
-    the same numbering, the numbering by position, then Match atoms. A candidate in the TS's
-    numbering whose bonds differ off the mode by no more than a step changes (A186) is another
-    isomer numbered as the TS, so no other numbering is tried for it."""
+    the same numbering, the numbering by position, then Match atoms (ended at the first match
+    that keeps the bonds off the mode, A187). A candidate in the TS's numbering whose bonds
+    differ off the mode by no more than a step changes (A186) is another isomer numbered as
+    the TS, so no other numbering is tried for it."""
     if geometry.elements(ts_rows) == geometry.elements(rows):
         identity = list(range(len(rows)))
         real, off = _off_mode(ts_rows, rows, identity, active)
@@ -261,14 +285,22 @@ def _mapping(ts_rows: Rows, rows: Rows, active: set) -> list[int] | None:
             return identity
         if real <= atom_matching.MAX_BOND_CHANGES:
             return None
+    return _matched(ts_rows, rows, active)
+
+
+def _matched(ts_rows: Rows, rows: Rows, active: set) -> list[int] | None:
     by_position = compare._by_position(ts_rows, rows)[1]
     if not _off_mode(ts_rows, rows, by_position, active)[1]:
         return by_position
+
+    def enough(mapping: list[int]) -> bool:
+        return not _off_mode(ts_rows, rows, mapping, active)[1]
+
     try:
-        found = atom_matching.match(ts_rows, rows)
+        found = atom_matching.match(ts_rows, rows, enough=enough)
     except Exception:  # noqa: BLE001 - a match that cannot be made places nothing
         return None
-    return None if _off_mode(ts_rows, rows, found.mapping, active)[1] else found.mapping
+    return found.mapping if enough(found.mapping) else None
 
 
 def _side_of(mode: Any, ts_rows: Rows, placed: Rows, apart: np.ndarray | None) -> tuple[str, bool]:
@@ -336,13 +368,13 @@ def find(
     free = compare._counts(elements, strict, loose)  # the TS's bonds, the active pairs free
 
     tried = _tried(Counter(elements), candidates, species)
-    found: dict[str, list[tuple[tuple, Candidate, dict[str, Any]]]] = {"+": [], "−": []}
+    found: dict[str, list[Found]] = {"+": [], "−": []}
     matched = 0
     for candidate in tried:
         structure = candidate.structure
         if not _compatible(structure, ts):
             continue
-        if not compare._could_be_same(free, compare._bond_counts(structure.rows), False):
+        if not compare._could_be_same(free, candidate.counts(), False):
             continue
         matched += 1
         mapping = _mapping(rows, structure.rows, active)
@@ -373,18 +405,18 @@ def find(
         if other:
             entry["other_level"] = True
         key = (other, mixed, bool(structure.imaginary), rmsd if rmsd is not None else np.inf)
-        found[side].append((key, candidate, entry))
+        found[side].append(Found(key, candidate, entry, mapping))
     predicted = _predicted(rows, mode)
     sides = []
     for side in ("−", "+"):
-        found[side].sort(key=lambda f: f[0])
-        same = [f for f in found[side] if not f[0][0]]
+        found[side].sort(key=lambda f: f.key)
+        same = [f for f in found[side] if not f.key[0]]
         listed = same or found[side]  # other levels only when none is at the TS's (A186)
         shown: dict[str, Any] = {
             "side": side,
             "bonds": predicted[side],
             "found": len(listed),
-            "candidates": [entry for _, _, entry in listed[:top]],
+            "candidates": [f.entry for f in listed[:top]],
         }
         if same and len(same) < len(found[side]):
             shown["at_other_levels"] = len(found[side]) - len(same)
@@ -425,32 +457,47 @@ def find(
     return out
 
 
+def _through_ts(a: Found, b: Found) -> tuple[list[int], list[int]]:
+    """B's and the TS's atom for each of A's, from the mappings each was placed on the TS by."""
+    ts_of_a = [0] * len(a.mapping)
+    for i, k in enumerate(a.mapping):
+        ts_of_a[k] = i
+    return [b.mapping[i] for i in ts_of_a], ts_of_a
+
+
 def _check(
     ts: compare.Structure,
-    found: dict[str, list[tuple[tuple, Candidate, dict[str, Any]]]],
+    found: dict[str, list[Found]],
     tolerance: float,
 ) -> tuple[dict[str, Any] | None, int]:
     """A184's bond check of the best pairs, the nearest first: the first that links, else the
-    best pair's verdict."""
+    best pair's verdict. Each pair is matched through the TS (A187), not by Match atoms again."""
     minus, plus = found["−"][:PAIR_TRIES], found["+"][:PAIR_TRIES]
     pairs = sorted(  # at the TS's level first, then nearest
         ((i, j) for i in range(len(minus)) for j in range(len(plus))),
-        key=lambda p: (minus[p[0]][0][0] + plus[p[1]][0][0], p[0] + p[1], p[0]),
+        key=lambda p: (minus[p[0]].key[0] + plus[p[1]].key[0], p[0] + p[1], p[0]),
     )
     first = None
     for count, (i, j) in enumerate(pairs, start=1):
         a, b = minus[i], plus[j]
-        result = compare.compare(a[1].structure, b[1].structure, ts, False, tolerance)
+        result = compare.compare(
+            a.candidate.structure,
+            b.candidate.structure,
+            ts,
+            False,
+            tolerance,
+            mappings=_through_ts(a, b),
+        )
         ts_check = result.get("ts_check") or {}
         check = {
-            "a": _named(a[2]),
-            "b": _named(b[2]),
+            "a": _named(a.entry),
+            "b": _named(b.entry),
             "verdict": ts_check.get("verdict", "unclear"),
             "reasons": ts_check.get("reasons", result.get("notes", [])),
             "changed": ts_check.get("changed", []),
         }
         if check["verdict"] == "links":
-            if not (a[2].get("other_level") or b[2].get("other_level")):
+            if not (a.entry.get("other_level") or b.entry.get("other_level")):
                 return check, count
             # A link only through a structure at another level is not a bond check at the
             # TS's level: it stays unclear (validation on a real folder: such links were the
@@ -534,3 +581,108 @@ def _said(
         f"The nearest pair, {pair}, {check['verdict']}: " + " ".join(check["reasons"]),
         f"Not settled: {follow}.",
     )
+
+
+# ---------- several TSs in one call (A187) ----------
+
+MAX_ANSWER = 20_000  # A187: characters of a batch answer; the TSs beyond wait for `offset`
+WHY_LENGTH = 160  # characters of the reason kept per TS in a batch
+
+
+def unlinked(session: Session) -> list[Node]:
+    """The TS nodes with coordinates missing an edge on either side (an edge to their group
+    counts), in canvas order (A187)."""
+    from chembook3d.services import gaps  # gaps imports follow_mode, which is heavier
+
+    mechanism = gaps._mechanism(session)
+    out = []
+    for node in all_ts(session):
+        unit = mechanism.of_node.get(node.id, node.id)
+        if not (mechanism.incoming[unit] and mechanism.outgoing[unit]):
+            out.append(node)
+    return out
+
+
+def all_ts(session: Session) -> list[Node]:
+    """Every TS node with coordinates, in canvas order."""
+    return [
+        n
+        for n in node_service.list_nodes(session)
+        if n.kind == NodeKind.NODE and n.role == Role.TRANSITION_STATE and n.geometry
+    ]
+
+
+def _best(side: dict[str, Any], checked: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The side's candidate in the bond check (the pair that links, else the nearest pair),
+    else its nearest."""
+    if not side["candidates"]:
+        return None
+    best = checked or side["candidates"][0]
+    keys = ("label", "node_id", "species_node_id", "rmsd", "other_level")
+    out = {k: best[k] for k in keys if k in best}
+    out["found"] = side["found"]
+    return out
+
+
+def _clip(text: str) -> str:
+    return text if len(text) <= WHY_LENGTH else text[: WHY_LENGTH - 1].rstrip() + "…"
+
+
+def brief(found: dict[str, Any]) -> dict[str, Any]:
+    """One TS's answer in a few lines (A187): the mode's active bonds, per side the candidate
+    of the bond check (else the nearest) and how many were found, and the verdict: links,
+    unclear or does not link (A184's bond check of the pairs tried), one side (a side has no
+    candidate) or no side."""
+    sides = {s["side"]: s for s in found["sides"]}
+    block: dict[str, Any] = {
+        "ts": found["ts"]["label"],
+        "mode": ", ".join(a["bond"] for a in found["mode"]["active"]),
+    }
+    empty = [s for s in ("−", "+") if not sides[s]["found"]]
+    check = found.get("check")
+    if len(empty) == 2:
+        block["verdict"] = "no side"
+    elif empty:
+        block["verdict"] = "one side"
+        block["why"] = f"nothing on the {empty[0]} side"
+    else:
+        assert check is not None
+        block["verdict"] = check["verdict"]
+        if check["verdict"] != "links" and check.get("reasons"):
+            block["why"] = _clip(str(check["reasons"][0]))
+    for side, checked in (("−", "a"), ("+", "b")):
+        best = _best(sides[side], check[checked] if check is not None else None)
+        if best is not None:
+            block[side] = best
+    return block
+
+
+def batch(blocks: list[dict[str, Any]], total: int, offset: int, seconds: float) -> dict[str, Any]:
+    """The answer for several TSs: their blocks, counts by verdict, and `more` when some were
+    left for the next call (A187)."""
+    counts = Counter(b["verdict"] for b in blocks)
+    out: dict[str, Any] = {
+        "tss": blocks,
+        "counts": dict(counts),
+        "shown": {"from": offset + 1 if blocks else offset, "to": offset + len(blocks)},
+        "of": total,
+        "seconds": round(seconds, 1),
+    }
+    left = total - offset - len(blocks)
+    if left > 0:
+        out["more"] = {
+            "left": left,
+            "offset": offset + len(blocks),
+            "hint": f"{left} more TSs: call again with offset {offset + len(blocks)}.",
+        }
+    out["summary"] = (
+        f"{len(blocks)} of {total} TSs searched: "
+        + ", ".join(f"{n} {v}" for v, n in counts.most_common())
+        + "."
+    )
+    out["next"] = (
+        "Propose each `links` pair at medium (A184 bond check, with both RMSDs); follow the "
+        "mode (start_local_follow_mode) only for the TSs still unsettled; call with `ts` for "
+        "one TS's full answer (bonds per side, more candidates, reasons)."
+    )
+    return out

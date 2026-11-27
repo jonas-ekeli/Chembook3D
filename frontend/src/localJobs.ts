@@ -37,7 +37,7 @@ export function localStatusText(job: LocalJob): string {
     case 'converged':
       return job.kind === 'single_point' || job.kind === 'follow_mode' ? 'Done' : 'Converged'
     case 'not_converged':
-      // D263c: a mode-follow's ends stop at 40 steps on purpose
+      // D263c: a mode-follow's ends stop at their step limit (60, A188) on purpose
       return job.kind === 'follow_mode' ? 'Done' : 'Stopped before converging'
     case 'failed':
       return 'Failed'
