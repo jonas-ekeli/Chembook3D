@@ -1311,7 +1311,9 @@ TOOLS: list[ToolSpec] = [
         "list, label, RMSD to the first), and `near_cut`: pairs that could have gone either "
         "way. D267: mirror images and other stereoisomers are other molecules (a molecule "
         "that is another's mirror image says `mirror_image_of`, that molecule's number in its "
-        "formula). Up to 300 structures. Changes nothing.",
+        "formula). A conformer's `runs`: members that each hold an optimization at one "
+        "level, separate runs of one structure kept as separate nodes, never merged (A194). "
+        "Up to 300 structures. Changes nothing.",
         help={
             "structures": "The structures, each " + STRUCTURE_HELP,
             "all_nodes": "Add every node and free species with coordinates.",
@@ -1891,8 +1893,9 @@ TOOLS: list[ToolSpec] = [
         "What merging node_id into into_id would do (D262): why it is refused, what it warns "
         "about (real bond changes, geometries at one level further apart than the duplicate "
         "tolerance), the atom match, both nodes' values at each level they share and which "
-        "count, the geometry the kept node shows, and the calculations, edges and records that "
-        "move. Changes nothing; merge_nodes asks the user to confirm the merge.",
+        "count, `runs` (levels both optimized at: two runs, A194), the geometry the kept "
+        "node shows, and the calculations, edges and records that move. Changes nothing; "
+        "merge_nodes asks the user to confirm the merge.",
     ),
     T(
         "get_node_geometries",
@@ -2179,9 +2182,11 @@ CONFIRM_DESCRIPTIONS = {
     "numbered otherwise), edges and records moving onto it. At a level both have, the lower "
     "energy's calculations count and the other's are set aside. Refused for different "
     "molecules, a TS with a minimum, or a mirror image; warned (pass anyway once the user has "
-    "seen it) for a real bond change or geometries apart at one level. See preview_node_merge "
-    "first; pairs, branch and anyway are as there. In a playground, while you work on your "
-    "own, two nodes you made yourself and nobody changed since merge without asking (D264c).",
+    "seen it) for a real bond change or geometries apart at one level, and refused without "
+    "anyway when both hold an optimization at one level (`runs` in the preview: two runs of "
+    "one structure, kept as two nodes, A194). See preview_node_merge first; pairs, branch "
+    "and anyway are as there. In a playground, while you work on your own, two nodes you "
+    "made yourself and nobody changed since merge without asking (D264c).",
     "replace_with_local_result": "Import a finished local job's result onto its node, "
     "replacing the node's geometry at the job's level (D260): the job's replace_offer lists "
     "the optimizations there and the calculations sitting on them, which are removed for good; "

@@ -7,6 +7,7 @@ The rules live in `services/folder_survey.py`, `services/structure_compare.py` a
 Like `api/local_files.py`, these read files on this computer, so only the app's own page or
 Claude on this computer may call them."""
 
+import itertools
 import json
 import time
 from pathlib import Path
@@ -18,7 +19,14 @@ from pydantic import BaseModel, Field
 from chembook3d.api.jobs import _local_page_only
 from chembook3d.api.routes import DbSession, _investigation
 from chembook3d.models import Node, Role
-from chembook3d.services import batch_import, folder_survey, irc_ends, thermo_settings, ts_partners
+from chembook3d.services import (
+    batch_import,
+    folder_survey,
+    irc_ends,
+    node_merge,
+    thermo_settings,
+    ts_partners,
+)
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
 from chembook3d.services.records import RecordError
@@ -274,6 +282,7 @@ def _name_nodes(session: Any, found: dict[str, Any], refs: list[dict[str, Any]])
     for formula in found["formulas"]:
         for molecule in formula["molecules"]:
             for conformer in molecule["conformers"]:
+                nodes = []
                 for member in conformer["members"]:
                     node_id = refs[member["index"] - 1].get("node_id")
                     node = session.get(Node, node_id) if node_id else None
@@ -282,8 +291,22 @@ def _name_nodes(session: Any, found: dict[str, Any], refs: list[dict[str, Any]])
                     member["node_id"] = node.id
                     if node.role == Role.TRANSITION_STATE:
                         member["ts"] = True
+                    nodes.append((member["index"], node))
+                # A194: members that each hold an optimization at one level are separate runs
+                # of one structure (the import keeps them as two nodes, D246): never merged.
+                ran: set[int] = set()
+                for (i, a), (j, b) in itertools.combinations(nodes, 2):
+                    if node_merge.runs(a, b):
+                        ran.update((i, j))
+                if ran:
+                    conformer["runs"] = sorted(ran)
     found["next"] = (
         "Make the conformer groups now, before linking (the linking tools treat a group as "
         "one structure): one propose_mechanism with only groups, each a molecule's minima "
-        "(members without ts) as member_ids, when it has more than one."
+        "(members without ts) as member_ids, when it has more than one. Members of one "
+        "conformer are within the duplicate tolerance; merge one into another only when it "
+        "holds no optimization at a level the other has (a single point or frequency job on a "
+        "node of its own). Members in a conformer's `runs` each hold an optimization at one "
+        "level: separate runs of one structure, kept as separate nodes in the conformer group "
+        "and never merged (A194)."
     )

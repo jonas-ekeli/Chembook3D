@@ -885,7 +885,22 @@ def _own_merge(session: Session, params: dict[str, Any], made: Autonomy) -> bool
     merge without asking. Everywhere else a merge always asks (D262i)."""
     if not proposals.in_playground(session):
         return False
-    return _own_nodes(session, made, [params["node_id"], params["into_id"]])
+    if not _own_nodes(session, made, [params["node_id"], params["into_id"]]):
+        return False
+    source = session.get(Node, params["node_id"])
+    into = session.get(Node, params["into_id"])
+    found = node_merge.runs(into, source) if source and into else []
+    if found and not params.get("anyway"):
+        # A194: two runs of one structure stay two nodes, in one conformer group; merged
+        # without asking only when Claude says the user wants it (anyway).
+        raise RecordError(
+            f"“{_label(source)}” and “{_label(into)}” both hold an optimization at "
+            + ", ".join(found)
+            + ": two runs that ended on one structure, which the import keeps as two nodes "
+            "(D246, A194). Put them in one conformer group instead; merge them (anyway) only "
+            "when the user asks for it"
+        )
+    return True
 
 
 def _own(param: str) -> Callable[[Session, dict[str, Any], Autonomy], bool]:

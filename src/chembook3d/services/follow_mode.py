@@ -38,12 +38,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from chembook3d import local_jobs, xyz
-from chembook3d.models import GroupNode, Node, Role, Status
+from chembook3d.models import GroupNode, LevelOfTheory, Node, Role, Status
 from chembook3d.services import (
     atom_matching,
     batch_import,
     folder_survey,
     irc_ends,
+    levels,
     thermo_settings,
 )
 from chembook3d.services import nodes as node_service
@@ -96,7 +97,8 @@ def _matches(
     candidates: list[_Candidate],
     window: float = compare.END_RMSD,
 ) -> list[dict[str, Any]]:
-    """The candidates the end matches (A184; within `window`, A191), nearest first."""
+    """The candidates the end matches (A184; within `window`, A191), nearest first, those at
+    another level than the TS's after the others (A194)."""
     formula = _formula(rows)
     shape = (compare.signature(rows), compare._bond_counts(rows))
     found = []
@@ -120,7 +122,7 @@ def _matches(
         if same.mapping is not None:
             entry["renumbered"] = True
         found.append(entry)
-    found.sort(key=lambda m: m["rmsd"])
+    found.sort(key=lambda m: (bool(m.get("other_level")), m["rmsd"]))
     return found
 
 
@@ -132,13 +134,19 @@ HELD = ("scan path", "scan or constrained geometry", "imaginary frequency")
 
 
 def _node_candidates(
-    session: Session, exclude: str | None, folder: Path | None = None
+    session: Session,
+    exclude: str | None,
+    folder: Path | None = None,
+    level: tuple[str, int] | None = None,
 ) -> list[_Candidate]:
     """Every node with coordinates but `exclude` (the TS followed), those A186 shows are no
     minimum (a scan path, a scan or constrained geometry, an imaginary frequency: A188) and,
     with the investigation's `folder`, the nodes made from another TS's IRC end optimization
     (A192); TS nodes among them are told apart by `_is_ts` and never an end's match, nor is a
-    node of no role at a TS node's structure (a single point on it, A193 as A188's files)."""
+    node of no role at a TS node's structure (a single point on it, A193 as A188's files).
+    A194: a node whose structure is only at levels of a lower kind of method than the TS's
+    geometry level `level` (id, `levels.method_rank`), an xTB conformer search's member under
+    a DFT TS, say, is marked `other_level`."""
     from chembook3d.services import ts_partners  # it imports gaps, which imports this module
 
     tolerance = thermo_settings.settings(session).duplicate_tolerance
@@ -176,6 +184,14 @@ def _node_candidates(
         if node.group_id is not None:
             entry["group_id"] = node.group_id
             entry["group"] = groups.get(node.group_id) or "Untitled group"
+        held = ts_partners.held_levels(node) if level is not None else {}
+        if (
+            level is not None
+            and held
+            and level[0] not in held
+            and max(levels.method_rank(levels.fields_of(lv)) for lv in held.values()) < level[1]
+        ):
+            entry["other_level"] = True
         out.append(_Candidate(rows, node.charge, node.multiplicity, entry))
     return out
 
@@ -350,6 +366,8 @@ def _settle(entry: dict[str, Any]) -> None:
                 "as": "group",
                 "members": len(matches),
             }
+            if all(m.get("other_level") for m in matches):
+                entry["settled"]["other_level"] = True
         else:
             entry["settled"] = {**matches[0], "as": "nearest", "others": len(matches) - 1}
         return
@@ -446,12 +464,21 @@ def _verdict(ends: dict[str, dict[str, Any]], ts_label: str) -> dict[str, Any]:
                 "flags": flags,
             }
         exact = all(settled[n]["as"] in ("one", "group") for n in ENDS)
+        elsewhere = [n for n in ENDS if settled[n].get("other_level")]
+        for n in elsewhere:
+            flags.insert(
+                0,
+                f"The {SHOWN[n]} end matches {_name(settled[n])}, a structure only at a lower "
+                "kind of method than the TS's geometry level (an xTB conformer search's under a "
+                "DFT TS, say): a weak end, so the link is low (A194).",
+            )
         return {
             "outcome": "links",
             "verdict": f"{head}: links {_name(a)} and {_name(b)}",
             # A184: a mode-follow whose two ends each match one structure; A191, A193: medium
-            # when an end took the nearest of several conformers or a wider match.
-            "confidence": "high" if exact else "medium",
+            # when an end took the nearest of several conformers or a wider match; A194: low
+            # when an end is at another level than the TS's only.
+            "confidence": "low" if elsewhere else "high" if exact else "medium",
             "flags": flags,
             "links": [a, b],
         }
@@ -515,7 +542,21 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
     nearest first) and the files of the job's folder it matches; with the verdict."""
     found = _read(session, folder, job_id)
     charge, multiplicity = found.job["charge"], found.job["multiplicity"]
-    nodes = _node_candidates(session, found.ts_node.id if found.ts_node else None, folder)
+    from chembook3d.services import ts_partners  # it imports gaps, which imports this module
+
+    level = ts_partners.ts_level(
+        session,
+        {"node_id": found.ts_node.id}
+        if found.ts_node is not None
+        else {"calculation_id": found.follow.get("calculation_id")},
+    )
+    held = session.get(LevelOfTheory, level.id) if level is not None else None
+    nodes = _node_candidates(
+        session,
+        found.ts_node.id if found.ts_node else None,
+        folder,
+        (held.id, levels.method_rank(levels.fields_of(held))) if held is not None else None,
+    )
     notes: list[str] = []
     files: list[_Candidate] | None = None
     where = found.follow.get("folder")

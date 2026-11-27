@@ -449,7 +449,19 @@ def _end(item: _Item) -> dict[str, Any]:
     out: dict[str, Any] = {"label": item.label, "node_id": item.node.id}
     if item.group:
         out["group"] = item.group
+        out["group_id"] = item.node.group_id
     return out
+
+
+def _edge(found: _Found) -> dict[str, Any]:
+    """A194: the association as propose_mechanism takes it, A + S → B, a grouped end as its
+    group (the pair stands for the nearest members of the two units)."""
+    assert found.species is not None
+    return {
+        "source_id": found.a.unit,
+        "target_id": found.b.unit,
+        "species": [{"species_id": found.species.node.id, "direction": "joins"}],
+    }
 
 
 def _entry(found: _Found) -> dict[str, Any]:
@@ -466,6 +478,7 @@ def _entry(found: _Found) -> dict[str, Any]:
         out["core_rmsd"] = round(found.rmsd, 3)
         out["bonds_to_core"] = found.bonds
         out["confidence"] = "medium" if small else "low"
+        out["edge"] = _edge(found)
     else:
         out["b"] = _end(found.b)
         out["rmsd"] = round(found.rmsd, 3)
@@ -557,12 +570,15 @@ def find(
         out["make_species"] = to_make
     out["summary"] = _summary(counts, to_make)
     out["next"] = (
-        "Propose each association as an edge between the two minima (or their groups) with the "
-        "species joining (A + S → B) or leaving (B → A + S): the atoms fix the species, so this "
-        "needs no chemistry choice. Medium when `confidence` says so (the bonds balance and the "
-        "core RMSD is small), else low, naming the core RMSD in the evidence. other_pairs: "
-        "other conformers of the same two molecules; group the conformers (group_structures) "
-        "rather than linking each. A species marked make_species is an ordinary node: make it "
+        "Propose every association listed, at the `confidence` it gives (medium when the "
+        "bonds balance and the core RMSD is small, else low), with its `edge` as it stands "
+        "(A + S → B; reverse source and target for the species leaving, B → A + S): the atoms "
+        "fix the species, so this needs no chemistry choice. A grouped end is its group "
+        "(`group_id`, A194): the pair stands for the nearest members of the two groups, so "
+        "never link the two nodes named instead. Name the core RMSD and the bonds to the core "
+        "in the evidence. other_pairs: other conformers of the same two molecules; group the "
+        "conformers (group_structures) rather than linking each. A species marked "
+        "make_species is an ordinary node: make it "
         "a free species first (set_node_kind, kind species). same_atoms pairs are low, and "
         "only where no TS you have links them (a rotation TS would: find_ts_partners)."
     )
