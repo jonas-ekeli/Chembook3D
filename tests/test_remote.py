@@ -1628,6 +1628,11 @@ def test_saga_agent_file_helper_failures_never_fall_back_to_sftp(at_work, saga, 
         )
     if failure == "refusal":
         saga.saga_file_error = "Fixture helper refused the request."
+    expected = {
+        "missing": "Saga could not read ~/.local/lib/chembook3d/saga_prepare.py",
+        "wrong pin": f"The running keeper expects Saga helper SHA-256 {saga_access._sha}",
+        "refusal": saga.saga_file_error,
+    }[failure]
     (work / "results").mkdir()
     (work / "results" / TS).write_bytes((FIXTURES / TS).read_bytes())
     results = f"{SAGA_WORK}/results"
@@ -1642,7 +1647,6 @@ def test_saga_agent_file_helper_failures_never_fall_back_to_sftp(at_work, saga, 
         _write(at_work, geometry, WATER),
     ):
         assert response.status_code == 409, response.text
-        expected = saga.saga_file_error or "Install the matching Saga helper"
         assert expected in response.json()["detail"]
     folder = tmp_path / "copy"
     folder.mkdir()

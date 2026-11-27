@@ -125,10 +125,18 @@ async def _request(connection, request: dict) -> dict:
             encoding="utf-8",
             timeout=105,
         )
-        if reply.exit_status in {3, 4}:
+        if reply.exit_status == 3:
             return {
                 "ok": False,
-                "error": "Install the matching Saga helper from this checkout.",
+                "error": "Saga could not read ~/.local/lib/chembook3d/saga_prepare.py. "
+                "Check the installed helper on the connected account.",
+            }
+        if reply.exit_status == 4:
+            return {
+                "ok": False,
+                "error": f"The running keeper expects Saga helper SHA-256 {_sha}. "
+                "Compare the installed helper with the workstation checkout. "
+                "If those match, restart the keeper using the Saga test procedure.",
             }
         answer = json.loads(reply.stdout)
         if reply.exit_status == 1 and answer.get("ok") is False:
