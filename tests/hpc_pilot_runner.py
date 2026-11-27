@@ -45,10 +45,10 @@ def main(args: list[str]) -> None:
     assert Path(inp).is_file()
     with Path("scheduler-calls.txt").open("a", encoding="ascii") as stream:
         stream.write(f"{inp} {nodes} {cores} {hours}\n")
-    if mode == "reject":
-        print(
-            "sbatch: error: Batch job submission failed: invalid test allocation", file=sys.stderr
-        )
+    if mode in {"reject", "conflicting-receipt"}:
+        print("sbatch: error: Batch job submission failed: Invalid allocation", file=sys.stderr)
+        if mode == "conflicting-receipt":
+            print("Submitted batch job 123")
         return  # matches the outer wrapper's zero exit
     job_id = int(Path.cwd().parent.name[:12], 16)
     name = Path(inp).stem

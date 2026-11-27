@@ -13,13 +13,13 @@ from pathlib import Path
 
 from chembook3d import xyz
 from chembook3d.parsers.gaussian import keyword_of, split_route_words
+from chembook3d.remote.saga_prepare import scheduler_outcome
 
 SUBSYSTEM = "chembook3d-jobs-v1"
 LOCAL_WORK = "/cluster/work/gaussian-pilot"
 MAX_INPUT = 256_000
 ATTEMPT = re.compile(r"[a-f0-9]{32}")
 SAFE_STEM = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}")
-RECEIPT = re.compile(r"^Submitted batch job ([0-9]{1,20})$", re.MULTILINE)
 
 
 def signature(key: bytes, payload: dict) -> str:
@@ -303,22 +303,7 @@ class JobPilot:
         state, job_id, detail = "uncertain", None, None
         try:
             result = subprocess.run(args, cwd=folder, capture_output=True, timeout=60, check=False)
-            output = result.stdout.decode(errors="replace").replace("\r\n", "\n")
-            receipts = RECEIPT.findall(output)
-            if len(receipts) == 1:
-                state, job_id = "submitted", receipts[0]
-            elif not receipts:
-                messages = output.splitlines() + result.stderr.decode(errors="replace").splitlines()
-                rejection = next(
-                    (
-                        s
-                        for s in messages
-                        if s.startswith("sbatch: error: Batch job submission failed:")
-                    ),
-                    None,
-                )
-                if rejection:
-                    state, detail = "rejected", rejection[:500]
+            state, job_id, detail = scheduler_outcome(result.stdout, result.stderr)
         except (OSError, subprocess.TimeoutExpired):
             detail = "The submitter did not return a verifiable receipt."
         with db:

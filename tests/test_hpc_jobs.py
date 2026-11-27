@@ -183,7 +183,12 @@ def test_link_to_geometry_outside_the_area(pilot, tmp_path):
 
 @pytest.mark.parametrize(
     ("mode", "expected"),
-    [("ok", "submitted"), ("reject", "rejected"), ("lost-receipt", "uncertain")],
+    [
+        ("ok", "submitted"),
+        ("reject", "rejected"),
+        ("lost-receipt", "uncertain"),
+        ("conflicting-receipt", "uncertain"),
+    ],
 )
 def test_one_wrapper_invocation_across_retries_and_helper_restart(pilot, mode, expected):
     helper = replace(pilot, submitter=(*pilot.submitter[:-1], mode))
