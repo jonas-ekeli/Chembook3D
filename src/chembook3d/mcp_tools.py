@@ -1324,6 +1324,25 @@ TOOLS: list[ToolSpec] = [
         "10). Changes nothing.",
     ),
     T(
+        "find_direct_links",
+        "read",
+        "GET",
+        "/api/mechanism/direct-links",
+        "Pairs of minima a step with no TS may join (FR-MCP-27, A190), for the steps "
+        "find_ts_partners cannot find: `association` (minimum B has the atoms of minimum A and "
+        "one free species together, and B's bonds are theirs but for the species' bonds to A's "
+        "atoms, A181; read as A + species → B, or B → A + species when it leaves), ranked by "
+        "the atom-matched RMSD of A against B without the species (`core_rmsd`), with a "
+        "suggested confidence (medium when that RMSD is small, else low); and `same_atoms` "
+        "(the same atoms, bonds differing only at a metal or not at all: a coordination mode "
+        'or conformation change no TS links, "no TS: direct link?", low). A small '
+        "closed-shell molecule imported as an ordinary node counts as a species and is named "
+        "in `make_species`: make it a free species (set_node_kind) before proposing. Pairs an "
+        "edge or one TS already joins, and pairs in one group, are left out; per pair of "
+        "groups the nearest members. As many as fit in about 20,000 characters, then `more` "
+        "with the offset to call again with. Changes nothing.",
+    ),
+    T(
         "read_pdf",
         "read",
         "GET",

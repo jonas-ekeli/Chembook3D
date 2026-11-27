@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from chembook3d.api.jobs import _local_page_only
 from chembook3d.api.routes import DbSession, _investigation
 from chembook3d.models import Node
-from chembook3d.services import batch_import, folder_survey, thermo_settings, ts_partners
+from chembook3d.services import batch_import, folder_survey, irc_ends, thermo_settings, ts_partners
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
 from chembook3d.services.records import RecordError
@@ -153,6 +153,13 @@ class _Partners:
     def __init__(self, session: Any, folder: Path, tolerance: float, body: PartnersIn):
         self.session, self.folder, self.tolerance, self.body = session, folder, tolerance, body
         self.made: dict[str | None, tuple[list, list, dict[str, int]]] = {}
+        self.ends: dict[str, str] | None = None  # A192: IRC end nodes, by node: their TS
+
+    def irc_ends_of_others(self, ts_id: str | None) -> set[str]:
+        """A192: the nodes made from another TS's IRC end optimization, never its partners."""
+        if self.ends is None:
+            self.ends = irc_ends.end_nodes(self.session, self.folder, self.tolerance)
+        return {n for n, ts in self.ends.items() if ts != ts_id}
 
     def find(self, ref: StructureRef) -> dict[str, Any]:
         session, folder, tolerance, body = self.session, self.folder, self.tolerance, self.body
@@ -175,6 +182,9 @@ class _Partners:
             self.made[key] = (candidates, species, skipped)
         candidates, species, skipped = self.made[key]
         node = session.get(Node, ref.node_id) if ref.node_id is not None else None
+        if body.candidates is None:
+            others = self.irc_ends_of_others(node.id if node is not None else None)
+            candidates = [c for c in candidates if c.entry.get("node_id") not in others]
         if node is not None:  # never the TS itself, nor counted as left out
             candidates = [c for c in candidates if c.entry.get("node_id") != node.id]
             species = [c for c in species if c.entry.get("node_id") != node.id]

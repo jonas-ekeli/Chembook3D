@@ -6,6 +6,17 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Building from a folder, from what validation run 4 showed (A190–A192): `find_direct_links`
+  lists the steps between minima with no TS (a free species joining or leaving, ranked by the
+  RMSD of the complex without it; a coordination or conformation change, "no TS: direct
+  link?"), naming small molecules imported as nodes that should be free species; on the run's
+  playground it listed 15 of the 18 reachable minimum-to-minimum steps of the answer key in about
+  10 s. The batch import sends an IRC end's optimization into its TS's IRC (its name and first
+  or final structure show it), and such a node is never another TS's partner. A mode-follow
+  end over one group's conformers stands for the group, over ungrouped conformers for the
+  nearest (medium), and a soft mode's end may match within 1.0 Å (medium). The playbook makes
+  small molecules free species, groups conformers, proposes the direct links and rewrites its
+  summary note at the end.
 - Faster and more reliable building from a folder, from what validation run 3 showed (A187–A189):
   `find_ts_partners` takes several TSs at once (`tss`, or `all_ts` "unlinked"/"all") and answers
   each in a few lines, about a minute for 47 TSs of a real folder where one call took 2–5 minutes

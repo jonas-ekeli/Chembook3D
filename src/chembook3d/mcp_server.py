@@ -124,6 +124,8 @@ Rules:
   with a TS, whether it links two minima along its imaginary mode; find_ts_partners starts
   from a TS and finds the minima on each side of its mode among the nodes, with that check
   of the best pair (all_ts "unlinked": every TS missing an edge, a few lines each);
+  find_direct_links lists the steps with no TS (a free species joining or leaving, a
+  conformation or coordination change) between minima, by the core's RMSD;
   group_structures sorts many into isomers, conformers and duplicates.
   They change nothing; import with
   import_folder after showing the user the plan. A TS that no IRC and no bond check along

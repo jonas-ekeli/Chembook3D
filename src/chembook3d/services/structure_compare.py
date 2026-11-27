@@ -470,16 +470,18 @@ def end_match(
     other: Rows,
     prints: tuple[Print, Print] | None = None,
     counts: tuple["_Bonds", "_Bonds"] | None = None,
+    window: float = END_RMSD,
 ) -> Same | None:
     """A184: whether `other` is the structure a mode-follow end (or an IRC end) relaxed to:
     the same bonds by A181's rule with weak contacts, metal–hydrogen ones included, left out
-    (`split`), and an atom-matched RMSD under END_RMSD, whatever the order of its atoms. Ruled
+    (`split`), and an atom-matched RMSD under END_RMSD (`window`; A191's wider one for a soft
+    mode), whatever the order of its atoms. Ruled
     out cheaply first by the order-independent bound and the bond counts; then the same
     numbering, the numbering by position and Match atoms are tried in that order."""
     if not same_atoms(end, other):
         return None
     pa, pb = prints or (signature(end), signature(other))
-    if lower_bound(pa, pb) >= END_RMSD:
+    if lower_bound(pa, pb) >= window:
         return None
     ca, cb = counts or (_bond_counts(end), _bond_counts(other))
     if not _could_be_same(ca, cb, False):
@@ -492,7 +494,7 @@ def end_match(
             return None
         tried.add(key)
         rmsd = geometry.aligned_rmsd(end, [other[j] for j in mapping])
-        if rmsd is None or rmsd >= END_RMSD:
+        if rmsd is None or rmsd >= window:
             return None
         formed, broken = atom_matching.changes(end, other, mapping)
         real_formed, real_broken, _, _ = split(end, other, mapping, formed, broken)
@@ -511,7 +513,7 @@ def end_match(
 
     def enough(mapping: list[int]) -> bool:  # A188: Match atoms ends at the first that fits
         rmsd = geometry.aligned_rmsd(end, [other[j] for j in mapping])
-        if rmsd is None or rmsd >= END_RMSD:
+        if rmsd is None or rmsd >= window:
             return False
         formed, broken = atom_matching.changes(end, other, mapping)
         real_formed, real_broken, _, _ = split(end, other, mapping, formed, broken)

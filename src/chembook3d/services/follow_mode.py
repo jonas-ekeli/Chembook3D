@@ -12,7 +12,11 @@ contacts left out) and the atom-matched RMSD is under 0.5 Å, whatever the atom 
 and the bond counts rule most candidates out before any atoms are matched. A188: a TS (a node,
 or a file of one TS structure) is never a match, nor a node A186 shows is no minimum; an end
 whose distances along the mode are still the TS's (`structure_compare._side` "none") returned
-to the TS and matches nothing.
+to the TS and matches nothing. A191: an end matching several members of one group stands for
+the group, one matching several conformers of one molecule otherwise for the nearest (a
+medium link); a soft mode (below 100 cm⁻¹) whose end changes no bond and matches nothing
+within 0.5 Å takes the nearest minimum with its bonds within 1.0 Å (medium). A192: a node or
+folder file made from another TS's IRC end optimization is never an end's match.
 
 The verdict: both ends each matching one structure links them (high confidence, A184); both
 matching the same one is flagged; both returned to a TS is said; an end that matches nothing
@@ -26,11 +30,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from chembook3d import local_jobs, xyz
-from chembook3d.models import Node, Role, Status
-from chembook3d.services import batch_import, folder_survey, thermo_settings
+from chembook3d.models import GroupNode, Node, Role, Status
+from chembook3d.services import (
+    atom_matching,
+    batch_import,
+    folder_survey,
+    irc_ends,
+    thermo_settings,
+)
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
 from chembook3d.services.geometry import Rows
@@ -40,6 +51,8 @@ SHOWN = {"+": "+", "-": "−"}
 NAMES = {"+": "+", "plus": "+", "-": "-", "−": "-", "minus": "-"}
 NODE_DX = 260.0  # px: a node made from an end sits this far beside the TS, + right, − left
 NODE_DY = 120.0  # px: and this far below it
+SOFT_MODE = 100.0  # A191: an imaginary mode below this (cm⁻¹) that changes no bond is soft
+SOFT_RMSD = 1.0  # A191: a soft mode's end takes the nearest minimum with its bonds within this
 
 
 @dataclass
@@ -73,9 +86,13 @@ def _compatible(candidate: _Candidate, charge: int | None, multiplicity: int | N
 
 
 def _matches(
-    rows: Rows, charge: int | None, multiplicity: int | None, candidates: list[_Candidate]
+    rows: Rows,
+    charge: int | None,
+    multiplicity: int | None,
+    candidates: list[_Candidate],
+    window: float = compare.END_RMSD,
 ) -> list[dict[str, Any]]:
-    """The candidates the end matches (A184), nearest first."""
+    """The candidates the end matches (A184; within `window`, A191), nearest first."""
     formula = _formula(rows)
     shape = (compare.signature(rows), compare._bond_counts(rows))
     found = []
@@ -90,6 +107,7 @@ def _matches(
             candidate.rows,
             (shape[0], candidate.print_),
             (shape[1], candidate.counts),
+            window,
         )
         if same is None:
             continue
@@ -109,18 +127,25 @@ def _is_ts(entry: dict[str, Any]) -> bool:
 HELD = ("scan path", "scan or constrained geometry", "imaginary frequency")
 
 
-def _node_candidates(session: Session, exclude: str | None) -> list[_Candidate]:
-    """Every node with coordinates but `exclude` (the TS followed) and those A186 shows are no
-    minimum (a scan path, a scan or constrained geometry, an imaginary frequency: A188); TS
-    nodes among them are told apart by `_is_ts` and never an end's match."""
+def _node_candidates(
+    session: Session, exclude: str | None, folder: Path | None = None
+) -> list[_Candidate]:
+    """Every node with coordinates but `exclude` (the TS followed), those A186 shows are no
+    minimum (a scan path, a scan or constrained geometry, an imaginary frequency: A188) and,
+    with the investigation's `folder`, the nodes made from another TS's IRC end optimization
+    (A192); TS nodes among them are told apart by `_is_ts` and never an end's match."""
     from chembook3d.services import ts_partners  # it imports gaps, which imports this module
 
     tolerance = thermo_settings.settings(session).duplicate_tolerance
+    ends = irc_ends.end_nodes(session, folder, tolerance) if folder is not None else {}
+    groups = {g.id: g.label for g in session.scalars(select(GroupNode))}
     out = []
     for node in node_service.list_nodes(session, with_calculations=True):
         if not node.geometry or node.id == exclude:
             continue
         if ts_partners.left_out(node, tolerance) in HELD:
+            continue
+        if ends.get(node.id, exclude) != exclude:  # A192: another TS's IRC end optimization
             continue
         rows = [list(r) for r in node.geometry]
         entry = {
@@ -131,6 +156,9 @@ def _node_candidates(session: Session, exclude: str | None) -> list[_Candidate]:
         }
         if node.kind != "node":
             entry["kind"] = str(node.kind)
+        if node.group_id is not None:
+            entry["group_id"] = node.group_id
+            entry["group"] = groups.get(node.group_id) or "Untitled group"
         out.append(_Candidate(rows, node.charge, node.multiplicity, entry))
     return out
 
@@ -176,10 +204,12 @@ def _file_candidates(folder: Path, investigation: Path, tolerance: float) -> lis
 def _read_files(folder: Path, investigation: Path, tolerance: float) -> list[_Candidate]:
     out: list[_Candidate] = []
     kept: list[_Candidate] = []  # one per structure
-    for final in folder_survey.final_structures(folder, True, investigation):
+    for final in folder_survey.final_structures(folder, True, investigation, tolerance):
         entry = {"path": final.path, "step": final.step, "formula": _formula(final.rows)}
         if final.role == Role.TRANSITION_STATE.value:
             entry["role"] = final.role
+        if final.irc_end:
+            entry["irc_end"] = final.irc_end
         candidate = _Candidate(final.rows, final.charge, final.multiplicity, entry).prepared()
         same = next(
             (
@@ -273,24 +303,69 @@ def _bonds(found: _Job, name: str) -> dict[str, Any]:
     }
 
 
-def _structures(matches: list[dict[str, Any]], files: list[dict[str, Any]]) -> list[str]:
-    """The distinct structures an end matches, as keys: its nodes, else its files."""
+def _key(settled: dict[str, Any] | None) -> str | None:
+    """The structure an end settled on, as a key: its group, node or folder structure."""
+    if settled is None:
+        return None
+    if settled.get("as") == "group":
+        return f"group:{settled['group_id']}"
+    if "node_id" in settled:
+        return f"node:{settled['node_id']}"
+    return f"file:{settled['structure']}"
+
+
+def _settle(entry: dict[str, Any]) -> None:
+    """A191: the one structure an end stands for. One match is it; several, all in one group,
+    are the group; several of one molecule otherwise (every match has the end's bonds, so they
+    are conformers of one molecule) are the nearest, "and N other conformers"; nodes before
+    the folder's files."""
+    matches = entry["matches"]
     if matches:
-        return [f"node:{m['node_id']}" for m in matches]
-    return list(dict.fromkeys(f"file:{f['structure']}" for f in files))
+        groups = {m.get("group_id") for m in matches}
+        if len(matches) == 1:
+            entry["settled"] = {**matches[0], "as": "one"}
+        elif len(groups) == 1 and None not in groups:
+            first = matches[0]
+            entry["settled"] = {
+                "group_id": first["group_id"],
+                "label": first["group"],
+                "rmsd": first["rmsd"],
+                "as": "group",
+                "members": len(matches),
+            }
+        else:
+            entry["settled"] = {**matches[0], "as": "nearest", "others": len(matches) - 1}
+        return
+    files = entry.get("files") or []
+    structures = list(dict.fromkeys(f["structure"] for f in files))
+    if len(structures) == 1:
+        entry["settled"] = {**files[0], "as": "one"}
+    elif structures:
+        entry["settled"] = {**files[0], "as": "nearest", "others": len(structures) - 1}
 
 
 def _name(match: dict[str, Any]) -> str:
-    if "node_id" in match:
-        return f"“{match['label']}”"
-    return f"{match['path']} (step {match['step']})"
+    if match.get("as") == "group":
+        return f"the group “{match['label']}”"
+    name = (
+        f"“{match['label']}”" if "node_id" in match else f"{match['path']} (step {match['step']})"
+    )
+    if match.get("as") == "nearest":
+        others = match["others"]
+        name += f" and {others} other conformer{'s' if others > 1 else ''} of the same molecule"
+    return name
 
 
 def _verdict(ends: dict[str, dict[str, Any]], ts_label: str) -> dict[str, Any]:
-    """A184: both ends each matching exactly one structure link those two (high confidence);
-    both matching the same one, more than one, one end or none are said and flagged."""
-    keys = {n: _structures(ends[n]["matches"], ends[n].get("files", [])) for n in ENDS}
-    first = {n: (ends[n]["matches"] or ends[n].get("files") or [None])[0] for n in ENDS}
+    """A184: both ends each matching one structure link those two (high confidence); A191: an
+    end standing for a group of its matches is one structure too, while the nearest of several
+    conformers or a soft mode's wider match makes the link medium; both on the same structure,
+    one end or none are said and flagged."""
+    for n in ENDS:
+        if "settled" not in ends[n] and not ends[n].get("returned_to_ts"):
+            _settle(ends[n])
+    settled = {n: ends[n].get("settled") for n in ENDS}
+    keys = {n: _key(settled[n]) for n in ENDS}
     flags: list[str] = []
     back = [n for n in ENDS if ends[n].get("returned_to_ts") or ends[n].get("ts_matches")]
     for n in back:
@@ -304,7 +379,7 @@ def _verdict(ends: dict[str, dict[str, Any]], ts_label: str) -> dict[str, Any]:
                 f"The {SHOWN[n]} end matches another TS, {_name(ends[n]['ts_matches'][0])}: "
                 "a TS is never an end's match (A188)."
             )
-    if len(back) == 2 and not any(keys[n] for n in ENDS):
+    if len(back) == 2 and not any(keys.values()):
         return {
             "outcome": "returned",
             "verdict": f"Followed the mode of “{ts_label}”: both ends returned to a TS",
@@ -317,9 +392,26 @@ def _verdict(ends: dict[str, dict[str, Any]], ts_label: str) -> dict[str, Any]:
                 f"The {SHOWN[n]} end stopped after {ends[n]['cycles']} steps without converging "
                 "(a partial relaxation, as expected); its match is by A184's 0.5 Å."
             )
+        found = settled[n]
+        if found is None:
+            continue
+        if found["as"] == "nearest":
+            flags.insert(
+                0,
+                f"The {SHOWN[n]} end matches {found['others'] + 1} conformers of one molecule "
+                f"within 0.5 Å; the nearest, {_name(found)}, is taken (A191): group them, or "
+                "check which.",
+            )
+        elif found["as"] == "soft":
+            flags.insert(
+                0,
+                f"The {SHOWN[n]} end of this soft mode (below {SOFT_MODE:.0f} cm⁻¹, no bond "
+                f"change) matches nothing within 0.5 Å; the nearest minimum with its bonds, "
+                f"{_name(found)} ({found['rmsd']:.2f} Å, within {SOFT_RMSD} Å), is taken (A191).",
+            )
     head = f"Followed the mode of “{ts_label}”"
-    if all(len(keys[n]) == 1 for n in ENDS):
-        a, b = first["+"], first["-"]
+    if all(keys[n] for n in ENDS):
+        a, b = settled["+"], settled["-"]
         if keys["+"] == keys["-"]:
             flags.insert(0, f"Both ends match the same structure, {_name(a)}.")
             return {
@@ -328,34 +420,23 @@ def _verdict(ends: dict[str, dict[str, Any]], ts_label: str) -> dict[str, Any]:
                 "confidence": None,
                 "flags": flags,
             }
+        exact = all(settled[n]["as"] in ("one", "group") for n in ENDS)
         return {
             "outcome": "links",
             "verdict": f"{head}: links {_name(a)} and {_name(b)}",
-            "confidence": "high",  # A184: a mode-follow whose two ends each match one
+            # A184: a mode-follow whose two ends each match one structure; A191: medium when
+            # an end took the nearest of several conformers or a soft mode's wider match.
+            "confidence": "high" if exact else "medium",
             "flags": flags,
             "links": [a, b],
         }
     parts = []
     for n in ENDS:
-        if not keys[n]:
+        if keys[n] is None:
             parts.append(f"{SHOWN[n]} end matches nothing")
-        elif len(keys[n]) == 1:
-            parts.append(f"{SHOWN[n]} end matches {_name(first[n])} ({first[n]['rmsd']:.2f} Å)")
         else:
-            names = ", ".join(_name(m) for m in (ends[n]["matches"] or ends[n]["files"])[:4])
-            parts.append(f"{SHOWN[n]} end matches {len(keys[n])} structures ({names})")
-            flags.insert(
-                0,
-                f"The {SHOWN[n]} end matches {len(keys[n])} structures: duplicates or conformers "
-                "closer than 0.5 Å; check them.",
-            )
-    matched = [n for n in ENDS if keys[n]]
-    if not matched:
-        outcome = "none"
-    elif any(len(keys[n]) > 1 for n in ENDS):
-        outcome = "ambiguous"
-    else:
-        outcome = "one_end"
+            parts.append(f"{SHOWN[n]} end matches {_name(settled[n])} ({settled[n]['rmsd']:.2f} Å)")
+    outcome = "one_end" if any(keys.values()) else "none"
     if outcome == "none":
         flags.insert(0, "No end matches a structure: the TS is unsettled.")
     return {
@@ -366,12 +447,29 @@ def _verdict(ends: dict[str, dict[str, Any]], ts_label: str) -> dict[str, Any]:
     }
 
 
+def _no_bond_change(ts_rows: Rows, rows: Rows) -> bool:
+    """No real bond (A181, metal–hydrogen contacts weak) differs between the TS and an end
+    in its numbering."""
+    formed, broken = atom_matching.changes(ts_rows, rows)
+    real_formed, real_broken, _, _ = compare.split(ts_rows, rows, None, formed, broken)
+    return not real_formed and not real_broken
+
+
+def _own_irc_stems(node: Node | None) -> set[str | None]:
+    """The stems of the TS node's own IRC files (A192); None stands for "not an IRC end"."""
+    out: set[str | None] = {None}
+    for calc in node.irc_calculations if node is not None else []:
+        if calc.irc_part == "path" and calc.source_file is not None:
+            out.add(irc_ends.stem(calc.source_file.original_name or ""))
+    return out
+
+
 def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
     """D263c: per end how it relaxed, its bonds against the TS, the nodes it matches (A184,
     nearest first) and the files of the job's folder it matches; with the verdict."""
     found = _read(session, folder, job_id)
     charge, multiplicity = found.job["charge"], found.job["multiplicity"]
-    nodes = _node_candidates(session, found.ts_node.id if found.ts_node else None)
+    nodes = _node_candidates(session, found.ts_node.id if found.ts_node else None, folder)
     notes: list[str] = []
     files: list[_Candidate] | None = None
     where = found.follow.get("folder")
@@ -385,6 +483,10 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
     made = found.job.get("made") or {}
     out_ends: dict[str, dict[str, Any]] = {}
     mode = _mode(found)
+    # A191: a soft mode (a rotation's, say) whose ends change no bond may match wider.
+    soft = abs(float(found.follow.get("wavenumber") or -1e9)) < SOFT_MODE
+    # A192: the folder's IRC end optimizations are this TS's ends only, never another's.
+    own = _own_irc_stems(found.ts_node)
     for name in ENDS:
         end = found.ends[name]
         rows = _end_rows(found, name)
@@ -407,7 +509,11 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
         at_ts = [m for m in matched if _is_ts(m)]
         if files is not None:
             in_files = _matches(rows, charge, multiplicity, files)
-            entry["files"] = [f for f in in_files if f.get("role") is None]
+            entry["files"] = [
+                f
+                for f in in_files
+                if f.get("role") is None and f.get("irc_end") in own  # A192
+            ]
             at_ts += [f for f in in_files if f.get("role") is not None]
         if at_ts:
             entry["ts_matches"] = at_ts
@@ -416,6 +522,17 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
             entry["matches"] = []
             if "files" in entry:
                 entry["files"] = []
+        else:
+            _settle(entry)
+            if "settled" not in entry and soft and _no_bond_change(found.ts_rows, rows):
+                near = [
+                    m
+                    for m in _matches(rows, charge, multiplicity, nodes, SOFT_RMSD)
+                    if not _is_ts(m)
+                ]
+                if near:  # A191: the single nearest, said to be a soft mode's wider match
+                    entry["matches"] = [{**near[0], "soft": True}]
+                    entry["settled"] = {**near[0], "as": "soft"}
         if name in made:
             entry["node_made"] = made[name]
         out_ends[name] = entry
@@ -443,10 +560,12 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
             "matches: nodes with the same bonds (weak contacts left out) within 0.5 Å "
             "atom-matched RMSD, nearest first (A184), never a TS (`ts_matches`); files: "
             "the folder's outputs whose final structure matches; returned_to_ts: the end "
-            "still matches the TS it started from, so it matches nothing (A188). Energies are "
-            "the job's own method's, never for comparison. An end that matches nothing can "
-            "become a node "
-            "with make_node_from_end."
+            "still matches the TS it started from, so it matches nothing (A188); settled: "
+            "the one structure the end stands for (A191: `as` one, group when its matches are "
+            "one group's members, nearest of several conformers of one molecule, or soft: a "
+            "soft mode's nearest minimum with its bonds within 1.0 Å; nearest and soft make a "
+            "link medium). Energies are the job's own method's, never for comparison. An end "
+            "that matches nothing can become a node with make_node_from_end."
         ),
     }
 
