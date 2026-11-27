@@ -237,7 +237,7 @@ Jonas confirmed with `command -v` on a Saga login node that the installed submis
 
 #### First submission of an enrolled minimum
 
-Preparation alone ends at `nosub`. For the local acceptance test, the fixture operator runs the helper's `enable-submit` command to enroll the fixed wrapper for that preparation. The helper pins the resolved executable and its SHA-256. This command is outside the agent interface. The pilot fixes the resource request at one node, 40 cores and 24 hours. A live trial on Saga still needs a user decision on the calculation and allocation.
+Preparation alone ends at `nosub`. For the local acceptance test, the fixture operator runs the helper's `enable-submit` command to enroll the fixed wrapper for that preparation. The helper pins the resolved executable and its SHA-256. This command is outside the agent interface. The pilot fixes the resource request at one node, 40 cores and 24 hours. On 2026-11-27 Jonas selected this allocation for the first live submission of the enrolled minimum. The user confirms the attempt in the app. Resource selection for later calculations remains open.
 
 1. Call `prepare_saga_minimum` in the investigation. With submission enabled, the response includes an attempt ID and the approved input revision. The app retains the complete input for review.
 2. Request `submit_prepared_job` with the server and attempt ID. The app shows the input, SHA-256, account, host, submission directory and resources. Declining leaves the scheduler untouched. On confirmation, the keeper signs the fixed request for the enrolled attempt. The helper verifies the signature, checks the current input against the approved digest and claims the attempt before invoking the wrapper.
