@@ -596,8 +596,10 @@ def create_fix_mode(
 # ---------- D263c, A184: follow a TS's imaginary mode both ways ----------
 
 FOLLOW_MODE = "follow_mode"
-FOLLOW_SHIFT = 0.1  # A184: Å moved by the atom moving most, each way
-FOLLOW_STEPS = 40  # A184: optimizer steps each end relaxes for, at most
+# A188 (amends A184's 0.1 Å and 40 steps): far enough that a cheaper method's own saddle,
+# which seldom sits where the TS's level put it, lies behind the end, not ahead of it.
+FOLLOW_SHIFT = 0.4  # Å moved by the atom moving most, each way
+FOLLOW_STEPS = 60  # optimizer steps each end relaxes for, at most
 FOLLOW_METHODS = {"mace-omol": "MACE-OMOL-0", "gfn2": "GFN2-xTB"}
 FOLLOW_TEST_METHODS = {"stub-saddle", "stub", "mace-stub"}  # CHEMBOOK3D_LOCAL_STUB=1 only
 FOLLOW_END_FIELDS = ("shift", "converged", "cycles", "energy")  # job_status's, per end
@@ -639,10 +641,11 @@ def create_follow_mode(
     tolerance: float = 0.05,
 ) -> dict[str, Any]:
     """D263c, A184: a job that follows a TS's imaginary mode both ways: the frequency
-    calculation's structure (any level, DFT included) displaced 0.1 Å along the normalised
-    lowest imaginary mode on each side (the atom moving most moves 0.1 Å) and each relaxed for
-    at most 40 steps with MACE-OMOL-0 or GFN2-xTB. Its result is information, never imported:
-    `services/follow_mode.py` matches the ends against the nodes and the folder named here."""
+    calculation's structure (any level, DFT included) displaced along the normalised lowest
+    imaginary mode on each side (the atom moving most moves FOLLOW_SHIFT, 0.4 Å, A188) and
+    each relaxed for at most FOLLOW_STEPS (60) steps with MACE-OMOL-0 or GFN2-xTB. Its result
+    is information, never imported: `services/follow_mode.py` matches the ends against the
+    nodes and the folder named here."""
     offered = methods()
     allowed = set(FOLLOW_METHODS) | (FOLLOW_TEST_METHODS if method in TEST_METHODS else set())
     if method not in allowed:

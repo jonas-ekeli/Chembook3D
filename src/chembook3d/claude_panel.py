@@ -185,7 +185,8 @@ geometry; restarts; what is imported already). `compare_structures` says which b
 between two structures, whatever their atom order (a side may be a list: a sum of species),
 and with a TS whether it links two minima along its imaginary mode; `find_ts_partners` starts
 from a TS and finds the minima on each side of its mode among the nodes, with that check of the
-best pair; `group_structures` sorts many into isomers, conformers and duplicates. Then
+best pair (`all_ts` "unlinked": every TS missing an edge, a few lines each);
+`group_structures` sorts many into isomers, conformers and duplicates. Then
 `import_folder`, showing the plan first.
 A TS that neither an IRC nor the bond check along its mode settles (D263c):
 `start_local_follow_mode` relaxes both ends of its mode briefly, `get_follow_mode_ends` matches

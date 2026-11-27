@@ -6,6 +6,18 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Faster and more reliable building from a folder, from what validation run 3 showed (A187–A189):
+  `find_ts_partners` takes several TSs at once (`tss`, or `all_ts` "unlinked"/"all") and answers
+  each in a few lines, about a minute for 47 TSs of a real folder where one call took 2–5 minutes
+  before (FR-MCP-26); Match atoms stops a TS search at the first match that keeps the bonds off the
+  mode, and the bond check matches a pair through the TS, which no longer swaps an olefin's two
+  carbons into a false "does not link". Long tool answers keep one value per line, so Claude can
+  read a saved answer in parts. Mode-follows start 0.4 Å along the mode and relax for up to 60
+  steps (before 0.1 Å and 40, which often sent both ends to one structure); an end is never matched
+  to a TS, a scan or constrained geometry or a structure with an imaginary frequency, an end still at
+  the TS along the mode "returned to the TS", and a folder's outputs are read once while they do not
+  change. A batch import takes an IRC sent to the TS file of the same batch, as its plan shows it, and
+  never attaches a minimum's file to a TS node as its duplicate, nor a TS's to a minimum.
 - Fixed: while working on its own, Claude stopped after nine of its local jobs had ended, because
   Claude Code ends a turn after its Stop hook has blocked nine times in a row (D231). The panel now
   raises that cap. `/build-mechanism` runs the TS partner search on every TS before it starts any

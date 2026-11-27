@@ -318,3 +318,82 @@ def test_decoys_near_the_ts_that_are_no_minima_or_at_another_level(open_client):
     # A link only through a structure at another level stays unclear (A186).
     assert fallen["check"]["verdict"] == "unclear"
     assert "another geometry level" in fallen["check"]["reasons"][0]
+
+
+def _edge(client, source, target):
+    made = client.post("/api/transitions", json={"source_id": source, "target_id": target})
+    assert made.status_code in (200, 201), made.text
+
+
+def test_several_tss_in_one_call_a_few_lines_each(open_client, monkeypatch):
+    """T-MCP-52 (A187): `all_ts` searches every TS in one call, each answered in a few lines
+    (the mode's bonds, the checked candidate per side with its RMSD, the verdict); a TS without
+    a mode is an error line, not a refusal; "unlinked" leaves out a TS with edges on both
+    sides; `tss` names them; an answer over the size limit stops with `more` and the offset to
+    go on from; naming no TS or two ways is refused."""
+    ts = commit(open_client, upload(open_client, "ts.log", _ts_output()))["node_id"]
+    open_client.patch(f"/api/nodes/{ts}", json={"label": "TS", "role": "transition_state"})
+    ethane = _node(open_client, "ethane", ETHANE, role="minimum")
+    methyl = _node(open_client, "methyl", METHYL, role="minimum", multiplicity=2)
+    radical = _node(open_client, "CH3", METHYL, kind="species", multiplicity=2)
+    other = _node(open_client, "other TS", ETHANE, role="transition_state")
+
+    found = _partners(open_client, all_ts="all").json()
+    assert found["of"] == 2 and found["counts"] == {"links": 1, "error": 1}
+    first, second = found["tss"]
+    assert first == {
+        "ts": "TS",
+        "node_id": ts,
+        "mode": "C1–C2",
+        "verdict": "links",
+        "−": {"label": "ethane", "node_id": ethane, "rmsd": first["−"]["rmsd"], "found": 1},
+        "+": {
+            "label": first["+"]["label"],
+            "node_id": first["+"]["node_id"],
+            "species_node_id": radical,
+            "rmsd": first["+"]["rmsd"],
+            "found": 2,
+        },
+    }
+    assert first["+"]["node_id"] in (methyl, radical)
+    assert second["node_id"] == other and second["verdict"] == "error"
+    assert "no imaginary mode" in second["why"]
+    assert "more" not in found and "1 links" in found["summary"]
+    assert "start_local_follow_mode" in found["next"]
+
+    _edge(open_client, ethane, ts)
+    _edge(open_client, ts, methyl)
+    unlinked = _partners(open_client, all_ts="unlinked").json()
+    assert [b["node_id"] for b in unlinked["tss"]] == [other]
+    named = _partners(open_client, tss=[{"node_id": ts}]).json()
+    assert [b["verdict"] for b in named["tss"]] == ["links"]
+
+    monkeypatch.setattr(ts_partners, "MAX_ANSWER", 50)  # room for one TS at a time
+    page = _partners(open_client, all_ts="all").json()
+    assert len(page["tss"]) == 1 and page["more"]["offset"] == 1 and page["more"]["left"] == 1
+    rest = _partners(open_client, all_ts="all", offset=1).json()
+    assert [b["node_id"] for b in rest["tss"]] == [other] and "more" not in rest
+    assert rest["shown"] == {"from": 2, "to": 2}
+
+    for body in ({}, {"ts": {"node_id": ts}, "all_ts": "all"}):
+        refused = _partners(open_client, **body)
+        assert refused.status_code == 422 and "all_ts" in refused.text
+
+
+def test_match_atoms_ends_at_the_first_match_the_search_accepts():
+    """A187: with `enough`, Match atoms stops at the first starting orientation whose match it
+    accepts (a TS search's: no bond off the mode changes) instead of trying all of them, and
+    gives that match; without, it is unchanged."""
+    from chembook3d.services import atom_matching
+
+    shuffled, _ = scrambled(transfer(1.9), seed=3)
+    asked = []
+
+    def enough(mapping):
+        asked.append(mapping)
+        return True
+
+    full = atom_matching.match(transfer(1.1), shuffled)  # the hydrogen moves: bonds change
+    quick = atom_matching.match(transfer(1.1), shuffled, enough=enough)
+    assert quick.mapping == full.mapping and quick.mapping in asked
+    assert len(asked) == 2  # the first orientation's match, accepted, and again once repaired

@@ -123,7 +123,8 @@ Rules:
   between two structures (whatever their atom order; a side may be a sum of species) and,
   with a TS, whether it links two minima along its imaginary mode; find_ts_partners starts
   from a TS and finds the minima on each side of its mode among the nodes, with that check
-  of the best pair; group_structures sorts many into isomers, conformers and duplicates.
+  of the best pair (all_ts "unlinked": every TS missing an edge, a few lines each);
+  group_structures sorts many into isomers, conformers and duplicates.
   They change nothing; import with
   import_folder after showing the user the plan. A TS that no IRC and no bond check along
   its mode settles (D263c): start_local_follow_mode relaxes both ends of its mode briefly,
@@ -177,13 +178,14 @@ def check_url(url: str) -> str:
 
 
 # D149: an answer longer than this is sent without indentation, which roughly halves a long list.
+# A187: still one value per line, so an answer the client keeps in a file can be read in parts.
 COMPACT_ABOVE = 20_000
 
 
 def _json_text(value: Any) -> str:
     text = json.dumps(value, ensure_ascii=False, indent=1)
     if len(text) > COMPACT_ABOVE:
-        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        text = json.dumps(value, ensure_ascii=False, indent=0, separators=(",", ":"))
     return text
 
 

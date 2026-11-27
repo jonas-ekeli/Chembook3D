@@ -309,3 +309,36 @@ def test_undo_import_of_a_merged_file_asks_to_undo_the_merge_first(open_client):
     entry = merge_entry(open_client, b)
     assert open_client.post(f"/api/node-merges/{entry['id']}/undo").status_code == 200
     assert open_client.get(f"/api/history/{imported['id']}/undo").json()["blockers"] == []
+
+
+def test_a_duplicate_is_not_attached_across_roles(open_client):
+    """T-IMP-83 (A189, as D262b refuses the merge): a minimum's frequency job within the
+    duplicate tolerance of a TS node is not attached to it as its duplicate (blocked, saying
+    why); as a new node it goes in; a single point on the TS (no role) still attaches."""
+    from tests.test_import import commit, preview
+    from tests.test_local_follow_mode import TS, ts_output
+
+    ts = commit(open_client, upload(open_client, "ts.log", ts_output()))["node_id"]
+    assert node(open_client, ts)["role"] == "transition_state"
+    minimum = ts_output((150.0, 300.0, 600.0, 900.0, 1200.0, 3000.0))
+    plan = upload(open_client, "min.log", minimum)
+    assert plan["duplicates"] and plan["duplicates"][0]["node_id"] == ts
+    shown = preview(open_client, plan, duplicate_action="attach")
+    assert any(
+        "is a transition state and this file's structure a minimum" in b for b in shown["blockers"]
+    )
+    refused = open_client.post(
+        f"/api/imports/{plan['token']}/commit", json={"duplicate_action": "attach"}
+    )
+    assert refused.status_code == 422 and "never one node" in refused.text
+    made = commit(open_client, plan, duplicate_action="new")["node_id"]
+    assert made != ts and node(open_client, made)["role"] == "minimum"
+
+    single = g.output(g.step("#P B3LYP/6-31G(d) SP", [TS]))
+    attached = commit(
+        open_client,
+        upload(open_client, "sp.log", single),
+        duplicate_action="attach",
+        duplicate_node_id=ts,
+    )
+    assert attached["node_id"] == ts

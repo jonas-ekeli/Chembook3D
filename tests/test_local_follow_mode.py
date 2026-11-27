@@ -140,13 +140,13 @@ def test_both_ends_of_the_mode_are_relaxed_and_matched(open_client, tmp_path):
     assert done["kind"] == "follow_mode" and done["method"] == "stub-saddle"
     spec = done["follow_mode"]
     assert spec["calculation_id"] == frequency["id"] and spec["ts_node_id"] == ts_id
-    assert spec["shift"] == 0.1 and spec["steps"] == 40 and spec["wavenumber"] == -500.0
+    assert spec["shift"] == 0.4 and spec["steps"] == 60 and spec["wavenumber"] == -500.0  # A188
     assert spec["folder"] == str(outputs) and "mode" not in spec
     assert done["nothing_to_import"] and not done["importable"] and not done["awaiting_choice"]
     found = done["result"]["follow_mode"]
     assert set(found["ends"]) == {"+", "-"}
-    assert all(0 < e["cycles"] <= 41 for e in found["ends"].values())
-    assert [e["shift"] for e in found["ends"].values()] == [0.1, -0.1]
+    assert all(0 < e["cycles"] <= 61 for e in found["ends"].values())
+    assert [e["shift"] for e in found["ends"].values()] == [0.4, -0.4]
 
     refused = open_client.post(f"/api/local/jobs/{done['id']}/import")
     assert refused.status_code == 422 and "never imported" in refused.json()["detail"]
@@ -332,3 +332,59 @@ def test_the_tools_are_offered_and_named_in_the_guides(tmp_path):
         assert refused.is_error and made["id"]
 
     anyio.run(run)
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_a_ts_is_never_an_end_and_an_end_at_the_ts_returned(open_client, tmp_path):
+    """T-LOC-55 (A188): at the + end's structure lie a TS node, a folder's TS output and a
+    single point on it; none is the + end's match (`ts_matches`, flagged), while the − end
+    matches B; each end has its side. With both ends set back to the TS's coordinates, they
+    returned to it: no matches, outcome "returned"."""
+    import json
+
+    from chembook3d import local_jobs
+
+    ts_id, _ = import_ts(open_client)
+    other = make_node(open_client, "other TS", shifted(0.5))
+    open_client.patch(f"/api/nodes/{other}", json={"role": "transition_state"})
+    b_id = make_node(open_client, "B", shifted(-0.5))
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    ts_there = g.output(
+        g.step(
+            "#P B3LYP/6-31G(d) Freq",
+            [shifted(0.5)],
+            -77.0,
+            after=[*frequency_lines([-400.0, 300.0, 600.0, 900.0, 1200.0, 3000.0], MODES, TS)],
+        )
+    )
+    (outputs / "ts2.log").write_text(ts_there, encoding="utf-8")
+    (outputs / "ts2_sp.log").write_text(
+        g.output(g.step("#P PBE0/def2TZVP SP", [shifted(0.5)])), encoding="utf-8"
+    )
+    done = follow(open_client, ts_id, folder=str(outputs))
+    matched = ends(open_client, done["id"])
+    plus, minus = matched["ends"]["+"], matched["ends"]["-"]
+    assert plus["matches"] == [] and plus["files"] == []
+    assert {m.get("node_id") or m.get("path") for m in plus["ts_matches"]} == {
+        other,
+        "ts2.log",
+        "ts2_sp.log",
+    }
+    assert [m["node_id"] for m in minus["matches"]] == [b_id]
+    assert (plus["side"], minus["side"]) == ("+", "−")
+    assert not plus["returned_to_ts"] and not minus["returned_to_ts"]
+    assert matched["outcome"] == "one_end"
+    assert any("“other TS”" in f and "never an end's match" in f for f in matched["flags"])
+
+    result = local_jobs.job_dir(folder_of(open_client), done["id"]) / local_jobs.RESULT
+    data = json.loads(result.read_text(encoding="utf-8"))
+    start = [[x, y, z] for _, _, x, y, z in TS]
+    for end in data["follow_mode"]["ends"].values():
+        end["coordinates"] = start
+    result.write_text(json.dumps(data), encoding="utf-8")
+    back = ends(open_client, done["id"])
+    assert back["outcome"] == "returned" and back["confidence"] is None
+    for end in back["ends"].values():
+        assert end["returned_to_ts"] and end["side"] == "none" and end["matches"] == []
+    assert sum("returned to the TS" in f for f in back["flags"]) == 2

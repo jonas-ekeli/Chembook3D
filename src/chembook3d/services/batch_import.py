@@ -482,6 +482,18 @@ def _is_irc(staged: imports.StagedFile) -> bool:
     )
 
 
+def _made_by_file(
+    session: Session, other: str, created: dict[str, str], by_id: dict[str, BatchFile]
+) -> tuple[Node | None, list[str]]:
+    """The node another file of the batch created or finished (a row's "file:<id>" target),
+    or why there is none."""
+    if other in created:
+        return session.get(Node, created[other]), []
+    if other in by_id:
+        return None, [f"It goes to the node {by_id[other].relative} makes, which is not imported"]
+    return None, ["The file chosen for it is not in this batch"]
+
+
 def _order(batch: Batch) -> list[BatchFile]:
     """Files with an optimization first, so the files that create or finish nodes come before
     the files that attach to them (D97), IRCs last, after the TSs they go to (D134); then by
@@ -622,6 +634,11 @@ def run(
                             "It is an IRC, and no transition state starts where it does: "
                             "choose its TS, or untick it"
                         )
+                elif target_text.startswith("file:"):
+                    # The TS another file of the batch makes, as the plan names it (A187).
+                    target, why = _made_by_file(session, target_text[5:], created, by_id)
+                    match = "chosen" if target is not None else "none"
+                    blockers += why
                 else:
                     match = "none"
                     blockers.append("An IRC goes into the IRC of its TS: choose the TS")
@@ -633,16 +650,9 @@ def run(
                 if target is None:
                     blockers.append("The node chosen for it no longer exists")
             elif target_text.startswith("file:"):
-                other = target_text[5:]
                 match = "chosen"
-                if other in created:
-                    target = session.get(Node, created[other])
-                elif other in by_id:
-                    blockers.append(
-                        f"It goes to the node {by_id[other].relative} makes, which is not imported"
-                    )
-                else:
-                    blockers.append("The file chosen for it is not in this batch")
+                target, why = _made_by_file(session, target_text[5:], created, by_id)
+                blockers += why
             else:
                 target = _closest(nodes, final_rows, final, tolerance)
                 if target is not None:

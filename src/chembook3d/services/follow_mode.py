@@ -1,20 +1,26 @@
-"""The ends of a mode-follow job matched against the structures there are (D263c, A184).
+"""The ends of a mode-follow job matched against the structures there are (D263c, A184, A188).
 
-A `follow_mode` local job (`local_jobs.create_follow_mode`) displaces a TS 0.1 Å along its
-imaginary mode on each side and relaxes each end for at most 40 steps. Its result is
-information, never imported: here, on demand, each end is compared with the TS (the bonds that
-form and break, `structure_compare.compare`) and matched against the open investigation's nodes
-and, when the job named one, a folder's outputs (`folder_survey.final_structures`). An end
+A `follow_mode` local job (`local_jobs.create_follow_mode`) displaces a TS along its imaginary
+mode on each side (the atom moving most moves 0.4 Å, A188) and relaxes each end for at most 60
+steps. Its result is information, never imported: here, on demand, each end is compared with
+the TS (the bonds that form and break, `structure_compare.compare`) and matched against the open
+investigation's nodes and, when the job named one, a folder's outputs
+(`folder_survey.final_structures`, read again only when the folder's files change). An end
 matches a structure when no real bond changes between them (A181's rule, weak and metal–hydrogen
 contacts left out) and the atom-matched RMSD is under 0.5 Å, whatever the atom order (A184,
 `structure_compare.end_match`); formula, charge and multiplicity, the order-independent bound
-and the bond counts rule most candidates out before any atoms are matched.
+and the bond counts rule most candidates out before any atoms are matched. A188: a TS (a node,
+or a file of one TS structure) is never a match, nor a node A186 shows is no minimum; an end
+whose distances along the mode are still the TS's (`structure_compare._side` "none") returned
+to the TS and matches nothing.
 
 The verdict: both ends each matching one structure links them (high confidence, A184); both
-matching the same one is flagged; an end that matches nothing may become a node of its own
-(`make_node`), coordinates only: a partial relaxation is a guess, never a result.
+matching the same one is flagged; both returned to a TS is said; an end that matches nothing
+may become a node of its own (`make_node`), coordinates only: a partial relaxation is a guess,
+never a result.
 """
 
+import threading
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,7 +30,7 @@ from sqlalchemy.orm import Session
 
 from chembook3d import local_jobs, xyz
 from chembook3d.models import Node, Role, Status
-from chembook3d.services import folder_survey, thermo_settings
+from chembook3d.services import batch_import, folder_survey, thermo_settings
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
 from chembook3d.services.geometry import Rows
@@ -96,10 +102,25 @@ def _matches(
     return found
 
 
+def _is_ts(entry: dict[str, Any]) -> bool:
+    return entry.get("role") == Role.TRANSITION_STATE.value and entry.get("kind") is None
+
+
+HELD = ("scan path", "scan or constrained geometry", "imaginary frequency")
+
+
 def _node_candidates(session: Session, exclude: str | None) -> list[_Candidate]:
+    """Every node with coordinates but `exclude` (the TS followed) and those A186 shows are no
+    minimum (a scan path, a scan or constrained geometry, an imaginary frequency: A188); TS
+    nodes among them are told apart by `_is_ts` and never an end's match."""
+    from chembook3d.services import ts_partners  # it imports gaps, which imports this module
+
+    tolerance = thermo_settings.settings(session).duplicate_tolerance
     out = []
-    for node in node_service.list_nodes(session):
+    for node in node_service.list_nodes(session, with_calculations=True):
         if not node.geometry or node.id == exclude:
+            continue
+        if ts_partners.left_out(node, tolerance) in HELD:
             continue
         rows = [list(r) for r in node.geometry]
         entry = {
@@ -114,14 +135,51 @@ def _node_candidates(session: Session, exclude: str | None) -> list[_Candidate]:
     return out
 
 
+# A188: a folder's final structures, read once while none of its files changes (each read
+# parses every output in it: about a minute for a few hundred DFT outputs, once per end asked).
+_FILES: dict[tuple[str, str, float], tuple[tuple, list[_Candidate]]] = {}
+_FILES_LOCK = threading.Lock()
+KEPT_FOLDERS = 4
+
+
+def _signature(folder: Path, investigation: Path) -> tuple:
+    """What a folder's files are: each path, size and time of change."""
+    out = []
+    skip = investigation.resolve() if investigation else None
+    for path in batch_import._candidates(folder.expanduser().resolve(), True, skip):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        out.append((str(path), stat.st_size, stat.st_mtime_ns))
+    return tuple(out)
+
+
 def _file_candidates(folder: Path, investigation: Path, tolerance: float) -> list[_Candidate]:
-    """The folder's final structures. Files ending on one structure (an optimization and the
-    single point on it, a restart) share a `structure` number, so an end matching them all
-    matches one structure."""
+    """The folder's final structures, read again only when its files changed. Files ending on
+    one structure (an optimization and the single point on it, a restart) share a `structure`
+    number, so an end matching them all matches one structure."""
+    key = (str(folder), str(investigation), tolerance)
+    signature = _signature(folder, investigation)
+    with _FILES_LOCK:
+        kept = _FILES.get(key)
+        if kept is not None and kept[0] == signature:
+            return kept[1]
+    out = _read_files(folder, investigation, tolerance)
+    with _FILES_LOCK:
+        _FILES[key] = (signature, out)
+        while len(_FILES) > KEPT_FOLDERS:
+            _FILES.pop(next(iter(_FILES)))
+    return out
+
+
+def _read_files(folder: Path, investigation: Path, tolerance: float) -> list[_Candidate]:
     out: list[_Candidate] = []
     kept: list[_Candidate] = []  # one per structure
     for final in folder_survey.final_structures(folder, True, investigation):
         entry = {"path": final.path, "step": final.step, "formula": _formula(final.rows)}
+        if final.role == Role.TRANSITION_STATE.value:
+            entry["role"] = final.role
         candidate = _Candidate(final.rows, final.charge, final.multiplicity, entry).prepared()
         same = next(
             (
@@ -142,6 +200,11 @@ def _file_candidates(folder: Path, investigation: Path, tolerance: float) -> lis
         else:
             entry["structure"] = same.entry["structure"]
         out.append(candidate)
+    # A188: a single point on a TS's structure is that TS too, never an end's match.
+    at_ts = {c.entry["structure"] for c in out if c.entry.get("role")}
+    for candidate in out:
+        if candidate.entry["structure"] in at_ts:
+            candidate.entry["role"] = Role.TRANSITION_STATE.value
     return out
 
 
@@ -174,6 +237,21 @@ def _read(session: Session, folder: Path, job_id: str) -> _Job:
     node = session.get(Node, follow.get("ts_node_id") or job["node_id"])
     label = (node.label if node is not None else None) or follow.get("ts_label") or "the TS"
     return _Job(job, status, follow, ends, ts_rows, label, node)
+
+
+def _mode(found: _Job) -> Any:
+    """The followed mode's active pairs (`structure_compare._active`), in the TS's numbering."""
+    mode = found.follow.get("mode")
+    if not mode:
+        return None
+    ts = compare.Structure(
+        found.ts_label,
+        found.ts_rows,
+        frequencies=[float(found.follow.get("wavenumber") or -1.0)],
+        modes=[mode],
+        mode_rows=found.ts_rows,
+    )
+    return compare._active(ts)
 
 
 def _end_rows(found: _Job, name: str) -> Rows:
@@ -214,6 +292,25 @@ def _verdict(ends: dict[str, dict[str, Any]], ts_label: str) -> dict[str, Any]:
     keys = {n: _structures(ends[n]["matches"], ends[n].get("files", [])) for n in ENDS}
     first = {n: (ends[n]["matches"] or ends[n].get("files") or [None])[0] for n in ENDS}
     flags: list[str] = []
+    back = [n for n in ENDS if ends[n].get("returned_to_ts") or ends[n].get("ts_matches")]
+    for n in back:
+        if ends[n].get("returned_to_ts"):
+            flags.append(
+                f"The {SHOWN[n]} end returned to the TS: its distances along the mode are the "
+                "TS's, so it matches nothing (A188)."
+            )
+        else:
+            flags.append(
+                f"The {SHOWN[n]} end matches another TS, {_name(ends[n]['ts_matches'][0])}: "
+                "a TS is never an end's match (A188)."
+            )
+    if len(back) == 2 and not any(keys[n] for n in ENDS):
+        return {
+            "outcome": "returned",
+            "verdict": f"Followed the mode of “{ts_label}”: both ends returned to a TS",
+            "confidence": None,
+            "flags": flags,
+        }
     for n in ENDS:
         if not ends[n]["converged"]:
             flags.append(
@@ -287,19 +384,38 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
             notes.append(f"The folder {where} could not be read: {exc}")
     made = found.job.get("made") or {}
     out_ends: dict[str, dict[str, Any]] = {}
+    mode = _mode(found)
     for name in ENDS:
         end = found.ends[name]
         rows = _end_rows(found, name)
+        matched = _matches(rows, charge, multiplicity, nodes)
         entry: dict[str, Any] = {
             "shift": end.get("shift"),
             "converged": bool(end.get("converged")),
             "cycles": end.get("cycles"),
             "energy": end.get("energy"),
             **_bonds(found, name),
-            "matches": _matches(rows, charge, multiplicity, nodes),
+            "matches": [m for m in matched if not _is_ts(m)],
         }
+        # A188: the side of the mode the end lies on, by the mode's active pairs; one whose
+        # active distances are still the TS's ("none") did not leave the TS: it matches
+        # nothing, whatever lies within 0.5 Å (a TS and its minima often do, with the TS's
+        # partial bonds weak). Another TS is never an end's match either.
+        side = compare._side(mode, found.ts_rows, rows, None)[0] if mode is not None else None
+        entry["side"] = SHOWN.get(side, side) if side is not None else None
+        entry["returned_to_ts"] = side == "none"
+        at_ts = [m for m in matched if _is_ts(m)]
         if files is not None:
-            entry["files"] = _matches(rows, charge, multiplicity, files)
+            in_files = _matches(rows, charge, multiplicity, files)
+            entry["files"] = [f for f in in_files if f.get("role") is None]
+            at_ts += [f for f in in_files if f.get("role") is not None]
+        if at_ts:
+            entry["ts_matches"] = at_ts
+        if entry["returned_to_ts"]:  # whatever lies near the TS is no end of it either
+            entry["near_ts"] = entry["matches"] + entry.get("files", [])
+            entry["matches"] = []
+            if "files" in entry:
+                entry["files"] = []
         if name in made:
             entry["node_made"] = made[name]
         out_ends[name] = entry
@@ -325,9 +441,11 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
             "imaginary mode and relaxed for at most `steps` steps. formed/broken: bonds against "
             "the TS by the 3D view's rule (its partial bonds count), in the TS's numbering; "
             "matches: nodes with the same bonds (weak contacts left out) within 0.5 Å "
-            "atom-matched RMSD, nearest first (A184); files: "
-            "the folder's outputs whose final structure matches. Energies are the job's own "
-            "method's, never for comparison. An end that matches nothing can become a node "
+            "atom-matched RMSD, nearest first (A184), never a TS (`ts_matches`); files: "
+            "the folder's outputs whose final structure matches; returned_to_ts: the end "
+            "still matches the TS it started from, so it matches nothing (A188). Energies are "
+            "the job's own method's, never for comparison. An end that matches nothing can "
+            "become a node "
             "with make_node_from_end."
         ),
     }
