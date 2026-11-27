@@ -6,6 +6,18 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- A mirror image is another molecule (D267): no mechanism tool counts a match that turns a
+  stereocentre into its mirror image as the same structure or a link (`find_ts_partners`, A184's
+  bond check, mode-follow and IRC end matching, `find_direct_links`, `group_structures`, the
+  duplicate checks). A TS side or end that fits a node only reflected says "mirror image of …:
+  the matching minimum is not in the investigation", `find_gaps` lists it as
+  `missing_mirror_image`, and build_structure's new `mirror` step makes it. A doubt only from
+  centres with like neighbours (a methyl's hydrogens) no longer holds the bond check back.
+
+- An IRC end's optimization goes into its TS's IRC from the single import too (D268, confirming
+  A192): the import dialog and Claude's import tools plan it there, say so, and offer "Make a
+  new node instead".
+
 - The Saga pilot can submit one operator-enabled Gaussian minimum after the user
   reviews the input, account and resources in the app. Looking up the same
   attempt recovers its Slurm receipt after a lost reply. The submission workflow

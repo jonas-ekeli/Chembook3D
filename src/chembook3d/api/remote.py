@@ -27,7 +27,7 @@ from chembook3d.api.live import AGENT, CLIENT_HEADER
 from chembook3d.api.routes import _investigation, _staging
 from chembook3d.parsers import orca
 from chembook3d.remote import client, keeper, servers
-from chembook3d.services import batch_import, imports
+from chembook3d.services import batch_import, imports, irc_ends
 from chembook3d.services import nodes as node_service
 
 router = APIRouter(prefix="/api/remote")
@@ -458,7 +458,7 @@ async def import_file(server_id: str, body: RemoteImportIn, request: Request):
             )
             options = imports.ImportOptions(target_node_id=body.node_id)
             with investigation.sessions.begin() as session:
-                return imports.plan(session, staged, options).as_dict()
+                return irc_ends.plan(session, investigation.folder, staged, options)  # D268
         except imports.ImportFailed as exc:
             raise HTTPException(422, str(exc)) from exc
         finally:

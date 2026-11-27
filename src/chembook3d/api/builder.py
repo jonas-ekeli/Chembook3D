@@ -97,6 +97,7 @@ class EditIn(StructureIn):
         "rotate_fragment",
         "align_vectors",
         "flip",
+        "mirror",
     ]
     value: float | None = None  # distance (Å), angle, dihedral or turn (degrees); D148: a new
     # atom's bond length, a molecule's distance from the picked atom to each of its donors
@@ -347,6 +348,8 @@ def _apply(structure: builder.Structure, picks: list[int], body: EditIn) -> buil
             done = builder.rotate_fragment(structure, picks, _value(body), body.axis)
         elif body.tool == "flip":
             done = builder.flip(structure, picks, body.ignore or [])
+        elif body.tool == "mirror":
+            done = builder.mirror(structure)
         elif body.tool == "align_vectors":
             target = 0.0 if body.value is None else _value(body)
             done = builder.align_vectors(
@@ -395,6 +398,7 @@ STEP_TOOLS = Literal[
     "rotate_fragment",
     "align_vectors",
     "flip",
+    "mirror",
 ]
 POINTS = (
     "Two points, each an atom (from 1) or a list of atoms whose middle counts, e.g. [4, [62, 63]]"
@@ -442,7 +446,10 @@ class StepIn(BaseModel):
         "their middle towards the third (which stays), everything reached from them without "
         "passing the third turning rigidly (an η² ligand end over end about the metal, an "
         "aryl's two ortho C about its N); refused when that is tied to the rest some other way, "
-        "naming the bonds of the tie: give one in `ignore_bonds`, or remove it first."
+        "naming the bonds of the tie: give one in `ignore_bonds`, or remove it first. mirror "
+        "(D267): the whole structure's mirror image (no atoms), numbering kept: a mirror image "
+        "is another molecule, made so when a TS needs the mirror image of a node "
+        "(find_gaps' missing_mirror_image)."
     )
     atoms: list[int] | None = Field(
         None,

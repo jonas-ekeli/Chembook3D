@@ -42,7 +42,7 @@ from chembook3d.api.remote import _check, _saved
 from chembook3d.api.routes import _investigation, _staging
 from chembook3d.parsers import orca, saga_job
 from chembook3d.remote import client, keeper, servers
-from chembook3d.services import batch_import, imports, inspection
+from chembook3d.services import batch_import, imports, inspection, irc_ends
 
 router = APIRouter(prefix="/api/server-files")
 
@@ -856,7 +856,7 @@ async def import_server_files(server_id: str, body: ServerImportIn, request: Req
                 )
                 options = imports.ImportOptions(target_node_id=body.node_id)
                 with investigation.sessions.begin() as session:
-                    return imports.plan(session, staged, options).as_dict()
+                    return irc_ends.plan(session, investigation.folder, staged, options)  # D268
             batch = batch_import.scan(
                 _staging(request),
                 folder,

@@ -329,8 +329,8 @@ def _associations(
                     if not compare._could_be_same(a.counts(), counts, False):
                         continue
                     mapping = _core_mapping(a, core)
-                    if mapping is None:
-                        continue
+                    if mapping is None or atom_matching.stereo_flips(a.rows, core, mapping):
+                        continue  # D267: a mirror image (another stereoisomer) is no partner
                     rmsd = geometry.aligned_rmsd(a.rows, [core[j] for j in mapping])
                     if rmsd is None or (best is not None and rmsd >= best.rmsd):
                         continue
@@ -425,6 +425,8 @@ def _coordination(a: _Item, b: _Item, tolerance: float) -> _Found | None:
         if metal_only(matched.mapping) is None:
             return None
         mapping = matched.mapping
+    if atom_matching.stereo_flips(a.rows, b.rows, mapping):
+        return None  # D267: a mirror image (another stereoisomer) is another molecule
     changed = metal_only(mapping) or []
     rmsd = geometry.aligned_rmsd(a.rows, [b.rows[j] for j in mapping])
     if rmsd is None or rmsd <= tolerance:

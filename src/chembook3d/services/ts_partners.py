@@ -24,6 +24,11 @@ atom-matched RMSD to the TS (for a sum, over the larger species' atoms); energie
 read. The best pairs are then checked by A184's bond check (`structure_compare.compare` with the
 TS), and the first that links is given, else the best pair's verdict. Nothing is written.
 
+D267: a mirror image is another molecule. A candidate whose numbering turns a stereocentre off
+the mode into its mirror image (`atom_matching.stereo_flips`) is never on a side; when its
+mirror image fits instead it is listed apart (`mirror_images`), and a side whose best fit it is
+says `mirror_of` (the matching minimum is not in the investigation; `find_gaps` lists it).
+
 A187: Match atoms stops at the first starting orientation whose match keeps the bonds off the
 mode, the bond check maps each pair through the TS (the mappings that placed each candidate on
 it), and several TSs are searched in one call (`all_ts`, `unlinked`, `brief`, `batch`), the
@@ -32,7 +37,7 @@ candidates made once per geometry level by the route.
 
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -303,6 +308,30 @@ def _matched(ts_rows: Rows, rows: Rows, active: set) -> list[int] | None:
     return found.mapping if enough(found.mapping) else None
 
 
+def _placing(
+    ts_rows: Rows, structure: compare.Structure, active: set, skip: set[int]
+) -> tuple[compare.Structure, list[int] | None, bool] | None:
+    """D267: the candidate as it lies on the TS, its atom for each of the TS's, and whether
+    only its mirror image fits: its own structure when the numbering that keeps the bonds off
+    the mode turns no stereocentre off the mode into its mirror image (`stereo_flips`); else
+    its mirror image (`atom_matching.mirrored`) when that fits so; else no atoms (another
+    stereoisomer). None when no numbering keeps the bonds off the mode. A numbering that keeps
+    the bonds cannot put a stereocentre right (its neighbours all differ), so no other is
+    tried."""
+    mapping = _mapping(ts_rows, structure.rows, active)
+    if mapping is None:
+        return None
+    if not atom_matching.stereo_flips(ts_rows, structure.rows, mapping, skip):
+        return structure, mapping, False
+    image = replace(
+        structure, rows=atom_matching.mirrored(structure.rows), modes=None, mode_rows=None
+    )
+    reflected = _mapping(ts_rows, image.rows, active)
+    if reflected is None or atom_matching.stereo_flips(ts_rows, image.rows, reflected, skip):
+        return structure, None, False
+    return image, reflected, True
+
+
 def _side_of(mode: Any, ts_rows: Rows, placed: Rows, apart: np.ndarray | None) -> tuple[str, bool]:
     """The side of the mode the candidate lies on, and whether its active distances change
     both ways (then the side most of the motion, weighted by the mode's shares, points to)."""
@@ -369,7 +398,9 @@ def find(
 
     tried = _tried(Counter(elements), candidates, species)
     found: dict[str, list[Found]] = {"+": [], "−": []}
-    matched = 0
+    mirrors: dict[str, list[Found]] = {"+": [], "−": []}  # D267: fit only as mirror images
+    skip = {k for pair in active for k in pair}
+    matched = stereoisomers = 0
     for candidate in tried:
         structure = candidate.structure
         if not _compatible(structure, ts):
@@ -377,8 +408,12 @@ def find(
         if not compare._could_be_same(free, candidate.counts(), False):
             continue
         matched += 1
-        mapping = _mapping(rows, structure.rows, active)
+        placing = _placing(rows, structure, active, skip)
+        if placing is None:
+            continue
+        structure, mapping, mirror = placing
         if mapping is None:
+            stereoisomers += 1  # D267: another stereoisomer, never a partner
             continue
         placed = [structure.rows[j] for j in mapping]
         apart = compare._apart(structure, mapping)
@@ -405,6 +440,10 @@ def find(
         if other:
             entry["other_level"] = True
         key = (other, mixed, bool(structure.imaginary), rmsd if rmsd is not None else np.inf)
+        if mirror:
+            entry["mirror_image"] = True
+            mirrors[side].append(Found(key, candidate, entry, mapping))
+            continue
         found[side].append(Found(key, candidate, entry, mapping))
     predicted = _predicted(rows, mode)
     sides = []
@@ -422,6 +461,16 @@ def find(
             shown["at_other_levels"] = len(found[side]) - len(same)
         if listed and not same:
             shown["other_level"] = True
+        if mirrors[side]:
+            mirrors[side].sort(key=lambda f: f.key)
+            shown["mirror_images"] = [f.entry for f in mirrors[side][:top]]
+            best = mirrors[side][0].entry
+            nearest = listed[0].entry.get("rmsd") if listed else None
+            if nearest is None or (best["rmsd"] is not None and best["rmsd"] < nearest):
+                # D267: a minimum fits this side well only as its mirror image
+                shown["mirror_of"] = {
+                    k: best[k] for k in ("label", "node_id", "rmsd", "group") if k in best
+                }
         found[side] = listed
         sides.append(shown)
 
@@ -442,6 +491,7 @@ def find(
             "structures": len(candidates),
             "with_the_atoms": len(tried),
             "bond_counts_fit": matched,
+            **({"other_stereoisomers": stereoisomers} if stereoisomers else {}),
         },
         "seconds": seconds,
     }
@@ -528,6 +578,15 @@ def _words(
     level: Level | None = None,
 ) -> tuple[str, str]:
     summary, next_ = _said(ts, sides, check)
+    mirrored = [s for s in sides if s.get("mirror_of")]
+    if mirrored and not (check and check["verdict"] == "links"):
+        summary += " " + " ".join(
+            f"On the {s['side']} side: {mirror_text(s['mirror_of'])}." for s in mirrored
+        )
+        next_ = (
+            "The missing minimum is the mirror image of an existing node: a gap (find_gaps "
+            "lists it as missing_mirror_image, with how to make it)."
+        )
     fallen = [s["side"] for s in sides if s.get("other_level")]
     if fallen and level is not None:
         summary += (
@@ -536,6 +595,15 @@ def _words(
             "through them is weaker."
         )
     return summary, next_
+
+
+def mirror_text(found: dict[str, Any]) -> str:
+    """D267's words for a side whose minimum fits only reflected."""
+    rmsd = f" (RMSD {found['rmsd']} Å reflected)" if found.get("rmsd") is not None else ""
+    return (
+        f"mirror image of “{found['label']}”{rmsd}: the matching minimum is not in the "
+        "investigation (a mirror image is another molecule, D267)"
+    )
 
 
 def _said(
@@ -631,7 +699,8 @@ def _clip(text: str) -> str:
 def brief(found: dict[str, Any]) -> dict[str, Any]:
     """One TS's answer in a few lines (A187): the mode's active bonds, per side the candidate
     of the bond check (else the nearest) and how many were found, and the verdict: links,
-    unclear or does not link (A184's bond check of the pairs tried), one side (a side has no
+    unclear or does not link (A184's bond check of the pairs tried), mirror image (D267: a
+    side's best fit is a node only reflected, and nothing links), one side (a side has no
     candidate) or no side."""
     sides = {s["side"]: s for s in found["sides"]}
     block: dict[str, Any] = {
@@ -640,7 +709,13 @@ def brief(found: dict[str, Any]) -> dict[str, Any]:
     }
     empty = [s for s in ("−", "+") if not sides[s]["found"]]
     check = found.get("check")
-    if len(empty) == 2:
+    mirrored = [s for s in ("−", "+") if sides[s].get("mirror_of")]
+    if mirrored and not (check and check["verdict"] == "links"):
+        block["verdict"] = "mirror image"  # D267
+        block["why"] = _clip(
+            "; ".join(f"{s} side: {mirror_text(sides[s]['mirror_of'])}" for s in mirrored)
+        )
+    elif len(empty) == 2:
         block["verdict"] = "no side"
     elif empty:
         block["verdict"] = "one side"
@@ -654,6 +729,8 @@ def brief(found: dict[str, Any]) -> dict[str, Any]:
         best = _best(sides[side], check[checked] if check is not None else None)
         if best is not None:
             block[side] = best
+        if side in mirrored and block["verdict"] == "mirror image":
+            block[side] = {**(best or {}), "mirror_of": sides[side]["mirror_of"]}
     return block
 
 
@@ -682,7 +759,9 @@ def batch(blocks: list[dict[str, Any]], total: int, offset: int, seconds: float)
     )
     out["next"] = (
         "Propose each `links` pair at medium (A184 bond check, with both RMSDs); follow the "
-        "mode (start_local_follow_mode) only for the TSs still unsettled; call with `ts` for "
-        "one TS's full answer (bonds per side, more candidates, reasons)."
+        "mode (start_local_follow_mode) only for the TSs still unsettled; a `mirror image` "
+        "TS needs a minimum the investigation lacks, the mirror image of `mirror_of` (D267; "
+        "find_gaps lists it); call with `ts` for one TS's full answer (bonds per side, more "
+        "candidates, reasons)."
     )
     return out

@@ -29,7 +29,7 @@ from chembook3d.api.routes import _investigation, _staging
 from chembook3d.models import new_id
 from chembook3d.parsers import local_result
 from chembook3d.remote import servers
-from chembook3d.services import imports, inspection
+from chembook3d.services import imports, inspection, irc_ends
 
 router = APIRouter(prefix="/api/inspections")
 
@@ -327,7 +327,7 @@ async def import_inspected(inspection_id: str, body: ImportIn, request: Request)
                 app_settings.remember_import_folder(local.parent)  # D78
             options = imports.ImportOptions(target_node_id=body.node_id)
             with investigation.sessions.begin() as session:
-                return imports.plan(session, staged, options).as_dict()
+                return irc_ends.plan(session, investigation.folder, staged, options)  # D268
         except imports.ImportFailed as exc:
             raise HTTPException(422, str(exc)) from exc
 

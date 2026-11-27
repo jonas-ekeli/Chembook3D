@@ -679,3 +679,47 @@ def test_a_batch_sends_an_irc_end_optimization_into_its_ts(open_client, tmp_path
     assert finals["end_opt.out"].irc_end is None
     assert irc_ends.stem("Ru-3_IRC_reverse_b2_12_END.out") == "ru-3_irc"
     assert irc_ends.stem("circle_opt.out") is None
+
+
+def test_a_single_import_sends_an_irc_end_optimization_into_its_ts(open_client, tmp_path):
+    """T-IMP-85 (D268, A192): imported alone, through the dialog or Claude's import_file, a
+    file named as a TS's IRC file and starting on that IRC's last point goes into the TS's IRC
+    as that end's optimization, the plan saying so (`irc_end`); irc_end false makes a node of
+    it, and a file of another name stays an ordinary import."""
+    ts = import_ts(open_client)
+    add(open_client, ts, "TS_IRC_forward.out", g.irc(points=6, ending="max_points"))
+    end = g.end_point_opt_freq("forward", 6, -52.46)
+
+    plan = upload(open_client, "TS_IRC_forward_END_opt.out", end)
+    assert plan["kind"] == "irc" and plan["blockers"] == [], plan["blockers"]
+    assert plan["irc"] == {"part": "end", "direction": "forward"}
+    assert plan["irc_end"] == {
+        "node_id": ts,
+        "label": "TS",
+        "direction": "forward",
+        "reason": "optimized from its IRC end",
+    }
+    commit(open_client, plan)
+    assert [n["id"] for n in open_client.get("/api/canvas").json()["nodes"]] == [ts]
+    with open_client.app.state.investigation.sessions.begin() as session:
+        held = session.query(Calculation).filter(Calculation.node_id == ts).all()
+        parts = {(c.irc_part, c.irc_direction) for c in held if c.irc_part}
+    assert {("end_opt", "forward"), ("end_freq", "forward")} <= parts
+
+    # Claude's import_file stages by path: the same plan.
+    path = tmp_path / "TS_IRC_forward_END_opt2.out"
+    path.write_text(g.end_point_opt_freq("forward", 6, -52.4601), encoding="utf-8")
+    response = open_client.post("/api/imports/from-path", json={"path": str(path)})
+    assert response.status_code == 200, response.text
+    staged = response.json()
+    assert staged["kind"] == "irc" and staged["irc_end"]["node_id"] == ts
+
+    # A node of its own, by choice.
+    own = preview(open_client, staged, irc_end=False)
+    assert own["kind"] == "steps" and own["irc_end"] is None and own["mode"] == "new"
+    made = commit(open_client, own, irc_end=False)["node_id"]
+    assert made != ts and len(open_client.get("/api/canvas").json()["nodes"]) == 2
+
+    # Another name: an ordinary import, whatever its structure.
+    other = upload(open_client, "end_opt.out", g.end_point_opt_freq("forward", 6, -52.4602))
+    assert other["kind"] == "steps" and other["irc_end"] is None

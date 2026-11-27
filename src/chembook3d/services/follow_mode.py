@@ -18,7 +18,9 @@ medium link); a soft mode (below 100 cm⁻¹) whose end changes no bond and matc
 within 0.5 Å takes the nearest minimum with its bonds within 1.0 Å (medium); A193: so does any
 other end that left the TS (`_wider`, "conformer": another conformer of a molecule there is,
 medium), and `make_node` refuses it. A192: a node or folder file made from another TS's IRC
-end optimization is never an end's match.
+end optimization is never an end's match. D267: no match turns a stereocentre into its mirror
+image (`end_match`); an end that matches nothing but a node reflected (`atom_matching.mirrored`,
+within 0.5 Å) says `mirror_of`: that node's mirror image is missing.
 
 The verdict: both ends each matching one structure links them (high confidence, A184); both
 matching the same one is flagged; both returned to a TS is said; an end that matches nothing
@@ -455,7 +457,19 @@ def _verdict(ends: dict[str, dict[str, Any]], ts_label: str) -> dict[str, Any]:
         }
     parts = []
     for n in ENDS:
-        if keys[n] is None:
+        image = ends[n].get("mirror_of")
+        if keys[n] is None and image is not None:
+            parts.append(
+                f"{SHOWN[n]} end is the mirror image of “{image['label']}” ({image['rmsd']:.2f} "
+                "Å reflected): the matching minimum is not in the investigation"
+            )
+            flags.insert(
+                0,
+                f"The {SHOWN[n]} end matches “{image['label']}” only reflected: a mirror image "
+                "is another molecule (D267), so its minimum is missing. Make it from that node "
+                "(find_gaps: missing_mirror_image) rather than from this end.",
+            )
+        elif keys[n] is None:
             parts.append(f"{SHOWN[n]} end matches nothing")
         else:
             parts.append(f"{SHOWN[n]} end matches {_name(settled[n])} ({settled[n]['rmsd']:.2f} Å)")
@@ -565,6 +579,14 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
                 elif near:  # A193: another conformer of a molecule the folder has
                     entry["matches"] = [{**near[0], "conformer": True}]
                     entry["settled"] = {**near[0], "as": "conformer"}
+                else:  # D267: a minimum it matches only reflected is another molecule
+                    image = [
+                        m
+                        for m in _matches(atom_matching.mirrored(rows), charge, multiplicity, nodes)
+                        if not _is_ts(m)
+                    ]
+                    if image:
+                        entry["mirror_of"] = image[0]
         if name in made:
             entry["node_made"] = made[name]
         out_ends[name] = entry
@@ -597,7 +619,9 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
             "one group's members, nearest of several conformers of one molecule, soft: a "
             "soft mode's nearest minimum with its bonds within 1.0 Å, or conformer: any other "
             "end's, another conformer of that molecule; nearest, soft and conformer make a "
-            "link medium). Energies are the job's own method's, never for comparison. An end "
+            "link medium). mirror_of: the node an end that matches nothing fits only "
+            "reflected within 0.5 Å (D267: a mirror image is another molecule, so that minimum "
+            "is missing). Energies are the job's own method's, never for comparison. An end "
             "that matches nothing, not even within 1.0 Å, can become a node with "
             "make_node_from_end."
         ),

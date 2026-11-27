@@ -119,6 +119,8 @@ cheapest and most certain first; flag the rest. Only between structures you have
 branch or a step the edges and steps do not already link.
 - A missing minimum: the end that matches nothing (`make_node_from_end`, or the IRC's end),
   refined with `start_local_refine` at `mace-omol`.
+- A missing mirror image (a mirror image is another molecule, D267): `build_structure` from
+  that node with the step `mirror`, `create_node` with its build_id, refined with `mace-omol`.
 - A missing TS: a planned edge between the minima (if none), then `start_local_ts_guess`;
   `correct` only when the person asked for the PBE correction (D239).
 - A missing intermediate: built with the structure tools (`build_structure` and its edits,
