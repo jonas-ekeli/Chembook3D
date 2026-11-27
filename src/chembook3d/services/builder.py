@@ -1508,6 +1508,29 @@ def flip(structure: Structure, picks: list[int], ignore: Sequence[Pair] = ()) ->
     return done
 
 
+def mirror(structure: Structure) -> Edited:
+    """D267: the whole structure's mirror image, reflected through the plane across its centre
+    square to x (x negated about the centre), every atom keeping its number and its bonds, so
+    each stereocentre turns. A mirror image is another molecule: this makes the one a TS needs
+    when the investigation holds only its mirror image. Dihedral holds change sign."""
+    if not structure.rows:
+        raise BuildError("There is no structure to mirror")
+    coords = structure.coords
+    coords[:, 0] = 2 * coords[:, 0].mean() - coords[:, 0]
+    result = _with(structure, coords)
+    for hold in result.holds:
+        if len(hold.atoms) == 4 and hold.value is not None:
+            hold.value = -hold.value
+    count = len(structure.rows)
+    return Edited(
+        result,
+        list(range(count)),
+        f"Mirrored all {_atoms(count)} through the plane across the structure's centre square "
+        "to x: the mirror image, a different molecule when it has a stereocentre (D267); the "
+        "atoms keep their numbers",
+    )
+
+
 # ---------- holding for Minimize (D140) ----------
 
 HOLD_KINDS = {2: "distance", 3: "angle", 4: "dihedral"}

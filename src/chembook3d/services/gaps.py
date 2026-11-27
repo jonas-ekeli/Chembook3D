@@ -10,6 +10,10 @@ changes nothing. The kinds, most useful first:
   evidence at hand: a finished mode-follow job of the TS (`follow_mode.ends`), else its IRC's
   ends matched against the minima (A184's `end_match`), else only the bonds its imaginary mode
   moves; the hole says which.
+- `missing_mirror_image` (D267): a TS side's minimum is the mirror image of a node there is: a
+  mode-follow end or the IRC's end matches that node only reflected, else `find_ts_partners`
+  finds it on the side only reflected. A mirror image is another molecule, so the minimum is
+  missing; it is made exactly by the builder's `mirror` step on that node, then refined.
 - `missing_ts`: two minima joined by an edge, or next to each other in the steps' order with
   nothing joining them, one elementary step apart (one to three bonds formed or broken, A184),
   with the same atoms or balanced by the edge's free species, and no TS between them.
@@ -48,7 +52,7 @@ from chembook3d.models import (
     Transition,
 )
 from chembook3d.pathtools import METALS
-from chembook3d.services import follow_mode, levels, thermo_settings
+from chembook3d.services import atom_matching, follow_mode, levels, thermo_settings, ts_partners
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
 from chembook3d.services import transitions as transition_service
@@ -59,7 +63,14 @@ MAX_LISTED = 25  # holes listed in one answer, most useful first
 MAX_PAIRS = 40  # pairs of minima compared in one call
 MACE_GUESS = "MACE guess"  # D265c: the filled node's label suffix and tag (A185)
 FILLED = "Filled by Claude"  # D265c, A184: the evidence of an edge that fills a hole
-KINDS = ("ts_end", "missing_ts", "unbalanced", "missing_intermediate", "cycle")
+KINDS = (
+    "ts_end",
+    "missing_mirror_image",
+    "missing_ts",
+    "unbalanced",
+    "missing_intermediate",
+    "cycle",
+)
 _HOLE_ID = re.compile(r"\b((?:" + "|".join(KINDS) + r")-[0-9a-f]{8})\b")
 _FILLED_EDGE = re.compile(r"^\s*filled by claude", re.IGNORECASE)
 
@@ -226,6 +237,29 @@ TS_GUESS_FILL = (
     "low, hole set, and filled naming the TS node"
 )
 REFINE = "start_local_refine with method mace-omol"
+MIRROR_FILL = (
+    "build_structure from node “{label}” (node_id {node_id}) with the one step mirror, "
+    "create_node with its build_id (planned), then " + REFINE + " on it, then "
+    "propose_mechanism with the edge to the TS, low, hole set, and filled naming the new node."
+)
+
+
+def _mirror_hole(unit: "_Unit", image: dict[str, Any], where: str, evidence: str) -> Hole:
+    """D267: the TS `unit` needs the mirror image of the node `image` (node_id, label, rmsd
+    reflected) on the side `where` says."""
+    rmsd = image.get("rmsd")
+    return Hole(
+        "missing_mirror_image",
+        hole_id("missing_mirror_image", unit.id, image["node_id"]),
+        [unit.ref(), {"id": image["node_id"], "label": image["label"]}],
+        f"Missing mirror image of “{image['label']}”, needed by “{unit.label}”: {where} "
+        f"matches “{image['label']}” only reflected"
+        + (f" ({rmsd:.2f} Å)" if rmsd is not None else "")
+        + ", and a mirror image is another molecule (D267).",
+        MIRROR_FILL.format(label=image["label"], node_id=image["node_id"]),
+        evidence=evidence,
+        weight=0,
+    )
 
 
 def _follow_job(folder: Path, node_id: str) -> str | None:
@@ -266,10 +300,63 @@ def _matching_units(rows: compare.Rows, minima: list[_Unit]) -> list[tuple[_Unit
     return sorted(found, key=lambda m: m[1])
 
 
+def _partner_mirrors(
+    session: Session,
+    folder: Path,
+    mechanism: _Mechanism,
+    unit: _Unit,
+    ts: compare.Structure,
+    tolerance: float,
+    made: dict[Any, Any],
+) -> list[Hole]:
+    """D267: the sides of a TS with neither a mode-follow nor an IRC that `find_ts_partners`
+    finds a minimum on only reflected (`mirror_of`), unless an edge already joins the TS to a
+    candidate of that side. `made` keeps the candidates per geometry level, and the IRC end
+    nodes (A192), for every TS of the call."""
+    from chembook3d.services import irc_ends  # it imports the import code
+
+    node = unit.node
+    assert node is not None
+    if "ends" not in made:
+        made["ends"] = irc_ends.end_nodes(session, folder, tolerance)
+    level = ts_partners.ts_level(session, {"node_id": node.id})
+    key = ("level", level.id if level is not None else None)
+    if key not in made:
+        made[key] = ts_partners.from_investigation(session, folder, tolerance, None, level)
+    candidates, species, _ = made[key]
+    others = {n for n, ts_id in made["ends"].items() if ts_id != node.id} | {node.id}
+    candidates = [c for c in candidates if c.entry.get("node_id") not in others]
+    species = [c for c in species if c.entry.get("node_id") != node.id]
+    found = ts_partners.find(ts, candidates, species, tolerance, level=level)
+    if (found.get("check") or {}).get("verdict") == "links":
+        return []
+    near = mechanism.neighbours(unit.id)
+    holes = []
+    for side in found["sides"]:
+        image = side.get("mirror_of")
+        if not image or not image.get("node_id"):
+            continue
+        linked = {
+            mechanism.of_node.get(c.get("node_id"), c.get("node_id")) for c in side["candidates"]
+        }
+        if linked & near:
+            continue
+        holes.append(
+            _mirror_hole(
+                unit,
+                image,
+                f"its mode's {side['side']} side (find_ts_partners)",
+                found["summary"],
+            )
+        )
+    return holes
+
+
 def _ts_end_holes(
     session: Session, folder: Path, mechanism: _Mechanism, tolerance: float
 ) -> list[Hole]:
     holes = []
+    made: dict[Any, Any] = {}  # D267: the candidates `_partner_mirrors` makes, once per call
     minima = [u for u in mechanism.units.values() if not u.ts]
     for unit in mechanism.units.values():
         if not unit.ts:
@@ -332,6 +419,16 @@ def _ts_end_holes(
                             )
                         )
                         continue
+                    if end.get("mirror_of"):
+                        holes.append(
+                            _mirror_hole(
+                                unit,
+                                end["mirror_of"],
+                                f"the {shown} end of its mode-follow (job {job_id})",
+                                ends["verdict"],
+                            )
+                        )
+                        continue
                     holes.append(
                         Hole(
                             "ts_end",
@@ -378,6 +475,19 @@ def _ts_end_holes(
                         )
                     )
                     continue
+                image = _matching_units(atom_matching.mirrored(end.rows), minima)
+                if image:
+                    first, rmsd = image[0]
+                    holes.append(
+                        _mirror_hole(
+                            unit,
+                            {"node_id": first.id, "label": first.label, "rmsd": rmsd},
+                            f"the IRC's {direction} end",
+                            "IRC end compared with every minimum and their mirror images (A184, "
+                            "D267)",
+                        )
+                    )
+                    continue
                 holes.append(
                     Hole(
                         "ts_end",
@@ -398,6 +508,11 @@ def _ts_end_holes(
         structure = _structure(session, folder, unit, tolerance)
         if structure is not None:
             mode = compare._active(structure)
+        if mode is not None and node is not None and structure is not None:
+            mirrors = _partner_mirrors(session, folder, mechanism, unit, structure, tolerance, made)
+            holes += mirrors
+            if len(mirrors) >= len(sides):
+                continue
         bonds = None
         if mode is not None and structure is not None:
             bonds = {"along_mode": [compare._bond(structure.rows, i, j) for i, j, _ in mode.active]}
@@ -761,9 +876,11 @@ def find(session: Session, folder: Path, since: datetime | None = None) -> dict[
             else f"No holes found; {len(filled)} of at most {MAX_FILLED} filled in this run."
         ),
         "key": (
-            "Holes of D265a, most useful first: ts_end, missing_ts, unbalanced, "
-            "missing_intermediate, cycle. bonds: formed and broken by A181's rule (weak and "
-            "metal–hydrogen contacts left out; a TS against an end counts its partial bonds), "
+            "Holes of D265a, most useful first: ts_end, missing_mirror_image (D267: a TS's "
+            "minimum is the mirror image of a node, made exactly by build_structure's mirror "
+            "step), missing_ts, unbalanced, missing_intermediate, cycle. bonds: formed and "
+            "broken by A181's rule (weak and metal–hydrogen contacts left out; a TS against "
+            "an end counts its partial bonds), "
             "or along_mode: the pairs the TS's imaginary mode moves. Only what edges and the "
             "steps' order link is looked at; no branch is invented. Fill at most 10 a run "
             "(cheapest and most certain first), each with MACE guesses only, through "

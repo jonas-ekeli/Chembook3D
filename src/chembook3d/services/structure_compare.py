@@ -459,8 +459,8 @@ def same_structure(
         return None
     formed, broken = atom_matching.changes(a, b, mapping)
     real_formed, real_broken, _, _ = atom_matching.split_changes(a, b, mapping, formed, broken)
-    if real_formed or real_broken:
-        return None
+    if real_formed or real_broken or atom_matching.stereo_flips(a, b, mapping):
+        return None  # D267: nor is a mirror image the same structure
     identity = all(i == j for i, j in enumerate(mapping))
     return Same(rmsd, None if identity else mapping)
 
@@ -500,6 +500,8 @@ def end_match(
         real_formed, real_broken, _, _ = split(end, other, mapping, formed, broken)
         if real_formed or real_broken:
             return None
+        if atom_matching.stereo_flips(end, other, mapping):
+            return None  # D267: a mirror image (or another stereoisomer) is another molecule
         identity = all(i == j for i, j in enumerate(mapping))
         return Same(rmsd, None if identity else mapping)
 
@@ -517,7 +519,7 @@ def end_match(
             return False
         formed, broken = atom_matching.changes(end, other, mapping)
         real_formed, real_broken, _, _ = split(end, other, mapping, formed, broken)
-        return not (real_formed or real_broken)
+        return not (real_formed or real_broken)  # `check` then rules out a mirror image
 
     try:
         matched = atom_matching.match(end, other, enough=enough)
@@ -963,8 +965,24 @@ def _links(
         ts_match = atom_matching.match(a.rows, ts.rows)
     ts_in_a = [ts.rows[j] for j in ts_match.mapping]
     mode = _active(ts, ts_match.mapping)
-    if ts_match.doubts:
-        reasons.append("The TS's atom match is doubtful: " + "; ".join(ts_match.doubts) + ".")
+    skip = {k for i, j, _ in mode.active for k in (i, j)} if mode is not None else set()
+    flipped = sorted(
+        set(atom_matching.stereo_flips(a.rows, ts.rows, ts_match.mapping, skip))
+        | set(atom_matching.stereo_flips(a.rows, b.rows, mapping, skip))
+    )
+    doubts = list(ts_match.doubts)
+    if atom_matching.MIRROR_DOUBT in doubts and not flipped:
+        # Only centres with like neighbours (a methyl's hydrogens) turned: a numbering detail,
+        # not another stereoisomer (D267).
+        doubts.remove(atom_matching.MIRROR_DOUBT)
+    if doubts:
+        reasons.append("The TS's atom match is doubtful: " + "; ".join(doubts) + ".")
+    if flipped:
+        reasons.append(
+            "A, B and the TS are not all the same stereoisomer: "
+            + ", ".join(f"{a.rows[i][0]}{i + 1}" for i in flipped)
+            + " would need a reflection, and a mirror image is another molecule (D267)."
+        )
     verdict = "links"
     count = len(changed)
     if not LINK_BONDS[0] <= count <= LINK_BONDS[1]:
@@ -1095,7 +1113,8 @@ def _same_molecule(
     counts: tuple[_Bonds, _Bonds] | None = None,
     match: bool = True,
 ) -> tuple[bool, list[int] | None, int]:
-    """Whether b has a's bonds (A181; weak changes too when `count_weak`): the same numbering
+    """Whether b has a's bonds (A181; weak changes too when `count_weak`) and a's handedness
+    (D267: a mirror image, or another stereoisomer, is another molecule): the same numbering
     first, else through Match atoms when the bond counts allow it. Gives the map (None: the same
     numbering) and how many weak changes there are."""
     for attempt in ("same", "match"):
@@ -1112,6 +1131,10 @@ def _same_molecule(
         rf, rb, wf, wb = split(a, b, mapping, formed, broken)
         weak = len(wf) + len(wb)
         if not rf and not rb and not (count_weak and weak):
+            if atom_matching.stereo_flips(a, b, mapping or list(range(len(a)))):
+                # D267: no numbering that keeps the bonds puts a stereocentre right (its
+                # neighbours all differ), so it is another stereoisomer
+                return False, None, 0
             identity = mapping is None or all(i == j for i, j in enumerate(mapping))
             return True, None if identity else mapping, weak
     return False, None, 0
@@ -1130,6 +1153,7 @@ class _Molecule:
     rows: Rows
     counts: _Bonds
     conformers: list[_Conformer] = field(default_factory=list)
+    mirror_of: "_Molecule | None" = None  # D267: the molecule this one is the mirror image of
     # Per order of elements met, a member's own rows and its map to the molecule's numbering
     # (None: the same): a structure in that order is checked against it first, which saves
     # matching atoms again for every file of one program.
@@ -1231,25 +1255,39 @@ def group(
                 n, s.rows, counts, [_Conformer(s.rows, shape, [member(n, None, False)])]
             )
             molecule.orders[tuple(geometry.elements(s.rows))] = (s.rows, None)
+            mirror = atom_matching.mirrored(s.rows)
+            molecule.mirror_of = next(
+                (
+                    m
+                    for m in molecules
+                    if _same_molecule(m.rows, mirror, count_weak, (m.counts, counts))[0]
+                ),
+                None,
+            )
             molecules.append(molecule)
 
     formulas = []
     for (formula, charge, multiplicity), prints in buckets.items():
         molecules = [m for found in prints.values() for m in found]
         molecules.sort(key=lambda m: m.index)
+        number = {id(m): k for k, m in enumerate(molecules, start=1)}
+        shown = []
+        for m in molecules:
+            entry: dict[str, Any] = {"conformers": [{"members": c.members} for c in m.conformers]}
+            if m.mirror_of is not None:
+                entry["mirror_image_of"] = number[id(m.mirror_of)]  # D267
+            shown.append(entry)
         formulas.append(
             {
                 "formula": formula,
                 "charge": charge,
                 "multiplicity": multiplicity,
-                "molecules": [
-                    {"conformers": [{"members": c.members} for c in m.conformers]}
-                    for m in molecules
-                ],
+                "molecules": shown,
             }
         )
     molecule_count = sum(len(f["molecules"]) for f in formulas)
     conformer_count = sum(len(m["conformers"]) for f in formulas for m in f["molecules"])
+    mirrors = sum("mirror_image_of" in m for f in formulas for m in f["molecules"])
     return {
         "count": len(structures),
         "tolerance": tolerance,
@@ -1257,7 +1295,13 @@ def group(
         "near_cut": near,
         "summary": (
             f"{len(structures)} structures: {len(formulas)} formula(s), {molecule_count} "
-            f"molecule(s) by their bonds, {conformer_count} conformer(s) (duplicates within "
-            f"{tolerance} Å)."
+            f"molecule(s) by their bonds and handedness, {conformer_count} conformer(s) "
+            f"(duplicates within {tolerance} Å)."
+            + (
+                f" {mirrors} molecule(s) are the mirror image of another (`mirror_image_of`, "
+                "the molecule's number in its formula): another molecule (D267)."
+                if mirrors
+                else ""
+            )
         ),
     }

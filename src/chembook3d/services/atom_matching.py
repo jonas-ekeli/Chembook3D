@@ -66,6 +66,7 @@ GOOD_ENOUGH = 0.25  # Å: a match changing no bond and fitting this well ends th
 # A match is doubtful beyond these (D113).
 MAX_BOND_CHANGES = 4
 MAX_RMSD = 2.0  # Å, over the atoms whose bonds stay, fitted on them
+MIRROR_DOUBT = "the match turns a centre into its mirror image"
 
 
 @dataclass
@@ -466,7 +467,7 @@ def _result(m: _Matcher, start: Rows, best: list[int], pinned: dict[int, int], s
     rmsd = m.rmsd(best)
     doubts = []
     if m.inverted(best):
-        doubts.append("the match turns a centre into its mirror image")
+        doubts.append(MIRROR_DOUBT)
     if len(formed) + len(broken) > MAX_BOND_CHANGES:
         doubts.append(
             f"{len(formed) + len(broken)} bonds form or break, more than the "
@@ -495,6 +496,53 @@ def _result(m: _Matcher, start: Rows, best: list[int], pinned: dict[int, int], s
 
 
 Pairs = list[tuple[int, int]]
+
+
+def mirrored(rows: Rows) -> Rows:
+    """D267: the mirror image of a structure, reflected through the yz plane (x negated), its
+    atoms in the same order."""
+    return [[row[0], -float(row[1]), float(row[2]), float(row[3]), *row[4:]] for row in rows]
+
+
+def stereo_flips(start: Rows, end: Rows, mapping: list[int], skip: Iterable[int] = ()) -> list[int]:
+    """D267: the start's stereocentres that the mapping turns into their mirror image, so that
+    the end is another stereoisomer (a mirror image is another molecule). A stereocentre here
+    is an atom with three or more neighbours whose surroundings all differ (Weisfeiler–Lehman
+    labels, so no swap of like neighbours, a methyl's hydrogens or an isopropyl's methyls, puts
+    it right), at least three of them still bonded at the end; its first three such neighbours
+    span opposite handedness at the end, beyond PLANAR. `inverted` also counts centres with
+    like neighbours, which Match atoms swaps back for a path; here they are no stereocentres.
+    Never counted: metals (their shape changes as ligands come and go, D120), nitrogen with
+    three neighbours (it inverts at room temperature) and the `skip` atoms (a TS mode's)."""
+    from chembook3d.pathtools import METALS
+
+    elements = [row[0] for row in start]
+    p, q = _coords(start), _coords(end)
+    adj_p = bonds(p, elements)
+    adj_q = bonds(q, [row[0] for row in end])
+    labels = _labels(elements, adj_p, {})[ROUNDS]
+    order = np.asarray(mapping)
+    kept_bonds = adj_q[np.ix_(order, order)]
+    skipped = set(skip)
+    found = []
+    for c, element in enumerate(elements):
+        if c in skipped or element in METALS:
+            continue
+        near = np.flatnonzero(adj_p[c]).tolist()
+        if len(near) < 3 or (element == "N" and len(near) == 3):
+            continue
+        if len({labels[k] for k in near}) < len(near):
+            continue
+        kept = [k for k in near if kept_bonds[c, k]]
+        if len(kept) < 3:
+            continue
+        a = p[kept[:3]] - p[c]
+        b = q[order[kept[:3]]] - q[order[c]]
+        va = np.linalg.det(a) / np.prod(np.linalg.norm(a, axis=1))
+        vb = np.linalg.det(b) / np.prod(np.linalg.norm(b, axis=1))
+        if abs(va) > PLANAR and abs(vb) > PLANAR and va * vb < 0:
+            found.append(c)
+    return found
 
 
 def changes(start: Rows, end: Rows, mapping: list[int] | None = None) -> tuple[Pairs, Pairs]:

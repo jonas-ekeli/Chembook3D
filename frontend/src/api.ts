@@ -2254,6 +2254,10 @@ export type ImportPlan = {
   ensemble: EnsemblePlan | null
   /** D134: an IRC file planned as an ordinary import: the TS nodes it starts from, nearest first. */
   irc_targets?: { node_id: string; label: string; rmsd: number }[] | null
+  /** D131: the IRC part an IRC import adds ('both' directions for a path that has two). */
+  irc?: { part: 'path' | 'end'; direction: IrcDirection | 'both' | null } | null
+  /** D268, A192: the file is an IRC end's optimization, planned into its TS's IRC. */
+  irc_end?: { node_id: string; label: string; direction: IrcDirection; reason: string } | null
   /** D246: an optimization at a level the node lacks that can be added beside the node's
    * geometry; without it, it continues the node's optimization or goes to a derived node. */
   beside?: BesidePlan | null
@@ -2401,6 +2405,8 @@ export type ImportOptions = {
    * of its end points ('forward' or 'reverse'). */
   irc_part?: 'path' | 'end' | null
   irc_direction?: IrcDirection | null
+  /** D268: false imports an IRC end's optimization as a node of its own, not into its TS's IRC. */
+  irc_end?: boolean | null
   /** D137: a scan path (a joined scan) shown on this edge, its box on the canvas or not. */
   path_edge_id?: string | null
   on_edge_only?: boolean

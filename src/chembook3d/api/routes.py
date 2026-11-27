@@ -50,6 +50,7 @@ from chembook3d.services import (
     history,
     import_undo,
     imports,
+    irc_ends,
     levels,
     node_merge_undo,
     playground_merge_undo,
@@ -430,6 +431,8 @@ class ImportOptionsIn(BaseModel):
     path_edge_id: str | None = None  # D137: a scan path shown on this edge (D121)
     on_edge_only: bool = False
     irc_direction: str | None = None
+    # D268: false imports an IRC end's optimization as a node of its own, not into its TS's IRC
+    irc_end: bool | None = None
     conformer_count: int | None = None
     conformers: list[int] | None = None
     method: str | None = None
@@ -1325,9 +1328,11 @@ def _options(body: ImportOptionsIn | None) -> imports.ImportOptions:
     return imports.ImportOptions(**body.model_dump()) if body else imports.ImportOptions()
 
 
-def _plan(session: Session, staged: imports.StagedFile, options: imports.ImportOptions):
+def _plan(
+    session: Session, staged: imports.StagedFile, options: imports.ImportOptions, folder: Path
+):
     try:
-        return imports.plan(session, staged, options).as_dict()
+        return irc_ends.plan(session, folder, staged, options)  # D268
     except imports.ImportFailed as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -1349,7 +1354,8 @@ async def upload_import(request: Request, filename: str, node_id: str | None = N
     def stage_and_plan():
         staged = _stage(request, data, filename, "")
         with investigation.sessions.begin() as session:
-            return _plan(session, staged, imports.ImportOptions(target_node_id=node_id))
+            options = imports.ImportOptions(target_node_id=node_id)
+            return _plan(session, staged, options, investigation.folder)
 
     return await run_in_threadpool(stage_and_plan)
 
@@ -1364,7 +1370,8 @@ def import_from_path(body: ImportFromPathIn, request: Request, session: DbSessio
         raise HTTPException(422, f"Cannot read {path}") from exc
     staged = _stage(request, data, path.name, str(path.resolve()))
     app_settings.remember_import_folder(path.resolve().parent)  # D78
-    return _plan(session, staged, imports.ImportOptions(target_node_id=body.node_id))
+    options = imports.ImportOptions(target_node_id=body.node_id)
+    return _plan(session, staged, options, _investigation(request).folder)
 
 
 def _staged(request: Request, token: str) -> imports.StagedFile:
@@ -1376,7 +1383,7 @@ def _staged(request: Request, token: str) -> imports.StagedFile:
 
 @router.post("/imports/{token}/preview")
 def preview_import(token: str, body: ImportOptionsIn, request: Request, session: DbSession):
-    return _plan(session, _staged(request, token), _options(body))
+    return _plan(session, _staged(request, token), _options(body), _investigation(request).folder)
 
 
 @router.post("/imports/{token}/commit", response_model=ImportCommitOut)
@@ -1384,8 +1391,10 @@ def commit_import(token: str, body: ImportOptionsIn, request: Request, session: 
     staged = _staged(request, token)
     if body.path_edge_id is not None and session.get(Transition, body.path_edge_id) is None:
         raise HTTPException(422, "The edge to show this path on no longer exists")
+    folder = _investigation(request).folder
     try:
-        result = imports.commit(session, _investigation(request).folder, staged, _options(body))
+        options, _ = irc_ends.routed(session, folder, staged, _options(body))  # D268
+        result = imports.commit(session, folder, staged, options)
     except imports.ImportBlocked as exc:
         raise HTTPException(422, {"blockers": exc.blockers, "message": str(exc)}) from exc
     except imports.ImportFailed as exc:

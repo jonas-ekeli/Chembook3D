@@ -105,6 +105,9 @@ IMPORT_HELP = {
     "irc_direction. Left out, the file is imported as an ordinary calculation.",
     "irc_direction": "With irc_part 'end': 'forward' or 'reverse', the side of the path the "
     "end point belongs to.",
+    "irc_end": "D268: an optimization or frequency job whose name, up to IRC, is a TS's IRC "
+    "file's and whose first or final structure is that IRC's end point goes into that TS's "
+    "IRC by itself (the plan's irc_end says so); false imports it as a node of its own.",
     "path_edge_id": "A scan imported as a new node: the transition (edge) the scan was run "
     "for, so its chip shows on that edge (D121, D137).",
     "on_edge_only": "With path_edge_id: true shows the scan only as the chip on its edge, with "
@@ -581,7 +584,9 @@ TOOLS: list[ToolSpec] = [
         "To go on from an answer, pass its build_id. A molecule or SMILES binds to a metal's "
         "open site at `value` Å from its donors, where it has the most room; when no site has "
         "room the step fails and says what is in the way (free a site first rather than forcing "
-        "it in for Minimize). Use this rather than writing new coordinates yourself.",
+        "it in for Minimize). The step mirror gives the whole structure's mirror image "
+        "(D267, find_gaps' missing_mirror_image). Use this rather than writing new coordinates "
+        "yourself.",
     ),
     T(
         "check_structure",
@@ -1270,7 +1275,12 @@ TOOLS: list[ToolSpec] = [
         "(atom-matched RMSD; for a sum over the larger species; energies are never read), "
         "with level, group and `ref` to pass on; then `check`: "
         "A184's bond check of the best pairs as compare_structures with ts gives it (links, "
-        "unclear or does not link, with reasons), and `next`. Several TSs at once (A187): "
+        "unclear or does not link, with reasons), and `next`. D267: a mirror image is another "
+        "molecule, so a candidate whose match turns a stereocentre into its mirror image is "
+        "never one (`other_stereoisomers` counts them); one that fits only reflected is listed "
+        "as `mirror_images`, and a side it fits best says `mirror_of` (verdict `mirror image`: "
+        "the matching minimum is not in the investigation; find_gaps lists it). Several TSs at "
+        "once (A187): "
         '`tss`, or `all_ts` ("unlinked": every TS missing an edge on a side; "all"), '
         "answered in a few lines per TS (the mode's bonds, the nearest candidate per side "
         "with its RMSD, the verdict and why), as many as fit, then `more` with the offset to "
@@ -1299,7 +1309,9 @@ TOOLS: list[ToolSpec] = [
         "aside, then matched atom by atom), then by atom-matched RMSD. Gives per formula its "
         "molecules, per molecule its conformers, per conformer its members (index in the "
         "list, label, RMSD to the first), and `near_cut`: pairs that could have gone either "
-        "way. Up to 300 structures. Changes nothing.",
+        "way. D267: mirror images and other stereoisomers are other molecules (a molecule "
+        "that is another's mirror image says `mirror_image_of`, that molecule's number in its "
+        "formula). Up to 300 structures. Changes nothing.",
         help={
             "structures": "The structures, each " + STRUCTURE_HELP,
             "all_nodes": "Add every node and free species with coordinates.",
@@ -1344,9 +1356,11 @@ TOOLS: list[ToolSpec] = [
         "The holes in the mechanism you are building (D265), most useful first, each with a "
         "stable id, its kind, the nodes in it, the bonds that change and a suggested fill: "
         "ts_end (a TS with no edge on a side; what lies there from its finished mode-follow "
-        "or its IRC, else only the bonds its mode moves), missing_ts (two minima an edge or "
-        "the steps' order links, one to three bonds apart, with no TS), unbalanced (an edge "
-        "whose sides differ in atoms with no free species to balance them), "
+        "or its IRC, else only the bonds its mode moves), missing_mirror_image (D267: a TS "
+        "side's minimum is the mirror image of a node there is: made exactly by "
+        "build_structure's mirror step on that node, then refined), missing_ts (two minima "
+        "an edge or the steps' order links, one to three bonds apart, with no TS), "
+        "unbalanced (an edge whose sides differ in atoms with no free species to balance them), "
         "missing_intermediate (linked minima more than one step apart) and cycle (the last "
         "minimum of the steps does not give back the first's catalyst). Only what edges and "
         "steps already link is looked at. Also how many holes you filled in this run (at most "
@@ -1831,8 +1845,10 @@ TOOLS: list[ToolSpec] = [
         "lies on) and `returned_to_ts` (its distances along the mode still the TS's: it "
         "matches nothing); with `verdict`: links two structures (both ends each match "
         "exactly one: high confidence), one end matches, no end matches, both ends returned to "
-        "a TS, or both ends match the same structure (flagged). A TS left unsettled is "
-        "flagged, never guessed. Changes nothing.",
+        "a TS, or both ends match the same structure (flagged). D267: no match is a mirror "
+        "image; an end that matches a node only reflected says `mirror_of` (that minimum is "
+        "missing; find_gaps lists it). A TS left unsettled is flagged, never guessed. Changes "
+        "nothing.",
     ),
     T(
         "make_node_from_end",

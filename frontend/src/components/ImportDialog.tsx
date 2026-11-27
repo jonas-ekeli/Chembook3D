@@ -470,8 +470,9 @@ export function ImportDialog({
 
   const species = options.kind === 'species'
   const forIrc = plan?.kind === 'irc'
+  const ircPart = plan?.irc ?? irc
   const ircWhat =
-    irc?.part === 'end' ? `a job on the ${irc.direction} end point` : 'an IRC path'
+    ircPart?.part === 'end' ? `a job on the ${ircPart.direction} end point` : 'an IRC path'
   const title = irc
     ? `Add ${ircWhat} to the IRC of “${nodeName(target)}”`
     : target
@@ -609,6 +610,23 @@ export function ImportDialog({
                 </button>
               ))}
             </section>
+          )}
+
+          {plan.irc_end && (
+            <section className="notice" aria-label="An IRC end">
+              <p>
+                {plan.irc_end.reason[0].toUpperCase() + plan.irc_end.reason.slice(1)}: the {plan.irc_end.direction} end
+                of the IRC of “{nodeName(plan.irc_end)}”. It goes into that IRC as the end point&apos;s job, not onto the
+                canvas.
+              </p>
+              <button onClick={() => change({ irc_end: false })}>Make a new node instead</button>
+            </section>
+          )}
+          {options.irc_end === false && !plan.irc_end && (
+            <p className="notice">
+              Imported as a node of its own.{' '}
+              <button onClick={() => change({ irc_end: null })}>Into its TS&apos;s IRC instead</button>
+            </p>
           )}
 
           {!plan.ensemble && (
