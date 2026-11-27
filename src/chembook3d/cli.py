@@ -44,6 +44,25 @@ def open_browser(url: str) -> None:
 def main(argv: list[str] | None = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
+    if argv[:1] == ["saga-probe"]:
+        import asyncio
+        import json
+
+        from chembook3d.remote import client
+
+        parser = argparse.ArgumentParser(prog="chembook3d saga-probe")
+        parser.add_argument("server", nargs="?", default="saga", help="Saved Saga server ID")
+        args = parser.parse_args(argv[1:])
+        try:
+            reply = asyncio.run(client.call("saga_probe", server=args.server, timeout=16))
+        except client.KeeperError as exc:
+            if "Unknown operation" in str(exc):
+                parser.exit(
+                    1, "The open HPC login uses an older keeper. See the Saga test procedure.\n"
+                )
+            parser.exit(1, f"{exc}\n")
+        print(json.dumps(reply["probe"]))
+        return
     if argv[:1] == ["mcp"]:  # D91: the MCP server for Claude, beside the running app
         from chembook3d.mcp_server import main as mcp_main
 

@@ -7,6 +7,36 @@ import { E2E_DIR, canvasNode } from './helpers.ts'
 // played here by requests carrying its client name, as the MCP server sends them.
 const CLAUDE = { 'X-Chembook-Client': 'claude' }
 
+// The backend integration test exercises the real receipt and SSH transport. Here the
+// browser receives a pending review and sends the user's decision through the dialog.
+test('review the generated Gaussian input before submitting', async ({ page }) => {
+  const folder = join(E2E_DIR, `hpc-review-${Date.now()}`)
+  await page.request.post('/api/investigations', { data: { folder, name: 'HPC review' } })
+  const preview = '%chk=water\n#p HF/STO-3G Opt\n\nWater\n\n0 1\nO 0 0 0\n'
+  await page.route('**/api/live?**', async (route) => {
+    if (new URL(route.request().url()).searchParams.has('since')) return route.continue()
+    const response = await route.fetch()
+    const live = await response.json()
+    await route.fulfill({ json: { ...live, confirmations: [{
+      id: 'local-review', action: 'submit_prepared_job', summary: '1 node, 40 cores, 24 h',
+      preview, reason: '', status: 'pending', seconds_left: 60,
+    }] } })
+  })
+  let confirmed = false
+  await page.route('**/api/confirmations/local-review/answer', async (route) => {
+    confirmed = route.request().postDataJSON().confirm === true
+    await route.fulfill({ json: { status: 'done' } })
+  })
+  await page.goto('/')
+  const dialog = page.getByRole('dialog', { name: 'Submit the prepared Gaussian job?' })
+  await expect(dialog).toContainText('1 node, 40 cores, 24 h')
+  await dialog.getByText('Review Gaussian input').click()
+  await expect(dialog.locator('pre')).toHaveText(preview, { useInnerText: false })
+  expect(confirmed).toBe(false)
+  await dialog.getByRole('button', { name: 'Submit job' }).click()
+  await expect.poll(() => confirmed).toBe(true)
+})
+
 test.afterEach(async ({ request }) => {
   await request.post('/api/investigations/close')
 })

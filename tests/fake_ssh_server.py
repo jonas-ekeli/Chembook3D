@@ -13,25 +13,33 @@ Run as a script for the UI tests: `python -m tests.fake_ssh_server --port 8767 -
 
 import argparse
 import asyncio
+import base64
 import contextlib
 import fnmatch
+import json
 import os
 import posixpath
+import re
 import socket
 import socketserver
+import subprocess
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import asyncssh
 from asyncssh.x11 import walk_xauth
 
+from chembook3d.remote import probe, saga_access, saga_prepare
+from chembook3d.remote.job_pilot import LOCAL_WORK, SUBSYSTEM, JobPilot
+
 USER = "jonas"
 PASSWORD = "correct horse"
 CODE = "123456"
 HOME = "/cluster/home/jonas"
+SAGA_FILE_OPERATIONS = {"list_files", "read_file", "create_xyz"}
 
 
 @dataclass
@@ -42,6 +50,10 @@ class Record:
     logins: int = 0  # successful logins
     commands: list[str | None] = field(default_factory=list)  # each session's command
     displays: list[str | None] = field(default_factory=list)  # each session's X11 display
+    saga_prepare_requests: list[bytes] = field(default_factory=list)
+    saga_minimum_requests: list[dict] = field(default_factory=list)
+    saga_file_requests: list[dict] = field(default_factory=list)
+    sftp_paths: list[str] = field(default_factory=list)
 
 
 class _Server(asyncssh.SSHServer):
@@ -83,10 +95,33 @@ class _Server(asyncssh.SSHServer):
         return False
 
 
+class _SFTPServer(asyncssh.SFTPServer):
+    def __init__(self, chan, fake: "FakeSaga"):
+        super().__init__(chan, chroot=os.fsencode(fake.root))
+        self._record = fake.record
+
+    def map_path(self, path: bytes) -> bytes:
+        self._record.sftp_paths.append(os.fsdecode(path))
+        return super().map_path(path)
+
+    def lstat(self, path):
+        attrs = super().lstat(path)
+        if sys.platform == "win32" and posixpath.basename(path) == b".submit-minimum.json":
+            # A Linux Saga account exposes POSIX mode bits, including on this Windows fixture.
+            attrs = asyncssh.SFTPAttrs.from_local(attrs)
+            attrs.permissions &= ~0o077
+        return attrs
+
+
 class FakeSaga:
     def __init__(self, root: Path, real_shell: bool = False, port: int = 0, x11: bool = True):
         self.root = root
         self.real_shell = real_shell
+        self.job_pilot = None
+        self.drop_submit_reply = False
+        self.saga_prepare_reply: dict | None = None
+        self.saga_minimum: Callable[[dict], dict] | None = None
+        self.saga_file_error: str | None = None
         self.port = port
         self.x11 = x11
         self.xauthority = root / ".Xauthority"  # the cookies of the forwarded displays
@@ -104,14 +139,13 @@ class FakeSaga:
         return self.key.export_public_key("openssh").decode().split()[1]
 
     async def start_async(self) -> None:
-        root = str(self.root)
         self._server = await asyncssh.create_server(
             lambda: _Server(self),
             "127.0.0.1",
             self.port,
             server_host_keys=[self.key],
             process_factory=self._session,
-            sftp_factory=lambda chan: asyncssh.SFTPServer(chan, chroot=root.encode()),
+            sftp_factory=lambda chan: _SFTPServer(chan, self),
             encoding=None,
             line_editor=False,
             x11_forwarding=self.x11,
@@ -172,10 +206,187 @@ class FakeSaga:
     async def _session(self, process: asyncssh.SSHServerProcess) -> None:
         self.record.commands.append(process.command)
         self.record.displays.append(process.channel.get_x11_display())
+        if process.command == saga_access.COMMAND:
+            request = await process.stdin.read()
+            envelope = None
+            with contextlib.suppress(ValueError):
+                envelope = json.loads(request)
+            operation = envelope.get("operation") if isinstance(envelope, dict) else None
+            if isinstance(operation, str) and operation in SAGA_FILE_OPERATIONS:
+                self.record.saga_file_requests.append(envelope)
+                if await self._saga_files(process, envelope):
+                    return
+            elif operation == "prepare_minimum":
+                self.record.saga_prepare_requests.append(request)
+                if self.saga_prepare_reply is not None:
+                    process.stdout.write(json.dumps(self.saga_prepare_reply).encode())
+                    process.exit(0)
+                    return
+            if self.saga_minimum and operation in {
+                "prepare_minimum",
+                "submit_minimum",
+                "minimum_status",
+            }:
+                self.record.saga_minimum_requests.append(envelope)
+                try:
+                    result = await asyncio.to_thread(self.saga_minimum, envelope)
+                    if self.drop_submit_reply and operation == "submit_minimum":
+                        self.drop_submit_reply = False
+                        process.exit(1)  # receipt is durable, but no bytes reached the keeper
+                        return
+                    reply, status = {"ok": True, "result": result}, 0
+                except (OSError, ValueError) as exc:
+                    reply, status = {"ok": False, "error": str(exc)}, 1
+                process.stdout.write(json.dumps(reply).encode())
+                process.exit(status)
+                return
+            await self._pinned(process, saga_access.LAUNCHER, request)
+            return
+        if process.command == probe.COMMAND:
+            await self._pinned(process, probe.PROBE_SOURCE, await process.stdin.read(257))
+            return
+        if process.subsystem == SUBSYSTEM and self.job_pilot is not None:
+            try:
+                envelope = json.loads(await process.stdin.read(65536))
+                value = await asyncio.to_thread(self.job_pilot.handle, envelope)
+                if self.drop_submit_reply and envelope["request"]["operation"] == "submit":
+                    self.drop_submit_reply = False
+                    process.exit(1)  # the helper recorded the receipt, but the app lost the reply
+                    return
+                reply = {"ok": True, "result": value}
+            except (OSError, ValueError, KeyError) as exc:
+                reply = {"ok": False, "error": str(exc)}
+            process.stdout.write(json.dumps(reply).encode())
+            process.exit(0)
+            return
+        if process.subsystem:
+            process.exit(1)
+            return
         if self.real_shell and process.command:
             await _real(process)
         else:
             await _FakeShell(self.root, process, self.xauthority).run()
+
+    @property
+    def saga_control(self) -> Path:
+        return self.root / HOME.lstrip("/") / ".local/lib/chembook3d"
+
+    async def _pinned(
+        self, process: asyncssh.SSHServerProcess, launcher: str, request: bytes
+    ) -> None:
+        """Run the keeper's exact pinned launcher in the stand-in account's home."""
+        home = str(self.root / HOME.lstrip("/"))
+        result = await asyncio.to_thread(
+            subprocess.run,
+            [sys.executable, "-I", "-S", "-c", launcher],
+            env={**os.environ, "HOME": home, "USERPROFILE": home},
+            input=request,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        process.stdout.write(result.stdout)
+        process.exit(result.returncode)
+
+    async def _saga_files(self, process: asyncssh.SSHServerProcess, request: dict) -> bool:
+        """Project helper filesystem operations into the fixture's SFTP namespace."""
+        installed = self.saga_control / "saga_prepare.py"
+        if not installed.is_file():
+            return False  # the real launcher reports the missing install
+        source = installed.read_bytes().replace(b"\r\n", b"\n")
+        if source != Path(saga_prepare.__file__).read_bytes().replace(b"\r\n", b"\n"):
+            return False  # the real launcher reports the pin mismatch
+        try:
+            if self.saga_file_error is not None:
+                raise ValueError(self.saga_file_error)
+            policy = json.loads((self.saga_control / saga_prepare.MARKER).read_bytes())
+            if sys.platform == "linux":
+                result = await asyncio.to_thread(self._linux_saga_files, source, request, policy)
+            else:
+                result = self._portable_saga_files(request, policy["work_root"])
+            reply, status = {"ok": True, "result": result}, 0
+        except (OSError, ValueError) as exc:
+            reply, status = {"ok": False, "error": str(exc)}, 1
+        process.stdout.write(json.dumps(reply).encode())
+        process.exit(status)
+        return True
+
+    def _linux_saga_files(self, source: bytes, request: dict, policy: dict) -> dict:
+        # Give this execution its own globals so other fake servers keep their own root.
+        helper = {"__name__": "_fake_saga_prepare"}
+        exec(compile(source, str(self.saga_control / "saga_prepare.py"), "exec"), helper)
+        helper["PROJECTS"] = self.root / "cluster/projects"
+        path = request["path"]
+        if path.startswith("/"):
+            request = {**request, "path": str(self.root) + path}
+        if not Path(policy["work_root"]).is_relative_to(self.root):
+            policy = {**policy, "work_root": str(self.root) + policy["work_root"]}
+        result = helper["file_operation"](request, policy)
+        for key in ("path", "agent_read_root", "free"):
+            if isinstance(result.get(key), str):
+                result[key] = result[key].removeprefix(str(self.root))
+        return result
+
+    def _portable_saga_files(self, request: dict, root: str) -> dict:
+        """Stand in for the helper on test hosts without Linux's filesystem interfaces."""
+        path = request["path"]
+        operation = request["operation"]
+        relative = path[len(root) + 1 :] if path.startswith(root + "/") else ""
+        parts = relative.split("/") if relative else []
+        if (path != root and not parts) or any(
+            not p or p in (".", "..") or "\\" in p or ":" in p for p in parts
+        ):
+            raise ValueError("This path is outside the pilot's approved results directory.")
+        target = self.root / root.lstrip("/")
+        for part in parts:
+            target /= part
+            if target.is_symlink():
+                raise ValueError("Links are outside the pilot's approved results directory.")
+        if operation == "list_files":
+            entries = []
+            for child in target.iterdir():
+                if child.is_symlink():
+                    entries.append({"name": child.name, "kind": "outside"})
+                elif child.is_dir() or child.is_file():
+                    info = child.stat()
+                    entries.append(
+                        {
+                            "name": child.name,
+                            "kind": "directory" if child.is_dir() else "file",
+                            "size": info.st_size,
+                            "modified": int(info.st_mtime),
+                        }
+                    )
+            return {"path": path, "entries": entries, "agent_read_root": root}
+        if operation == "read_file":
+            with target.open("rb") as stream:
+                info = os.fstat(stream.fileno())
+                offset = request["offset"]
+                size = info.st_size
+                start = max(0, size + offset) if offset < 0 else min(size, offset)
+                stream.seek(start)
+                data = stream.read(request["length"])
+            return {
+                "path": path,
+                "size": size,
+                "modified": int(info.st_mtime),
+                "version": saga_prepare.file_version(info),
+                "offset": start,
+                "data": base64.b64encode(data).decode("ascii"),
+            }
+        if (
+            len(parts) != 2
+            or parts[0] != "geometries"
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\.xyz", parts[1])
+        ):
+            raise ValueError("Only flat, named XYZ files may be created in geometries.")
+        data = request["text"].replace("\r\n", "\n").encode("utf-8")
+        try:
+            with target.open("xb") as stream:
+                stream.write(data)
+        except FileExistsError:
+            return {"path": path, "written": False, "free": None}
+        return {"path": path, "written": True, "size": len(data)}
 
 
 class _FakeShell:
@@ -439,17 +650,200 @@ async def _real(process: asyncssh.SSHServerProcess) -> None:
     process.exit(child.returncode or 0)
 
 
+def enable_job_pilot(fake: FakeSaga, config: Path, server_id: str) -> None:
+    """Create a local operator profile and toy project, outside the real user's settings."""
+    import secrets
+
+    remote = LOCAL_WORK
+    work = fake.root / remote.lstrip("/")
+    work.mkdir(parents=True, exist_ok=True)
+    geometries = work / "geometries"
+    geometries.mkdir(exist_ok=True)
+    (geometries / "water.xyz").write_text(
+        "3\nWater\nO 0 0 0\nH 0.76 0.59 0\nH -0.76 0.59 0\n", encoding="ascii"
+    )
+    private = config / "pilot-helper"
+    jobs = private / "job-files"
+    jobs.mkdir(parents=True, exist_ok=True)
+    (jobs / "minimum.jd").write_text("#p HF/STO-3G Opt", encoding="ascii")
+    (jobs / "linked-minimum.jd").write_text("linked-minimum", encoding="ascii")
+    tool = (sys.executable, str(Path(__file__).with_name("hpc_pilot_runner.py").resolve()))
+    profile = config / "remote" / "local-job-pilot.json"
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    target = ["127.0.0.1", fake.port, USER]
+    if profile.exists():
+        saved = json.loads(profile.read_text("utf-8"))
+        if saved["target"] != target or saved["server_id"] != server_id:
+            raise ValueError("This pilot profile belongs to a different server.")
+        key = bytes.fromhex(saved["key"])
+    else:
+        key = secrets.token_bytes(32)
+        with os.fdopen(
+            os.open(profile, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8"
+        ) as stream:
+            json.dump({"target": target, "key": key.hex(), "server_id": server_id}, stream)
+    fake.job_pilot = JobPilot(
+        private,
+        work,
+        remote,
+        geometries,
+        jobs,
+        (*tool, "prepare", "ok"),
+        (*tool, "submit", "ok"),
+        key,
+        40,
+        24,
+    )
+
+
+def enable_saga_minimum(fake: FakeSaga, remote_root: str, contents: str, monkeypatch) -> None:
+    """Enroll a synthetic manual minimum and a scheduler which only writes local test files."""
+    work = fake.root / remote_root.lstrip("/")
+    home = fake.root / HOME.lstrip("/")
+    control = fake.saga_control
+    control.mkdir(mode=0o700, parents=True)
+    (control / "saga_prepare.py").write_bytes(Path(saga_prepare.__file__).read_bytes())
+    wrapper = home / "tools/uibkvant-tools/runnable/submit_job_g16-C.01"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_bytes(
+        b"#!/usr/bin/env python3\n"
+        b"from pathlib import Path\n"
+        b"import os, sys\n"
+        b"stage = Path('.') if sys.platform == 'linux' else Path(os.environ['SAGA_FIXTURE_CWD'])\n"
+        b"assert sys.argv[1:] == ['sample.inp', '-n', '1', '-c', '40', '-t', '24']\n"
+        b"assert (stage / 'sample.inp').is_file()\n"
+        b"with (stage / 'scheduler-calls.txt').open('a') as calls:\n"
+        b"    print(' '.join(sys.argv[1:]), file=calls)\n"
+        b"(stage / 'sample.log').write_text('Starting job 72410 on test-node on Saga "
+        b"at Tue Nov 24 09:00:00 CET 2026\\nJobName: sample\\n')\n"
+        b"print('Submitted batch job 72410')\n"
+    )
+    wrapper.chmod(0o700)
+    marker = ".submit-minimum.json"
+    if sys.platform == "linux":
+        # This pytest process owns the synthetic remote. The keeper is a separate process.
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setattr(saga_prepare, "PROJECTS", work.parents[2])
+        reference = work / "min-test-reference/sample.inp"
+        reference.parent.mkdir(parents=True)
+        reference.write_bytes(contents.encode())
+        reference.with_suffix(".xyz").write_bytes(b"2\nSynthetic H2\nH 0 0 0\nH 0 0 0.74\n")
+        job = work.parent / "jobdescriptions" / saga_prepare.JOB
+        job.parent.mkdir()
+        job.write_bytes(b"synthetic job description\n")
+        generator = home / "tools/scripts/submit_all_DFT.sh"
+        generator.parent.mkdir(parents=True)
+        generator.write_bytes(
+            b'#!/bin/sh\n[ "$3" = nosub ] && cp ../min-test-reference/sample.inp sample.inp\n'
+        )
+        generator.chmod(0o700)
+        saga_prepare.install(reference)
+        policy = json.loads((control / saga_prepare.MARKER).read_bytes())
+        saga_prepare.prepare({"operation": "prepare_minimum"}, policy)
+        saga_prepare.enable_submit()
+
+        def operation(request):
+            if request["operation"] == "prepare_minimum":
+                result = saga_prepare.prepare(request, policy)
+            else:
+                result = saga_prepare.minimum_operation(request, policy)
+            return {**result, "directory": result["directory"].removeprefix(str(fake.root))}
+
+    else:
+        # Saga's fd-based helper requires Linux. Supply its wire replies on other hosts.
+        attempt, revision = "19" * 16, saga_prepare.digest(contents.encode())
+        directory = f"{remote_root}/prepare-{attempt}"
+        prepared = {
+            "state": "prepared",
+            "directory": directory,
+            "input_name": "sample.inp",
+            "input": contents,
+            "sha256": revision,
+            "reference_sha256": revision,
+        }
+        policy = {"work_root": remote_root, "attempt": attempt, "reference_sha256": revision}
+        resources = {"nodes": 1, "cores": 40, "hours": 24}
+        authorization = {
+            "attempt": attempt,
+            "revision": revision,
+            "key": "71" * 32,
+            **resources,
+            "wrapper": HOME + "/tools/uibkvant-tools/runnable/submit_job_g16-C.01",
+            "wrapper_sha256": saga_prepare.digest(wrapper.read_bytes()),
+        }
+        saga_prepare.atomic_write(control / marker, json.dumps(authorization).encode())
+        saga_prepare.atomic_write(control / saga_prepare.MARKER, json.dumps(policy).encode())
+        stage = work / ("prepare-" + attempt) / "submission"
+        stage.parent.mkdir(parents=True)
+        (stage.parent / "sample.inp").write_bytes(contents.encode())
+        receipt = {
+            "attempt": attempt,
+            "revision": revision,
+            "state": "prepared",
+            "directory": directory + "/submission",
+            "job_id": None,
+            "detail": None,
+            **resources,
+        }
+
+        def operation(request):
+            if request["operation"] == "prepare_minimum":
+                return prepared
+            if request["operation"] == "submit_minimum" and receipt["state"] == "prepared":
+                stage.mkdir()
+                (stage / "sample.inp").write_bytes((stage.parent / "sample.inp").read_bytes())
+                subprocess.run(
+                    [sys.executable, str(wrapper), "sample.inp", "-n", "1", "-c", "40", "-t", "24"],
+                    # CreateProcess rejects long current directories on Windows.
+                    env={**os.environ, "SAGA_FIXTURE_CWD": str(stage)},
+                    check=True,
+                    capture_output=True,
+                    timeout=10,
+                )
+                receipt.update(state="submitted", job_id="72410")
+            return receipt.copy()
+
+    # The fake SFTP server starts at its chroot. Expose the remote names in that namespace.
+    sftp_control = fake.root / ".local/lib/chembook3d"
+    sftp_control.mkdir(parents=True, mode=0o700)
+    saga_prepare.atomic_write(sftp_control / marker, (control / marker).read_bytes())
+    saga_prepare.atomic_write(
+        sftp_control / saga_prepare.MARKER,
+        json.dumps({**policy, "work_root": remote_root}).encode(),
+    )
+    fake.saga_minimum = operation
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--root", required=True)
+    parser.add_argument(
+        "--job-pilot-config",
+        type=Path,
+        help="Enable the local Gaussian pilot using an isolated app config folder.",
+    )
     args = parser.parse_args()
     root = Path(args.root)
     root.mkdir(parents=True, exist_ok=True)
     fake = FakeSaga(root, port=args.port)
 
     async def serve() -> None:
+        if args.job_pilot_config:
+            # A repeat run on the same isolated profile must keep the host key trusted
+            # by the app so the user can reconnect and recover an earlier receipt.
+            key = args.job_pilot_config / "pilot-helper" / "ssh-host-key"
+            key.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                descriptor = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                fake.key = asyncssh.read_private_key(key)
+            else:
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(fake.key.export_private_key())
         await fake.start_async()
+        if args.job_pilot_config:
+            enable_job_pilot(fake, args.job_pilot_config, "saga")
         print(f"fake Saga on 127.0.0.1:{fake.port}", flush=True)
         await asyncio.Event().wait()
 

@@ -737,6 +737,33 @@ Routes for all of these are in `api/pathway.py`.
 
 ## SSH servers such as Saga (D122, A69)
 
+- `prepare_saga_minimum` in `mcp_tools.py` calls `api/hpc_jobs.py`. The keeper uses
+  `remote/saga_access.py` to check the enrolled directory and launch the pinned helper
+  over the existing SSH connection. `remote/saga_prepare.py` is the standalone file
+  the operator copies to Saga. The same helper checks scoped agent listings, byte
+  reads for inspection and import, and exclusive XYZ creation. The keeper's
+  `saga_file_operations` capability identifies sessions supporting this route.
+  Its setup, upgrade and acceptance procedure are in 05 §9.
+  `tests/test_saga_prepare.py` covers the cluster helper and `tests/test_remote.py`
+  covers the agent interface, login reuse and file scopes.
+
+- For an operator-enabled Saga minimum (FR-SSH-21), the same API stores the
+  investigation's immutable input preview. `api/live.py` handles the app confirmation.
+  The keeper signs the fixed request in `remote/saga_access.py`. The standalone
+  helper claims the attempt, stages the verified input and records the wrapper's receipt.
+  See `tests/test_saga_submission_helper.py`, `tests/test_saga_submission_transport.py`
+  and the enrolled submission scenarios in `tests/test_remote.py`.
+
+- `chembook3d saga-probe` is the user-run Q101 diagnostic. The keeper passes the
+  existing session to `remote/probe.py` for a fixed, digest-checked capability query.
+  See 05 §9 for the Saga procedure.
+
+- The local preparation pilot (D266, FR-SSH-19) connects `api/hpc_jobs.py` and
+  `api/live.py` to the keeper's fixed SSH subsystem. `remote/job_pilot.py` validates
+  files, guards the one-time submission in SQLite and records the receipt.
+  `tests/fake_ssh_server.py` provisions the fixture and `tests/hpc_pilot_runner.py`
+  implements the synthetic wrappers. See 05 §9 for an interactive local run.
+
 - Agent job follow-up (D266, FR-SSH-18): `check_server_job` in `mcp_tools.py` calls
   `api/server_files.py` with the Slurm ID and an optional submission folder or wrapper log.
   `parsers/saga_job.py` interprets the UiBKvant wrapper evidence. The route uses the keeper's

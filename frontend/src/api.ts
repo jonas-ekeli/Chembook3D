@@ -2718,6 +2718,7 @@ export type ClaudeRequest = {
   id: string
   action: string
   summary: string
+  preview?: string | null
   reason: string
   status: 'pending' | 'running' | 'done' | 'refused' | 'expired' | 'failed'
   seconds_left: number

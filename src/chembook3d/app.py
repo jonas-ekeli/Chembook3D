@@ -25,6 +25,7 @@ from chembook3d.api.crystals import router as crystals_router
 from chembook3d.api.energies import router as energy_router
 from chembook3d.api.energy_profiles import router as energy_profile_router
 from chembook3d.api.equilibrium import router as equilibrium_router
+from chembook3d.api.hpc_jobs import router as hpc_job_router
 from chembook3d.api.import_undo import router as undo_router
 from chembook3d.api.inspect import inspections
 from chembook3d.api.inspect import router as inspect_router
@@ -214,6 +215,7 @@ def create_app(launched: bool = False, notices: list[str] | None = None) -> Fast
     app.include_router(scan_editor_router)  # D135
     app.include_router(builder_router)  # D139
     app.include_router(server_files_router)  # D124
+    app.include_router(hpc_job_router)  # D266: loopback preparation/submission pilot
     app.include_router(local_files_router)  # D225
     app.include_router(crystals_router)  # D234
     app.include_router(structures_router)  # D263

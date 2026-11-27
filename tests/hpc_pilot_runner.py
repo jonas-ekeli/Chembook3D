@@ -1,0 +1,65 @@
+"""Local-only stand-ins for the two UiBKvant commands. No Gaussian or Slurm installation."""
+
+import sys
+from pathlib import Path
+
+
+def linked_minimum_input(stem: str, atoms: list[str]) -> str:
+    """Synthetic five-step minimum; the job fixture owns the routes and inline basis."""
+    first = (
+        f"%chk={stem}\n#p HF/Gen\n# SP\n\nStart\n\n0 1\n"
+        + "\n".join(atoms)
+        + "\n\nH O 0\nS 1 1.0\n 1.0 1.0\n****\n\n"
+    )
+    steps = [first]
+    for job in ["SP", "Stable=(Opt,RRHF)", "Opt=Tight", "Freq"]:
+        steps.append(
+            f"%chk={stem}\n#p B3LYP/ChkBasis\n# Geom=Check Guess=Read\n# {job}"
+            "\n\nContinue\n\n0 1\n\n"
+        )
+    return "--Link1--\n".join(steps)
+
+
+def main(args: list[str]) -> None:
+    operation, mode, *fields = args
+    if operation == "prepare":
+        jd, geometry, flag = fields
+        assert flag == "nosub" and Path(jd).is_absolute()
+        if mode == "missing":
+            return
+        path = Path(geometry)
+        atoms = path.read_text("ascii").splitlines()[2:]
+        if mode == "wrong-geometry":
+            atoms = ["He 0 0 0"]
+        route = Path(jd).read_text("ascii").strip()
+        if route == "linked-minimum":
+            contents = linked_minimum_input(path.stem, atoms)
+        else:
+            contents = (
+                f"%chk={path.stem}\n{route}\n\nLocal pilot\n\n0 1\n" + "\n".join(atoms) + "\n\n"
+            )
+        path.with_suffix(".inp").write_text(contents, encoding="ascii")
+        return
+    inp, n, nodes, c, cores, t, hours = fields
+    assert operation == "submit" and (n, nodes, c, t) == ("-n", "1", "-c", "-t")
+    assert Path(inp).is_file()
+    with Path("scheduler-calls.txt").open("a", encoding="ascii") as stream:
+        stream.write(f"{inp} {nodes} {cores} {hours}\n")
+    if mode in {"reject", "conflicting-receipt"}:
+        print("sbatch: error: Batch job submission failed: Invalid allocation", file=sys.stderr)
+        if mode == "conflicting-receipt":
+            print("Submitted batch job 123")
+        return  # matches the outer wrapper's zero exit
+    job_id = int(Path.cwd().parent.name[:12], 16)
+    name = Path(inp).stem
+    Path(name + ".log").write_text(
+        f"Starting job {job_id} on pilot-node on Saga at Tue Nov 24 09:00:00 CET 2026\n"
+        f"JobName: {name}\n",
+        encoding="ascii",
+    )
+    if mode != "lost-receipt":
+        print(f"Submitted batch job {job_id}")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

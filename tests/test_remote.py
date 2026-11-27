@@ -3,6 +3,7 @@ the keeper, the terminal, and coming back after a restart. `tests/fake_ssh_serve
 in for Saga; the keeper runs as the separate process it is in the app."""
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -20,10 +21,21 @@ from fastapi.testclient import TestClient
 
 from chembook3d.app import create_app
 from chembook3d.mcp_server import Bridge
-from chembook3d.mcp_tools import BY_NAME, PANEL_ALLOWED, READ_ONLY_TOOLS, TOOLS
+from chembook3d.mcp_tools import BY_NAME, PANEL_ALLOWED, READ_ONLY_TOOLS, TOOLS, input_schema
 from chembook3d.parsers import orca
-from chembook3d.remote import client, keeper
-from tests.fake_ssh_server import CODE, PASSWORD, USER, FakeSaga, FakeXServer, free_display
+from chembook3d.remote import client, job_pilot, keeper, saga_access, saga_prepare, servers
+from tests.fake_ssh_server import (
+    CODE,
+    HOME,
+    PASSWORD,
+    USER,
+    FakeSaga,
+    FakeXServer,
+    enable_job_pilot,
+    enable_saga_minimum,
+    free_display,
+)
+from tests.hpc_pilot_runner import linked_minimum_input
 
 APP = "http://127.0.0.1:8765"
 ORIGIN = {"origin": APP}
@@ -925,7 +937,7 @@ def _text(response) -> str:
     return response.text
 
 
-def test_claude_sees_the_servers_and_the_files_in_the_terminals_directory(at_work):
+def test_claude_sees_the_servers_and_the_files_in_the_terminals_directory(at_work, saga):
     # No Origin, as Claude's MCP server sends.
     listed = at_work.get("/api/server-files").json()["servers"]
     assert listed == [
@@ -951,6 +963,11 @@ def test_claude_sees_the_servers_and_the_files_in_the_terminals_directory(at_wor
         assert "outside the terminal's current directory" in response.json()["detail"]
     foreign = {"origin": "https://evil.example"}
     assert at_work.get("/api/server-files/saga/files", headers=foreign).status_code == 403
+    text = at_work.get("/api/server-files/saga/read", params={"path": "job.gjf"})
+    assert text.is_success and "#P B3LYP/6-31G(d) Opt" in text.text
+    assert f"{WORK}/old" in saga.record.sftp_paths
+    assert f"{WORK}/job.gjf" in saga.record.sftp_paths
+    assert saga.record.saga_file_requests == []
 
 
 def test_claude_reads_pages_the_end_and_searches_without_changing_anything(at_work, saga):
@@ -1218,6 +1235,570 @@ def test_check_server_job_through_mcp(at_work, saga):
     assert at_work.get(url + "302").json()["state"] == "cancelled"
 
 
+def test_user_can_export_and_import_outside_the_pilot_area(at_work, saga, config_dir):
+    enable_job_pilot(saga, config_dir, "saga")
+    assert _allow(at_work).is_success
+    assert _write(at_work, "manual.xyz").status_code == 409
+    node = _node(at_work, "manual")
+    sent = at_work.post("/api/remote/servers/saga/send", json={"node_id": node}, headers=ORIGIN)
+    assert sent.json() == {"path": f"{WORK}/manual.xyz", "sent": True, "exists": False}
+    plan = at_work.post(
+        "/api/remote/servers/saga/import", json={"paths": [f"{WORK}/{TS}"]}, headers=ORIGIN
+    )
+    assert plan.is_success
+    imported = at_work.post(f"/api/imports/{plan.json()['token']}/commit", json={})
+    assert imported.is_success and imported.json()["node_id"]
+
+
+def test_missing_job_subsystem_never_falls_back_to_shell(at_work, saga, config_dir):
+    enable_job_pilot(saga, config_dir, "saga")
+    pilot = saga.job_pilot
+    saga.job_pilot = None  # client configured, helper unavailable on the server
+    before = len(saga.record.commands)
+    response = at_work.post(
+        "/api/hpc-jobs/saga/prepare",
+        json={"geometry": "water.xyz", "job_file": "minimum.jd", "cores": 1, "hours": 1},
+    )
+    assert response.status_code == 409
+    assert saga.record.commands[before:] == [None]  # one subsystem request, no exec fallback
+    assert saga.record.logins == 1 and not (pilot.state / "attempts.sqlite").exists()
+
+
+def test_saga_probe_reuses_the_keepers_login(at_work, saga, capsys):
+    from chembook3d.cli import main
+    from chembook3d.remote import probe
+
+    before = len(saga.record.commands)
+    with pytest.raises(client.KeeperError, match="only a server ID"):
+        asyncio.run(client.call("saga_probe", server="saga", path="custom.py"))
+    assert len(saga.record.commands) == before
+    dest = saga.root / HOME.lstrip("/") / ".local/lib/chembook3d/hpc_capability_probe.py"
+    for install in (False, True):
+        if install:
+            dest.parent.mkdir(parents=True)
+            dest.write_text("raise RuntimeError('unreviewed file')", encoding="ascii")
+        with pytest.raises(SystemExit) as failure:
+            main(["saga-probe"])
+        assert failure.value.code == 1 and "Install the branch's probe" in capsys.readouterr().err
+    source = Path(__file__).resolve().parents[1] / "scripts/hpc_capability_probe.py"
+    dest.write_bytes(source.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    main(["saga-probe"])
+    assert json.loads(capsys.readouterr().out) == probe.REPLY
+    assert saga.record.logins == 1 and saga.record.commands[before:] == [probe.COMMAND] * 3
+
+
+SAGA_WORK = f"/cluster/projects/nn0000k/{USER}/chembook3d-pilot"
+SAGA_CONTROL = ".local/lib/chembook3d"
+SAGA_MARKER = f"{SAGA_CONTROL}/{saga_prepare.MARKER}"
+
+
+def _enroll_saga(saga, *, install_helper=False) -> Path:
+    # The fixture's SFTP home is its root, and the launcher uses the SSH account's HOME.
+    for login_home in (saga.root, saga.root / HOME.lstrip("/")):
+        manifest = login_home / SAGA_MARKER
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        with os.fdopen(
+            os.open(manifest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600),
+            "w",
+            encoding="utf-8",
+        ) as stream:
+            json.dump({"work_root": SAGA_WORK}, stream)
+    work = saga.root / SAGA_WORK.lstrip("/")
+    (work / "geometries").mkdir(parents=True)
+    if install_helper:
+        (saga.saga_control / "saga_prepare.py").write_bytes(
+            Path(saga_prepare.__file__).read_bytes()
+        )
+    return work
+
+
+def test_saga_preparation_uses_only_the_fixed_command_on_the_existing_login(at_work, saga):
+    tool = BY_NAME["prepare_saga_minimum"]
+    schema = input_schema(tool)
+    assert set(schema["properties"]) == {"server_id"}
+    assert schema["required"] == ["server_id"]
+    assert tool.kind == "write"
+    before = len(saga.record.commands)
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            bridge = Bridge(APP, http=http)
+            args = {"server_id": "saga"}
+            assert (await bridge.call(tool.name, args)).is_error  # no operator installation
+            assert saga.record.commands[before:] == []
+            work = _enroll_saga(saga)
+            assert (await bridge.call(tool.name, {**args, "path": "water.xyz"})).is_error
+            with pytest.raises(client.KeeperError):
+                await client.call("saga_prepare_minimum", server="saga", path="water.xyz")
+            assert saga.record.commands[before:] == []
+
+            # The launcher is available, but the installed helper is not.
+            assert (await bridge.call(tool.name, args)).is_error
+            assert saga.record.commands[before:] == [saga_access.COMMAND]
+
+            input_text = (
+                "#p HF/STO-3G Opt\n\nWater\n\n0 1\nO 0 0 0\nH 0.76 0.59 0\nH -0.76 0.59 0\n\n"
+            )
+            digest = hashlib.sha256(input_text.encode()).hexdigest()
+            directory = "prepare-0123456789abcdef0123456789abcdef"
+            prepared = {
+                "state": "prepared",
+                "directory": f"{SAGA_WORK}/{directory}",
+                "input_name": "water.inp",
+                "input": input_text,
+                "sha256": digest,
+                "reference_sha256": digest,
+            }
+            (work / directory).mkdir()
+            (work / directory / "water.inp").write_bytes(input_text.encode())
+            saga.saga_prepare_reply = {
+                "ok": True,
+                "result": {**prepared, "reference_sha256": "0" * 64},
+            }
+            assert (await bridge.call(tool.name, args)).is_error
+            saga.saga_prepare_reply = {"ok": True, "result": prepared}
+            answer = await bridge.call(tool.name, args)
+            assert not answer.is_error, answer.content
+            assert json.loads(answer.content[0].text) == prepared
+
+    anyio.run(exercise)
+    assert saga.record.commands[before:] == [saga_access.COMMAND] * 3
+    assert saga.record.saga_prepare_requests == [b'{"operation":"prepare_minimum"}\n'] * 3
+    assert saga.record.answers == [[PASSWORD], [CODE]]
+    assert saga.record.logins == 1
+
+
+@pytest.mark.parametrize("drop_reply", [False, True])
+def test_enrolled_saga_minimum_requires_review_and_recovers_one_receipt(
+    at_work, saga, monkeypatch, drop_reply
+):
+    preview = linked_minimum_input("sample", ["H 0 0 0", "H 0 0 0.74"])
+    revision = hashlib.sha256(preview.encode()).hexdigest()
+    enable_saga_minimum(saga, SAGA_WORK, preview, monkeypatch)
+    marker = json.loads((saga.saga_control / ".submit-minimum.json").read_bytes())
+    attempt = marker["attempt"]
+    stage_path = f"{SAGA_WORK}/prepare-{attempt}/submission"
+    stage = saga.root / stage_path.lstrip("/")
+    saga.drop_submit_reply = drop_reply
+    before = len(saga.record.commands)
+    ids = {"server_id": "saga", "attempt": attempt}
+    resources = {"nodes": 1, "cores": 40, "hours": 24}
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            bridge = Bridge(APP, http=http)
+            for _ in range(2):
+                prepared = await bridge.call("prepare_saga_minimum", {"server_id": "saga"})
+                assert not prepared.is_error, prepared.content
+                job = json.loads(prepared.content[0].text)
+                assert job["submission_enabled"] and job["attempt"] == attempt
+                assert job["input"] == preview
+                assert job["revision"] == job["reference_sha256"] == revision
+                assert {field: job[field] for field in resources} == resources
+                assert marker["key"] not in prepared.content[0].text
+            url = f"/api/hpc-jobs/saga/attempts/{attempt}/submit"
+            assert (await http.post(url, headers=ORIGIN)).status_code == 403
+            extra = {"action": "submit_prepared_job", "params": {**ids, "cores": 4}}
+            assert (await http.post("/api/confirmations", json=extra)).status_code == 422
+            if drop_reply:
+                # The general "Work on its own" setting still requires this specific review.
+                autonomy = await http.put("/api/claude/autonomy", json={"on": True}, headers=ORIGIN)
+                assert autonomy.is_success and autonomy.json()["on"]
+
+            async def decide(choice):
+                task = asyncio.create_task(bridge.call("submit_prepared_job", ids))
+                try:
+                    with anyio.fail_after(10):
+                        while True:
+                            pending = (await http.get("/api/live")).json()["confirmations"]
+                            if pending:
+                                break
+                            if task.done():
+                                pytest.fail(str((await task).content))
+                            await asyncio.sleep(0.02)
+                    [dialog] = pending
+                    assert dialog["preview"] == preview
+                    for item in ("sample.inp", stage_path, revision, "1 node, 40 cores, 24 h"):
+                        assert item in dialog["summary"], dialog["summary"]
+                    answer = f"/api/confirmations/{dialog['id']}/answer"
+                    body = {"confirm": choice != "refuse"}
+                    for headers in ({}, {**ORIGIN, "X-Chembook-Client": "claude"}):
+                        assert (
+                            await http.post(answer, json=body, headers=headers)
+                        ).status_code == 403
+                    if choice == "change target":
+                        saved = servers.load()
+                        servers.save([servers.Server("saga", "Saga", "127.0.0.1", 1, USER)])
+                    try:
+                        action = await http.post(answer, json=body, headers=ORIGIN)
+                    finally:
+                        if choice == "change target":
+                            servers.save(saved)
+                    assert action.is_success, action.text
+                    return action.json()["status"], await task
+                finally:
+                    task.cancel()
+
+            for choice, expected in (("refuse", "refused"), ("change target", "failed")):
+                status, _ = await decide(choice)
+                assert status == expected
+                assert not any(
+                    r["operation"] == "submit_minimum" for r in saga.record.saga_minimum_requests
+                )
+                assert not stage.exists()
+            initial = await bridge.call("get_prepared_job", ids)
+            assert (
+                not initial.is_error and json.loads(initial.content[0].text)["state"] == "prepared"
+            )
+            status, submitted = await decide("confirm")
+            assert status == ("failed" if drop_reply else "done"), submitted.content
+            assert submitted.is_error == drop_reply
+            follow_up = {"server_id": "saga", "job_id": "72410", "path": stage_path}
+            for repeat in (False, True):
+                if repeat:
+                    status, submitted = await decide("confirm")
+                    assert status == "done" and not submitted.is_error
+                found = await bridge.call("get_prepared_job", ids)
+                assert not found.is_error, found.content
+                result = json.loads(found.content[0].text)
+                assert result["state"] == "submitted" and result["revision"] == revision
+                assert result["follow_up"] == follow_up
+            checked = await bridge.call("check_server_job", follow_up)
+            assert (
+                not checked.is_error and json.loads(checked.content[0].text)["state"] == "started"
+            )
+
+    anyio.run(exercise)
+    payload = {"operation": "submit_minimum", "attempt": attempt, "revision": revision, **resources}
+    signed = {**payload, "signature": job_pilot.signature(bytes.fromhex(marker["key"]), payload)}
+    submissions = [
+        r for r in saga.record.saga_minimum_requests if r["operation"] == "submit_minimum"
+    ]
+    assert submissions == [signed, signed]
+    reads = [r for r in saga.record.saga_minimum_requests if r["operation"] == "minimum_status"]
+    assert reads == [{"operation": "minimum_status", "attempt": attempt, "revision": revision}] * 3
+    assert (stage / "scheduler-calls.txt").read_text().splitlines() == [
+        "sample.inp -n 1 -c 40 -t 24"
+    ]
+    assert (stage / "sample.inp").read_bytes() == preview.encode()
+    assert saga.record.logins == 1 and set(saga.record.commands[before:]) == {saga_access.COMMAND}
+
+
+def _assert_only_enrollment_sftp(saga, start):
+    assert {p.lstrip("/") for p in saga.record.sftp_paths[start:]} <= {
+        ".",
+        SAGA_MARKER,
+        SAGA_WORK.lstrip("/"),
+    }
+
+
+def test_saga_enrollment_routes_agent_files_through_the_pinned_helper(at_work, saga):
+    work = _enroll_saga(saga, install_helper=True)
+    (work / "results").mkdir()
+    (work / "results" / "sample.txt").write_text("fixture result", encoding="utf-8")
+    before_exec, before_sftp = len(saga.record.commands), len(saga.record.sftp_paths)
+    files = "/api/server-files/saga"
+    results = f"{SAGA_WORK}/results"
+    geometry = f"{SAGA_WORK}/geometries/other.xyz"
+
+    response = at_work.get(f"{files}/files", params={"path": results})
+    assert response.is_success, response.text
+    listing = response.json()
+    assert listing["path"] == results and SAGA_WORK in listing["cwd_note"]
+    assert [(e["name"], e["kind"], e["size"]) for e in listing["entries"]] == [
+        ("sample.txt", "file", len("fixture result")),
+    ]
+    read = at_work.get(f"{files}/read", params={"path": f"{results}/sample.txt"})
+    assert read.is_success and "fixture result" in read.text
+
+    assert _write(at_work, geometry, WATER).status_code == 409
+    assert [r["operation"] for r in saga.record.saga_file_requests] == ["list_files", "read_file"]
+    assert _allow(at_work).is_success
+    text = WATER.replace("\n", "\r\n").replace("water\r\n", "water\r\r\n")
+    expected = WATER.replace("water\n", "water\r\n").encode()
+    written = _write(at_work, geometry, text)
+    assert written.is_success, written.text
+    assert written.json()["path"] == f"saga:{geometry}"
+    assert written.json()["folders"] == [] and written.json()["size"] == len(expected)
+    assert saga.record.saga_file_requests[-1] == {
+        "operation": "create_xyz",
+        "path": geometry,
+        "text": text,
+    }
+    assert _write(at_work, geometry, WATER.replace("water", "duplicate")).status_code == 409
+    assert (work / "geometries" / "other.xyz").read_bytes() == expected
+    assert [entry["path"] for entry in _status(at_work)["claude_written"]] == [geometry]
+
+    for path in (
+        "manual.xyz",
+        f"{results}/other.xyz",
+        f"{SAGA_WORK}/geometries/deep/other.xyz",
+        f"{SAGA_WORK}/geometries/other.inp",
+    ):
+        assert _write(at_work, path, WATER).status_code == 409, path
+    assert at_work.get(f"{files}/files", params={"path": WORK}).status_code == 409
+    assert at_work.get(f"{files}/read", params={"path": f"{WORK}/job.gjf"}).status_code == 409
+    assert at_work.post(f"{files}/import", json={"paths": [f"{WORK}/{TS}"]}).status_code == 409
+    assert not (saga.root / WORK.lstrip("/") / "manual.xyz").exists()
+    assert not (work / "geometries" / "deep").exists()
+    assert sorted(p.name for p in (work / "results").iterdir()) == ["sample.txt"]
+    assert saga.record.commands[before_exec:] == [saga_access.COMMAND] * len(
+        saga.record.saga_file_requests
+    )
+    _assert_only_enrollment_sftp(saga, before_sftp)
+    assert saga.record.logins == 1
+
+
+def test_saga_agent_import_copies_an_output_in_bounded_helper_reads(at_work, saga):
+    work = _enroll_saga(saga, install_helper=True)
+    output = (FIXTURES / TS).read_bytes()
+    (work / "results").mkdir()
+    (work / "results" / TS).write_bytes(output)
+    path = f"{SAGA_WORK}/results/{TS}"
+    before_exec, before_sftp = len(saga.record.commands), len(saga.record.sftp_paths)
+    plan = at_work.post("/api/server-files/saga/import", json={"paths": [path]})
+    assert plan.is_success, plan.text
+    assert plan.json()["origin"] == {"device": "Saga", "path": f"saga:{path}", "name": TS}
+    imported = at_work.post(f"/api/imports/{plan.json()['token']}/commit", json={})
+    assert imported.is_success, imported.text
+    node_id = imported.json()["node_id"]
+    source = at_work.get(f"/api/nodes/{node_id}/calculations").json()[0]["source_file"]
+    assert at_work.get(f"/api/source-files/{source['id']}/download").content == output
+
+    assert all(
+        r["operation"] == "read_file" and r["path"] == path for r in saga.record.saga_file_requests
+    )
+    chunks = [(r["offset"], r["length"]) for r in saga.record.saga_file_requests if r["length"]]
+    assert chunks == [
+        (start, min(keeper.MAX_READ, len(output) - start))
+        for start in range(0, len(output), keeper.MAX_READ)
+    ]
+    assert saga.record.commands[before_exec:] == [saga_access.COMMAND] * len(
+        saga.record.saga_file_requests
+    )
+    _assert_only_enrollment_sftp(saga, before_sftp)
+
+
+def test_saga_download_discards_chunks_when_output_is_replaced(
+    at_work, saga, tmp_path, monkeypatch
+):
+    work = _enroll_saga(saga, install_helper=True)
+    output = work / "growing.out"
+    output.write_bytes(b"a" * (keeper.MAX_READ + 10))
+    replacement = work / "replacement"
+    replacement.write_bytes(b"b" * output.stat().st_size)
+    stamp = output.stat().st_mtime_ns
+    os.utime(replacement, ns=(stamp, stamp))
+    original = saga._saga_files
+
+    async def file_request(process, request):
+        if request["operation"] == "read_file" and request["offset"] == keeper.MAX_READ:
+            replacement.replace(output)
+        return await original(process, request)
+
+    monkeypatch.setattr(saga, "_saga_files", file_request)
+    destination = tmp_path / "copies"
+    destination.mkdir()
+    existing = destination / output.name
+    existing.write_bytes(b"previous copy")
+    reply = asyncio.run(
+        client.call(
+            "download",
+            server="saga",
+            paths=[f"{SAGA_WORK}/{output.name}"],
+            folder=str(destination),
+            within=True,
+        )
+    )
+    assert not reply["files"] and "changed" in reply["failed"][0]["reason"]
+    assert list(destination.iterdir()) == [existing]
+    assert existing.read_bytes() == b"previous copy"
+
+
+@pytest.mark.parametrize("failure", ["missing", "wrong pin", "refusal"])
+def test_saga_agent_file_helper_failures_never_fall_back_to_sftp(at_work, saga, tmp_path, failure):
+    work = _enroll_saga(saga, install_helper=failure == "refusal")
+    if failure == "wrong pin":
+        (saga.saga_control / "saga_prepare.py").write_text(
+            "raise AssertionError()", encoding="utf-8"
+        )
+    if failure == "refusal":
+        saga.saga_file_error = "Fixture helper refused the request."
+    expected = {
+        "missing": "Saga could not read ~/.local/lib/chembook3d/saga_prepare.py",
+        "wrong pin": f"The running keeper expects Saga helper SHA-256 {saga_access._sha}",
+        "refusal": saga.saga_file_error,
+    }[failure]
+    (work / "results").mkdir()
+    (work / "results" / TS).write_bytes((FIXTURES / TS).read_bytes())
+    results = f"{SAGA_WORK}/results"
+    path = f"{results}/{TS}"
+    geometry = f"{SAGA_WORK}/geometries/failed.xyz"
+    assert _allow(at_work).is_success
+    before_exec, before_sftp = len(saga.record.commands), len(saga.record.sftp_paths)
+    files = "/api/server-files/saga"
+    for response in (
+        at_work.get(f"{files}/files", params={"path": results}),
+        at_work.get(f"{files}/read", params={"path": path}),
+        _write(at_work, geometry, WATER),
+    ):
+        assert response.status_code == 409, response.text
+        assert expected in response.json()["detail"]
+    folder = tmp_path / "copy"
+    folder.mkdir()
+    copied = asyncio.run(
+        client.call("download", server="saga", paths=[path], folder=str(folder), within=True)
+    )
+    assert copied["files"] == [] and [item["path"] for item in copied["failed"]] == [path]
+    assert not list(folder.iterdir()) and not list((work / "geometries").iterdir())
+    assert [r["operation"] for r in saga.record.saga_file_requests] == [
+        "list_files",
+        "read_file",
+        "create_xyz",
+        "read_file",
+    ]
+    assert saga.record.commands[before_exec:] == [saga_access.COMMAND] * 4
+    _assert_only_enrollment_sftp(saga, before_sftp)
+    assert saga.record.logins == 1
+
+
+@pytest.mark.parametrize("capability", [None, False])
+def test_older_keeper_cannot_offer_agent_file_operations(at_work, saga, monkeypatch, capability):
+    _enroll_saga(saga, install_helper=True)
+    assert _allow(at_work).is_success
+    call = client.call
+    operations = []
+
+    async def old_keeper(operation, **fields):
+        operations.append(operation)
+        result = await call(operation, **fields)
+        if operation == "ping":
+            if capability is None:
+                result.pop("saga_file_operations", None)
+            else:
+                result["saga_file_operations"] = capability
+        return result
+
+    monkeypatch.setattr(client, "call", old_keeper)
+    files = "/api/server-files/saga"
+    path = f"{SAGA_WORK}/geometries/old.xyz"
+    for response in (
+        at_work.get(f"{files}/files", params={"path": SAGA_WORK}),
+        at_work.get(f"{files}/read", params={"path": path}),
+        _write(at_work, path, WATER),
+        at_work.post(f"{files}/import", json={"paths": [path]}),
+    ):
+        assert response.status_code == 409
+        assert "older version" in response.json()["detail"]
+    assert operations == ["ping"] * 4
+    assert not saga.record.saga_file_requests and saga.record.logins == 1
+
+
+def test_saga_enrollment_preserves_manual_transfers_outside_the_pilot(at_work, saga):
+    _enroll_saga(saga)  # manual transfers still work with the helper missing
+    node = _node(at_work, "manual")
+    sent = at_work.post("/api/remote/servers/saga/send", json={"node_id": node}, headers=ORIGIN)
+    assert sent.json() == {"path": f"{WORK}/manual.xyz", "sent": True, "exists": False}
+    url = "/api/remote/servers/saga/files"
+    listing = at_work.get(url)
+    assert listing.is_success, listing.text
+    assert "manual.xyz" in {entry["name"] for entry in listing.json()["entries"]}
+    before_sftp = len(saga.record.sftp_paths)
+    agent = at_work.get(url, headers={"X-Chembook-Client": "claude"})
+    assert agent.status_code == 403 and len(saga.record.sftp_paths) == before_sftp
+    plan = at_work.post(
+        "/api/remote/servers/saga/import", json={"paths": [f"{WORK}/{TS}"]}, headers=ORIGIN
+    )
+    assert plan.is_success, plan.text
+    imported = at_work.post(f"/api/imports/{plan.json()['token']}/commit", json={})
+    assert imported.is_success and imported.json()["node_id"]
+    assert f"{WORK}/manual.xyz" in saga.record.sftp_paths
+    assert f"{WORK}/{TS}" in saga.record.sftp_paths
+    assert saga.record.saga_file_requests == []
+    assert saga.record.logins == 1
+
+
+@pytest.mark.parametrize("drop_reply", [False, True])
+def test_local_preparation_submission_and_follow_up_through_mcp(
+    at_work, saga, config_dir, drop_reply
+):
+    # The app, bridge, real keeper and loopback SSH helper exercise the production routes.
+    args = {
+        "server_id": "saga",
+        "job_file": "linked-minimum.jd" if drop_reply else "minimum.jd",
+        "geometry": "water.xyz",
+        "cores": 40,
+        "hours": 24,
+    }
+    assert (
+        at_work.post(
+            "/api/hpc-jobs/saga/prepare", json={k: v for k, v in args.items() if k != "server_id"}
+        ).status_code
+        == 409
+    )
+    enable_job_pilot(saga, config_dir, "saga")
+    saga.drop_submit_reply = drop_reply
+    remote = saga.job_pilot.remote_work
+    # The user's shell stays in WORK, outside the pilot. Its location grants no agent access.
+    assert _allow(at_work).is_success
+    assert _write(at_work, "other.xyz").status_code == 409
+    assert _write(at_work, f"{remote}/other.xyz").status_code == 409
+    assert _write(at_work, f"{remote}/geometries/other.xyz", "1\n\nHe 0 0 0\n").is_success
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            bridge = Bridge(APP, http=http)
+            assert (
+                await bridge.call("list_server_files", {"server_id": "saga", "path": WORK})
+            ).is_error
+            prepared = await bridge.call("prepare_gaussian_job", args)
+            assert not prepared.is_error, prepared.content
+            record = json.loads(prepared.content[0].text)
+            ids = {"attempt": record["attempt"], "server_id": "saga"}
+            assert record["state"] == "prepared"
+            assert record["input"].count("--Link1--") == (4 if drop_reply else 0)
+            url = f"/api/hpc-jobs/saga/attempts/{record['attempt']}/submit"
+            assert (await http.post(url)).status_code == 403
+            for approved in (False, True):
+                task = asyncio.create_task(bridge.call("submit_prepared_job", ids))
+                try:
+                    with anyio.fail_after(10):
+                        while True:
+                            pending = (await http.get("/api/live")).json()["confirmations"]
+                            if pending:
+                                break
+                            await asyncio.sleep(0.02)
+                    dialog = pending[0]
+                    assert record["revision"] in dialog["summary"]
+                    assert dialog["preview"] == record["input"]
+                    assert "40 cores, 24 h" in dialog["summary"]
+                    answer = f"/api/confirmations/{dialog['id']}/answer"
+                    assert (await http.post(answer, json={"confirm": True})).status_code == 403
+                    response = await http.post(answer, json={"confirm": approved}, headers=ORIGIN)
+                    expected = ("failed" if drop_reply else "done") if approved else "refused"
+                    assert response.json()["status"] == expected, response.text
+                    await task
+                finally:
+                    task.cancel()
+                status = await bridge.call("get_prepared_job", ids)
+                observed = json.loads(status.content[0].text)
+                assert observed["state"] == ("submitted" if approved else "prepared")
+            checked = await bridge.call("check_server_job", observed["follow_up"])
+            assert json.loads(checked.content[0].text)["state"] == "started"
+            assert saga.record.logins == 1
+            calls = saga.job_pilot.work / record["attempt"] / "submission" / "scheduler-calls.txt"
+            assert calls.read_text().splitlines() == ["water.inp 1 40 24"]
+            assert calls.with_name("water.inp").read_bytes() == record["input"].encode()
+
+    anyio.run(exercise)
+
+
 # ---------- T-SSH-23 Claude imports outputs from the terminal's directory (D225) ----------
 
 
@@ -1348,6 +1929,8 @@ def test_a_new_file_and_its_folders_are_written_and_listed(at_work, saga):
     assert deep.json()["folders"] == [f"{WORK}/conformers", f"{WORK}/conformers/c01"]
     assert (work / "conformers" / "c01" / "c01.xyz").read_text(encoding="utf-8") == WATER
     assert _write(at_work, "conformers/c02.xyz", WATER).json()["folders"] == []
+    assert f"{WORK}/conformers/c01/c01.xyz" in saga.record.sftp_paths
+    assert saga.record.saga_file_requests == []
 
     listed = _status(at_work)["claude_written"]
     assert [w["path"] for w in listed] == [
@@ -1478,7 +2061,7 @@ def test_scans_reports_go_to_the_app_apart_from_inspect():
         {"type": "inspect", "paths": ["/w/x.out"]},
         {"type": "cwd", "path": "/w"},
     ]
-    assert "scans() {" in keeper.RC and keeper.PROTOCOL == 7
+    assert "scans() {" in keeper.RC and keeper.PROTOCOL >= 7
 
 
 def _editor_on(at_work, path: str) -> dict:

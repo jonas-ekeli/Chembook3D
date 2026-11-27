@@ -679,8 +679,36 @@ TOOLS: list[ToolSpec] = [
         "GET",
         "/api/server-files",
         "The SSH servers (Saga, ...) the app knows: whether the user is logged in and the "
-        "current directory of the server's terminal in the app. Only that directory and the "
-        "ones below it can be read; the user moves it with cd. You cannot log in.",
+        "current directory of the server's terminal in the app. Enrolled pilots have a fixed "
+        "read scope. Other servers allow reads in the current directory and below.",
+    ),
+    T(
+        "prepare_saga_minimum",
+        "write",
+        "POST",
+        "/api/hpc-jobs/{server_id}/prepare-minimum",
+        "Prepare the single operator-enrolled minimum on Saga using nosub. The helper selects "
+        "the verified XYZ, job description and work directory. Returns the checked Gaussian "
+        "input and SHA-256. When submission is enrolled, the result also includes the attempt "
+        "ID and resources for submit_prepared_job. Repeating recovers the same preparation.",
+    ),
+    T(
+        "prepare_gaussian_job",
+        "write",
+        "POST",
+        "/api/hpc-jobs/{server_id}/prepare",
+        "Prepare one ordinary Gaussian optimization on the configured local HPC pilot. "
+        "Select an approved .jd and .xyz by filename. Uses one node. Returns the complete "
+        "input for review, revision digest and attempt ID. Preparation never submits.",
+    ),
+    T(
+        "get_prepared_job",
+        "read",
+        "GET",
+        "/api/hpc-jobs/{server_id}/attempts/{attempt}",
+        "Read the state of an enrolled Saga or local HPC pilot attempt, including after a lost "
+        "submission reply. A receipt includes the arguments for check_server_job. "
+        "For an uncertain attempt reconcile it with the scheduler before any new submission.",
     ),
     T(
         "check_server_job",
@@ -704,8 +732,8 @@ TOOLS: list[ToolSpec] = [
         "read",
         "GET",
         "/api/server-files/{server_id}/files",
-        "The files in the server terminal's current directory (or a directory below it): "
-        "name, kind, size, time.",
+        "List names, types, sizes and modification times in the agent's allowed directory. "
+        "Use the enrolled pilot path on Saga.",
         help={
             "server_id": "Id of a logged-in server, from list_servers (e.g. 'saga').",
             "path": "A directory relative to the terminal's current directory (or a full path "
@@ -796,7 +824,8 @@ TOOLS: list[ToolSpec] = [
         "write",
         "POST",
         "/api/server-files/{server_id}/write",
-        "Write a NEW text file (an input, a job script, an xyz, notes) in the server terminal's "
+        "On enrolled Saga, create a new XYZ directly under the pilot's geometries directory. "
+        "On ordinary servers, write a NEW text file in the server terminal's "
         "current directory or a folder below it (new folders are made), only after the user "
         "turned on 'Let Claude write new files here' in the app's server tab (list_servers "
         "shows `writes`). An existing file is never replaced, edited or deleted: to change one, "
@@ -2101,6 +2130,8 @@ TOOLS += [
 # ---------- deleting: the app asks the user (D91) ----------
 
 CONFIRM_DESCRIPTIONS = {
+    "submit_prepared_job": "Ask the user to submit a prepared Gaussian input on the enrolled Saga "
+    "or local HPC pilot. The app shows the input, destination and resources for confirmation.",
     "delete_node": "Delete a node (or free species) with its calculations, notes and every "
     "edge touching it.",
     "delete_group": "Delete a group with its contents: its members, their calculations and "

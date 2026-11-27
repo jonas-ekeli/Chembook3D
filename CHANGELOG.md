@@ -6,6 +6,24 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The Saga pilot can submit one operator-enabled Gaussian minimum after the user
+  reviews the input, account and resources in the app. Looking up the same
+  attempt recovers its Slurm receipt after a lost reply. The submission workflow
+  has been tested with a local scheduler stand-in and a live Saga water calculation
+  through optimization, frequency analysis and copy-back (D266, 05 §9).
+
+- On enrolled Saga accounts, the cluster helper now enforces the notebook agent's
+  file permissions for listing, reading results, importing and creating new XYZ
+  files. Existing enrollments can update the helper in place (D266, 05 §9).
+
+- The notebook agent can reproduce one manually verified Gaussian minimum input through
+  an existing Saga login. The operator enrolls the reference on Saga. The helper runs the
+  generator with `nosub` and checks the full input against its SHA-256 digest (D266).
+
+- The local HPC pilot can prepare a Gaussian optimization from an approved job description
+  and XYZ geometry. The app shows the input and resources for approval and retains the
+  attempt so a lost submission reply can be checked without submitting twice (D266).
+
 - Building from a folder, from what validation run 4 showed (A190–A192): `find_direct_links`
   lists the steps between minima with no TS (a free species joining or leaving, ranked by the
   RMSD of the complex without it; a coordination or conformation change, "no TS: direct

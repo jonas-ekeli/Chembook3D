@@ -65,11 +65,21 @@ MAX_DIFF = 300  # lines of an edited copy's difference shown
 
 
 @dataclass
+class _Meta:
+    path: str  # full path on the server, symlinks followed
+    size: int
+    modified: int | None
+    head: bytes  # the first bytes asked for
+    version: str | None
+
+
+@dataclass
 class _Copy:
     folder: Path
     name: str
     size: int
     modified: int | None
+    version: str | None
     read: inspection.Inspection | None = None  # the summary's reading, kept with the copy
 
     @property
@@ -97,14 +107,17 @@ class Copies:
         for key in list(self.kept):
             self.drop(key)
 
-    async def get(
-        self, server: servers.Server, path: str, size: int, modified, job_id: str | None = None
-    ) -> _Copy:
-        """A copy of the file as it is now (`size` and `modified` as just read)."""
+    async def get(self, server: servers.Server, meta: _Meta, job_id: str | None = None) -> _Copy:
+        """Reuse a copy only while the remote file has the same metadata and helper version."""
+        path, size = meta.path, meta.size
         key = (server.id, path, job_id)
         async with self.lock:
             found = self.kept.get(key)
-            if found is not None and (found.size, found.modified) == (size, modified):
+            if found is not None and (found.size, found.modified, found.version) == (
+                size,
+                meta.modified,
+                meta.version,
+            ):
                 self.kept.move_to_end(key)
                 return found
             self.drop(key)
@@ -129,11 +142,17 @@ class Copies:
                 if answer["failed"]:
                     raise HTTPException(422, answer["failed"][0]["reason"])
                 copied = answer["files"][0]
+                if copied.get("version") != meta.version:
+                    raise HTTPException(409, "The remote file changed before the copy completed.")
             except BaseException:
                 shutil.rmtree(folder, ignore_errors=True)
                 raise
             found = _Copy(
-                folder, Path(copied["local"]).name, copied["size"], copied.get("modified")
+                folder,
+                Path(copied["local"]).name,
+                copied["size"],
+                copied.get("modified"),
+                meta.version,
             )
             self.kept[key] = found
             return found
@@ -168,22 +187,18 @@ async def _reader(request: Request, server_id: str, write: bool = False) -> serv
     _check(request, page_only=False)
     server = _saved(server_id)
     ping = await _keeper(server, "ping")
-    if ping.get("protocol", 1) < (WRITER_PROTOCOL if write else READER_PROTOCOL):
+    if (
+        ping.get("protocol", 1) < (WRITER_PROTOCOL if write else READER_PROTOCOL)
+        or ping.get("saga_file_operations") is not True
+    ):
         what = "write" if write else "read"
         raise HTTPException(
             409,
             f"The connection to {server.name} was opened by an older version of Chembook3D, "
-            f"which cannot let Claude {what} files. The user logs out and logs in again.",
+            f"which cannot let Claude {what} files with the current checks. The user logs out "
+            "and logs in again after the old keeper exits (at least a minute).",
         )
     return server
-
-
-@dataclass
-class _Meta:
-    path: str  # full path on the server, symlinks followed
-    size: int
-    modified: int | None
-    head: bytes  # the first bytes asked for
 
 
 async def _meta(server: servers.Server, path: str, head: int = 0) -> _Meta:
@@ -193,6 +208,7 @@ async def _meta(server: servers.Server, path: str, head: int = 0) -> _Meta:
         answer["size"],
         answer.get("modified"),
         base64.b64decode(answer["data"]),
+        answer.get("version"),
     )
 
 
@@ -293,7 +309,7 @@ async def list_servers(request: Request) -> ServersReadable:
         reason = None
         if session is None:
             reason = f"Not logged in; the user logs in in the app's {server.name} tab."
-        elif protocol < READER_PROTOCOL:
+        elif protocol < READER_PROTOCOL or held.get("saga_file_operations") is not True:
             reason = "Logged in by an older version of the app; the user logs out and in again."
         elif not cwd:
             reason = "The terminal has not reported its current directory."
@@ -307,7 +323,7 @@ async def list_servers(request: Request) -> ServersReadable:
                 cwd=cwd,
                 readable=reason is None,
                 reason=reason,
-                writes=bool(session and session.get("writes")),
+                writes=bool(reason is None and session and session.get("writes")),
             )
         )
     return ServersReadable(servers=result)
@@ -336,8 +352,12 @@ async def list_server_files(server_id: str, request: Request, path: str = "") ->
     return FileListing(
         server=server.id,
         path=answer["path"],
-        cwd_note="Paths are relative to the terminal's current directory; only it and the "
-        "directories below it can be read.",
+        cwd_note=(
+            f"Agent reads on this pilot are limited to the tree under {answer['agent_read_root']}."
+            if answer.get("agent_read_root")
+            else "Paths are relative to the terminal's current directory; only it and the "
+            "directories below it can be read."
+        ),
         entries=[
             FileEntry(
                 name=e["name"],
@@ -365,7 +385,7 @@ async def _all_lines(request: Request, server: servers.Server, meta: _Meta) -> I
     a copy."""
     if len(meta.head) >= meta.size:
         return iter(_decoded(meta.head))
-    copy = await copies(request.app).get(server, meta.path, meta.size, meta.modified)
+    copy = await copies(request.app).get(server, meta)
     return _file_lines(copy.local)
 
 
@@ -518,7 +538,7 @@ async def _inspected(
             f"{meta.path} is {meta.size / 1e6:.0f} MB, more than the Inspect window reads; "
             "use read_server_file with search or tail.",
         )
-    copy = await copies(request.app).get(server, meta.path, meta.size, meta.modified, job_id)
+    copy = await copies(request.app).get(server, meta, job_id)
     if copy.read is None:
         try:
             copy.read = await asyncio.to_thread(inspection.read_path, copy.local, copy.name)
@@ -787,7 +807,7 @@ async def _gathered(
     try:
         kept = copies(request.app)
         for meta in metas:
-            copy = await kept.get(server, meta.path, meta.size, meta.modified)
+            copy = await kept.get(server, meta)
             shutil.copyfile(copy.local, folder / posixpath.basename(meta.path))
         # D134: an ORCA IRC's points are in trajectories beside it; bring those there are.
         directory = posixpath.dirname(metas[0].path)
@@ -801,7 +821,7 @@ async def _gathered(
                     continue
                 try:
                     beside = await _meta(server, posixpath.join(directory, name))
-                    copy = await kept.get(server, beside.path, beside.size, beside.modified)
+                    copy = await kept.get(server, beside)
                 except HTTPException:
                     continue  # one that is not there stays missing; the import names it
                 shutil.copyfile(copy.local, folder / name)

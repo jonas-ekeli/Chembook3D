@@ -4,6 +4,7 @@ import { Modal } from './Modal'
 import { errorText } from '../util'
 
 const TITLES: Record<string, string> = {
+  submit_prepared_job: 'Submit the prepared Gaussian job?',
   dissolve_group: 'Claude asks to dissolve a group',
   remove_coordinates: 'Claude asks to remove coordinates',
 }
@@ -49,12 +50,18 @@ export function ClaudeRequestDialog({
             Refuse
           </button>
           <button className="danger" disabled={busy} onClick={() => answer(true)}>
-            Confirm
+            {request.action === 'submit_prepared_job' ? 'Submit job' : 'Confirm'}
           </button>
         </>
       }
     >
       <p>{request.summary}.</p>
+      {request.preview && (
+        <details>
+          <summary>Review Gaussian input</summary>
+          <pre style={{ maxHeight: '40vh', overflow: 'auto' }}>{request.preview}</pre>
+        </details>
+      )}
       {request.reason && <p>Claude's reason: {request.reason}</p>}
       <p className="muted">
         Nothing changes unless you confirm. Without an answer this is refused in {left} s.
