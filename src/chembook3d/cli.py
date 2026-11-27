@@ -44,6 +44,26 @@ def open_browser(url: str) -> None:
 def main(argv: list[str] | None = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
+    if argv[:1] == ["saga-ts-bundle"]:
+        import json
+
+        from chembook3d.remote.saga_ts_bundle import export_bundle
+
+        parser = argparse.ArgumentParser(prog="chembook3d saga-ts-bundle")
+        parser.add_argument("parent", type=Path, help="Archived constrained pre-optimization .inp")
+        parser.add_argument("child", type=Path, help="Reviewed unconstrained project TS .inp")
+        parser.add_argument("destination", type=Path, help="New private bundle directory")
+        parser.add_argument("--parent-job-id", required=True)
+        parser.add_argument("--mode-index", required=True, type=int)
+        args = parser.parse_args(argv[1:])
+        try:
+            review = export_bundle(
+                args.parent, args.child, args.parent_job_id, args.mode_index, args.destination
+            )
+        except (OSError, ValueError) as exc:
+            parser.exit(1, f"{exc}\n")
+        print(json.dumps(review, indent=2))
+        return
     if argv[:1] == ["saga-probe"]:
         import asyncio
         import json

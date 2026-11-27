@@ -866,49 +866,8 @@ class Keeper:
             if reply["ok"]:
                 session.used = time.monotonic()
             return reply
-        if op in {"saga_prepare_minimum", "saga_minimum_job"}:
-            fields = {"op", "token", "server"}
-            if op == "saga_minimum_job":
-                fields.update(("target", "key_id", "request"))
-            if msg.keys() != fields:
-                return {"ok": False, "error": "Invalid fields for the Saga job request."}
-            session = self.sessions.get(str(msg.get("server")))
-            if session is None or not saga_access.is_saga(session.server["host"]):
-                return {"ok": False, "error": "Connect to the enrolled Saga server in the HPC tab."}
-            try:
-                await refresh_saga_scope(session)
-                if session.saga_work is None:
-                    return {
-                        "ok": False,
-                        "error": "Enroll the verified manual minimum on Saga first.",
-                    }
-                target = [session.server[k] for k in ("host", "port", "username")]
-                policy = await saga_access.submission_policy(await session.files())
-                if op == "saga_prepare_minimum":
-                    reply = await saga_access.prepare(session.conn, session.saga_work)
-                    if reply["ok"] and policy is not None:
-                        result = reply["result"]
-                        directory = posixpath.join(session.saga_work, "prepare-" + policy.attempt)
-                        if result["directory"] == directory and result["sha256"] == policy.revision:
-                            result.update(
-                                submission_enabled=True,
-                                attempt=policy.attempt,
-                                revision=policy.revision,
-                                key_id=policy.key_id,
-                                **saga_access.RESOURCES,
-                            )
-                            reply["target"] = target
-                else:
-                    if policy is None or msg["target"] != target or msg["key_id"] != policy.key_id:
-                        return {"ok": False, "error": "The Saga submission enrollment has changed."}
-                    reply = await saga_access.minimum_job(
-                        session.conn, session.saga_work, policy, msg["request"]
-                    )
-            except (ValueError, OSError, asyncssh.Error) as exc:
-                return {"ok": False, "error": _reason(exc)}
-            if reply["ok"]:
-                session.used = time.monotonic()
-            return reply
+        if op in {"saga_prepare_minimum", "saga_prepare_ts", "saga_minimum_job", "saga_ts_job"}:
+            return await self._saga_job(op, msg)
         if op == "job_pilot":
             session = self.sessions.get(str(msg.get("server")))
             if session is None:
@@ -987,6 +946,65 @@ class Keeper:
             self.stopping.set()
             return {"ok": True}
         return {"ok": False, "error": f"Unknown operation {op!r}."}
+
+    async def _saga_job(self, op: str, msg: dict) -> dict:
+        fields = {"op", "token", "server"}
+        ts = op in {"saga_prepare_ts", "saga_ts_job"}
+        if op != "saga_prepare_minimum":
+            fields.add("target")
+        if op in {"saga_minimum_job", "saga_ts_job"}:
+            fields.update(("key_id", "request"))
+        if op == "saga_ts_job":
+            fields.add("directory")
+        if msg.keys() != fields:
+            return {"ok": False, "error": "Invalid fields for the Saga job request."}
+        session = self.sessions.get(str(msg.get("server")))
+        if session is None or not saga_access.is_saga(session.server["host"]):
+            return {"ok": False, "error": "Connect to the enrolled Saga server in the HPC tab."}
+        target = [session.server[k] for k in ("host", "port", "username")]
+        if "target" in fields and msg["target"] != target:
+            return {"ok": False, "error": "The connected Saga target has changed."}
+        try:
+            await refresh_saga_scope(session)
+            root = session.saga_work
+            if root is None:
+                return {"ok": False, "error": "Enroll the Saga pilot directory first."}
+            policy = await saga_access.submission_policy(await session.files(), ts=ts)
+            if op == "saga_prepare_minimum":
+                reply = await saga_access.prepare(session.conn, root)
+                if reply["ok"] and policy is not None:
+                    result = reply["result"]
+                    directory = posixpath.join(root, "prepare-" + policy.attempt)
+                    if result["directory"] == directory and result["sha256"] == policy.revision:
+                        result.update(
+                            submission_enabled=True,
+                            **policy.pins(),
+                            key_id=policy.key_id,
+                            **saga_access.RESOURCES,
+                        )
+                        reply["target"] = target
+            elif op == "saga_prepare_ts":
+                if not isinstance(policy, saga_access.TSSubmissionPolicy):
+                    return {"ok": False, "error": "Enroll the reviewed TS bundle on Saga first."}
+                reply = await saga_access.prepare_ts(session.conn, root, policy)
+                if reply["ok"]:
+                    reply["result"].update(
+                        submission_enabled=True, key_id=policy.key_id, **saga_access.RESOURCES
+                    )
+                    reply["target"] = target
+            else:
+                if policy is None or msg["key_id"] != policy.key_id:
+                    return {"ok": False, "error": "The Saga submission enrollment has changed."}
+                if ts and msg["directory"] != posixpath.join(
+                    root, "ts-" + policy.attempt, "submission"
+                ):
+                    return {"ok": False, "error": "The Saga TS destination has changed."}
+                reply = await saga_access.enrolled_job(session.conn, root, policy, msg["request"])
+        except (ValueError, OSError, asyncssh.Error) as exc:
+            return {"ok": False, "error": _reason(exc)}
+        if reply["ok"]:
+            session.used = time.monotonic()
+        return reply
 
     async def _list(self, session: Session, path: object, inside: bool = False) -> dict:
         """The files in a directory, by default the shell's current one (D122e). `inside`

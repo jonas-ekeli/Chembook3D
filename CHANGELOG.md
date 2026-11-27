@@ -6,6 +6,11 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The Saga helper supports an operator-enrolled TS replay from an archived constrained
+  pre-optimization. The app reviews the selected mode, parent job, input, checkpoint and
+  allocation before the wrapper can submit. The workstation can create an enrollment
+  with `chembook3d saga-ts-bundle`.
+
 - The local HPC pilot can inspect imaginary modes from a constrained pre-optimization
   and prepare a transition-state job using the producing attempt's checkpoint.
   Submission review includes the parent job, selected mode and checkpoint digest.

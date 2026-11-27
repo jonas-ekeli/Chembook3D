@@ -158,7 +158,7 @@ def _frequency_evidence(
     return {"frequency_geometry": frame, "modes": modes}
 
 
-def _preoptimization_modes(text: str, submitted: str, stem: str, pair: list[int]) -> dict:
+def preoptimization_modes(text: str, submitted: str, stem: str, pair: list[int]) -> dict:
     atoms, frozen, charge_spin, _ = parent_geometry(submitted, stem)
     if pair != frozen:
         raise ValueError("Expected the frozen atom pair in the submitted parent.")
@@ -214,6 +214,23 @@ def _preoptimization_modes(text: str, submitted: str, stem: str, pair: list[int]
     )
 
 
+def completed_copyback(log: str, log_path: Path, stem: str, job_id: str) -> tuple[float, bool]:
+    report = saga_job.parse(log, job_id, log_path.as_posix())
+    start = report.start_timestamp()
+    if (
+        report.job_name != stem
+        or report.state != "completed"
+        or report.wrapper_termination != "normal"
+        or not report.copy_announced
+        or start is None
+    ):
+        raise ValueError("The parent wrapper log must confirm this job and its copied output.")
+    copy = f"Copying './{stem}.fchk.gz' to submission folder..."
+    failure = f"File './{stem}.fchk.gz' could not be copied back home!"
+    lines = {line.strip() for line in log[saga_job.START.search(log).end() :].splitlines()}
+    return start, copy in lines and failure not in lines
+
+
 def inspect_preoptimization(
     submission: Path,
     stem: str,
@@ -233,36 +250,23 @@ def inspect_preoptimization(
     try:
         contents, log_meta = read_snapshot(log_path, 1024**2)
         log = contents.decode("utf-8").replace("\r\n", "\n")
-        report = saga_job.parse(log, job_id, log_path.as_posix())
-        start = report.start_timestamp()
-        if (
-            report.job_name != stem
-            or report.state != "completed"
-            or report.wrapper_termination != "normal"
-            or not report.copy_announced
-            or start is None
-        ):
-            raise ValueError("The parent wrapper log must confirm this job and its copied output.")
+        start, checkpoint_copy = completed_copyback(log, log_path, stem, job_id)
         data, meta = read_snapshot(submission / (stem + ".out"), 64 * 1024**2)
         if not start <= meta.st_mtime <= log_meta.st_mtime:
             raise ValueError("Cannot attribute the copied output's modification time to this job.")
         if submitted_input is None:
             submitted_input, _ = read_snapshot(submission / (stem + ".inp"), 256_000)
-        evidence = _preoptimization_modes(
+        evidence = preoptimization_modes(
             data.decode("utf-8"), submitted_input.decode("utf-8"), stem, pair
         )
     except (IndexError, UnicodeError, OSError) as exc:
         raise ValueError("Parent result files are missing, incomplete or unreadable.") from exc
 
-    copy = f"Copying './{stem}.fchk.gz' to submission folder..."
-    failure = f"File './{stem}.fchk.gz' could not be copied back home!"
-    # A matching unique start marker was required for report.state == "completed".
-    lines = {line.strip() for line in log[saga_job.START.search(log).end() :].splitlines()}
     return {
         "freeze_distance": list(pair),
         "output_sha256": hashlib.sha256(data).hexdigest(),
         **evidence,
-        "checkpoint_copy_announced": copy in lines and failure not in lines,
+        "checkpoint_copy_announced": checkpoint_copy,
         "start_timestamp": start,
         "log_mtime": log_meta.st_mtime,
     }

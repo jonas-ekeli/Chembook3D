@@ -15,10 +15,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from chembook3d.api.remote import _check, _saved
 from chembook3d.api.routes import _investigation
 from chembook3d.models import InvestigationInfo
-from chembook3d.remote import client, job_pilot, servers
+from chembook3d.remote import client, job_pilot, saga_access, servers
 
 router = APIRouter(prefix="/api/hpc-jobs")
 _TS_PILOT = "local_ts"
+_SAGA_TS = "saga_ts"
+_SAGA_PILOTS = {"saga_minimum", _SAGA_TS}
 
 
 async def _no_arguments(request: Request, detail: str):
@@ -34,21 +36,59 @@ def _target(server_id: str) -> list:
 @router.post("/{server_id}/prepare-minimum")
 async def prepare_saga_minimum(server_id: str, request: Request):
     """Prepare the minimum enrolled by the operator in a Saga login (D266)."""
+    return await _prepare_saga(server_id, request, ts=False)
+
+
+@router.post("/{server_id}/prepare-ts")
+async def prepare_saga_ts(server_id: str, request: Request):
+    """Prepare the archived TS input and checkpoint enrolled on the connected Saga account."""
+    return await _prepare_saga(server_id, request, ts=True)
+
+
+async def _prepare_saga(server_id: str, request: Request, *, ts: bool):
     _check(request, page_only=False)
     investigation = _investigation(request)
     info = investigation.info()
     target = _target(server_id)
     await _no_arguments(request, "Only the saved server ID is accepted.")
+    if ts and (info is None or not info.uuid):
+        raise HTTPException(409, "The current investigation has no ID for this preparation.")
     try:
-        reply = await client.call("saga_prepare_minimum", server=server_id, timeout=115)
+        if ts:
+            reply = await client.call(
+                "saga_prepare_ts", server=server_id, target=target, timeout=115
+            )
+        else:
+            reply = await client.call("saga_prepare_minimum", server=server_id, timeout=115)
     except client.KeeperError as exc:
         if "Unknown operation" in str(exc):
             raise HTTPException(
                 409, "The open HPC login uses an older keeper. See the Saga test procedure."
             ) from exc
         raise HTTPException(409, str(exc)) from exc
+    if not isinstance(reply.get("result"), dict):
+        raise HTTPException(409, "The keeper returned an invalid Saga preparation.")
     result = dict(reply["result"])
     key_id = result.pop("key_id", None)
+    if ts:
+        try:
+            if (
+                result.keys()
+                != saga_access.TS_PREVIEW_FIELDS | {"submission_enabled", *saga_access.RESOURCES}
+                or result["submission_enabled"] is not True
+                or not isinstance(result["attempt"], str)
+                or not job_pilot.ATTEMPT.fullmatch(result["attempt"])
+                or not isinstance(result["directory"], str)
+                or not re.fullmatch(
+                    rf"/cluster/projects/[A-Za-z0-9_-]+/{re.escape(target[2])}/chembook3d-pilot/"
+                    rf"ts-{result['attempt']}",
+                    result["directory"],
+                )
+            ):
+                raise ValueError
+            saga_access.validate_ts_preview(result)
+        except ValueError as exc:
+            raise HTTPException(409, "The keeper returned an invalid Saga TS preparation.") from exc
     if result.get("submission_enabled") is True:
         attempt = result["attempt"]
         revision = hashlib.sha256(result["input"].encode()).hexdigest()
@@ -61,15 +101,15 @@ async def prepare_saga_minimum(server_id: str, request: Request):
             or revision != result["revision"]
             or any(
                 type(result.get(k)) is not int or result[k] != n
-                for k, n in (("nodes", 1), ("cores", 40), ("hours", 24))
+                for k, n in saga_access.RESOURCES.items()
             )
-            or not result["directory"].endswith("/prepare-" + attempt)
+            or not result["directory"].endswith(("/ts-" if ts else "/prepare-") + attempt)
         ):
             raise HTTPException(
                 409, "The enrolled preparation does not match the saved target or input."
             )
         record = {
-            "pilot": "saga_minimum",
+            "pilot": _SAGA_TS if ts else "saga_minimum",
             "server_id": server_id,
             "target": target,
             "key_id": key_id,
@@ -80,6 +120,8 @@ async def prepare_saga_minimum(server_id: str, request: Request):
                 k: result[k] for k in ("input_name", "revision", "input", "nodes", "cores", "hours")
             },
         }
+        if ts:
+            record.update({k: result[k] for k in ("review", "review_sha256", "checkpoint_sha256")})
         _store_record(attempt, record)
     return result
 
@@ -230,11 +272,16 @@ def _record(
     if folder != Path(record["folder"]) or (owner and owner != investigation_id):
         raise HTTPException(409, "Open the investigation that prepared this job.")
     pilot = record.get("pilot")
-    if not owner and (require_identity or pilot in {"saga_minimum", _TS_PILOT}):
+    if not owner and (require_identity or pilot in {*_SAGA_PILOTS, _TS_PILOT}):
         raise HTTPException(409, "This prepared job has no recorded investigation ID.")
     if hashlib.sha256(record["input"].encode()).hexdigest() != record["revision"]:
         raise HTTPException(409, "Prepared input no longer matches its recorded revision.")
-    if pilot == "saga_minimum":
+    if pilot == _SAGA_TS:
+        try:
+            saga_access.validate_ts_preview({**record, "state": "prepared"})
+        except ValueError as exc:
+            raise HTTPException(409, "The TS review no longer matches its preparation.") from exc
+    if pilot in _SAGA_PILOTS:
         return record, None
     key = _local_key(server_id, target)
     if record["key_id"] != hashlib.sha256(key).hexdigest():
@@ -243,13 +290,26 @@ def _record(
 
 
 def _summary(record: dict) -> str:
-    if record.get("pilot") == "saga_minimum":
+    if record.get("pilot") in _SAGA_PILOTS:
         host, port, username = record["target"]
-        return (
+        summary = (
             f"Submit {record['input_name']} on {record['server_id']} ({username}@{host}, "
             f"port {port}), {record['nodes']} node, {record['cores']} cores, {record['hours']} h. "
             f"Directory {record['directory']}. Prepared input SHA-256 {record['revision']}"
         )
+        if record["pilot"] == _SAGA_TS:
+            review = record["review"]
+            first, second = review["freeze_distance"]
+            summary += (
+                f". Checkpoint {review['checkpoint_name']} SHA-256 {record['checkpoint_sha256']}. "
+                f"Parent {review['parent_stem']} (Slurm job {review['parent_job_id']}). "
+                f"Mode {review['mode_index']} ({review['frequency_cm1']:g} cm⁻¹), "
+                f"atoms {first} and {second}, bond projection {review['bond_projection']:g}, "
+                f"alignment {review['alignment']:g}. "
+                f"Parent output SHA-256 {review['output_sha256']}. "
+                f"Review SHA-256 {record['review_sha256']}"
+            )
+        return summary
     if record.get("pilot") == _TS_PILOT:
         host, port, username = record["target"]
         mode = record["mode_evidence"]
@@ -288,16 +348,18 @@ def describe_submission(session, params: dict) -> tuple[str, str]:
 
 
 async def _call(
-    server_id: str, request: dict, target: list, key: bytes | None, key_id=None
+    server_id: str, request: dict, target: list, key: bytes | None, key_id=None, directory=None
 ) -> dict:
     try:
         if key is None:
+            ts = request["operation"] in {"submit_ts", "ts_status"}
             response = await client.call(
-                "saga_minimum_job",
+                "saga_ts_job" if ts else "saga_minimum_job",
                 server=server_id,
                 target=target,
                 key_id=key_id,
                 request=request,
+                **({"directory": directory} if ts else {}),
                 timeout=115,
             )
         else:
@@ -307,7 +369,7 @@ async def _call(
             )
     except client.KeeperError as exc:
         detail = str(exc)
-        if request["operation"] in {"submit", "submit_minimum"}:
+        if request["operation"] in {"submit", "submit_minimum", "submit_ts"}:
             detail += " Check the same prepared attempt after reconnecting."
         raise HTTPException(409, detail) from exc
     result = response.get("result")
@@ -469,12 +531,30 @@ async def _action(request: Request, server_id: str, attempt: str, operation: str
         payload.update({k: record[k] for k in ("revision", "cores", "hours")})
         if record.get("pilot") == _TS_PILOT:
             payload["checkpoint_sha256"] = record["checkpoint_sha256"]
-    if record.get("pilot") == "saga_minimum":
+    if record.get("pilot") in _SAGA_PILOTS:
+        ts = record["pilot"] == _SAGA_TS
         if operation == "submit":
-            payload.update(operation="submit_minimum", nodes=record["nodes"])
+            payload.update(operation="submit_ts" if ts else "submit_minimum", nodes=record["nodes"])
         else:
-            payload.update(operation="minimum_status", revision=record["revision"])
-    result = await _call(server_id, payload, record["target"], key, record["key_id"])
+            payload.update(
+                operation="ts_status" if ts else "minimum_status", revision=record["revision"]
+            )
+        if ts:
+            payload.update({k: record[k] for k in ("review_sha256", "checkpoint_sha256")})
+    result = await _call(
+        server_id, payload, record["target"], key, record["key_id"], record["directory"]
+    )
+    if record.get("pilot") == _SAGA_TS and any(
+        result.get(k) != record[k]
+        for k in (
+            "directory",
+            "revision",
+            "review_sha256",
+            "checkpoint_sha256",
+            *saga_access.RESOURCES,
+        )
+    ):
+        raise HTTPException(409, "The returned Saga TS attempt no longer matches its preparation.")
     if record.get("pilot") == _TS_PILOT and any(
         record[k] != v for k, v in _ts_details(result).items()
     ):

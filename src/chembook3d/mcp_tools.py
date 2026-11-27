@@ -693,6 +693,17 @@ TOOLS: list[ToolSpec] = [
         "ID and resources for submit_prepared_job. Repeating recovers the same preparation.",
     ),
     T(
+        "prepare_saga_ts",
+        "write",
+        "POST",
+        "/api/hpc-jobs/{server_id}/prepare-ts",
+        "Prepare the single reviewed TS input and checkpoint enrolled by the operator on Saga. "
+        "Returns the full Gaussian input, parent Slurm receipt, selected mode and frozen atom "
+        "pair, checkpoint and output digests, destination, fixed resources and attempt ID. "
+        "Use submit_prepared_job for app confirmation. After a submission claim, get_prepared_job "
+        "recovers its receipt or reports uncertainty.",
+    ),
+    T(
         "prepare_gaussian_job",
         "write",
         "POST",
@@ -2166,7 +2177,8 @@ CONFIRM_DESCRIPTIONS = {
     "submit_prepared_job": "Ask the user to submit a prepared Gaussian input on the enrolled Saga "
     "or local HPC pilot. The app shows the input, destination and resources for confirmation. "
     "A constrained pre-optimization shows the frozen distance. A TS follow-on shows its "
-    "parent and Slurm receipt, selected mode and checkpoint digest.",
+    "parent and Slurm receipt, selected mode and checkpoint digest. A Saga TS submission also "
+    "shows the enrolled checkpoint filename and archived review digest.",
     "delete_node": "Delete a node (or free species) with its calculations, notes and every "
     "edge touching it.",
     "delete_group": "Delete a group with its contents: its members, their calculations and "

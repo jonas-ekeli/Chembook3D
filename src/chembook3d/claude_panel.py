@@ -155,9 +155,13 @@ Files on Saga or another server (D124): when the person is logged in in the app'
 On an enrolled Saga account use prepare_saga_minimum to reproduce the operator's manual
 minimum with nosub. Report its directory, input name and SHA-256. If its result includes
 submission_enabled and the person asks to submit, use submit_prepared_job with the returned
-attempt so they can review the input, destination and resources in the app. Use full paths inside
-the enrolled pilot for file tools. Its geometries directory accepts new XYZ files when the
-user enables writing. The scope on this account stays fixed when the terminal changes directory.
+attempt so they can review the input, destination and resources in the app.
+For an operator-enrolled Saga TS, use prepare_saga_ts with the saved server ID. Compare its
+archived parent Slurm receipt, atom pair and selected mode with the intended elementary step.
+When asked to submit that TS, use submit_prepared_job with the returned attempt so the person
+can review the full input, checkpoint, parent evidence, destination and fixed resources.
+Use full paths inside the enrolled pilot for file tools. Its geometries directory accepts new
+XYZ files when the user enables writing. The scope stays fixed when the terminal changes directory.
 For the configured local HPC pilot, prepare_gaussian_job returns the input for review.
 For a constrained pre-optimization, select the five-step project minimum and pass freeze_distance
 as two distinct 1-based atom indices from the selected XYZ. Treat the result as a TS guess.

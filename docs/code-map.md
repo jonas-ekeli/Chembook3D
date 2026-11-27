@@ -758,6 +758,12 @@ Routes for all of these are in `api/pathway.py`.
   existing session to `remote/probe.py` for a fixed, digest-checked capability query.
   See 05 §9 for the Saga procedure.
 
+- `chembook3d saga-ts-bundle` uses `remote/saga_ts_bundle.py` on the workstation
+  to verify an operator-selected archive and export a TS enrollment. The standalone
+  helper's operator-only `enroll-ts` command stores the reviewed files privately.
+  `prepare_saga_ts` uses the authenticated keeper and the existing app submission
+  review. The site helper checks digests again when staging the receiving checkpoint.
+
 - The local preparation pilot (D266, FR-SSH-19) connects `api/hpc_jobs.py` and
   `api/live.py` to the keeper's fixed SSH subsystem. `remote/job_pilot.py` validates
   files, applies an optional one-distance freeze to the linked optimization step,

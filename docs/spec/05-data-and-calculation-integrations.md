@@ -168,7 +168,23 @@ For an interactive handoff test, approve that frozen water preparation on the lo
 
 The fixed read directory is `/cluster/work/gaussian-pilot`. The existing agent file-write toggle permits new files under its `geometries` subdirectory. The helper chooses a fresh attempt folder, verifies atom order and coordinates, and stages the approved revision in its own submission directory. The project job files and authorization records live outside the fake server's SFTP tree. Moving the user's terminal does not change either agent boundary.
 
-Use `get_prepared_job` with the attempt ID after a lost reply. A recorded numeric receipt supplies `check_server_job` with its directory and job ID. A missing receipt after the wrapper has run leaves the attempt uncertain and blocks replay. The live Saga pilot supports the enrolled minimum. Deploying constrained preparation and checkpoint handoff on Saga, verification of the final TS, the single-point handoff, SDF, scans and IRC are later milestones.
+Use `get_prepared_job` with the attempt ID after a lost reply. A recorded numeric receipt supplies `check_server_job` with its directory and job ID. A missing receipt after the wrapper has run leaves the attempt uncertain and blocks replay. The live Saga trial verified the enrolled minimum. The site helper also supports the archived TS acceptance procedure below. Agent-driven preparation of a new constrained parent on Saga, verification of the final TS, the single-point handoff, SDF, scans and IRC are later milestones.
+
+### First Saga TS acceptance test using an archived pre-optimization
+
+An operator can enroll one reviewed TS input and its starting checkpoint for the current Saga pilot enrollment. This lets the operator test the real wrapper and checkpoint staging without charging the project for another pre-optimization. The workstation checks the parent log, Gaussian calculations, selected imaginary mode, formatted checkpoint and project TS input. For operator-selected archives the downloaded files' local modification times describe the transfer. The operator supplies the original parent Slurm ID, which must match the log. The helper pins the reviewed manifest, input, checkpoint, existing pilot and wrapper. Only the operator can change the enrollment.
+
+1. On the workstation with this checkout and the archive, run `uv run chembook3d saga-ts-bundle PARENT.inp CHILD.inp enrollment --parent-job-id ID --mode-index N` with the actual paths, original job ID and one-based Gaussian mode index. Keep the parent's matching `.log`, `.out` and `.fchk.gz` beside its input. Choose a new output directory. Inspect the command's report. Keep the bundle private with the project's calculation files.
+2. Transfer the resulting `enrollment` directory and the matching `src/chembook3d/remote/saga_prepare.py` into `~/chembook-saga-ts/` on Saga using your usual authenticated transfer. In your Saga terminal run the following commands with the existing enrolled pilot:
+
+   ```bash
+   install -m 600 -- ~/chembook-saga-ts/saga_prepare.py ~/.local/lib/chembook3d/saga_prepare.py
+   python3 ~/.local/lib/chembook3d/saga_prepare.py enroll-ts ~/chembook-saga-ts/enrollment
+   ```
+
+   Keep the TS attempt ID it prints. Re-enrolling the same bundle preserves the attempt. A different bundle for the same pilot enrollment is refused.
+3. Start the matching workstation checkout. If the old keeper is still running, log out of the open Chembook HPC sessions, close the app, wait a minute, reopen it and log into Saga with 2FA. Open the test investigation. Ask the agent, “Call `prepare_saga_ts` on Saga and report the attempt ID, parent Slurm ID, imaginary frequency, atom pair, input and checkpoint digests, and destination. Stop after preparation.” Compare the result with the operator's report. This step uses zero scheduler jobs.
+4. To exercise review, ask the agent to call `submit_prepared_job` once for that attempt. Choose **Refuse**. `get_prepared_job` should still return `prepared` with no job ID. For a live calculation, request review again and choose **Submit job** only if you intend to run this molecule with the displayed allocation. The pilot uses one node, 40 cores and 24 hours. After approval use `get_prepared_job` and pass its `follow_up` arguments to `check_server_job`. A lost reply is recovered through the same attempt.
 
 ### Testing access on Saga (Q101)
 

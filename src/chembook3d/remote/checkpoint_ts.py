@@ -208,12 +208,16 @@ def checkpoint_bytes(path: Path, inspection: dict, charge_spin: list[str]) -> by
     data, attrs = read_snapshot(path, CHECKPOINT_LIMIT)
     if not inspection["start_timestamp"] <= attrs.st_mtime <= inspection["log_mtime"]:
         raise ValueError("The checkpoint timestamp does not match the completed parent run.")
+    validate_checkpoint(data, inspection["frequency_geometry"], charge_spin)
+    return data
+
+
+def validate_checkpoint(data: bytes, reference: geometry.Rows, charge_spin: list[str]) -> None:
     try:
         with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
-            _fchk_geometry(stream, inspection["frequency_geometry"], charge_spin)
+            _fchk_geometry(stream, reference, charge_spin)
     except (OSError, EOFError, zlib.error) as exc:
         raise ValueError("The formatted checkpoint is not a complete gzip file.") from exc
-    return data
 
 
 def verify_ts_input(text: str, stem: str, charge_spin: list[str], settings: set[str]) -> None:

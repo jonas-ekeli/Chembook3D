@@ -20,6 +20,9 @@ from pathlib import Path
 JOB = "min-go_PBEPBE-GD3MBJ_DZ_singlet_CONVER9.jd"
 MARKER = ".prepare-minimum.json"
 SUBMIT_MARKER = ".submit-minimum.json"
+TS_MARKER = ".submit-ts.json"
+CHECKPOINT_LIMIT = 64 * 1024 * 1024
+TS_IDENTITY = ("attempt", "revision", "checkpoint_sha256", "review_sha256")
 RESOURCES = {"nodes": 1, "cores": 40, "hours": 24}
 WRAPPER = "tools/uibkvant-tools/runnable/submit_job_g16-C.01"
 OUTPUT_LIMIT = 65_536
@@ -281,19 +284,25 @@ def submit_policy(path):
     return policy
 
 
-def enable_submit():
+@contextmanager
+def policy_lock(control, lock_name):
     # A permanent lock file serializes concurrent enables across login nodes. Exclusive
     # flock on NFS needs a descriptor opened for writing.
     import fcntl
 
-    control = checked_control()
-    lock = control / ".submit-minimum.lock"
+    lock = control / lock_name
     flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
     with os.fdopen(os.open(lock, flags, 0o600), "wb") as guard:
         attrs = os.fstat(guard.fileno())
         if not stat.S_ISREG(attrs.st_mode) or attrs.st_uid != os.getuid() or attrs.st_mode & 0o077:
             raise ValueError("Expected a private submission policy lock.")
         fcntl.flock(guard, fcntl.LOCK_EX)
+        yield
+
+
+def enable_submit():
+    control = checked_control()
+    with policy_lock(control, ".submit-minimum.lock"):
         policy = json.loads(private_read(control / MARKER))
         expected = enrolled_submission(policy)
         root = Path(policy["work_root"])
@@ -394,7 +403,7 @@ def prepared_snapshot(folder, name, control, record):
     return data
 
 
-def stage_and_submit(folder, name, data, wrapper):
+def stage_and_submit(folder, name, data, wrapper, checkpoint=None):
     # Hold the directories by descriptor across staging and launch. A pre-existing
     # directory (including a link or matching checkpoint) consumes this claim safely.
     try:
@@ -406,10 +415,14 @@ def stage_and_submit(folder, name, data, wrapper):
             fd = os.open("submission", os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY, dir_fd=parent)
             try:
                 cwd = Path("/proc/self/fd") / str(fd)
-                with (cwd / name).open("xb") as stream:
-                    stream.write(data)
-                    stream.flush()
-                    os.fsync(stream.fileno())
+                files = [(name, data)]
+                if checkpoint is not None:
+                    files.append(checkpoint)
+                for filename, contents in files:
+                    with (cwd / filename).open("xb") as stream:
+                        stream.write(contents)
+                        stream.flush()
+                        os.fsync(stream.fileno())
                 os.fsync(fd)
                 os.fsync(parent)
                 args = [
@@ -447,17 +460,21 @@ def authorize_minimum(request, expected, enabled):
     ):
         raise ValueError("Request must match the enrolled attempt, input revision and resources.")
     if submit:
-        signed = {k: v for k, v in request.items() if k != "signature"}
-        payload = json.dumps(signed, sort_keys=True, separators=(",", ":")).encode()
-        mac = hmac.digest(bytes.fromhex(enabled["key"]), payload, "sha256").hex()
-        supplied = request["signature"]
-        if (
-            not isinstance(supplied, str)
-            or not re.fullmatch(r"[a-f0-9]{64}", supplied)
-            or not hmac.compare_digest(mac, supplied)
-        ):
-            raise ValueError("Invalid submission authorization.")
+        verify_signature(request, enabled["key"])
     return submit
+
+
+def verify_signature(request, key):
+    signed = {k: v for k, v in request.items() if k != "signature"}
+    payload = json.dumps(signed, sort_keys=True, separators=(",", ":")).encode()
+    mac = hmac.digest(bytes.fromhex(key), payload, "sha256").hex()
+    supplied = request["signature"]
+    if (
+        not isinstance(supplied, str)
+        or not re.fullmatch(r"[a-f0-9]{64}", supplied)
+        or not hmac.compare_digest(mac, supplied)
+    ):
+        raise ValueError("Invalid submission authorization.")
 
 
 def saved_outcome(receipt, claim):
@@ -511,8 +528,11 @@ def minimum_operation(request, policy):
     pin = submission_wrapper(root)
     if any(enabled.get(k) != v for k, v in pin.items()):
         raise ValueError("The enrolled submission wrapper has changed.")
+    return claim_and_submit(record, receipt, claim, folder, name, data, pin["wrapper"])
 
-    with open_directory(control, readable=True) as directory:
+
+def claim_and_submit(record, receipt, claim, folder, name, data, wrapper, checkpoint=None):
+    with open_directory(claim.parent, readable=True) as directory:
         try:
             fd = os.open(claim.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=directory)
         except FileExistsError:
@@ -522,11 +542,283 @@ def minimum_operation(request, policy):
         finally:
             os.close(fd)
         os.fsync(directory)
-        state, job_id, detail = stage_and_submit(folder, name, data, pin["wrapper"])
+        state, job_id, detail = stage_and_submit(folder, name, data, wrapper, checkpoint)
         outcome = {"state": state, "job_id": job_id, "detail": detail}
         atomic_write(receipt, json.dumps(outcome).encode())
         os.fsync(directory)
     return {**record, **outcome}
+
+
+def review_bytes(review):
+    return (
+        json.dumps(review, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+    ).encode()
+
+
+def validate_ts_review(review):
+    fields = {
+        "format",
+        "parent_job_id",
+        "parent_stem",
+        "input_name",
+        "checkpoint_name",
+        "input_sha256",
+        "checkpoint_sha256",
+        "output_sha256",
+        "freeze_distance",
+        "mode_index",
+        "frequency_cm1",
+        "bond_projection",
+        "alignment",
+    }
+    stem = r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}"
+    if not isinstance(review, dict) or set(review) != fields:
+        raise ValueError("Expected the complete archived TS review.")
+    strings = {
+        "parent_job_id": r"[1-9][0-9]{0,19}",
+        "parent_stem": stem,
+        "input_name": stem + r"\.inp",
+        "input_sha256": r"[0-9a-f]{64}",
+        "output_sha256": r"[0-9a-f]{64}",
+        "checkpoint_sha256": r"[0-9a-f]{64}",
+    }
+    if (
+        review["format"] != "chembook3d-saga-ts-v1"
+        or any(
+            not isinstance(review[k], str) or not re.fullmatch(v, review[k])
+            for k, v in strings.items()
+        )
+        or review["checkpoint_name"] != review["input_name"][:-4] + ".fchk.gz"
+    ):
+        raise ValueError("Invalid archived TS review identity or checkpoint basename.")
+    pair = review["freeze_distance"]
+    if (
+        not isinstance(pair, list)
+        or len(pair) != 2
+        or any(type(atom) is not int or atom < 1 for atom in pair)
+        or pair[0] == pair[1]
+        or type(review["mode_index"]) is not int
+        or review["mode_index"] < 1
+        or any(
+            type(review[k]) not in (int, float)
+            or not -sys.float_info.max <= review[k] <= sys.float_info.max
+            for k in ("frequency_cm1", "bond_projection", "alignment")
+        )
+        or review["frequency_cm1"] >= 0
+        or not 0 <= review["alignment"] <= 1
+    ):
+        raise ValueError("Invalid frozen atom pair or imaginary-mode evidence.")
+
+
+def ts_checkpoint_directives(data, input_name):
+    # Scientific route/geometry/mode checks run on the workstation. Here enforce
+    # the receiving basename before allowing a site wrapper to use the archive.
+    text = data.decode("utf-8").replace("\r\n", "\n")
+    steps = re.split(r"^[ \t]*--link1--[ \t]*$", text, flags=re.I | re.M)
+    if len(steps) != 2:
+        raise ValueError("Expected two linked TS input steps.")
+    for step in steps:
+        directives = [line.strip() for line in step.splitlines() if line.lstrip().startswith("%")]
+        checks = []
+        for directive in directives:
+            key, _, value = directive.partition("=")
+            if key.lower() == "%chk":
+                checks.append(value)
+            elif not re.fullmatch(
+                r"%(?:nproc(?:shared)?=[1-9]\d*|mem=[1-9]\d*(?:[kmgt][bw])?)", directive, re.I
+            ):
+                raise ValueError("Unsupported TS input directive.")
+        if checks != [input_name[:-4]]:
+            raise ValueError("Both TS steps must use the receiving checkpoint basename.")
+
+
+def ts_bundle(directory, private=False):
+    with open_directory(directory) as fd:
+        path = Path("/proc/self/fd") / str(fd)
+        read = private_read if private else read_file
+        manifest = read(path / "review.json", 4096)
+        review = json.loads(manifest, object_pairs_hook=distinct_fields)
+        validate_ts_review(review)
+        if manifest != review_bytes(review):
+            raise ValueError("Expected the canonical archived TS review.")
+        data = read(path / "child.inp", LIMIT)
+        checkpoint = read(path / "parent.fchk.gz", CHECKPOINT_LIMIT)
+    if digest(data) != review["input_sha256"] or digest(checkpoint) != review["checkpoint_sha256"]:
+        raise ValueError("The archived TS input or checkpoint differs from the review.")
+    ts_checkpoint_directives(data, review["input_name"])
+    return review, data, checkpoint
+
+
+def enroll_ts(source):
+    control = checked_control()
+    review, data, checkpoint = ts_bundle(source.absolute())
+    with policy_lock(control, ".submit-ts.lock"):
+        minimum = private_read(control / MARKER)
+        policy = json.loads(minimum)
+        enrolled_submission(policy)
+        root = Path(policy["work_root"])
+        check_root(root)
+        expected = {
+            "work_root": str(root),
+            "minimum_attempt": policy["attempt"],
+            "minimum_sha256": digest(minimum),
+            "revision": review["input_sha256"],
+            "checkpoint_sha256": review["checkpoint_sha256"],
+            "review_sha256": digest(review_bytes(review)),
+            **RESOURCES,
+            **submission_wrapper(root),
+        }
+        marker = control / TS_MARKER
+        if os.path.lexists(marker):
+            current = submit_policy(marker)
+            if current.get("minimum_attempt") == expected["minimum_attempt"]:
+                if any(current.get(k) != v for k, v in expected.items()):
+                    raise ValueError("A different TS pair or wrapper is enrolled for this pilot.")
+                if not re.fullmatch(r"[0-9a-f]{32}", current["attempt"]):
+                    raise ValueError("Invalid TS enrollment.")
+                # Retrying enrollment cannot repair or replace an existing authorization.
+                original, _, _ = ts_bundle(control / ("ts-" + current["attempt"]), private=True)
+                if review != original:
+                    raise ValueError("The enrolled TS review changed.")
+                return current["attempt"]
+        attempt = secrets.token_hex(16)
+        folder = control / ("ts-" + attempt)
+        folder.mkdir(mode=0o700)
+        for name, contents in (
+            ("child.inp", data),
+            ("parent.fchk.gz", checkpoint),
+            ("review.json", review_bytes(review)),
+        ):
+            atomic_write(folder / name, contents)
+        with open_directory(folder, readable=True) as directory:
+            os.fsync(directory)
+        marker_bytes = json.dumps({**expected, "attempt": attempt, "key": secrets.token_hex(32)})
+        atomic_write(marker, marker_bytes.encode())
+        with open_directory(control, readable=True) as directory:
+            os.fsync(directory)
+    return attempt
+
+
+def authorize_ts(request, enabled):
+    identity = {k: enabled[k] for k in TS_IDENTITY}
+    if (
+        not re.fullmatch(r"[0-9a-f]{32}", identity["attempt"])
+        or any(not re.fullmatch(r"[0-9a-f]{64}", identity[k]) for k in TS_IDENTITY[1:])
+        or any(type(enabled.get(k)) is not int or enabled[k] != v for k, v in RESOURCES.items())
+    ):
+        raise ValueError("Invalid TS enrollment.")
+    operation = request["operation"]
+    if operation not in ("prepare_ts", "ts_status", "submit_ts"):
+        raise ValueError("Unsupported TS operation.")
+    expected = dict(identity, operation=operation)
+    if operation == "submit_ts":
+        expected.update(RESOURCES)
+        if "signature" not in request:
+            raise ValueError("Missing TS submission authorization.")
+        expected["signature"] = request["signature"]
+    if set(request) != set(expected) or any(
+        type(request[k]) is not type(v) or request[k] != v for k, v in expected.items()
+    ):
+        raise ValueError("Request must match the enrolled TS review and resources.")
+    if operation == "submit_ts":
+        verify_signature(request, enabled["key"])
+    return identity
+
+
+def prepare_ts_snapshot(folder, name, data, done, identity):
+    with policy_lock(done.parent, ".submit-ts.lock"):
+        if not os.path.lexists(done):
+            with open_directory(folder.parent, readable=True) as parent:
+                os.mkdir(folder.name, 0o700, dir_fd=parent)
+                fd = os.open(
+                    folder.name, os.O_DIRECTORY | os.O_NOFOLLOW | os.O_RDONLY, dir_fd=parent
+                )
+                try:
+                    atomic_write(Path("/proc/self/fd") / str(fd) / name, data)
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+                os.fsync(parent)
+            atomic_write(done, identity["revision"].encode())
+            with open_directory(done.parent, readable=True) as directory:
+                os.fsync(directory)
+
+
+def ts_operation(request, policy):
+    control = checked_control()
+    if not os.path.lexists(control / TS_MARKER):
+        raise ValueError("The operator has not enrolled a Saga TS replay.")
+    enabled = submit_policy(control / TS_MARKER)
+    minimum = private_read(control / MARKER)
+    root = Path(policy["work_root"])
+    if (
+        json.loads(minimum) != policy
+        or digest(minimum) != enabled.get("minimum_sha256")
+        or enabled.get("work_root") != str(root)
+    ):
+        raise ValueError("The TS replay belongs to a different minimum enrollment.")
+    check_root(root)
+    identity = authorize_ts(request, enabled)
+    attempt = identity["attempt"]
+    folder = root / ("ts-" + attempt)
+    record = {
+        **identity,
+        **RESOURCES,
+        "directory": str(folder / "submission"),
+        "job_id": None,
+        "detail": None,
+    }
+    claim = control / ("ts-" + attempt + ".submit.claim")
+    receipt = control / ("ts-" + attempt + ".submit.done")
+    operation = request["operation"]
+    stored = saved_outcome(receipt, claim)
+    if stored is not None:
+        if operation == "prepare_ts":
+            raise ValueError(
+                "Submission has already been claimed. Use get_prepared_job for " + attempt
+            )
+        return {**record, **stored}
+    review, data, checkpoint = ts_bundle(control / ("ts-" + attempt), private=True)
+    if (
+        digest(review_bytes(review)) != identity["review_sha256"]
+        or review["input_sha256"] != identity["revision"]
+        or review["checkpoint_sha256"] != identity["checkpoint_sha256"]
+    ):
+        raise ValueError("The private TS bundle differs from the enrollment.")
+    name = review["input_name"]
+    done = control / ("ts-" + attempt + ".done")
+    if operation == "prepare_ts":
+        prepare_ts_snapshot(folder, name, data, done, identity)
+    if private_read(done) != identity["revision"].encode():
+        raise ValueError("Missing a matching TS preparation receipt.")
+    with open_directory(folder) as directory:
+        snapshot = read_file(Path("/proc/self/fd") / str(directory) / name)
+    if digest(snapshot) != identity["revision"]:
+        raise ValueError("The prepared TS input has changed.")
+    if operation == "prepare_ts":
+        return {
+            **identity,
+            "state": "prepared",
+            "directory": str(folder),
+            "input_name": name,
+            "input": snapshot.decode("utf-8"),
+            "review": review,
+        }
+    if operation == "ts_status":
+        return {**record, "state": "prepared"}
+    pin = submission_wrapper(root)
+    if any(enabled.get(k) != v for k, v in pin.items()):
+        raise ValueError("The enrolled submission wrapper has changed.")
+    return claim_and_submit(
+        record,
+        receipt,
+        claim,
+        folder,
+        name,
+        snapshot,
+        pin["wrapper"],
+        (review["checkpoint_name"], checkpoint),
+    )
 
 
 class Outside(ValueError):
@@ -757,6 +1049,9 @@ def main():
     if sys.argv[1:] == ["enable-submit"]:
         print("Enabled minimum submission for preparation", enable_submit())
         return
+    if len(sys.argv) == 3 and sys.argv[1] == "enroll-ts":
+        print("Enrolled archived TS replay", enroll_ts(Path(sys.argv[2])))
+        return
     if sys.argv[1:] == ["check-wrapper"]:
         policy = json.loads(private_read(checked_control() / MARKER))
         root = Path(policy["work_root"])
@@ -766,7 +1061,7 @@ def main():
     if len(sys.argv) != 1:
         raise ValueError(
             "Usage: python3 saga_prepare.py [setup /path/to/min-test-.../NAME.inp "
-            "| check-wrapper | enable-submit]"
+            "| check-wrapper | enable-submit | enroll-ts /path/to/review-bundle]"
         )
     request = parse_request(sys.stdin.buffer.read(JSON_LIMIT + 1))
     policy = json.loads(read_file(control_dir() / MARKER, 4096))
@@ -777,6 +1072,12 @@ def main():
         "minimum_status",
     ):
         result = minimum_operation(request, policy)
+    elif isinstance(request, dict) and request.get("operation") in (
+        "prepare_ts",
+        "submit_ts",
+        "ts_status",
+    ):
+        result = ts_operation(request, policy)
     else:
         result = file_operation(request, policy)
     print(json.dumps({"ok": True, "result": result}))
