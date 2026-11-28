@@ -127,8 +127,10 @@ def test_the_panel_gets_the_build_mechanism_command(tmp_path, monkeypatch):
     for rule in (
         "## Filling gaps (D265)",
         "Skip this with `--no-gaps`",
-        "Fill at most 10 a run",
-        "cheapest and most certain first",
+        "up to 10 a run (the 11th is refused), not a sample",
+        "most useful first across kinds",
+        "go on while certain holes remain under the 10",
+        "every `weak` one (a failed follow), which is never filled",
         "never a new branch",
         "`start_local_refine` at `mace-omol`",
         "`start_local_ts_guess`",

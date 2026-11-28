@@ -340,7 +340,8 @@ def test_the_tools_are_offered_and_named_in_the_guides(tmp_path):
 def test_a_ts_is_never_an_end_and_an_end_at_the_ts_returned(open_client, tmp_path):
     """T-LOC-55 (A188): at the + end's structure lie a TS node, a folder's TS output and a
     single point on it; none is the + end's match (`ts_matches`, flagged), while the − end
-    matches B; each end has its side. With both ends set back to the TS's coordinates, they
+    matches B; the followed TS's own output in the folder is no other TS (A195); each end has
+    its side. With both ends set back to the TS's coordinates, they
     returned to it: no matches, outcome "returned"."""
     import json
 
@@ -361,6 +362,7 @@ def test_a_ts_is_never_an_end_and_an_end_at_the_ts_returned(open_client, tmp_pat
         )
     )
     (outputs / "ts2.log").write_text(ts_there, encoding="utf-8")
+    (outputs / "own.log").write_text(ts_output(), encoding="utf-8")  # the followed TS's own
     (outputs / "ts2_sp.log").write_text(
         g.output(g.step("#P PBE0/def2TZVP SP", [shifted(0.5)])), encoding="utf-8"
     )
@@ -372,7 +374,8 @@ def test_a_ts_is_never_an_end_and_an_end_at_the_ts_returned(open_client, tmp_pat
         other,
         "ts2.log",
         "ts2_sp.log",
-    }
+    }  # A195: never the followed TS's own file
+    assert "ts_matches" not in minus
     assert [m["node_id"] for m in minus["matches"]] == [b_id]
     assert (plus["side"], minus["side"]) == ("+", "−")
     assert not plus["returned_to_ts"] and not minus["returned_to_ts"]

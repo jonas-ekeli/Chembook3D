@@ -520,6 +520,20 @@ def _wider(
     return [m for m in _matches(rows, charge, multiplicity, nodes, SOFT_RMSD) if not _is_ts(m)]
 
 
+def _own_ts_files(files: list[_Candidate], ts_rows: Rows, session: Session) -> set[int]:
+    """A195: the `structure` numbers of the folder's TS files that are the followed TS itself
+    (the same structure within the duplicate tolerance)."""
+    tolerance = thermo_settings.settings(session).duplicate_tolerance
+    formula = _formula(ts_rows)
+    return {
+        c.entry["structure"]
+        for c in files
+        if c.entry.get("role")
+        and c.entry.get("formula") == formula
+        and compare.same_structure(c.rows, ts_rows, tolerance) is not None
+    }
+
+
 def _no_bond_change(ts_rows: Rows, rows: Rows) -> bool:
     """No real bond (A181, metal–hydrogen contacts weak) differs between the TS and an end
     in its numbering."""
@@ -567,6 +581,7 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
             )
         except Exception as exc:  # noqa: BLE001 - a folder gone or unreadable is said
             notes.append(f"The folder {where} could not be read: {exc}")
+    own_files = _own_ts_files(files or [], found.ts_rows, session)
     made = found.job.get("made") or {}
     out_ends: dict[str, dict[str, Any]] = {}
     mode = _mode(found)
@@ -601,7 +616,14 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
                 for f in in_files
                 if f.get("role") is None and f.get("irc_end") in own  # A192
             ]
-            at_ts += [f for f in in_files if f.get("role") is not None]
+            # A195: the followed TS's own files (its optimization, a single point on it) are
+            # not another TS, as its node is not: an end near them has still left it (A188's
+            # side says whether it did).
+            at_ts += [
+                f
+                for f in in_files
+                if f.get("role") is not None and f.get("structure") not in own_files
+            ]
         if at_ts:
             entry["ts_matches"] = at_ts
         if entry["returned_to_ts"]:  # whatever lies near the TS is no end of it either

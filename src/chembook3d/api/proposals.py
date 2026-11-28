@@ -175,10 +175,30 @@ def propose(body: ProposeIn, request: Request, session: DbSession):
 
 
 @router.get("/mechanism/gaps")
-def find_gaps(request: Request, session: DbSession) -> dict[str, Any]:
+def find_gaps(
+    request: Request,
+    session: DbSession,
+    kind: Literal[
+        "ts_end",
+        "missing_mirror_image",
+        "missing_ts",
+        "unbalanced",
+        "missing_intermediate",
+        "cycle",
+        "weak",
+    ]
+    | None = Query(
+        None,
+        description="List one kind of hole only, or weak (a failed follow: flag, never "
+        "fill); left out, the most useful of every kind (A195).",
+    ),
+    offset: int = Query(
+        0, ge=0, description="With kind: skip this many holes (the `more` of the last answer)."
+    ),
+) -> dict[str, Any]:
     """D265a: the holes in the mechanism, most useful first, with a suggested fill each;
     nothing is written."""
-    return gaps.find(session, _investigation(request).folder, _since(request))
+    return gaps.find(session, _investigation(request).folder, _since(request), kind, offset)
 
 
 @router.get("/mechanism/direct-links")

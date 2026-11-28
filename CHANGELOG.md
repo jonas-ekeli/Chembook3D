@@ -6,6 +6,15 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Building from a folder, from what the gap-filling validation run showed (A195): `find_gaps`
+  orders its holes by usefulness across kinds (an edge alone, certain fills, one TS guess,
+  evidence first, choices) instead of kind by kind, keeps each kind's first places in a
+  listing, and takes `kind` (with `offset`) to list one kind. A mode-follow end that returned
+  to its TS is a failed follow, listed apart under `weak` and never counted as a hole; open
+  ends of several TSs on one structure say that one node fills them all and come first. The
+  playbook fills the certain holes in order up to the 10, not a sample. A mode-follow end no
+  longer "matches another TS" when that TS is the followed one's own output in the folder.
+
 - `chembook3d saga-ts-bundle` accepts archive paths through `..`, mapped or subst drives
   and short Windows names, and reports a cut-off or malformed archive as a message instead
   of a traceback. On Windows, two preparations publishing the same attempt at once no longer

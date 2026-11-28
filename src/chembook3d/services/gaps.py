@@ -4,7 +4,10 @@ FR-PANEL-10, FR-MCP-24).
 `find` lists the holes of D265a in the open investigation (a playground in practice), each with
 its kind, the nodes involved, the bond changes (A181's rule with metal–hydrogen contacts weak,
 A184, through `structure_compare`) and a suggested fill with the tools there are (D265b). It
-changes nothing. The kinds, most useful first:
+changes nothing. A195: the holes are ordered by usefulness across kinds (`Hole.order`: an edge
+alone closes it, a certain fill, one TS guess, evidence first, a choice), each kind keeps its
+first places in a listing (`_listed`), and weak ones (a mode-follow end that returned to its
+TS, a TS with no imaginary mode) are listed apart, never counted. The kinds:
 
 - `ts_end`: a transition state with no edge on a side. What lies there comes from the cheapest
   evidence at hand: a finished mode-follow job of the TS (`follow_mode.ends`), else its IRC's
@@ -35,6 +38,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
+from itertools import combinations
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +65,14 @@ from chembook3d.services.records import RecordError
 MAX_FILLED = 10  # D265d: holes filled in one run; the rest are flagged
 MAX_LISTED = 25  # holes listed in one answer, most useful first
 MAX_PAIRS = 40  # pairs of minima compared in one call
+MIN_PER_KIND = 3  # A195: places each kind keeps in a listing, so one kind cannot flood it
+MAX_WEAK = 10  # A195: weak holes (a failed follow) listed apart, at most this many
+# A195: how useful a hole is, across kinds, smaller first: an edge alone closes it; a fill
+# the evidence makes certain (an end that left the TS and matches nothing, a mirror image);
+# one TS guess between minima an edge joins (or a species that balances an edge); evidence
+# first (a TS never followed, minima only the steps' order links); a choice the files do
+# not make (an intermediate, a cycle).
+EDGE_ONLY, CERTAIN, ONE_STEP, EVIDENCE_FIRST, CHOICE = range(5)
 MACE_GUESS = "MACE guess"  # D265c: the filled node's label suffix and tag (A185)
 FILLED = "Filled by Claude"  # D265c, A184: the evidence of an edge that fills a hole
 KINDS = (
@@ -215,7 +227,14 @@ class Hole:
     bonds: dict[str, Any] | None = None
     difference: str | None = None
     evidence: str | None = None  # what the hole rests on
-    weight: float = 0.0  # within its kind: smaller first
+    weight: float = 0.0  # within its tier: smaller first
+    tier: int = ONE_STEP  # A195: how useful, across kinds (EDGE_ONLY … CHOICE), smaller first
+    weak: str | None = None  # A195: why it is no real hole (a failed follow): listed apart
+    rows: compare.Rows | None = field(default=None, repr=False)  # A195: the end's structure
+    linked: bool = False  # A195: an end of a TS joined on its other side
+
+    def order(self) -> tuple[int, float, int]:
+        return (self.tier, self.weight, KINDS.index(self.kind))
 
     def out(self) -> dict[str, Any]:
         found: dict[str, Any] = {
@@ -225,7 +244,7 @@ class Hole:
             "what": self.what,
             "fill": self.fill,
         }
-        for name in ("bonds", "difference", "evidence"):
+        for name in ("bonds", "difference", "evidence", "weak"):
             if getattr(self, name):
                 found[name] = getattr(self, name)
         return found
@@ -258,7 +277,7 @@ def _mirror_hole(unit: "_Unit", image: dict[str, Any], where: str, evidence: str
         + ", and a mirror image is another molecule (D267).",
         MIRROR_FILL.format(label=image["label"], node_id=image["node_id"]),
         evidence=evidence,
-        weight=0,
+        tier=CERTAIN,
     )
 
 
@@ -270,6 +289,15 @@ def _follow_job(folder: Path, node_id: str) -> str | None:
         if job.get("status") in ("converged", "not_converged"):
             return job["id"]
     return None
+
+
+def _follow_rows(session: Session, folder: Path, job_id: str) -> dict[str, compare.Rows]:
+    """A mode-follow job's two end structures, in the TS's numbering."""
+    try:
+        found = follow_mode._read(session, folder, job_id)
+    except (RecordError, local_jobs.LocalJobError):
+        return {}
+    return {name: follow_mode._end_rows(found, name) for name in follow_mode.ENDS}
 
 
 def _irc_ends(session: Session, folder: Path, node: Node, tolerance: float) -> dict[str, Any]:
@@ -380,7 +408,7 @@ def _ts_end_holes(
                     f"“{unit.label}” is a TS guess with no edge on its {side_text} side.",
                     "propose_mechanism with its edges to the two minima it was made between "
                     "(low, with the hole id of the gap it fills).",
-                    weight=0,
+                    tier=EDGE_ONLY,
                 )
             )
             continue
@@ -391,6 +419,7 @@ def _ts_end_holes(
             except (RecordError, compare.StructureError):
                 ends = None
             if ends is not None:
+                rows = _follow_rows(session, folder, job_id)
                 for name, end in ends["ends"].items():
                     shown = follow_mode.SHOWN[name]
                     bonds = {
@@ -415,7 +444,7 @@ def _ts_end_holes(
                                 "the mode-follow gives (not a filled gap).",
                                 bonds=bonds,
                                 evidence=ends["verdict"],
-                                weight=0,
+                                tier=EDGE_ONLY,
                             )
                         )
                         continue
@@ -430,18 +459,16 @@ def _ts_end_holes(
                         )
                         continue
                     holes.append(
-                        Hole(
-                            "ts_end",
-                            hole_id("ts_end", unit.id, name),
+                        _follow_end_hole(
+                            unit,
                             involved,
-                            f"The {shown} end of “{unit.label}”'s mode-follow (job {job_id}) "
-                            "matches no structure.",
-                            f"make_node_from_end (job {job_id}, end {name}), then {REFINE} "
-                            "on it, then propose_mechanism with the edge, low, hole set, and "
-                            "filled naming the new node.",
-                            bonds=bonds,
-                            evidence=ends["verdict"],
-                            weight=len(bonds["formed"]) + len(bonds["broken"]),
+                            job_id,
+                            name,
+                            end,
+                            ends,
+                            bonds,
+                            rows.get(name),
+                            bool(before or after),
                         )
                     )
                 continue
@@ -471,7 +498,7 @@ def _ts_end_holes(
                             "No structure is needed: propose the edge, high from the IRC "
                             "(not a filled gap).",
                             bonds=bonds,
-                            weight=0,
+                            tier=EDGE_ONLY,
                         )
                     )
                     continue
@@ -500,7 +527,10 @@ def _ts_end_holes(
                         bonds=bonds,
                         evidence="IRC end compared with every minimum (A184: same bonds, "
                         "RMSD under 0.5 Å)",
-                        weight=len((bonds or {}).get("formed", [])),
+                        weight=_end_weight(bool(before or after)),
+                        tier=CERTAIN,
+                        rows=end.rows,
+                        linked=bool(before or after),
                     )
                 )
             continue
@@ -531,10 +561,97 @@ def _ts_end_holes(
                 if mode is not None
                 else "Flag it: without an imaginary mode there is nothing to follow.",
                 bonds=bonds,
-                weight=1 if mode is not None else 5,
+                tier=EVIDENCE_FIRST,
+                weak=None if mode is not None else "no imaginary mode to follow",
             )
         )
+    _shared_ends(holes)
     return holes
+
+
+def _follow_end_hole(
+    unit: _Unit,
+    involved: list[dict[str, Any]],
+    job_id: str,
+    name: str,
+    end: dict[str, Any],
+    ends: dict[str, Any],
+    bonds: dict[str, list[str]],
+    rows: compare.Rows | None,
+    linked: bool,
+) -> Hole:
+    """A mode-follow end that matches no structure. A195: one that left the TS is a missing
+    minimum, a certain fill: first when the TS is joined on its other side (the fill
+    completes a step), then a converged end; one that returned to the TS is a failed follow,
+    no evidence of a missing minimum: weak, listed apart."""
+    shown = follow_mode.SHOWN[name]
+    what = f"The {shown} end of “{unit.label}”'s mode-follow (job {job_id}) matches no structure"
+    weak = None
+    if end.get("returned_to_ts"):
+        weak = "follow failed: the end returned to the TS"
+        what += ": it returned to the TS (its distances along the mode are the TS's, A188)."
+    else:
+        what += (
+            "; it left the TS"
+            + ("" if end.get("converged") else f" (not converged after {end.get('cycles')} steps)")
+            + (
+                ", and the TS is joined on its other side, so its fill completes the step."
+                if linked
+                else "."
+            )
+        )
+    return Hole(
+        "ts_end",
+        hole_id("ts_end", unit.id, name),
+        involved,
+        what,
+        "Flag it: a failed follow says nothing about this side (find_ts_partners may still "
+        "settle it); make no node from this end."
+        if weak
+        else f"make_node_from_end (job {job_id}, end {name}), then {REFINE} on it, then "
+        "propose_mechanism with the edge, low, hole set, and filled naming the new node.",
+        bonds=bonds,
+        evidence=ends["verdict"],
+        weight=_end_weight(linked) + (0 if end.get("converged") else 0.5),
+        tier=CERTAIN,
+        weak=weak,
+        rows=rows,
+        linked=linked,
+    )
+
+
+def _end_weight(linked: bool) -> float:
+    """A195: a certain end ranks by what its fill does, two for each hole it closes and each
+    step it completes (its TS joined on the other side), a completed step first on a tie."""
+    return (0 if linked else 1) - 2 * (1 + int(linked))
+
+
+def _shared_ends(holes: list[Hole]) -> None:
+    """A195: ends of different TSs that match each other (A184's `end_match`) are one missing
+    minimum: one node fills them all, so each says so, and ranks by all the holes it closes
+    and steps it completes (`_end_weight`)."""
+    open_ = [h for h in holes if h.rows is not None and not h.weak]
+    same: dict[str, set[str]] = {h.id: {h.id} for h in open_}
+    for a, b in combinations(open_, 2):
+        if a.nodes[0]["id"] == b.nodes[0]["id"] or not compare.same_atoms(a.rows, b.rows):
+            continue
+        if compare.end_match(a.rows, b.rows) is None:
+            continue
+        joined = same[a.id] | same[b.id]
+        for hole_id_ in joined:
+            same[hole_id_] = joined
+    by_id = {h.id: h for h in open_}
+    for hole in open_:
+        others = [by_id[i] for i in sorted(same[hole.id]) if i != hole.id]
+        if not others:
+            continue
+        names = ", ".join(f"“{o.nodes[0]['label']}”" for o in others[:3])
+        more = f" and {len(others) - 3} more" if len(others) > 3 else ""
+        hole.what += (
+            f" The same structure is the open end of {names}{more} (A184): one node fills "
+            f"{len(others) + 1} holes; after it, find_gaps gives the others as edges."
+        )
+        hole.weight -= 2 * sum(1 + int(o.linked) for o in others)
 
 
 def _composition(rows: compare.Rows | None) -> Counter[str] | None:
@@ -598,6 +715,7 @@ def _unbalanced_holes(session: Session, mechanism: _Mechanism) -> list[Hole]:
                 "(the edge's species), hole set, and filled naming a new species.",
                 difference=_difference(before, after),
                 weight=sum(missing.values()),
+                tier=ONE_STEP,
             )
         )
     return holes
@@ -721,6 +839,7 @@ def _pair_holes(
                     "class says which it is.",
                     difference=difference,
                     weight=99,
+                    tier=CHOICE,
                 )
             )
             continue
@@ -756,7 +875,8 @@ def _pair_holes(
                     "change, one elementary step, with no TS between them.",
                     fill,
                     bonds=bonds,
-                    weight=count + (2 if species else 0) + (1 if pair.edge is None else 0),
+                    weight=count + (2 if species else 0),
+                    tier=ONE_STEP if pair.edge is not None else EVIDENCE_FIRST,
                 )
             )
             continue
@@ -773,6 +893,7 @@ def _pair_holes(
                 "intermediate unclear (D263h).",
                 bonds=bonds,
                 weight=count,
+                tier=CHOICE,
             )
         )
     return holes
@@ -818,6 +939,7 @@ def _cycle_holes(
                     "missing_intermediate; flag it when the reaction class does not say them.",
                     bonds=bonds,
                     weight=len(bonds["formed"]) + len(bonds["broken"]),
+                    tier=CHOICE,
                 )
             )
             continue
@@ -841,13 +963,40 @@ def _cycle_holes(
                 fill,
                 difference=difference,
                 weight=sum((a - b).values()) + sum(extra.values()),
+                tier=CHOICE,
             )
         )
     return holes
 
 
-def find(session: Session, folder: Path, since: datetime | None = None) -> dict[str, Any]:
-    """D265a: the holes, most useful first, at most MAX_LISTED; nothing is written."""
+def _listed(ordered: list[Hole], limit: int) -> list[Hole]:
+    """A195: the first `limit` holes in order, each kind keeping its first MIN_PER_KIND
+    places, so one kind (a ts_end per unlinked TS) cannot hide the others."""
+    keep: set[str] = set()
+    for kind in KINDS:
+        keep.update(h.id for h in [h for h in ordered if h.kind == kind][:MIN_PER_KIND])
+    for hole in ordered:
+        if len(keep) >= limit:
+            break
+        keep.add(hole.id)
+    return [h for h in ordered if h.id in keep]
+
+
+WEAK = "weak"  # A195: the `kind` that lists the weak holes
+
+
+def find(
+    session: Session,
+    folder: Path,
+    since: datetime | None = None,
+    kind: str | None = None,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """D265a: the holes, most useful first across kinds (A195), at most MAX_LISTED; the weak
+    ones (a failed follow) apart. `kind` lists one kind only (or WEAK), from `offset`.
+    Nothing is written."""
+    if kind is not None and kind not in (*KINDS, WEAK):
+        raise RecordError(f"No hole kind “{kind}”: one of {', '.join((*KINDS, WEAK))}")
     tolerance = thermo_settings.settings(session).duplicate_tolerance
     mechanism = _mechanism(session)
     notes: list[str] = []
@@ -858,34 +1007,65 @@ def find(session: Session, folder: Path, since: datetime | None = None) -> dict[
         + _cycle_holes(session, folder, mechanism, tolerance)
     )
     unique = {h.id: h for h in holes}
-    ordered = sorted(unique.values(), key=lambda h: (KINDS.index(h.kind), h.weight))
+    ordered = sorted(unique.values(), key=Hole.order)
+    weak = [h for h in ordered if h.weak]
+    real = [h for h in ordered if not h.weak]
+    if kind is None:
+        shown = _listed(real, MAX_LISTED)
+        more = len(real) - len(shown)
+    else:
+        chosen = weak if kind == WEAK else [h for h in real if h.kind == kind]
+        shown = chosen[offset : offset + MAX_LISTED]
+        more = max(0, len(chosen) - offset - len(shown))
     filled = filled_holes(session, since)
-    count = Counter(h.kind for h in ordered)
+    count = Counter(h.kind for h in real)
+    why = Counter(h.weak for h in weak)
     return {
-        "count": len(ordered),
+        "count": len(real),
         "by_kind": {k: count.get(k, 0) for k in KINDS},
-        "holes": [h.out() for h in ordered[:MAX_LISTED]],
-        "more": max(0, len(ordered) - MAX_LISTED),
+        "holes": [h.out() for h in shown],
+        "more": more,
+        "weak": {
+            "count": len(weak),
+            "why": dict(why),
+            "holes": [] if kind == WEAK else [h.out() for h in weak[:MAX_WEAK]],
+        },
         "filled": {"count": len(filled), "limit": MAX_FILLED, "ids": sorted(filled)},
         "notes": notes,
         "summary": (
-            f"{len(ordered)} hole(s)"
-            + (f", the {MAX_LISTED} most useful listed" if len(ordered) > MAX_LISTED else "")
+            (
+                f"{len(real)} hole(s)"
+                + (
+                    f", {len(shown)} listed (most useful first, each kind kept in view)"
+                    if more and kind is None
+                    else ""
+                )
+                if real
+                else "No holes found"
+            )
+            + (
+                f"; {len(weak)} weak (a failed follow or no mode: flag, do not fill)"
+                if weak
+                else ""
+            )
             + f"; {len(filled)} of at most {MAX_FILLED} filled in this run (D265d)."
-            if ordered
-            else f"No holes found; {len(filled)} of at most {MAX_FILLED} filled in this run."
         ),
         "key": (
-            "Holes of D265a, most useful first: ts_end, missing_mirror_image (D267: a TS's "
-            "minimum is the mirror image of a node, made exactly by build_structure's mirror "
-            "step), missing_ts, unbalanced, missing_intermediate, cycle. bonds: formed and "
-            "broken by A181's rule (weak and metal–hydrogen contacts left out; a TS against "
-            "an end counts its partial bonds), "
-            "or along_mode: the pairs the TS's imaginary mode moves. Only what edges and the "
-            "steps' order link is looked at; no branch is invented. Fill at most 10 a run "
-            "(cheapest and most certain first), each with MACE guesses only, through "
-            "propose_mechanism with the hole id (hole on its edges, filled for its nodes); "
-            "flag the rest."
+            "Holes of D265a, most useful first across kinds (A195): those an edge alone "
+            "closes, then certain fills (a mode-follow or IRC end that left the TS and matches "
+            "nothing, a missing mirror image, D267, made exactly by build_structure's mirror "
+            "step), then one TS guess between minima an edge joins (missing_ts) or a species "
+            "an edge lacks (unbalanced), then holes that need evidence first (a TS never "
+            "followed, minima only the steps' order links), then missing_intermediate and "
+            "cycle; each kind keeps its first places, and `kind` lists one kind (with `offset` "
+            "while `more`). weak: no real hole (a follow whose end returned to the TS or lies on "
+            "another TS, a TS without an imaginary mode): flag it, never fill it. bonds: formed "
+            "and broken by A181's rule (weak and metal–hydrogen contacts left out; a TS "
+            "against an end counts its partial bonds), or along_mode: the pairs the TS's "
+            "imaginary mode moves. Only what edges and the steps' order link is looked at; no "
+            "branch is invented. Fill the certain holes in order, up to 10 a run, each with "
+            "MACE guesses only, through propose_mechanism with the hole id (hole on its edges, "
+            "filled for its nodes); flag the rest."
         ),
     }
 

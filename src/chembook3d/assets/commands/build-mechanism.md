@@ -122,9 +122,13 @@ Put these in the summary's review list and in the edge's evidence where there is
 ## Filling gaps (D265)
 
 Skip this with `--no-gaps`. After linking, call `find_gaps`; it lists the holes, most useful
-first, each with an id and a suggested fill. Fill at most 10 a run (the 11th is refused),
-cheapest and most certain first; flag the rest. Only between structures you have: never a new
-branch or a step the edges and steps do not already link.
+first across kinds, each with an id and a suggested fill (`kind` lists one kind). Fill the
+certain ones in that order up to 10 a run (the 11th is refused), not a sample: start their
+refines together, propose each fill as its job ends, then call `find_gaps` again (a node you
+made may now match other TSs' ends: link those, no fill) and go on while certain holes remain
+under the 10. Flag the rest, and every `weak` one (a failed follow), which is never filled.
+Only between structures you have: never a new branch or a step the edges and steps do not
+already link.
 - A missing minimum: the end that matches nothing (`make_node_from_end`, or the IRC's end),
   refined with `start_local_refine` at `mace-omol`.
 - A missing mirror image (a mirror image is another molecule, D267): `build_structure` from

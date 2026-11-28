@@ -8,15 +8,19 @@ whose imaginary mode stretches C1–C2) with its two wells, ethane against acety
 and a made-up RuCl2 for a cycle. MACE is the tests' stand-in `mace-stub`.
 """
 
+import json
 import time
+import typing
 
 import pytest
 from fastapi.testclient import TestClient
 
+from chembook3d import local_jobs
+from chembook3d.api import proposals as proposals_api
 from chembook3d.app import create_app
 from chembook3d.mcp_tools import BY_NAME, PANEL_ALLOWED, READ_ONLY_TOOLS, input_schema
 from chembook3d.services import gaps
-from tests.test_local_follow_mode import follow, import_ts, shifted, xyz_of
+from tests.test_local_follow_mode import TS, follow, import_ts, shifted, xyz_of
 from tests.test_local_jobs import (  # noqa: F401 - the fixtures
     finished,
     no_worker_left,
@@ -119,7 +123,11 @@ def test_holes_of_each_kind_are_found_and_none_in_a_complete_mechanism(page, tmp
 
     found = _gaps(page)
     kinds = [h["kind"] for h in found["holes"]]
-    assert kinds == sorted(kinds, key=gaps.KINDS.index)  # most useful first
+    # A195: most useful first across kinds: one TS guess between minima an edge joins, a
+    # species an edge lacks, then a TS never followed, then the holes that need a choice.
+    assert kinds[:3] == ["missing_ts", "unbalanced", "ts_end"]
+    assert set(kinds[3:]) == {"missing_intermediate", "cycle"}
+    assert found["weak"] == {"count": 0, "why": {}, "holes": []}
     (end_hole,) = _holes(found, "ts_end")
     assert _ids(end_hole) == {ts} and "product side" in end_hole["what"]
     assert "Only that is known" in end_hole["what"]
@@ -286,3 +294,89 @@ def test_a_ts_end_is_read_from_its_mode_follow(page, tmp_path):
     (hole,) = _holes(_gaps(page), "ts_end")
     assert _ids(hole) == {ts, apart} and "no edge joins them" in hole["what"]
     assert "not a filled gap" in hole["fill"]
+
+
+def _hole(kind, n, tier=gaps.CERTAIN, weight=0.0) -> gaps.Hole:
+    return gaps.Hole(kind, gaps.hole_id(kind, str(n)), [], "", "", tier=tier, weight=weight)
+
+
+def test_the_listing_keeps_every_kind_in_view():
+    """T-MCP-58 (A195): holes are ordered by usefulness across kinds, and when one kind would
+    fill the listing (a ts_end per unlinked TS) each other kind keeps its first places."""
+    ends = [_hole("ts_end", n, weight=n) for n in range(40)]
+    late = [_hole("missing_intermediate", n, tier=gaps.CHOICE) for n in range(5)]
+    one = _hole("missing_ts", 0, tier=gaps.ONE_STEP)
+    ordered = sorted([*late, *ends, one], key=gaps.Hole.order)
+    assert ordered[:2] == ends[:2] and ordered[40] is one
+    listed = gaps._listed(ordered, gaps.MAX_LISTED)
+    assert len(listed) == gaps.MAX_LISTED and listed == sorted(listed, key=gaps.Hole.order)
+    assert [h.kind for h in listed].count("missing_intermediate") == gaps.MIN_PER_KIND
+    assert one in listed and listed[: gaps.MAX_LISTED - 4] == ends[: gaps.MAX_LISTED - 4]
+    # The route's kinds are the service's.
+    hint = typing.get_type_hints(proposals_api.find_gaps)["kind"]
+    literal, _ = typing.get_args(hint)  # Literal[...] | None
+    assert set(typing.get_args(literal)) == {*gaps.KINDS, gaps.WEAK}
+
+
+@pytest.mark.usefixtures("stub_tools")
+def test_a_failed_follow_is_a_weak_hole_listed_apart(page, tmp_path):
+    """T-MCP-58 (A195): the open end of a TS joined on its other side completes a step; a
+    mode-follow end that returned to the TS is no missing minimum: it is left out of the holes
+    and their count, listed under weak ("follow failed") with a fill that flags it, and `kind`
+    weak lists it; `kind` lists one kind of the real holes."""
+    _, folder = _playground(page, tmp_path)
+    ts, _ = import_ts(page)
+    bonded = _node(page, "Bonded", atoms=shifted(-0.5), role="minimum")
+    _edge(page, bonded, ts)
+    u1 = _node(page, "U1", ETHYLENE, role="minimum")
+    u2 = _node(page, "U2", ETHANE, role="minimum")
+    _edge(page, u1, u2)  # an unbalanced edge
+    job = follow(page, ts)
+    (hole,) = _holes(_gaps(page), "ts_end")
+    assert "it left the TS" in hole["what"] and "make_node_from_end" in hole["fill"]
+    assert "joined on its other side, so its fill completes the step" in hole["what"]
+
+    result = local_jobs.job_dir(folder, job["id"]) / local_jobs.RESULT
+    data = json.loads(result.read_text(encoding="utf-8"))
+    data["follow_mode"]["ends"]["+"]["coordinates"] = [[x, y, z] for _, _, x, y, z in TS]
+    result.write_text(json.dumps(data), encoding="utf-8")
+    found = _gaps(page)
+    assert _holes(found, "ts_end") == [] and found["by_kind"]["ts_end"] == 0
+    assert found["count"] == 1 and found["holes"][0]["kind"] == "unbalanced"
+    assert found["weak"]["count"] == 1
+    assert found["weak"]["why"] == {"follow failed: the end returned to the TS": 1}
+    (weak,) = found["weak"]["holes"]
+    assert weak["id"] == hole["id"] and "returned to the TS" in weak["what"]
+    assert weak["fill"].startswith("Flag it") and "make_node_from_end" not in weak["fill"]
+    assert "1 weak" in found["summary"]
+
+    listed = _ok(page.get("/api/mechanism/gaps", params={"kind": "weak"}, headers=CLAUDE))
+    assert [h["id"] for h in listed["holes"]] == [hole["id"]] and listed["weak"]["holes"] == []
+    only = _ok(page.get("/api/mechanism/gaps", params={"kind": "unbalanced"}, headers=CLAUDE))
+    assert [h["kind"] for h in only["holes"]] == ["unbalanced"] and only["more"] == 0
+    wrong = page.get("/api/mechanism/gaps", params={"kind": "nonsense"}, headers=CLAUDE)
+    assert wrong.status_code == 422
+
+
+def test_ends_of_several_tss_on_one_structure_are_one_fill():
+    """T-MCP-58 (A195): open ends of two TSs that are the same structure (A184) say that one
+    node fills both and rank before another certain fill; an end of the same TS, a weak one
+    and another structure are left alone."""
+
+    def end(ts, n, rows, weak=None):
+        hole = gaps.Hole(
+            "ts_end", gaps.hole_id("ts_end", ts, n), [{"id": ts, "label": ts}], "", "", rows=rows
+        )
+        hole.tier, hole.weak = gaps.CERTAIN, weak
+        return hole
+
+    moved = [[e, x + 0.01, y, z] for e, x, y, z in ETHANE]
+    a, b = end("TS1", "+", ETHANE), end("TS2", "-", moved)
+    same_ts, weak = end("TS1", "-", moved), end("TS3", "+", ETHANE, weak="follow failed")
+    other = end("TS4", "+", ACETYLENE_H2)
+    gaps._shared_ends([other, a, b, same_ts, weak])
+    assert "“TS2”" in a.what and "one node fills 3 holes" in a.what
+    assert "“TS1”" in b.what and "one node fills 3 holes" in b.what
+    assert other.what == "" and weak.what == ""
+    ordered = sorted([other, a, b], key=gaps.Hole.order)
+    assert ordered[-1] is other

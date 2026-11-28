@@ -1408,9 +1408,13 @@ TOOLS: list[ToolSpec] = [
         "an edge or the steps' order links, one to three bonds apart, with no TS), "
         "unbalanced (an edge whose sides differ in atoms with no free species to balance them), "
         "missing_intermediate (linked minima more than one step apart) and cycle (the last "
-        "minimum of the steps does not give back the first's catalyst). Only what edges and "
-        "steps already link is looked at. Also how many holes you filled in this run (at most "
-        "10). Changes nothing.",
+        "minimum of the steps does not give back the first's catalyst). Ordered by "
+        "usefulness across kinds (A195: an edge alone, then certain fills, then one TS guess, "
+        "then evidence first, then choices), each kind kept in view; `kind` lists one kind "
+        "(`offset` while `more`). `weak` holds no real holes (a mode-follow end that "
+        "returned to the TS or lies on another TS: a failed follow): flag those, never fill "
+        "them. Only what edges and steps already link is looked at. Also how many holes you "
+        "filled in this run (at most 10). Changes nothing.",
     ),
     T(
         "find_direct_links",
