@@ -212,6 +212,23 @@ The project TS job description generated five steps from the HCN XYZ. For this c
 
 A second live TS bundle needs a separate enrollment from the existing Ru attempt. The current helper refuses a second distinct bundle for the same minimum enrollment. An open scope question is whether the operator should be able to select the next validated bundle for preparation while earlier submitted attempts remain available by ID for read-only follow-up.
 
+### Proposal: one node on Saga without hand enrollment (Q103–Q108)
+
+_Proposed 2026-11-28, awaiting Jonas. Nothing here is built until he answers Q103–Q108._
+
+The pilot replays only what the operator enrolled by hand: one manually verified minimum and one archived TS bundle. The next milestone is Jonas's representative request for one node: “Find a verified transition state for node X using this project's method.” The agent prepares and submits the calculations itself, but each submission still passes through the app's review. The local pilot already performs most of this sequence against a loopback stand-in (`prepare_gaussian_job` with `freeze_distance`, `inspect_preoptimization_modes`, `prepare_ts_from_preoptimization`). The proposal moves that sequence onto the Saga helper. The helper's independent checks stay in place, and the operator still owns everything that defines the method.
+
+| Stage | What changes | Boundary that stays |
+|---|---|---|
+| Bind the request | The agent names node X in the open investigation. The request records X's charge and multiplicity (Q103), the geometry chosen as the starting guess and its source (an existing frame, `start_local_ts_guess` or another notebook tool, Q108), the atom mapping and the adjacent intermediates used. | The agent reads the notebook through its existing tools. It cannot change which method the project uses. |
+| Write the guess | The agent writes the guess as a new flat XYZ file in the pilot's `geometries` directory with the existing write toggle. | New files only. Names are flat and the helper refuses anything else (FR-SSH-20). |
+| Prepare a fresh parent | New helper operation: run the pinned generator with an operator-enrolled job description (Q106) on that XYZ with `nosub`, in a fresh attempt directory. The helper checks the generated input the way the local pilot does: atom order and coordinates match the XYZ, five steps, the project route and the receiving checkpoint name. It can then apply the single-distance freeze to step 4. The app reviews the exact input, destination and resources. | The generator, job descriptions and wrapper are pinned by digest. The agent can change only the freeze. The wrapper runs at most once per attempt and its Slurm receipt is recorded. |
+| Choose a mode | The agent inspects the parent's copied-back output through scoped reads, as `inspect_preoptimization_modes` does locally. The D269 floor applies. | A mode below the floor cannot seed a TS. |
+| Prepare the TS child | New helper operation: build the unconstrained TS input from the enrolled TS job description and the selected parent's checkpoint (Q104). It binds the parent attempt, the mode evidence and the checkpoint digest, as the archived replay does now. | Only the parent's own copied-back checkpoint enters the child's submission directory. |
+| Follow up | `check_server_job` and `get_prepared_job` as now. The verdict uses the child's own convergence, normal termination and exactly one imaginary mode that matches the step. Automatic verification and the single point are step 2. | A missing receipt still blocks resubmission. |
+
+The operator's limits (Q105) bound how many parents and children one request may start, and the resources of each. Results attach to X as ordinary imported calculations with their provenance (Q107). Scans, IRC, revised angle or torsion constraints, parallel nodes and the single point stay in later steps. Tests follow the existing pattern: the loopback stand-in and the Linux helper tests cover generation, freeze, refusal, a lost reply, a stale or foreign checkpoint, and limits that are reached.
+
 ### Testing access on Saga (Q101)
 
 Sigma2 documents SSH connection reuse after interactive 2FA and user installation of software in a home or project area. OpenSSH registers a named subsystem in the server configuration. Installing a helper file in a user's home directory does not register it as a subsystem. The published guidance establishes neither an installed Chembook subsystem nor an isolated agent identity on Saga. [Sigma2 2FA](https://documentation.sigma2.no/getting_help/two_factor_authentication.html) · [User software](https://documentation.sigma2.no/software/userinstallsw.html) · [OpenSSH Subsystem](https://man.openbsd.org/sshd_config#Subsystem)
