@@ -38,7 +38,16 @@ exec(compile(source, str(path), "exec"), {{"__name__": "__main__"}})
 """
 COMMAND = "python3 -I -S -c " + shlex.quote(LAUNCHER)
 CONTROL = ".local/lib/chembook3d/"
-SUBMISSION_MARKER = ".submit-minimum.json"
+SUBMISSION_MARKER = saga_prepare.SUBMIT_MARKER
+TS_SUBMISSION_MARKER = saga_prepare.TS_MARKER
+TS_PREVIEW_FIELDS = {
+    *saga_prepare.TS_IDENTITY,
+    "state",
+    "directory",
+    "input_name",
+    "input",
+    "review",
+}
 
 
 async def _policy(sftp, name: str) -> dict | None:
@@ -49,7 +58,9 @@ async def _policy(sftp, name: str) -> dict | None:
         return None
     if attrs.type != asyncssh.FILEXFER_TYPE_REGULAR or attrs.size is None or attrs.size > 4096:
         raise ValueError("Invalid Saga enrollment file.")
-    if name == SUBMISSION_MARKER and (attrs.permissions is None or attrs.permissions & 0o077):
+    if name in (SUBMISSION_MARKER, TS_SUBMISSION_MARKER) and (
+        attrs.permissions is None or attrs.permissions & 0o077
+    ):
         raise ValueError("The Saga submission policy must be private to its owner.")
     async with sftp.open(marker, "rb") as stream:
         data = await stream.read(4097)
@@ -67,11 +78,13 @@ async def enrolled_root(sftp, username: str) -> str | None:
     if policy is None:
         # A surviving signing key still needs protection when a preparation
         # enrollment is missing, including on a new login or saved host alias.
-        try:
-            await sftp.lstat(CONTROL + SUBMISSION_MARKER)
-        except asyncssh.SFTPNoSuchFile:
-            return None
-        raise ValueError("Missing preparation enrollment for this Saga submission policy.")
+        for marker in (SUBMISSION_MARKER, TS_SUBMISSION_MARKER):
+            try:
+                await sftp.lstat(CONTROL + marker)
+            except asyncssh.SFTPNoSuchFile:
+                continue
+            raise ValueError("Missing preparation enrollment for this Saga submission policy.")
+        return None
     try:
         root = policy["work_root"]
         pattern = r"/cluster/projects/[a-zA-Z0-9_-]+/" + re.escape(username) + "/chembook3d-pilot"
@@ -92,27 +105,48 @@ class SubmissionPolicy:
     def key_id(self) -> str:
         return hashlib.sha256(self.key).hexdigest()
 
+    def pins(self) -> dict:
+        return {"attempt": self.attempt, "revision": self.revision}
 
-RESOURCES = {"nodes": 1, "cores": 40, "hours": 24}
+
+@dataclass(frozen=True)
+class TSSubmissionPolicy(SubmissionPolicy):
+    checkpoint_sha256: str
+    review_sha256: str
+
+    def pins(self) -> dict:
+        return {
+            **super().pins(),
+            "checkpoint_sha256": self.checkpoint_sha256,
+            "review_sha256": self.review_sha256,
+        }
+
+
+RESOURCES = saga_prepare.RESOURCES
 
 
 def _resources_match(data: dict) -> bool:
     return all(type(data.get(k)) is int and data[k] == v for k, v in RESOURCES.items())
 
 
-async def submission_policy(sftp) -> SubmissionPolicy | None:
-    policy = await _policy(sftp, SUBMISSION_MARKER)
+async def submission_policy(sftp, *, ts: bool = False) -> SubmissionPolicy | None:
+    policy = await _policy(sftp, TS_SUBMISSION_MARKER if ts else SUBMISSION_MARKER)
     if policy is None:
         return None
+    digest_fields = (
+        ("revision", "checkpoint_sha256", "review_sha256", "key") if ts else ("revision", "key")
+    )
     try:
         if (
             not job_pilot.ATTEMPT.fullmatch(policy["attempt"])
-            or not re.fullmatch(r"[0-9a-f]{64}", policy["revision"])
-            or not re.fullmatch(r"[0-9a-f]{64}", policy["key"])
+            or any(not re.fullmatch(r"[0-9a-f]{64}", policy[k]) for k in digest_fields)
             or not _resources_match(policy)
         ):
             raise ValueError
-        return SubmissionPolicy(policy["attempt"], policy["revision"], bytes.fromhex(policy["key"]))
+        args = policy["attempt"], policy["revision"], bytes.fromhex(policy["key"])
+        if ts:
+            return TSSubmissionPolicy(*args, policy["checkpoint_sha256"], policy["review_sha256"])
+        return SubmissionPolicy(*args)
     except (KeyError, ValueError, TypeError):
         raise ValueError("Invalid Saga submission enrollment.") from None
 
@@ -178,38 +212,78 @@ async def prepare(connection, root: str) -> dict:
         return {"ok": False, "error": "The Saga helper returned an invalid preparation result."}
 
 
-async def minimum_job(connection, root: str, policy: SubmissionPolicy, request: dict) -> dict:
-    """Sign only the fixed submit operation for this enrollment. Status needs no signature."""
-    if not isinstance(request, dict) or request.get("operation") not in (
-        "submit_minimum",
-        "minimum_status",
+def validate_ts_preview(result: dict) -> None:
+    """Cross-check the archived parent, input and checkpoint against the reviewed bundle."""
+    review = result.get("review")
+    saga_prepare.validate_ts_review(review)
+    if not isinstance(result.get("input"), str):
+        raise ValueError("Missing TS input.")
+    contents = result["input"].encode("utf-8")
+    if (
+        result.get("state") != "prepared"
+        or not 0 < len(contents) <= saga_prepare.LIMIT
+        or result.get("input_name") != review["input_name"]
+        or result.get("revision") != review["input_sha256"]
+        or hashlib.sha256(contents).hexdigest() != review["input_sha256"]
+        or result.get("checkpoint_sha256") != review["checkpoint_sha256"]
+        or hashlib.sha256(saga_prepare.review_bytes(review)).hexdigest()
+        != result.get("review_sha256")
     ):
+        raise ValueError("The prepared TS no longer matches its enrolled review.")
+
+
+async def prepare_ts(connection, root: str, policy: TSSubmissionPolicy) -> dict:
+    pins = policy.pins()
+    answer = await _request(connection, {"operation": "prepare_ts", **pins})
+    if not answer["ok"]:
+        return answer
+    try:
+        result = answer["result"]
+        if (
+            result.keys() != TS_PREVIEW_FIELDS
+            or any(result[k] != v for k, v in pins.items())
+            or result["directory"] != posixpath.join(root, "ts-" + policy.attempt)
+        ):
+            raise ValueError
+        validate_ts_preview(result)
+        return answer
+    except (AttributeError, KeyError, TypeError, ValueError, RecursionError, OverflowError):
+        return {"ok": False, "error": "The Saga helper returned an invalid TS preparation result."}
+
+
+async def enrolled_job(connection, root: str, policy: SubmissionPolicy, request: dict) -> dict:
+    """Sign only the fixed submit operation for this enrollment. Status needs no signature."""
+    ts = isinstance(policy, TSSubmissionPolicy)
+    submit_op, status_op, prefix = (
+        ("submit_ts", "ts_status", "ts-")
+        if ts
+        else ("submit_minimum", "minimum_status", "prepare-")
+    )
+    if not isinstance(request, dict) or request.get("operation") not in (submit_op, status_op):
         return {"ok": False, "error": "Unknown Saga job operation."}
-    submitting = request["operation"] == "submit_minimum"
-    fields = {"operation", "attempt", "revision"}
+    submitting = request["operation"] == submit_op
+    pins = policy.pins()
+    fields = {"operation", *pins}
     if submitting:
         fields.update(RESOURCES)
     if (
         request.keys() != fields
-        or request["attempt"] != policy.attempt
-        or request["revision"] != policy.revision
+        or any(request[k] != v for k, v in pins.items())
         or (submitting and not _resources_match(request))
     ):
-        return {"ok": False, "error": "The request does not match the enrolled minimum."}
+        return {"ok": False, "error": "The request does not match the enrolled preparation."}
     if submitting:
         request = {**request, "signature": job_pilot.signature(policy.key, request)}
     answer = await _request(connection, request)
     if not answer["ok"]:
         return answer
     result = answer["result"]
-    expected_dir = posixpath.join(root, "prepare-" + policy.attempt, "submission")
+    expected_dir = posixpath.join(root, prefix + policy.attempt, "submission")
     try:
         state = result["state"]
         if (
-            result.keys()
-            != {"attempt", "revision", "state", "directory", "job_id", "detail", *RESOURCES}
-            or result["attempt"] != policy.attempt
-            or result["revision"] != policy.revision
+            result.keys() != {*pins, "state", "directory", "job_id", "detail", *RESOURCES}
+            or any(result[k] != v for k, v in pins.items())
             or result["directory"] != expected_dir
             or not _resources_match(result)
             or state not in ("prepared", "submitted", "rejected", "uncertain")
@@ -225,6 +299,10 @@ async def minimum_job(connection, root: str, policy: SubmissionPolicy, request: 
     except (KeyError, TypeError, ValueError):
         return {"ok": False, "error": "The Saga helper returned an invalid submission result."}
     return answer
+
+
+async def minimum_job(connection, root: str, policy: SubmissionPolicy, request: dict) -> dict:
+    return await enrolled_job(connection, root, policy, request)
 
 
 async def file_request(connection, request: dict, root: str) -> dict:

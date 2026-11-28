@@ -698,13 +698,57 @@ TOOLS: list[ToolSpec] = [
         "ID and resources for submit_prepared_job. Repeating recovers the same preparation.",
     ),
     T(
+        "prepare_saga_ts",
+        "write",
+        "POST",
+        "/api/hpc-jobs/{server_id}/prepare-ts",
+        "Prepare the single reviewed TS input and checkpoint enrolled by the operator on Saga. "
+        "Returns the full Gaussian input, parent Slurm receipt, selected mode and frozen atom "
+        "pair, checkpoint and output digests, destination, fixed resources and attempt ID. "
+        "Use submit_prepared_job for app confirmation. After a submission claim, get_prepared_job "
+        "recovers its receipt or reports uncertainty.",
+    ),
+    T(
         "prepare_gaussian_job",
         "write",
         "POST",
         "/api/hpc-jobs/{server_id}/prepare",
-        "Prepare one ordinary Gaussian optimization on the configured local HPC pilot. "
-        "Select an approved .jd and .xyz by filename. Uses one node. Returns the complete "
+        "Prepare a Gaussian optimization on the configured local HPC pilot. Select an approved "
+        ".jd and .xyz by filename. For a five-step linked minimum, optionally freeze one "
+        "distance at its starting value during optimization. Uses one node. Returns the complete "
         "input for review, revision digest and attempt ID. Preparation never submits.",
+        help={
+            "freeze_distance": "Two distinct 1-based atom indices from the selected XYZ.",
+        },
+    ),
+    T(
+        "inspect_preoptimization_modes",
+        "read",
+        "GET",
+        "/api/hpc-jobs/{server_id}/attempts/{parent_attempt}/modes",
+        "Read imaginary modes from a finished constrained pre-optimization in this investigation "
+        "on the local HPC pilot. Returns the parent Slurm receipt, frozen atom pair and mode "
+        "projections along that bond, with the SHA-256 of the inspected output. Use the "
+        "intended elementary step to interpret the motion.",
+        help={"parent_attempt": "Attempt ID from the constrained prepare_gaussian_job."},
+    ),
+    T(
+        "prepare_ts_from_preoptimization",
+        "write",
+        "POST",
+        "/api/hpc-jobs/{server_id}/attempts/{parent_attempt}/prepare-ts",
+        "Prepare the local pilot's unconstrained project TS optimization and frequency job "
+        "from the selected pre-optimization. Choose an eligible mode from "
+        "inspect_preoptimization_modes whose motion fits the intended step, and pass the "
+        "output digest from the same inspection. Returns a new attempt, its parent receipt, "
+        "mode and checkpoint evidence, and the complete input with requested resources for "
+        "app confirmation via submit_prepared_job.",
+        help={
+            "parent_attempt": "Attempt ID from the constrained prepare_gaussian_job.",
+            "mode_index": "The selected one-based mode_index from inspect_preoptimization_modes.",
+            "output_sha256": "The 64-character lowercase hex output_sha256 from the same "
+            "inspect_preoptimization_modes result.",
+        },
     ),
     T(
         "get_prepared_job",
@@ -2153,7 +2197,10 @@ TOOLS += [
 
 CONFIRM_DESCRIPTIONS = {
     "submit_prepared_job": "Ask the user to submit a prepared Gaussian input on the enrolled Saga "
-    "or local HPC pilot. The app shows the input, destination and resources for confirmation.",
+    "or local HPC pilot. The app shows the input, destination and resources for confirmation. "
+    "A constrained pre-optimization shows the frozen distance. A TS follow-on shows its "
+    "parent and Slurm receipt, selected mode and checkpoint digest. A Saga TS submission also "
+    "shows the enrolled checkpoint filename and archived review digest.",
     "delete_node": "Delete a node (or free species) with its calculations, notes and every "
     "edge touching it.",
     "delete_group": "Delete a group with its contents: its members, their calculations and "

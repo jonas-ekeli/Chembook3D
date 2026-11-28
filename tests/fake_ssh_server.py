@@ -33,13 +33,17 @@ import asyncssh
 from asyncssh.x11 import walk_xauth
 
 from chembook3d.remote import probe, saga_access, saga_prepare
-from chembook3d.remote.job_pilot import LOCAL_WORK, SUBSYSTEM, JobPilot
+from chembook3d.remote.job_pilot import LOCAL_WORK, SUBSYSTEM, JobPilot, signature
+from tests.hpc_pilot_runner import checkpoint_ts_input
+from tests.preopt_fixture import write_completed_preopt
 
 USER = "jonas"
 PASSWORD = "correct horse"
 CODE = "123456"
 HOME = "/cluster/home/jonas"
 SAGA_FILE_OPERATIONS = {"list_files", "read_file", "create_xyz"}
+SAGA_TS_OPERATIONS = {"prepare_ts", "submit_ts", "ts_status"}
+SAGA_TS_MARKER = saga_prepare.TS_MARKER
 
 
 @dataclass
@@ -52,6 +56,7 @@ class Record:
     displays: list[str | None] = field(default_factory=list)  # each session's X11 display
     saga_prepare_requests: list[bytes] = field(default_factory=list)
     saga_minimum_requests: list[dict] = field(default_factory=list)
+    saga_ts_requests: list[dict] = field(default_factory=list)
     saga_file_requests: list[dict] = field(default_factory=list)
     sftp_paths: list[str] = field(default_factory=list)
 
@@ -106,7 +111,10 @@ class _SFTPServer(asyncssh.SFTPServer):
 
     def lstat(self, path):
         attrs = super().lstat(path)
-        if sys.platform == "win32" and posixpath.basename(path) == b".submit-minimum.json":
+        if sys.platform == "win32" and posixpath.basename(path) in {
+            b".submit-minimum.json",
+            SAGA_TS_MARKER.encode(),
+        }:
             # A Linux Saga account exposes POSIX mode bits, including on this Windows fixture.
             attrs = asyncssh.SFTPAttrs.from_local(attrs)
             attrs.permissions &= ~0o077
@@ -121,6 +129,7 @@ class FakeSaga:
         self.drop_submit_reply = False
         self.saga_prepare_reply: dict | None = None
         self.saga_minimum: Callable[[dict], dict] | None = None
+        self.saga_ts: Callable[[dict], dict] | None = None
         self.saga_file_error: str | None = None
         self.port = port
         self.x11 = x11
@@ -222,23 +231,23 @@ class FakeSaga:
                     process.stdout.write(json.dumps(self.saga_prepare_reply).encode())
                     process.exit(0)
                     return
-            if self.saga_minimum and operation in {
-                "prepare_minimum",
-                "submit_minimum",
-                "minimum_status",
-            }:
+            if self.saga_ts and isinstance(operation, str) and operation in SAGA_TS_OPERATIONS:
+                self.record.saga_ts_requests.append(envelope)
+                if self._installed_saga_source() is not None:
+                    await self._saga_job(process, self.saga_ts, envelope)
+                    return
+            if (
+                self.saga_minimum
+                and isinstance(operation, str)
+                and operation
+                in {
+                    "prepare_minimum",
+                    "submit_minimum",
+                    "minimum_status",
+                }
+            ):
                 self.record.saga_minimum_requests.append(envelope)
-                try:
-                    result = await asyncio.to_thread(self.saga_minimum, envelope)
-                    if self.drop_submit_reply and operation == "submit_minimum":
-                        self.drop_submit_reply = False
-                        process.exit(1)  # receipt is durable, but no bytes reached the keeper
-                        return
-                    reply, status = {"ok": True, "result": result}, 0
-                except (OSError, ValueError) as exc:
-                    reply, status = {"ok": False, "error": str(exc)}, 1
-                process.stdout.write(json.dumps(reply).encode())
-                process.exit(status)
+                await self._saga_job(process, self.saga_minimum, envelope)
                 return
             await self._pinned(process, saga_access.LAUNCHER, request)
             return
@@ -271,6 +280,21 @@ class FakeSaga:
     def saga_control(self) -> Path:
         return self.root / HOME.lstrip("/") / ".local/lib/chembook3d"
 
+    async def _saga_job(
+        self, process: asyncssh.SSHServerProcess, handler: Callable[[dict], dict], request: dict
+    ) -> None:
+        try:
+            result = await asyncio.to_thread(handler, request)
+            if self.drop_submit_reply and request["operation"] in {"submit_minimum", "submit_ts"}:
+                self.drop_submit_reply = False
+                process.exit(1)  # receipt is durable, but no bytes reached the keeper
+                return
+            reply, status = {"ok": True, "result": result}, 0
+        except (OSError, ValueError) as exc:
+            reply, status = {"ok": False, "error": str(exc)}, 1
+        process.stdout.write(json.dumps(reply).encode())
+        process.exit(status)
+
     async def _pinned(
         self, process: asyncssh.SSHServerProcess, launcher: str, request: bytes
     ) -> None:
@@ -288,14 +312,19 @@ class FakeSaga:
         process.stdout.write(result.stdout)
         process.exit(result.returncode)
 
+    def _installed_saga_source(self) -> bytes | None:
+        installed = self.saga_control / "saga_prepare.py"
+        if installed.is_file():
+            source = installed.read_bytes().replace(b"\r\n", b"\n")
+            if source == Path(saga_prepare.__file__).read_bytes().replace(b"\r\n", b"\n"):
+                return source
+        return None  # the real launcher reports the missing install or pin mismatch
+
     async def _saga_files(self, process: asyncssh.SSHServerProcess, request: dict) -> bool:
         """Project helper filesystem operations into the fixture's SFTP namespace."""
-        installed = self.saga_control / "saga_prepare.py"
-        if not installed.is_file():
-            return False  # the real launcher reports the missing install
-        source = installed.read_bytes().replace(b"\r\n", b"\n")
-        if source != Path(saga_prepare.__file__).read_bytes().replace(b"\r\n", b"\n"):
-            return False  # the real launcher reports the pin mismatch
+        source = self._installed_saga_source()
+        if source is None:
+            return False
         try:
             if self.saga_file_error is not None:
                 raise ValueError(self.saga_file_error)
@@ -667,6 +696,7 @@ def enable_job_pilot(fake: FakeSaga, config: Path, server_id: str) -> None:
     jobs.mkdir(parents=True, exist_ok=True)
     (jobs / "minimum.jd").write_text("#p HF/STO-3G Opt", encoding="ascii")
     (jobs / "linked-minimum.jd").write_text("linked-minimum", encoding="ascii")
+    (jobs / "ts.jd").write_text("checkpoint-ts", encoding="ascii")
     tool = (sys.executable, str(Path(__file__).with_name("hpc_pilot_runner.py").resolve()))
     profile = config / "remote" / "local-job-pilot.json"
     profile.parent.mkdir(parents=True, exist_ok=True)
@@ -812,6 +842,152 @@ def enable_saga_minimum(fake: FakeSaga, remote_root: str, contents: str, monkeyp
         json.dumps({**policy, "work_root": remote_root}).encode(),
     )
     fake.saga_minimum = operation
+
+
+def enable_saga_ts(fake: FakeSaga, remote_root: str, monkeypatch) -> tuple[dict, dict]:
+    """Enroll a reviewed synthetic checkpoint handoff and a scheduler with no cluster access."""
+    work = fake.root / remote_root.lstrip("/")
+    home = fake.root / HOME.lstrip("/")
+    control = fake.saga_control
+    parent = work / "synthetic-parent"
+    parent.mkdir()
+    write_completed_preopt(parent, "water", "72410", [1, 2])
+    bundle = work / "ts-test-water"
+    bundle.mkdir()
+    contents = checkpoint_ts_input("water-ts")
+    checkpoint = (parent / "water.fchk.gz").read_bytes()
+    review = {
+        "format": "chembook3d-saga-ts-v1",
+        "parent_job_id": "72410",
+        "parent_stem": "water",
+        "input_name": "water-ts.inp",
+        "checkpoint_name": "water-ts.fchk.gz",
+        "input_sha256": saga_prepare.digest(contents.encode()),
+        "checkpoint_sha256": saga_prepare.digest(checkpoint),
+        "output_sha256": saga_prepare.digest((parent / "water.out").read_bytes()),
+        "freeze_distance": [1, 2],
+        "mode_index": 1,
+        "frequency_cm1": -425.0,
+        "bond_projection": 0.96,
+        "alignment": 1.0,
+    }
+    review_bytes = (json.dumps(review, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    (bundle / "review.json").write_bytes(review_bytes)
+    (bundle / "child.inp").write_bytes(contents.encode())
+    (bundle / "parent.fchk.gz").write_bytes(checkpoint)
+    wrapper = home / saga_prepare.WRAPPER
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_bytes(
+        b"#!/usr/bin/env python3\n"
+        b"from pathlib import Path\n"
+        b"import os, sys\n"
+        b"stage = Path(os.environ.get('SAGA_FIXTURE_CWD', '.'))\n"
+        b"assert sys.argv[1:] == ['water-ts.inp', '-n', '1', '-c', '40', '-t', '24']\n"
+        b"assert {p.name for p in stage.iterdir()} == {'water-ts.inp', 'water-ts.fchk.gz'}\n"
+        b"with (stage / 'scheduler-calls.txt').open('a') as calls:\n"
+        b"    print(' '.join(sys.argv[1:]), file=calls)\n"
+        b"(stage / 'water-ts.log').write_text('Starting job 72411 on test-node on Saga "
+        b"at Tue Nov 24 09:00:00 CET 2026\\nJobName: water-ts\\n')\n"
+        b"print('Submitted batch job 72411')\n"
+    )
+    wrapper.chmod(0o700)
+    marker_path = control / SAGA_TS_MARKER
+    if sys.platform == "linux":
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setattr(saga_prepare, "PROJECTS", work.parents[2])
+        policy = {
+            "work_root": str(work),
+            "stem": "water",
+            "attempt": "18" * 16,
+            "reference_sha256": "60" * 32,
+        }
+        saga_prepare.atomic_write(control / saga_prepare.MARKER, json.dumps(policy).encode())
+        saga_prepare.enroll_ts(bundle)
+        marker = json.loads(marker_path.read_bytes())
+
+        def operation(request):
+            result = saga_prepare.ts_operation(request, policy)
+            return {**result, "directory": result["directory"].removeprefix(str(fake.root))}
+
+    else:
+        # Non-Linux hosts exercise the real keeper and confirmation against portable wire replies.
+        attempt = "29" * 16
+        identity = {
+            "attempt": attempt,
+            "revision": review["input_sha256"],
+            "checkpoint_sha256": review["checkpoint_sha256"],
+            "review_sha256": saga_prepare.digest(review_bytes),
+        }
+        resources = {"nodes": 1, "cores": 40, "hours": 24}
+        marker = {**identity, **resources, "key": "72" * 32}
+        saga_prepare.atomic_write(marker_path, json.dumps(marker).encode())
+        directory = f"{remote_root}/ts-{attempt}"
+        stage = work / f"ts-{attempt}" / "submission"
+        receipt_path = control / f"{attempt}.fixture-ts-receipt"
+
+        def operation(request):
+            name = request["operation"]
+            expected = {"operation": name, **identity}
+            if name == "submit_ts":
+                expected.update(resources)
+                expected["signature"] = signature(bytes.fromhex(marker["key"]), expected)
+            if request != expected:
+                raise ValueError("The request does not match the enrolled TS.")
+            if name == "prepare_ts":
+                if receipt_path.exists():
+                    raise ValueError("Check the prepared TS attempt for its submission status.")
+                stage.parent.mkdir(exist_ok=True)
+                preview = stage.parent / review["input_name"]
+                if not preview.exists():
+                    preview.write_bytes(contents.encode())
+                return {
+                    **identity,
+                    "state": "prepared",
+                    "directory": directory,
+                    "input_name": review["input_name"],
+                    "input": contents,
+                    "review": review,
+                }
+            receipt = {
+                **identity,
+                **resources,
+                "state": "prepared",
+                "directory": directory + "/submission",
+                "job_id": None,
+                "detail": None,
+            }
+            if receipt_path.exists():
+                return json.loads(receipt_path.read_bytes())
+            if name == "submit_ts":
+                stage.mkdir()
+                (stage / review["input_name"]).write_bytes(contents.encode())
+                (stage / review["checkpoint_name"]).write_bytes(checkpoint)
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(wrapper),
+                        review["input_name"],
+                        "-n",
+                        "1",
+                        "-c",
+                        "40",
+                        "-t",
+                        "24",
+                    ],
+                    env={**os.environ, "SAGA_FIXTURE_CWD": str(stage)},
+                    check=True,
+                    capture_output=True,
+                    timeout=10,
+                )
+                receipt.update(state="submitted", job_id="72411")
+                saga_prepare.atomic_write(receipt_path, json.dumps(receipt).encode())
+            return receipt
+
+    saga_prepare.atomic_write(
+        fake.root / ".local/lib/chembook3d" / SAGA_TS_MARKER, marker_path.read_bytes()
+    )
+    fake.saga_ts = operation
+    return marker, review
 
 
 def main() -> None:

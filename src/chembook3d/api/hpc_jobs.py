@@ -7,16 +7,20 @@ import re
 import secrets
 import tempfile
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from chembook3d.api.remote import _check, _saved
 from chembook3d.api.routes import _investigation
 from chembook3d.models import InvestigationInfo
-from chembook3d.remote import client, job_pilot, servers
+from chembook3d.remote import client, job_pilot, saga_access, servers
 
 router = APIRouter(prefix="/api/hpc-jobs")
+_TS_PILOT = "local_ts"
+_SAGA_TS = "saga_ts"
+_SAGA_PILOTS = {"saga_minimum", _SAGA_TS}
 
 
 async def _no_arguments(request: Request, detail: str):
@@ -32,21 +36,59 @@ def _target(server_id: str) -> list:
 @router.post("/{server_id}/prepare-minimum")
 async def prepare_saga_minimum(server_id: str, request: Request):
     """Prepare the minimum enrolled by the operator in a Saga login (D266)."""
+    return await _prepare_saga(server_id, request, ts=False)
+
+
+@router.post("/{server_id}/prepare-ts")
+async def prepare_saga_ts(server_id: str, request: Request):
+    """Prepare the archived TS input and checkpoint enrolled on the connected Saga account."""
+    return await _prepare_saga(server_id, request, ts=True)
+
+
+async def _prepare_saga(server_id: str, request: Request, *, ts: bool):
     _check(request, page_only=False)
     investigation = _investigation(request)
     info = investigation.info()
     target = _target(server_id)
     await _no_arguments(request, "Only the saved server ID is accepted.")
+    if ts and (info is None or not info.uuid):
+        raise HTTPException(409, "The current investigation has no ID for this preparation.")
     try:
-        reply = await client.call("saga_prepare_minimum", server=server_id, timeout=115)
+        if ts:
+            reply = await client.call(
+                "saga_prepare_ts", server=server_id, target=target, timeout=115
+            )
+        else:
+            reply = await client.call("saga_prepare_minimum", server=server_id, timeout=115)
     except client.KeeperError as exc:
         if "Unknown operation" in str(exc):
             raise HTTPException(
                 409, "The open HPC login uses an older keeper. See the Saga test procedure."
             ) from exc
         raise HTTPException(409, str(exc)) from exc
+    if not isinstance(reply.get("result"), dict):
+        raise HTTPException(409, "The keeper returned an invalid Saga preparation.")
     result = dict(reply["result"])
     key_id = result.pop("key_id", None)
+    if ts:
+        try:
+            if (
+                result.keys()
+                != saga_access.TS_PREVIEW_FIELDS | {"submission_enabled", *saga_access.RESOURCES}
+                or result["submission_enabled"] is not True
+                or not isinstance(result["attempt"], str)
+                or not job_pilot.ATTEMPT.fullmatch(result["attempt"])
+                or not isinstance(result["directory"], str)
+                or not re.fullmatch(
+                    rf"/cluster/projects/[A-Za-z0-9_-]+/{re.escape(target[2])}/chembook3d-pilot/"
+                    rf"ts-{result['attempt']}",
+                    result["directory"],
+                )
+            ):
+                raise ValueError
+            saga_access.validate_ts_preview(result)
+        except ValueError as exc:
+            raise HTTPException(409, "The keeper returned an invalid Saga TS preparation.") from exc
     if result.get("submission_enabled") is True:
         attempt = result["attempt"]
         revision = hashlib.sha256(result["input"].encode()).hexdigest()
@@ -59,15 +101,15 @@ async def prepare_saga_minimum(server_id: str, request: Request):
             or revision != result["revision"]
             or any(
                 type(result.get(k)) is not int or result[k] != n
-                for k, n in (("nodes", 1), ("cores", 40), ("hours", 24))
+                for k, n in saga_access.RESOURCES.items()
             )
-            or not result["directory"].endswith("/prepare-" + attempt)
+            or not result["directory"].endswith(("/ts-" if ts else "/prepare-") + attempt)
         ):
             raise HTTPException(
                 409, "The enrolled preparation does not match the saved target or input."
             )
         record = {
-            "pilot": "saga_minimum",
+            "pilot": _SAGA_TS if ts else "saga_minimum",
             "server_id": server_id,
             "target": target,
             "key_id": key_id,
@@ -78,6 +120,8 @@ async def prepare_saga_minimum(server_id: str, request: Request):
                 k: result[k] for k in ("input_name", "revision", "input", "nodes", "cores", "hours")
             },
         }
+        if ts:
+            record.update({k: result[k] for k in ("review", "review_sha256", "checkpoint_sha256")})
         _store_record(attempt, record)
     return result
 
@@ -88,6 +132,77 @@ class PrepareIn(BaseModel):
     job_file: str = Field(max_length=83)
     cores: int = Field(ge=1)
     hours: int = Field(ge=1)
+    freeze_distance: list[Annotated[int, Field(ge=1)]] | None = Field(
+        default=None, min_length=2, max_length=2
+    )
+
+    @field_validator("freeze_distance")
+    @classmethod
+    def _distinct_atoms(cls, pair: list[int] | None) -> list[int] | None:
+        if pair is not None and pair[0] == pair[1]:
+            raise ValueError("Specify two distinct atom indices.")
+        return pair
+
+
+_Sha256 = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+
+
+class PrepareTSIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    cores: int = Field(ge=1)
+    hours: int = Field(ge=1)
+    mode_index: int = Field(ge=1)
+    output_sha256: _Sha256
+
+
+_JOB_ID_PATTERN = r"^[1-9][0-9]{0,19}$"
+_JobId = Annotated[str, Field(pattern=_JOB_ID_PATTERN)]
+_AtomPair = Annotated[list[Annotated[int, Field(ge=1)]], Field(min_length=2, max_length=2)]
+
+
+class _ModeEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    mode_index: int = Field(ge=1)
+    frequency_cm1: float = Field(lt=0)
+    bond_projection: float
+    relative_displacement: float = Field(ge=0)
+    alignment: float = Field(ge=0, le=1)
+    eligible: bool
+
+
+class _SelectedMode(_ModeEvidence):
+    freeze_distance: _AtomPair
+    output_sha256: _Sha256
+
+
+class _InspectedModes(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    attempt: str
+    parent_job_id: _JobId
+    freeze_distance: _AtomPair
+    output_sha256: _Sha256
+    modes: list[_ModeEvidence]
+
+
+class _TSDetails(BaseModel):
+    model_config = ConfigDict(strict=True)
+    parent_attempt: str
+    parent_job_id: _JobId
+    checkpoint_name: str
+    checkpoint_sha256: _Sha256
+    mode_index: int = Field(ge=1)
+    mode_evidence: _SelectedMode
+    directory: str
+    revision: _Sha256
+    cores: int = Field(ge=1)
+    hours: int = Field(ge=1)
+
+
+def _ts_details(result: dict) -> dict:
+    try:
+        return _TSDetails.model_validate(result).model_dump()
+    except ValidationError as exc:
+        raise HTTPException(409, "The helper returned invalid TS preparation metadata.") from exc
 
 
 def _local_key(server_id: str, target: list) -> bytes:
@@ -139,7 +254,12 @@ def _store_record(attempt: str, record: dict) -> None:
 
 
 def _record(
-    server_id: str, attempt: str, folder: Path, investigation_id: str | None
+    server_id: str,
+    attempt: str,
+    folder: Path,
+    investigation_id: str | None,
+    *,
+    require_identity: bool = False,
 ) -> tuple[dict, bytes | None]:
     try:
         record = json.loads(_record_path(attempt).read_text("utf-8"))
@@ -148,14 +268,20 @@ def _record(
     target = _target(server_id)
     if record["server_id"] != server_id or record["target"] != target:
         raise HTTPException(409, "The pilot configuration has changed since preparation.")
-    saga = record.get("pilot") == "saga_minimum"
-    if folder != Path(record["folder"]) or (
-        saga and record["investigation_id"] != investigation_id
-    ):
+    owner = record.get("investigation_id")
+    if folder != Path(record["folder"]) or (owner and owner != investigation_id):
         raise HTTPException(409, "Open the investigation that prepared this job.")
+    pilot = record.get("pilot")
+    if not owner and (require_identity or pilot in {*_SAGA_PILOTS, _TS_PILOT}):
+        raise HTTPException(409, "This prepared job has no recorded investigation ID.")
     if hashlib.sha256(record["input"].encode()).hexdigest() != record["revision"]:
         raise HTTPException(409, "Prepared input no longer matches its recorded revision.")
-    if saga:
+    if pilot == _SAGA_TS:
+        try:
+            saga_access.validate_ts_preview({**record, "state": "prepared"})
+        except ValueError as exc:
+            raise HTTPException(409, "The TS review no longer matches its preparation.") from exc
+    if pilot in _SAGA_PILOTS:
         return record, None
     key = _local_key(server_id, target)
     if record["key_id"] != hashlib.sha256(key).hexdigest():
@@ -164,17 +290,49 @@ def _record(
 
 
 def _summary(record: dict) -> str:
-    if record.get("pilot") == "saga_minimum":
+    if record.get("pilot") in _SAGA_PILOTS:
         host, port, username = record["target"]
-        return (
+        summary = (
             f"Submit {record['input_name']} on {record['server_id']} ({username}@{host}, "
             f"port {port}), {record['nodes']} node, {record['cores']} cores, {record['hours']} h. "
             f"Directory {record['directory']}. Prepared input SHA-256 {record['revision']}"
         )
+        if record["pilot"] == _SAGA_TS:
+            review = record["review"]
+            first, second = review["freeze_distance"]
+            summary += (
+                f". Checkpoint {review['checkpoint_name']} SHA-256 {record['checkpoint_sha256']}. "
+                f"Parent {review['parent_stem']} (Slurm job {review['parent_job_id']}). "
+                f"Mode {review['mode_index']} ({review['frequency_cm1']:g} cm⁻¹), "
+                f"atoms {first} and {second}, bond projection {review['bond_projection']:g}, "
+                f"alignment {review['alignment']:g}. "
+                f"Parent output SHA-256 {review['output_sha256']}. "
+                f"Review SHA-256 {record['review_sha256']}"
+            )
+        return summary
+    if record.get("pilot") == _TS_PILOT:
+        host, port, username = record["target"]
+        mode = record["mode_evidence"]
+        first, second = mode["freeze_distance"]
+        return (
+            f"Submit the TS optimization on {record['server_id']} ({username}@{host}, "
+            f"port {port}), 1 node, {record['cores']} cores, {record['hours']} h. "
+            f"Directory {record['directory']}. Parent attempt {record['parent_attempt']} "
+            f"(Slurm job {record['parent_job_id']}). Mode {record['mode_index']} "
+            f"({mode['frequency_cm1']:g} cm⁻¹), atoms {first} and {second}, "
+            f"bond projection {mode['bond_projection']:g}. Parent output SHA-256 "
+            f"{mode['output_sha256']}. "
+            f"Checkpoint {record['checkpoint_name']} SHA-256 {record['checkpoint_sha256']}. "
+            f"Prepared input SHA-256 {record['revision']}"
+        )
+    freeze = ""
+    if pair := record.get("freeze_distance"):
+        first, second = pair
+        freeze = f"Freeze the distance between atoms {first} and {second} at its starting value. "
     return (
         f"Submit {record['geometry']} using {record['job_file']} on {record['server_id']} "
         f"(local pilot), 1 node, {record['cores']} cores, {record['hours']} h. "
-        f"Directory {record['directory']}. Prepared input SHA-256 {record['revision']}"
+        f"{freeze}Directory {record['directory']}. Prepared input SHA-256 {record['revision']}"
     )
 
 
@@ -190,16 +348,18 @@ def describe_submission(session, params: dict) -> tuple[str, str]:
 
 
 async def _call(
-    server_id: str, request: dict, target: list, key: bytes | None, key_id=None
+    server_id: str, request: dict, target: list, key: bytes | None, key_id=None, directory=None
 ) -> dict:
     try:
         if key is None:
+            ts = request["operation"] in {"submit_ts", "ts_status"}
             response = await client.call(
-                "saga_minimum_job",
+                "saga_ts_job" if ts else "saga_minimum_job",
                 server=server_id,
                 target=target,
                 key_id=key_id,
                 request=request,
+                **({"directory": directory} if ts else {}),
                 timeout=115,
             )
         else:
@@ -209,16 +369,24 @@ async def _call(
             )
     except client.KeeperError as exc:
         detail = str(exc)
-        if request["operation"] in {"submit", "submit_minimum"}:
+        if request["operation"] in {"submit", "submit_minimum", "submit_ts"}:
             detail += " Check the same prepared attempt after reconnecting."
         raise HTTPException(409, detail) from exc
-    result = response["result"]
-    if result["attempt"] != request["attempt"]:
+    result = response.get("result")
+    if not isinstance(result, dict):
+        raise HTTPException(409, "The helper did not return a job result.")
+    if result.get("attempt") != request["attempt"]:
         raise HTTPException(409, "The helper returned a different attempt.")
-    if result.get("job_id"):
+    if job_id := result.get("job_id"):
+        if (
+            not isinstance(job_id, str)
+            or not re.fullmatch(_JOB_ID_PATTERN, job_id)
+            or not isinstance(result.get("directory"), str)
+        ):
+            raise HTTPException(409, "The helper returned an invalid submission receipt.")
         result["follow_up"] = {
             "server_id": server_id,
-            "job_id": result["job_id"],
+            "job_id": job_id,
             "path": result["directory"],
         }
     return result
@@ -227,25 +395,120 @@ async def _call(
 @router.post("/{server_id}/prepare")
 async def prepare(server_id: str, body: PrepareIn, request: Request):
     _check(request, page_only=False)
-    folder = str(_investigation(request).folder)
+    investigation = _investigation(request)
+    info = investigation.info()
+    if info is None or not info.uuid:
+        raise HTTPException(409, "The current investigation has no ID for this preparation.")
     target = _target(server_id)
     key = _local_key(server_id, target)
     attempt = secrets.token_hex(16)
+    options = body.model_dump(exclude_none=True)
     result = await _call(
-        server_id, {"operation": "prepare", "attempt": attempt, **body.model_dump()}, target, key
+        server_id, {"operation": "prepare", "attempt": attempt, **options}, target, key
     )
     revision = hashlib.sha256(result["input"].encode()).hexdigest()
-    if revision != result["revision"] or result["state"] != "prepared":
+    if (
+        revision != result["revision"]
+        or result["state"] != "prepared"
+        or result.get("freeze_distance") != body.freeze_distance
+    ):
         raise HTTPException(409, "Helper did not return a verified prepared input.")
     record = {
-        **body.model_dump(),
+        **options,
         "input": result["input"],
         "revision": revision,
         "directory": result["directory"],
-        "folder": folder,
+        "folder": str(investigation.folder),
+        "investigation_id": info.uuid,
         "server_id": server_id,
         "target": target,
         "key_id": hashlib.sha256(key).hexdigest(),
+    }
+    _store_record(attempt, record)
+    return result
+
+
+def _preoptimization(request: Request, server_id: str, parent_attempt: str) -> tuple[dict, bytes]:
+    _check(request, page_only=False)
+    investigation = _investigation(request)
+    info = investigation.info()
+    parent, key = _record(
+        server_id,
+        parent_attempt,
+        investigation.folder,
+        info.uuid if info else None,
+        require_identity=True,
+    )
+    if key is None or parent.get("pilot") is not None or not parent.get("freeze_distance"):
+        raise HTTPException(409, "Choose a constrained pre-optimization on the local pilot.")
+    return parent, key
+
+
+@router.get("/{server_id}/attempts/{parent_attempt}/modes")
+async def inspect_preoptimization_modes(server_id: str, parent_attempt: str, request: Request):
+    parent, key = _preoptimization(request, server_id, parent_attempt)
+    await _no_arguments(request, "Only the server ID and parent attempt are accepted.")
+    result = await _call(
+        server_id, {"operation": "inspect_modes", "attempt": parent_attempt}, parent["target"], key
+    )
+    try:
+        inspection = _InspectedModes.model_validate(result)
+    except ValidationError as exc:
+        raise HTTPException(
+            409, "The helper returned invalid pre-optimization mode evidence."
+        ) from exc
+    if inspection.freeze_distance != parent["freeze_distance"] or len(
+        {mode.mode_index for mode in inspection.modes}
+    ) != len(inspection.modes):
+        raise HTTPException(409, "The mode evidence does not match the prepared pre-optimization.")
+    return inspection.model_dump()
+
+
+@router.post("/{server_id}/attempts/{parent_attempt}/prepare-ts")
+async def prepare_ts_from_preoptimization(
+    server_id: str, parent_attempt: str, body: PrepareTSIn, request: Request
+):
+    parent, key = _preoptimization(request, server_id, parent_attempt)
+    if request.query_params:
+        raise HTTPException(
+            422, "Pass the mode index, output digest, cores and hours in the request body."
+        )
+    attempt = secrets.token_hex(16)
+    result = await _call(
+        server_id,
+        {
+            "operation": "prepare_ts",
+            "attempt": attempt,
+            "parent_attempt": parent_attempt,
+            **body.model_dump(),
+        },
+        parent["target"],
+        key,
+    )
+    details = _ts_details(result)
+    evidence = details["mode_evidence"]
+    contents = result.get("input")
+    if (
+        result.get("state") != "prepared"
+        or result.get("job_id") is not None
+        or not isinstance(contents, str)
+        or not contents
+        or hashlib.sha256(contents.encode()).hexdigest() != details["revision"]
+        or details["directory"] != f"{job_pilot.LOCAL_WORK}/{attempt}/submission"
+        or details["parent_attempt"] != parent_attempt
+        or details["checkpoint_name"] != job_pilot.ts_stem(parent["geometry"]) + ".fchk.gz"
+        or any(details[field] != getattr(body, field) for field in ("cores", "hours", "mode_index"))
+        or evidence["mode_index"] != body.mode_index
+        or evidence["eligible"] is not True
+        or evidence["freeze_distance"] != parent["freeze_distance"]
+        or evidence["output_sha256"] != body.output_sha256
+    ):
+        raise HTTPException(409, "The helper did not return a verified TS preparation.")
+    record = {
+        **{k: parent[k] for k in ("folder", "investigation_id", "server_id", "target", "key_id")},
+        **details,
+        "pilot": _TS_PILOT,
+        "input": contents,
     }
     _store_record(attempt, record)
     return result
@@ -266,12 +529,39 @@ async def _action(request: Request, server_id: str, attempt: str, operation: str
         ):
             raise HTTPException(409, "The prepared job no longer matches the confirmation.")
         payload.update({k: record[k] for k in ("revision", "cores", "hours")})
-    if record.get("pilot") == "saga_minimum":
+        if record.get("pilot") == _TS_PILOT:
+            payload["checkpoint_sha256"] = record["checkpoint_sha256"]
+    if record.get("pilot") in _SAGA_PILOTS:
+        ts = record["pilot"] == _SAGA_TS
         if operation == "submit":
-            payload.update(operation="submit_minimum", nodes=record["nodes"])
+            payload.update(operation="submit_ts" if ts else "submit_minimum", nodes=record["nodes"])
         else:
-            payload.update(operation="minimum_status", revision=record["revision"])
-    return await _call(server_id, payload, record["target"], key, record["key_id"])
+            payload.update(
+                operation="ts_status" if ts else "minimum_status", revision=record["revision"]
+            )
+        if ts:
+            payload.update({k: record[k] for k in ("review_sha256", "checkpoint_sha256")})
+    result = await _call(
+        server_id, payload, record["target"], key, record["key_id"], record["directory"]
+    )
+    if record.get("pilot") == _SAGA_TS and any(
+        result.get(k) != record[k]
+        for k in (
+            "directory",
+            "revision",
+            "review_sha256",
+            "checkpoint_sha256",
+            *saga_access.RESOURCES,
+        )
+    ):
+        raise HTTPException(409, "The returned Saga TS attempt no longer matches its preparation.")
+    if record.get("pilot") == _TS_PILOT and any(
+        record[k] != v for k, v in _ts_details(result).items()
+    ):
+        raise HTTPException(409, "The returned TS attempt no longer matches its preparation.")
+    if "freeze_distance" in record:
+        result["freeze_distance"] = record["freeze_distance"]
+    return result
 
 
 @router.get("/{server_id}/attempts/{attempt}")

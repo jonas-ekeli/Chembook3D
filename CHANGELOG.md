@@ -6,6 +6,18 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The Saga helper supports an operator-enrolled TS replay from an archived constrained
+  pre-optimization. The app reviews the selected mode, parent job, input, checkpoint and
+  allocation before the wrapper can submit. The workstation can create an enrollment
+  with `chembook3d saga-ts-bundle`.
+
+- The local HPC pilot can inspect imaginary modes from a constrained pre-optimization
+  and prepare a transition-state job using the producing attempt's checkpoint.
+  Submission review includes the parent job, selected mode and checkpoint digest.
+
+- In the local HPC pilot, the agent can freeze one distance in a five-step Gaussian
+  pre-optimization. The app shows the selected atom pair and revised input for approval.
+
 - Building from a folder, from what validation run 6 showed (A194): two optimizations at one
   level that end on one structure are two runs, kept as two nodes in one conformer group
   (`group_structures` names them in `runs`, the merge preview too, and Claude's own merge of

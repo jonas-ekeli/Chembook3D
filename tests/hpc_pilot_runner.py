@@ -1,7 +1,15 @@
 """Local-only stand-ins for the two UiBKvant commands. No Gaussian or Slurm installation."""
 
+import re
 import sys
 from pathlib import Path
+
+from chembook3d import xyz
+
+if __package__:
+    from .preopt_fixture import WATER, write_completed_preopt
+else:
+    from preopt_fixture import WATER, write_completed_preopt
 
 
 def linked_minimum_input(stem: str, atoms: list[str]) -> str:
@@ -20,6 +28,16 @@ def linked_minimum_input(stem: str, atoms: list[str]) -> str:
     return "--Link1--\n".join(steps)
 
 
+def checkpoint_ts_input(stem: str) -> str:
+    steps = []
+    for route in ("Opt=(RecalcFC=30,MaxCycles=150,TS,NoLinear,NoEigenTest,Tight)", "Freq"):
+        steps.append(
+            f"%chk={stem}\n#p B3LYP/ChkBasis Geom=Check Guess=Read\n# {route}"
+            "\n\nLocal TS pilot\n\n0 1\n\n"
+        )
+    return "--Link1--\n".join(steps)
+
+
 def main(args: list[str]) -> None:
     operation, mode, *fields = args
     if operation == "prepare":
@@ -34,6 +52,8 @@ def main(args: list[str]) -> None:
         route = Path(jd).read_text("ascii").strip()
         if route == "linked-minimum":
             contents = linked_minimum_input(path.stem, atoms)
+        elif route == "checkpoint-ts":
+            contents = checkpoint_ts_input(path.stem)
         else:
             contents = (
                 f"%chk={path.stem}\n{route}\n\nLocal pilot\n\n0 1\n" + "\n".join(atoms) + "\n\n"
@@ -52,11 +72,23 @@ def main(args: list[str]) -> None:
         return  # matches the outer wrapper's zero exit
     job_id = int(Path.cwd().parent.name[:12], 16)
     name = Path(inp).stem
+    text = Path(inp).read_text(encoding="ascii")
+    if text == checkpoint_ts_input(name):
+        assert Path(name + ".fchk.gz").is_file()
     Path(name + ".log").write_text(
         f"Starting job {job_id} on pilot-node on Saga at Tue Nov 24 09:00:00 CET 2026\n"
         f"JobName: {name}\n",
         encoding="ascii",
     )
+    if mode == "ok" and name == "water":
+        freeze = re.search(r"^B (\d+) (\d+) F$", text, re.M)
+        if freeze:
+            rows = text.split("\n\n")[2].splitlines()[1:]
+            fixture_water = [xyz.Atom(symbol, x, y, z) for symbol, _, x, y, z in WATER]
+            if xyz.parse_xyz("\n".join(rows)) == fixture_water:
+                write_completed_preopt(
+                    Path.cwd(), name, str(job_id), [int(i) for i in freeze.groups()]
+                )
     if mode != "lost-receipt":
         print(f"Submitted batch job {job_id}")
 

@@ -107,12 +107,44 @@ Conversion constants are defined once, in one module, from CODATA 2018 (P17).
 
 ## 9. Gaussian HPC wrapper workflow (D266)
 
+### From a node request to a reaction-wide task (scoping)
+
+Jonas wants to give the agent a scientific task in an investigation, ranging from work on one node to completing a set of calculations for a reaction. Choosing a default geometry from the viewer is still open. The investigation already exposes nodes, stored geometries, their levels of theory and calculation steps. A request can explicitly identify a displayed frame when that is the intended starting point.
+
+Jonas's representative request is “Find a verified transition state for node X using this project's method.” The requested result includes a converged DFT TS optimization with one confirmed imaginary mode and a completed project single point on that optimized geometry. The node should retain the calculations and starting-geometry provenance so another request can reuse a valid TS or run just a missing single point.
+
+| Stage | Agent action and evidence |
+|---|---|
+| Find a guess | Inspect X, its charge and multiplicity, project method, existing calculations and the adjacent intermediates. Reuse an appropriate guess or use the notebook's existing local ML or semiempirical guess tools. For example, `start_local_ts_guess` can use compatible endpoint structures. Record the source and atom mapping for the chosen guess. |
+| Improve the guess | For a rough guess, pre-optimize with the relevant distances, angles or torsions held. Inspect the modes at that geometry. A mode moving the atoms along the intended coordinate is evidence to try an unconstrained project DFT TS optimization. A constrained structure remains a guess. |
+| Recover a difficult TS | If the pre-optimization lacks a useful mode, or the TS search fails, use the preceding results to choose a revised constraint target or a scan along the relevant coordinate(s). Select a promising scan geometry for the next attempt and record why. Retry and resource limits remain open. |
+| Verify and complete X | Check convergence and normal termination, then inspect the frequency result on the same unconstrained geometry at the project's TS level. Proposed interpretation of “verified”: exactly one imaginary mode whose atomic displacements support the intended elementary step. Record the frequency and evidence for that interpretation. `get_vibrational_modes` and `compare_structures` already provide relevant evidence for imported calculations. An ambiguous mode needs further evidence before the agent claims success. Run the project single point on the verified geometry in the correct electronic state and associate the successful result with X. |
+
+For a set of alternating intermediates and transition states, the agent should inventory missing work and run independent jobs in parallel within the user's allocation. A difficult TS can depend on usable geometries from one or both adjacent intermediates. As soon as the needed geometries are ready it can proceed, while unrelated nodes continue. A TS single point depends on verification of its own TS. The set-level report should distinguish completed, pending and blocked nodes and give the outstanding calculation or scientific question for each.
+
+#### Evidence from the three-stage Gaussian example (Q100)
+
+The example uses three separate submissions. In the five-step preparation, the fourth step enables `ModRedundant` and freezes one interatomic distance at its starting value. The fifth step computes frequencies. The subsequent project TS job reads its geometry, basis and wavefunction guess from a checkpoint, releases the distance, optimizes and computes frequencies. The project single point reads the optimized geometry and guess from a checkpoint and supplies its own larger basis. In both handoffs the atom sequence and printed Cartesian coordinates agree after alignment. The wrapper logs identify the formatted checkpoint staged under each receiving job's name. They do not identify which earlier artifact supplied those bytes.
+
+The constrained and unconstrained structures each have one imaginary vibrational frequency. The relative displacement of the selected atoms lies mainly along their separation in both modes. The constrained result supports the choice of starting geometry. For this node, Jonas accepted the converged, unconstrained TS because its sole imaginary mode opens and closes the selected bond. This evidence is sufficient to proceed to the project single point. For other nodes, use the intended elementary step to identify the motion to check. Where several bond changes matter, inspect their relative directions together, allowing for reversal of the whole mode.
+
+If the expected motion is unclear from the node and its neighbors, the agent can consult project PDFs, search the literature, or look up a primary source online. When a source informs the assignment, record the citation and which motion it suggests, alongside the displacements observed in this calculation. If those displacements still leave the assignment ambiguous, keep the TS unverified.
+
+In the local pilot, pass `freeze_distance` to `prepare_gaussian_job` as two distinct 1-based atom indices from the selected XYZ. The helper verifies the generated five-step minimum, adds `ModRedundant` to the optimization and inserts a single distance freeze at its starting value. The review shows the atom pair, complete revised input and its SHA-256 digest.
+
+After the parent job finishes, `inspect_preoptimization_modes` takes its attempt ID. The helper checks the parent receipt, log and copied-back Gaussian output. For each imaginary frequency it reports the mode index, frequency and how strongly the two selected atoms move relative to one another along the bond. Reversing all displacements gives the same chemical interpretation. The agent uses this evidence and the intended elementary step to choose a guess. A component along the bond alone does not establish a TS.
+
+`prepare_ts_from_preoptimization` takes the parent attempt, the inspected output's SHA-256 digest, selected mode index, cores and hours. A change to that output requires a new inspection. The local helper uses its fixed project TS job description to generate the unconstrained optimization and linked frequency calculation. Both steps read the receiving checkpoint. The mode index records the scientific reason for selecting the guess. The app binds the child to the investigation and presents the parent attempt, job ID, mode and checkpoint digest with the generated input. On approval the helper checks the source checkpoint again and stages those bytes in the fresh child submission directory under the receiving job's basename. The helper compares the formatted checkpoint's atom order, charge, multiplicity and Cartesian geometry with the parent input and frequency result. The local handoff accepts a copied-back `.fchk.gz` up to 64 MiB compressed and 256 MiB expanded.
+
+Use synthetic fixtures in CI for the three-stage sequence. In the successful case the unconstrained optimization converges and its sole imaginary mode opens and closes the specified bond, which permits the single point. Change only the displacement vectors so the same imaginary frequency belongs to unrelated motion and verify that the single point stays pending. Check that the freeze applies only to the preparation, a constrained result cannot authorize a TS single point, and each child uses its selected parent's checkpoint. Cover a missing or changed checkpoint and a single point that starts from the pre-optimized geometry instead of the verified TS. Scans, ambiguous-mode follow-up, intermediate completion criteria, and authorization for concurrent work and retries remain open.
+
 ### Running the first workflow locally
 
 From a checkout with development dependencies installed, run:
 
 ```text
 uv run pytest -q tests/test_hpc_jobs.py tests/test_remote.py::test_local_preparation_submission_and_follow_up_through_mcp
+uv run pytest -q tests/test_remote.py::test_preoptimization_checkpoint_to_ts_through_mcp
 ```
 
 This exercises the app through MCP, the keeper and a loopback SSH subsystem. It uses synthetic water coordinates and a project job file. The generator and scheduler are local stand-ins. To try the workflow interactively, start the stand-in from the repository root:
@@ -130,9 +162,53 @@ uv run chembook3d --port 8875
 
 Open a local test investigation. In that app's server settings edit its Saga entry to host `127.0.0.1`, port `8767` and user `jonas`. Connect with the fixture password `correct horse` and code `123456`. Ask the agent to prepare `water.xyz` using `minimum.jd` on one node with 40 cores and 24 hours. The input, resources and attempt ID are available before submission. Request submission, expand **Review Gaussian input** in the app, then choose **Submit job** or **Refuse**.
 
+To try a constrained pre-optimization in the same fixture, ask the agent to prepare `water.xyz` with `linked-minimum.jd` and freeze the distance between atoms 1 and 2. In the preview, step 4 should contain `Opt=(Tight,ModRedundant)` and `B 1 2 F`. Step 5 should still request frequencies. For the freeze, the helper supports bare `Opt` and the reviewed project options `Tight`, `RecalcFC=n` and `MaxCycles=n`. If it encounters another option, it identifies it before review.
+
+For an interactive handoff test, approve that frozen water preparation on the loopback server. Its stand-in writes synthetic output and a compressed checkpoint. Ask the agent, “Inspect the imaginary modes of the pre-optimization I just submitted. If one opens and closes the distance between atoms 1 and 2, prepare the unconstrained project TS using that parent checkpoint, one node, two cores and one hour. Show me the parent job ID, selected mode and checkpoint digest before asking me to submit.” The fixture supplies one imaginary mode at −425 cm⁻¹. After review, the child stand-in supplies its own receipt and start log. The fixture demonstrates job handoff and makes no prediction about the potential energy surface of water.
+
 The fixed read directory is `/cluster/work/gaussian-pilot`. The existing agent file-write toggle permits new files under its `geometries` subdirectory. The helper chooses a fresh attempt folder, verifies atom order and coordinates, and stages the approved revision in its own submission directory. The project job files and authorization records live outside the fake server's SFTP tree. Moving the user's terminal does not change either agent boundary.
 
-Use `get_prepared_job` with the attempt ID after a lost reply. A recorded numeric receipt supplies `check_server_job` with its directory and job ID. The demo wrapper produces a start log. A missing receipt after the wrapper has run leaves the attempt uncertain and blocks replay. SDF, checkpoint-based restarts, constrained inputs, scans, IRC and deployment on Saga are later milestones.
+Use `get_prepared_job` with the attempt ID after a lost reply. A recorded numeric receipt supplies `check_server_job` with its directory and job ID. A missing receipt after the wrapper has run leaves the attempt uncertain and blocks replay. The live Saga trial verified the enrolled minimum. The site helper also supports the archived TS acceptance procedure below. Agent-driven preparation of a new constrained parent on Saga, verification of the final TS, the single-point handoff, SDF, scans and IRC are later milestones.
+
+### First Saga TS acceptance test using an archived pre-optimization
+
+An operator can enroll one reviewed TS input and its starting checkpoint for the current Saga pilot enrollment. This lets the operator test the real wrapper and checkpoint staging without charging the project for another pre-optimization. The workstation checks the parent log, Gaussian calculations, selected imaginary mode, formatted checkpoint and project TS input. For operator-selected archives the downloaded files' local modification times describe the transfer. The operator supplies the original parent Slurm ID, which must match the log. The helper pins the reviewed manifest, input, checkpoint, existing pilot and wrapper. Only the operator can change the enrollment.
+
+1. On the workstation with this checkout and the archive, run `uv run chembook3d saga-ts-bundle PARENT.inp CHILD.inp enrollment --parent-job-id ID --mode-index N` with the actual paths, original job ID and one-based Gaussian mode index. Keep the parent's matching `.log`, `.out` and `.fchk.gz` beside its input. Choose a new output directory. Inspect the command's report. Keep the bundle private with the project's calculation files.
+2. Transfer the resulting `enrollment` directory and the matching `src/chembook3d/remote/saga_prepare.py` into `~/chembook-saga-ts/` on Saga using your usual authenticated transfer. In your Saga terminal run the following commands with the existing enrolled pilot:
+
+   ```bash
+   install -m 600 -- ~/chembook-saga-ts/saga_prepare.py ~/.local/lib/chembook3d/saga_prepare.py
+   python3 ~/.local/lib/chembook3d/saga_prepare.py enroll-ts ~/chembook-saga-ts/enrollment
+   ```
+
+   Keep the TS attempt ID it prints. Re-enrolling the same bundle preserves the attempt. A different bundle for the same pilot enrollment is refused.
+3. Start the matching workstation checkout. If the old keeper is still running, log out of the open Chembook HPC sessions, close the app, wait a minute, reopen it and log into Saga with 2FA. Open the test investigation. Ask the agent, “Call `prepare_saga_ts` on Saga and report the attempt ID, parent Slurm ID, imaginary frequency, atom pair, input and checkpoint digests, and destination. Stop after preparation.” Compare the result with the operator's report. This step uses zero scheduler jobs.
+4. To exercise review, ask the agent to call `submit_prepared_job` once for that attempt. Choose **Refuse**. `get_prepared_job` should still return `prepared` with no job ID. For a live calculation, request review again and choose **Submit job** only if you intend to run this molecule with the displayed allocation. The pilot uses one node, 40 cores and 24 hours. After approval use `get_prepared_job` and pass its `follow_up` arguments to `check_server_job`. A lost reply is recovered through the same attempt.
+
+On 2026-11-28 the operator confirmed step 3 on Saga. The agent returned the enrolled attempt ID. The parent Slurm ID, selected mode and frequency, frozen atom pair, and SHA-256 digests of the TS input and starting checkpoint matched the workstation record. The operator then chose **Refuse** in the submission review. Before and after review, `get_prepared_job` reported `prepared` with a null job ID.
+
+The operator subsequently approved the same attempt. The agent reported one submission request. It retrieved the Slurm job ID from the submitted attempt and used its follow-up arguments to find the matching wrapper start line. At that check, the wrapper had recorded no termination and the Gaussian output in scratch was outside the approved results directory. Final TS convergence and vibrational results remain unverified.
+
+#### Small molecule for repeated live TS tests
+
+Use neutral singlet HCN ⇌ HNC isomerization for the next short calculation. This three-atom system exercises hydrogen transfer and fits the pilot's single-distance constraint. Start with the following geometry in ångströms, derived from the three saddle-point distances reported by [Lee and Rendell](https://www.sciencedirect.com/science/article/abs/pii/000926149190073I).
+
+```xyz
+3
+HCN-HNC TS guess, neutral singlet
+C  0.000000  0.000000  0.000000
+N  1.194000  0.000000  0.000000
+H  0.380092  1.125555  0.000000
+```
+
+Generate the parent with the project minimum job description and `nosub`. Check the atom ordering, then freeze N–H (atoms 2 and 3 in the XYZ) in the fourth step and retain the fifth-step frequency calculation. The operator prepares this parent on Saga. After it finishes, inspect the imaginary mode and its motion along N–H before using the checkpoint for the unconstrained project TS. For the child, require convergence and one imaginary mode in which C–H shortens as N–H lengthens, or vice versa.
+
+On Saga, the operator generated the three-atom input with the project minimum job description and `nosub`. The input preserved the C, N, H order, neutral singlet and expected optimization options. For the manually submitted parent, `check_server_job` attributed the copied output to its Slurm receipt. The wrapper and all five Gaussian steps terminated normally. The constrained optimization converged in step 4. Step 5 reported three frequencies, one imaginary at −1065.4677 cm⁻¹. In the printed phase of mode 1, the bond projections computed from the step 5 input orientation and displacements were +0.265 for C–H and −0.762 for N–H. This supports selecting the constrained parent for the H-transfer TS optimization. The submission directory contained the 39,415-byte formatted checkpoint archive.
+
+The project TS job description generated five steps from the HCN XYZ. For this checkpoint restart, retain steps 4 and 5 in a separate input with the same basename. Keep the Link1 separator between those two steps. Both read the checkpoint geometry, guess and basis. The workstation bundle command accepted the extracted child and all four parent files. It validated the formatted checkpoint against the parent frequency geometry and identified mode 1 on N–H with a projection of −0.762. The HCN child is ready for enrollment.
+
+A second live TS bundle needs a separate enrollment from the existing Ru attempt. The current helper refuses a second distinct bundle for the same minimum enrollment. An open scope question is whether the operator should be able to select the next validated bundle for preparation while earlier submitted attempts remain available by ID for read-only follow-up.
 
 ### Testing access on Saga (Q101)
 

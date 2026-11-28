@@ -28,11 +28,13 @@ from tests.fake_ssh_server import (
     CODE,
     HOME,
     PASSWORD,
+    SAGA_TS_MARKER,
     USER,
     FakeSaga,
     FakeXServer,
     enable_job_pilot,
     enable_saga_minimum,
+    enable_saga_ts,
     free_display,
 )
 from tests.hpc_pilot_runner import linked_minimum_input
@@ -1488,12 +1490,212 @@ def test_enrolled_saga_minimum_requires_review_and_recovers_one_receipt(
     assert saga.record.logins == 1 and set(saga.record.commands[before:]) == {saga_access.COMMAND}
 
 
-def _assert_only_enrollment_sftp(saga, start):
+def _assert_only_enrollment_sftp(saga, start, *markers):
     assert {p.lstrip("/") for p in saga.record.sftp_paths[start:]} <= {
         ".",
         SAGA_MARKER,
         SAGA_WORK.lstrip("/"),
+        *(f"{SAGA_CONTROL}/{marker}" for marker in markers),
     }
+
+
+async def _review_saga_ts(http, bridge, job, confirm):
+    params = {"server_id": "saga", "attempt": job["attempt"]}
+    task = asyncio.create_task(bridge.call("submit_prepared_job", params))
+    try:
+        with anyio.fail_after(10):
+            while not (pending := (await http.get("/api/live")).json()["confirmations"]):
+                if task.done():
+                    pytest.fail(str((await task).content))
+                await asyncio.sleep(0.02)
+        [dialog] = pending
+        assert dialog["preview"] == job["input"]
+        review = job["review"]
+        first, second = review["freeze_distance"]
+        for value in (
+            review["input_name"],
+            f"Parent {review['parent_stem']} (Slurm job {review['parent_job_id']})",
+            review["checkpoint_name"],
+            review["output_sha256"],
+            job["revision"],
+            job["checkpoint_sha256"],
+            job["review_sha256"],
+            job["directory"] + "/submission",
+            "1 node, 40 cores, 24 h",
+            f"Mode {review['mode_index']} ({review['frequency_cm1']:g} cm⁻¹)",
+            f"atoms {first} and {second}",
+            f"bond projection {review['bond_projection']:g}",
+            f"{USER}@127.0.0.1",
+        ):
+            assert value in dialog["summary"], dialog["summary"]
+        answer = f"/api/confirmations/{dialog['id']}/answer"
+        for headers in ({}, {**ORIGIN, "X-Chembook-Client": "claude"}):
+            assert (
+                await http.post(answer, json={"confirm": confirm}, headers=headers)
+            ).status_code == 403
+        response = await http.post(answer, json={"confirm": confirm}, headers=ORIGIN)
+        assert response.is_success, response.text
+        return response.json()["status"], await task
+    finally:
+        task.cancel()
+
+
+def test_enrolled_saga_ts_requires_review_and_recovers_one_receipt(
+    at_work, saga, monkeypatch, tmp_path
+):
+    tool = BY_NAME["prepare_saga_ts"]
+    schema = input_schema(tool)
+    assert set(schema["properties"]) == {"server_id"}
+    assert schema["required"] == ["server_id"]
+    assert tool.kind == "write"
+    before_exec, before_sftp = len(saga.record.commands), len(saga.record.sftp_paths)
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            bridge = Bridge(APP, http=http)
+            server = {"server_id": "saga"}
+
+            async def result(name, **params):
+                answer = await bridge.call(name, {**server, **params})
+                assert not answer.is_error, answer.content
+                return json.loads(answer.content[0].text)
+
+            assert (await bridge.call(tool.name, server)).is_error
+            work = _enroll_saga(saga, install_helper=True)
+            assert (await bridge.call(tool.name, server)).is_error
+            assert saga.record.commands[before_exec:] == []
+            marker, review = enable_saga_ts(saga, SAGA_WORK, monkeypatch)
+            attempt = marker["attempt"]
+            identity = {
+                k: marker[k] for k in ("attempt", "revision", "checkpoint_sha256", "review_sha256")
+            }
+            resources = {"nodes": 1, "cores": 40, "hours": 24}
+            stage_path = f"{SAGA_WORK}/ts-{attempt}/submission"
+            stage = work / f"ts-{attempt}" / "submission"
+            ids = {**server, "attempt": attempt}
+            assert (
+                await bridge.call(tool.name, {**server, "checkpoint": "other.fchk.gz"})
+            ).is_error
+            assert (
+                await http.post("/api/hpc-jobs/saga/prepare-ts", json={"cores": 4}, headers=ORIGIN)
+            ).status_code == 422
+            assert saga.record.saga_ts_requests == []
+
+            child = await result(tool.name)
+            assert child == await result(tool.name)
+            assert child["state"] == "prepared" and child["submission_enabled"] is True
+            assert child["directory"] + "/submission" == stage_path
+            assert child["review"] == review
+            assert {key: child[key] for key in identity} == identity
+            assert {key: child[key] for key in resources} == resources
+            assert hashlib.sha256(child["input"].encode()).hexdigest() == child["revision"]
+            assert marker["key"] not in json.dumps(child)
+            assert "key_id" not in child
+            assert not stage.exists()
+
+            other = await http.post(
+                "/api/investigations", json={"folder": str(tmp_path / "other"), "name": "Other"}
+            )
+            assert other.is_success, other.text
+            assert (await bridge.call("get_prepared_job", ids)).is_error
+            assert (await bridge.call("submit_prepared_job", ids)).is_error
+            assert (await bridge.call(tool.name, server)).is_error
+            reopened = await http.post(
+                "/api/investigations/open", json={"folder": str(tmp_path / "inv")}
+            )
+            assert reopened.is_success, reopened.text
+
+            # Neither a live shell nor the TS enrollment widens the agent's file permissions.
+            assert (await bridge.call("list_server_files", {**server, "path": WORK})).is_error
+            marker_remote = f"{HOME}/{SAGA_CONTROL}/{SAGA_TS_MARKER}"
+            assert (
+                await bridge.call("read_server_file", {**server, "path": marker_remote})
+            ).is_error
+            assert _allow(at_work).is_success
+            assert _write(at_work, f"{SAGA_WORK}/ts-{attempt}/other.xyz", WATER).status_code == 409
+            inbox = f"{SAGA_WORK}/geometries/other.xyz"
+            assert _write(at_work, inbox, WATER).is_success
+            assert _write(at_work, inbox, WATER).status_code == 409
+
+            url = f"/api/hpc-jobs/saga/attempts/{attempt}/submit"
+            assert (await http.post(url, headers=ORIGIN)).status_code == 403
+            assert (
+                await http.post(
+                    "/api/confirmations",
+                    json={"action": "submit_prepared_job", "params": {**ids, "cores": 4}},
+                )
+            ).status_code == 422
+            with pytest.raises(client.KeeperError):
+                await client.call(
+                    "saga_ts_job",
+                    server="saga",
+                    target=["127.0.0.1", saga.port, USER],
+                    key_id=hashlib.sha256(bytes.fromhex(marker["key"])).hexdigest(),
+                    directory=stage_path,
+                    request={
+                        "operation": "submit_ts",
+                        **identity,
+                        **resources,
+                        "checkpoint_sha256": "0" * 64,
+                    },
+                )
+            autonomy = await http.put("/api/claude/autonomy", json={"on": True}, headers=ORIGIN)
+            assert autonomy.is_success and autonomy.json()["on"]
+            status, _ = await _review_saga_ts(http, bridge, child, False)
+            assert status == "refused"
+            assert all(r["operation"] != "submit_ts" for r in saga.record.saga_ts_requests)
+            assert not stage.exists()
+            assert (await result("get_prepared_job", attempt=attempt))["state"] == "prepared"
+
+            saga.drop_submit_reply = True
+            status, reply = await _review_saga_ts(http, bridge, child, True)
+            assert status == "failed" and reply.is_error
+            receipt = await result("get_prepared_job", attempt=attempt)
+            assert receipt["state"] == "submitted" and receipt["job_id"] == "72411"
+            assert {key: receipt[key] for key in identity} == identity
+            assert {key: receipt[key] for key in resources} == resources
+            assert receipt["follow_up"] == {**server, "job_id": "72411", "path": stage_path}
+            status, reply = await _review_saga_ts(http, bridge, child, True)
+            assert status == "done" and not reply.is_error
+            assert await result("get_prepared_job", attempt=attempt) == receipt
+            reported = await result("check_server_job", job_id="72411", path=stage_path)
+            assert reported["state"] == "started"
+
+            assert (await bridge.call(tool.name, server)).is_error
+
+            prepare = {"operation": "prepare_ts", **identity}
+            reads = {"operation": "ts_status", **identity}
+            submit = {"operation": "submit_ts", **identity, **resources}
+            signed = {
+                **submit,
+                "signature": job_pilot.signature(bytes.fromhex(marker["key"]), submit),
+            }
+            assert saga.record.saga_ts_requests == [
+                prepare,
+                prepare,
+                prepare,
+                reads,
+                signed,
+                reads,
+                signed,
+                reads,
+                prepare,
+            ]
+            assert (stage / "scheduler-calls.txt").read_text().splitlines() == [
+                "water-ts.inp -n 1 -c 40 -t 24"
+            ]
+            assert (stage / review["input_name"]).read_bytes() == child["input"].encode()
+            assert (stage / review["checkpoint_name"]).read_bytes() == (
+                work / "synthetic-parent/water.fchk.gz"
+            ).read_bytes()
+
+    anyio.run(exercise)
+    assert saga.record.logins == 1 and saga.record.answers == [[PASSWORD], [CODE]]
+    assert set(saga.record.commands[before_exec:]) == {saga_access.COMMAND}
+    assert saga.record.saga_minimum_requests == []
+    _assert_only_enrollment_sftp(saga, before_sftp, saga_access.SUBMISSION_MARKER, SAGA_TS_MARKER)
 
 
 def test_saga_enrollment_routes_agent_files_through_the_pinned_helper(at_work, saga):
@@ -1722,18 +1924,56 @@ def test_saga_enrollment_preserves_manual_transfers_outside_the_pilot(at_work, s
     assert saga.record.logins == 1
 
 
-@pytest.mark.parametrize("drop_reply", [False, True])
+async def _review_local_job(http, bridge, record, approve):
+    ids = {"server_id": "saga", "attempt": record["attempt"]}
+    task = asyncio.create_task(bridge.call("submit_prepared_job", ids))
+    try:
+        with anyio.fail_after(10):
+            while not (pending := (await http.get("/api/live")).json()["confirmations"]):
+                if task.done():
+                    pytest.fail(str((await task).content))
+                await asyncio.sleep(0.02)
+        [dialog] = pending
+        assert dialog["preview"] == record["input"]
+        for value in (record["revision"], f"{record['cores']} cores, {record['hours']} h"):
+            assert value in dialog["summary"]
+        if pair := record.get("freeze_distance"):
+            assert f"distance between atoms {pair[0]} and {pair[1]}" in dialog["summary"]
+        if "checkpoint_sha256" in record:
+            for key in ("checkpoint_sha256", "parent_attempt", "parent_job_id", "checkpoint_name"):
+                assert str(record[key]) in dialog["summary"]
+        answer = f"/api/confirmations/{dialog['id']}/answer"
+        body = {"confirm": approve}
+        assert (await http.post(answer, json=body)).status_code == 403
+        response = await http.post(answer, json=body, headers=ORIGIN)
+        assert response.is_success, response.text
+        await task
+        return response.json()["status"]
+    finally:
+        task.cancel()
+
+
+@pytest.mark.parametrize(
+    ("job_file", "drop_reply", "freeze_distance"),
+    [
+        pytest.param("minimum.jd", False, None, id="ordinary"),
+        pytest.param("linked-minimum.jd", True, None, id="linked-lost-reply"),
+        pytest.param("linked-minimum.jd", False, [1, 2], id="frozen-distance"),
+    ],
+)
 def test_local_preparation_submission_and_follow_up_through_mcp(
-    at_work, saga, config_dir, drop_reply
+    at_work, saga, config_dir, job_file, drop_reply, freeze_distance
 ):
     # The app, bridge, real keeper and loopback SSH helper exercise the production routes.
     args = {
         "server_id": "saga",
-        "job_file": "linked-minimum.jd" if drop_reply else "minimum.jd",
+        "job_file": job_file,
         "geometry": "water.xyz",
         "cores": 40,
         "hours": 24,
     }
+    if freeze_distance is not None:
+        args["freeze_distance"] = freeze_distance
     assert (
         at_work.post(
             "/api/hpc-jobs/saga/prepare", json={k: v for k, v in args.items() if k != "server_id"}
@@ -1762,39 +2002,128 @@ def test_local_preparation_submission_and_follow_up_through_mcp(
             record = json.loads(prepared.content[0].text)
             ids = {"attempt": record["attempt"], "server_id": "saga"}
             assert record["state"] == "prepared"
-            assert record["input"].count("--Link1--") == (4 if drop_reply else 0)
+            steps = record["input"].split("--Link1--")
+            assert len(steps) == (5 if job_file == "linked-minimum.jd" else 1)
+            if freeze_distance:
+                assert record["freeze_distance"] == freeze_distance
+                assert "B 1 2 F" in steps[3].splitlines()
+            else:
+                assert "modredundant" not in record["input"].lower()
             url = f"/api/hpc-jobs/saga/attempts/{record['attempt']}/submit"
             assert (await http.post(url)).status_code == 403
-            for approved in (False, True):
-                task = asyncio.create_task(bridge.call("submit_prepared_job", ids))
-                try:
-                    with anyio.fail_after(10):
-                        while True:
-                            pending = (await http.get("/api/live")).json()["confirmations"]
-                            if pending:
-                                break
-                            await asyncio.sleep(0.02)
-                    dialog = pending[0]
-                    assert record["revision"] in dialog["summary"]
-                    assert dialog["preview"] == record["input"]
-                    assert "40 cores, 24 h" in dialog["summary"]
-                    answer = f"/api/confirmations/{dialog['id']}/answer"
-                    assert (await http.post(answer, json={"confirm": True})).status_code == 403
-                    response = await http.post(answer, json={"confirm": approved}, headers=ORIGIN)
-                    expected = ("failed" if drop_reply else "done") if approved else "refused"
-                    assert response.json()["status"] == expected, response.text
-                    await task
-                finally:
-                    task.cancel()
+            for approved in (False, True, True) if freeze_distance else (False, True):
+                expected = ("failed" if drop_reply else "done") if approved else "refused"
+                assert await _review_local_job(http, bridge, record, approved) == expected
                 status = await bridge.call("get_prepared_job", ids)
                 observed = json.loads(status.content[0].text)
                 assert observed["state"] == ("submitted" if approved else "prepared")
+                if freeze_distance:
+                    assert observed["freeze_distance"] == freeze_distance
             checked = await bridge.call("check_server_job", observed["follow_up"])
-            assert json.loads(checked.content[0].text)["state"] == "started"
+            assert json.loads(checked.content[0].text)["state"] == (
+                "completed" if freeze_distance else "started"
+            )
             assert saga.record.logins == 1
             calls = saga.job_pilot.work / record["attempt"] / "submission" / "scheduler-calls.txt"
             assert calls.read_text().splitlines() == ["water.inp 1 40 24"]
             assert calls.with_name("water.inp").read_bytes() == record["input"].encode()
+
+    anyio.run(exercise)
+
+
+def test_local_preparation_api_rejects_invalid_freeze_distance(at_work, saga, config_dir):
+    enable_job_pilot(saga, config_dir, "saga")
+    args = {"job_file": "linked-minimum.jd", "geometry": "water.xyz", "cores": 40, "hours": 24}
+    url = "/api/hpc-jobs/saga/prepare"
+    for pair in ([], [1], [1, 2, 3], [True, 2], [1.0, 2], ["1", 2], [1, 1], [0, 2]):
+        response = at_work.post(url, json={**args, "freeze_distance": pair})
+        assert response.status_code == 422, response.text
+    for job_file, pair in (("linked-minimum.jd", [1, 4]), ("minimum.jd", [1, 2])):
+        response = at_work.post(url, json={**args, "job_file": job_file, "freeze_distance": pair})
+        assert response.status_code == 409, response.text
+    assert not list(saga.job_pilot.work.glob("*/submission"))
+
+
+def test_preoptimization_checkpoint_to_ts_through_mcp(at_work, saga, config_dir, tmp_path):
+    enable_job_pilot(saga, config_dir, "saga")
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            bridge = Bridge(APP, http=http)
+
+            async def result(tool, **params):
+                reply = await bridge.call(tool, {"server_id": "saga", **params})
+                assert not reply.is_error, reply.content
+                return json.loads(reply.content[0].text)
+
+            parent = await result(
+                "prepare_gaussian_job",
+                job_file="linked-minimum.jd",
+                geometry="water.xyz",
+                freeze_distance=[1, 2],
+                cores=2,
+                hours=1,
+            )
+            source = {"parent_attempt": parent["attempt"]}
+            args = {"server_id": "saga", **source}
+            assert (await bridge.call("inspect_preoptimization_modes", args)).is_error
+            assert await _review_local_job(http, bridge, parent, True) == "done"
+            observed = await result("get_prepared_job", attempt=parent["attempt"])
+            evidence = await result("inspect_preoptimization_modes", **source)
+            [mode] = evidence["modes"]
+            assert mode["mode_index"] == 1 and mode["frequency_cm1"] == -425.0 and mode["eligible"]
+            selection = {"cores": 2, "hours": 1, "output_sha256": evidence["output_sha256"]}
+            wrong = await bridge.call(
+                "prepare_ts_from_preoptimization", {**args, **selection, "mode_index": 2}
+            )
+            assert wrong.is_error
+            stale = await bridge.call(
+                "prepare_ts_from_preoptimization",
+                {**args, **selection, "mode_index": 1, "output_sha256": "0" * 64},
+            )
+            assert stale.is_error
+            child = await result(
+                "prepare_ts_from_preoptimization", **source, **selection, mode_index=1
+            )
+            assert child["parent_job_id"] == observed["job_id"]
+            assert child["parent_attempt"] == parent["attempt"] and child["mode_index"] == 1
+            assert child["state"] == "prepared" and child["job_id"] is None
+            assert child["input"].count("--Link1--") == 1
+            assert "modredundant" not in child["input"].lower()
+            root = saga.job_pilot.work
+            source_bytes = (root / parent["attempt"] / "submission" / "water.fchk.gz").read_bytes()
+            assert hashlib.sha256(source_bytes).hexdigest() == child["checkpoint_sha256"]
+            stage = root / child["attempt"] / "submission"
+            assert await _review_local_job(http, bridge, child, False) == "refused"
+            assert not stage.exists()
+            saga.drop_submit_reply = True
+            assert await _review_local_job(http, bridge, child, True) == "failed"
+            receipt = await result("get_prepared_job", attempt=child["attempt"])
+            assert receipt["state"] == "submitted" and receipt["job_id"] != observed["job_id"]
+            assert receipt["checkpoint_sha256"] == child["checkpoint_sha256"]
+            assert (stage / "water-ts.fchk.gz").read_bytes() == source_bytes
+            assert (stage / "water-ts.inp").read_bytes() == child["input"].encode()
+            assert (stage / "scheduler-calls.txt").read_text().splitlines() == [
+                "water-ts.inp 1 2 1"
+            ]
+            report = await result(
+                "check_server_job",
+                **{key: value for key, value in receipt["follow_up"].items() if key != "server_id"},
+            )
+            assert report["state"] == "started"
+
+            other = await http.post(
+                "/api/investigations", json={"folder": str(tmp_path / "other"), "name": "Other"}
+            )
+            assert other.is_success, other.text
+            assert (await bridge.call("inspect_preoptimization_modes", args)).is_error
+            assert (
+                await bridge.call(
+                    "prepare_ts_from_preoptimization", {**args, **selection, "mode_index": 1}
+                )
+            ).is_error
 
     anyio.run(exercise)
 

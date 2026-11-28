@@ -155,13 +155,30 @@ Files on Saga or another server (D124): when the person is logged in in the app'
 On an enrolled Saga account use prepare_saga_minimum to reproduce the operator's manual
 minimum with nosub. Report its directory, input name and SHA-256. If its result includes
 submission_enabled and the person asks to submit, use submit_prepared_job with the returned
-attempt so they can review the input, destination and resources in the app. Use full paths inside
-the enrolled pilot for file tools. Its geometries directory accepts new XYZ files when the
-user enables writing. The scope on this account stays fixed when the terminal changes directory.
+attempt so they can review the input, destination and resources in the app.
+For an operator-enrolled Saga TS, use prepare_saga_ts with the saved server ID. Compare its
+archived parent Slurm receipt, atom pair and selected mode with the intended elementary step.
+When asked to submit that TS, use submit_prepared_job with the returned attempt so the person
+can review the full input, checkpoint, parent evidence, destination and fixed resources.
+Use full paths inside the enrolled pilot for file tools. Its geometries directory accepts new
+XYZ files when the user enables writing. The scope stays fixed when the terminal changes directory.
 For the configured local HPC pilot, prepare_gaussian_job returns the input for review.
+For a constrained pre-optimization, select the five-step project minimum and pass freeze_distance
+as two distinct 1-based atom indices from the selected XYZ. Treat the result as a TS guess.
+Omit freeze_distance for an unconstrained optimization.
 Use its approved results directory for reads and its geometries directory for new XYZ files.
-Use submit_prepared_job for that attempt after review. For either pilot, if the reply is lost, use
-get_prepared_job on the same attempt and pass its follow_up arguments to check_server_job.
+Use submit_prepared_job for that attempt after review. Once a constrained pre-optimization
+finishes, inspect_preoptimization_modes reports imaginary modes and their motion along the
+frozen bond. Choose an eligible mode only when the motion supports the intended elementary
+step. If the motion is ambiguous or no mode is eligible, report the evidence and keep the
+structure as a guess. Pass the parent attempt, selected mode index and output_sha256 from
+the same inspection to prepare_ts_from_preoptimization. This prepares an unconstrained TS
+optimization and frequency job from the copied checkpoint. Use submit_prepared_job for the
+new attempt so the person can review its parent receipt, mode, checkpoint digest, resources
+and input. Verify the TS from its own converged optimization and frequency output, with one
+imaginary mode whose motion supports the intended step. For either pilot, if the submission
+reply is lost, use get_prepared_job on the same attempt and pass its follow_up arguments to
+check_server_job.
 An uncertain attempt must be reconciled before considering another submission.
 Use the wrapper evidence for job state and the parsed output for scientific conclusions.
 An unavailable log or output leaves the corresponding result unknown. Recheck after the
