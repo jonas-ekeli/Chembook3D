@@ -149,7 +149,8 @@ class PrepareNodeIn(BaseModel):
 def _node_request_path(request_id: str) -> Path:
     if not re.fullmatch(_HEX32, request_id):
         raise HTTPException(422, "Invalid node request ID.")
-    return servers.folder() / "saga-node-requests" / f"{request_id}.json"
+    # Build the filename from the 128-bit ID itself, as _record_path does.
+    return servers.folder() / "saga-node-requests" / f"{int(request_id, 16):032x}.json"
 
 
 def _open_node_request(body: PrepareNodeIn, opened: dict) -> str:
