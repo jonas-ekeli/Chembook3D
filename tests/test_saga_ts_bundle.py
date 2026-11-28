@@ -71,3 +71,25 @@ def test_refuses_unverified_export(archive, problem):
     with pytest.raises(SystemExit) as refused:
         main(["saga-ts-bundle", *archive])
     assert refused.value.code == 1 and not Path(archive[2]).exists()
+
+
+def test_accepts_operator_paths_through_parent_folders(archive, tmp_path, monkeypatch, capsys):
+    # A path like ``..\\archive\\P.inp`` or a mapped drive names the same files (05 §9).
+    (tmp_path / "work").mkdir()
+    monkeypatch.chdir(tmp_path / "work")
+    roundabout = [str(Path("..") / "work" / ".." / Path(p).name) for p in archive[:3]]
+    main(["saga-ts-bundle", *roundabout, *archive[3:]])
+    assert json.loads(capsys.readouterr().out)["input_name"] == "water-ts.inp"
+    assert (tmp_path / "export" / "review.json").is_file()
+
+
+def test_cut_off_parent_input_is_refused_with_a_message(archive, capsys):
+    # Cut the parent input after the last step's %chk line, so that step has no route.
+    parent = Path(archive[0])
+    text = parent.read_text("utf-8")
+    end = text.rindex("%chk=water") + len("%chk=water")
+    parent.write_text(text[:end], encoding="ascii")
+    with pytest.raises(SystemExit) as refused:
+        main(["saga-ts-bundle", *archive])
+    assert refused.value.code == 1 and not Path(archive[2]).exists()
+    assert "Traceback" not in capsys.readouterr().err

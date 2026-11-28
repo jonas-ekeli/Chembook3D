@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import tempfile
+import time
 from pathlib import Path
 from typing import Annotated
 
@@ -228,6 +229,22 @@ def _record_path(attempt: str) -> Path:
     return servers.folder() / "prepared-jobs" / f"{int(attempt, 16):032x}.json"
 
 
+def _read_published(path: Path) -> dict:
+    """Read a record another request has just published.
+
+    On Windows a concurrent rename briefly holds the destination open, so an immediate
+    read can fail with a sharing violation (PermissionError). Retry for about a second.
+    """
+    for delay in (0.02, 0.05, 0.1, 0.2, 0.3, 0.4):
+        try:
+            return json.loads(path.read_text("utf-8"))
+        except PermissionError:
+            if os.name != "nt":
+                raise
+            time.sleep(delay)
+    return json.loads(path.read_text("utf-8"))
+
+
 def _store_record(attempt: str, record: dict) -> None:
     """Publish the entire preview once. A repeat cannot replace another investigation's claim."""
     path = _record_path(attempt)
@@ -245,7 +262,7 @@ def _store_record(attempt: str, record: dict) -> None:
             else:
                 os.link(temporary, path)
         except FileExistsError:
-            if json.loads(path.read_text("utf-8")) != record:
+            if _read_published(path) != record:
                 raise HTTPException(
                     409, "This attempt already belongs to another investigation or preparation."
                 ) from None

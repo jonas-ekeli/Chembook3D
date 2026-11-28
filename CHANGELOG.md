@@ -6,6 +6,11 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- `chembook3d saga-ts-bundle` accepts archive paths through `..`, mapped or subst drives
+  and short Windows names, and reports a cut-off or malformed archive as a message instead
+  of a traceback. On Windows, two preparations publishing the same attempt at once no longer
+  fail while the other is still being written.
+
 - The Saga helper supports an operator-enrolled TS replay from an archived constrained
   pre-optimization. The app reviews the selected mode, parent job, input, checkpoint and
   allocation before the wrapper can submit. The workstation can create an enrollment

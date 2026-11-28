@@ -14,7 +14,27 @@ def export_bundle(
     parent: Path, child: Path, job_id: str, mode_index: int, destination: Path
 ) -> dict:
     """Verify the archive and export only the exact bytes the site operator will enroll."""
-    parent, child = parent.absolute(), child.absolute()
+    try:
+        return _export_bundle(parent, child, job_id, mode_index, destination)
+    except (IndexError, KeyError, StopIteration) as exc:
+        raise ValueError(
+            "The archived files are incomplete or not in the expected Gaussian format."
+        ) from exc
+
+
+def _operator_path(path: Path) -> Path:
+    # The operator names these files, so resolve their folder (``..``, mapped or subst drives,
+    # 8.3 names). read_snapshot still refuses a linked file itself.
+    try:
+        return path.absolute().parent.resolve(strict=True) / path.name
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"Missing folder for {path.name}.") from exc
+
+
+def _export_bundle(
+    parent: Path, child: Path, job_id: str, mode_index: int, destination: Path
+) -> dict:
+    parent, child = _operator_path(parent), _operator_path(child)
     if any(p.suffix != ".inp" or not SAFE_STEM.fullmatch(p.stem) for p in (parent, child)):
         raise ValueError("Choose two named Gaussian .inp files with supported basenames.")
     if parent.stem == child.stem or not re.fullmatch(r"[1-9][0-9]{0,19}", job_id):
