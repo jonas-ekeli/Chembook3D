@@ -6,6 +6,13 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- Saga node results come into the notebook (D271, last part): `import_saga_node_result`
+  imports a finished parent or TS child into the node as an ordinary calculation, once, after
+  the wrapper log shows the job completed. Its notes name the node request, the seed, the
+  attempt and Slurm job, the parent attempt and mode, and say the TS is not yet verified. Each
+  parent now names its seed (the frame, calculation or guess tool and why), which both reviews
+  show.
+
 - A finished Saga node parent can seed the TS (D271, second part): `inspect_preoptimization_modes`
   reads its copied-back results through the pilot's scoped reads, and
   `prepare_ts_from_preoptimization` prepares the unconstrained child from the enrolled project

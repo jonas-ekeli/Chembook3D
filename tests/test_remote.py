@@ -24,6 +24,7 @@ from chembook3d.mcp_server import Bridge
 from chembook3d.mcp_tools import BY_NAME, PANEL_ALLOWED, READ_ONLY_TOOLS, TOOLS, input_schema
 from chembook3d.parsers import orca
 from chembook3d.remote import client, job_pilot, keeper, saga_access, saga_prepare, servers
+from tests import gaussian_text, preopt_fixture
 from tests.fake_ssh_server import (
     CODE,
     HOME,
@@ -2530,6 +2531,36 @@ def test_a_joined_scan_is_saved_to_the_server_never_over_a_file(at_work, saga):
     assert at_work.post(url, json=body).status_code == 403  # the app's own page only
 
 
+async def _calculations(http, node_id):
+    response = await http.get(f"/api/nodes/{node_id}/calculations")
+    assert response.is_success, response.text
+    return response.json()
+
+
+def _write_ts_child_result(directory, stem, job_id, *, completed=True):
+    """A finished unconstrained TS optimization and frequency job with its wrapper log. It
+    starts at the parent's frozen geometry, read from the parent's checkpoint."""
+    common = "#p B3LYP/ChkBasis Geom=Check Guess=Read"
+    end = gaussian_text.moved(preopt_fixture.WATER, 0.02)
+    text = gaussian_text.output(
+        gaussian_text.step(
+            common + " Opt=(RecalcFC=30,MaxCycles=150,TS,NoLinear,NoEigenTest,Tight)",
+            [preopt_fixture.WATER, end],
+            converged=True,
+        ),
+        gaussian_text.step(common + " Freq", [end], frequencies=list(gaussian_text.TS_FREQUENCIES)),
+    )
+    (directory / (stem + ".out")).write_text(text, encoding="ascii")
+    ending = f"Job exited normally.\nJob {job_id} completed at noon\n" if completed else ""
+    (directory / (stem + ".log")).write_text(
+        f"Starting job {job_id} on pilot-node on Saga at Tue Nov 24 09:00:00 CET 2026\n"
+        f"JobName: {stem}\n"
+        f"Checking normal termination:\n -> {stem}.out\n normally terminated\n"
+        f"Copying './{stem}.out' to submission folder...\n" + ending,
+        encoding="ascii",
+    )
+
+
 async def _review_saga_node(http, bridge, job, confirm, expected):
     params = {"server_id": "saga", "attempt": job["attempt"]}
     task = asyncio.create_task(bridge.call("submit_prepared_job", params))
@@ -2562,8 +2593,9 @@ def test_saga_node_parent_is_prepared_reviewed_and_limited(at_work, saga, monkey
         "geometry",
         "freeze_distance",
         "request_id",
+        "seed",
     }
-    assert set(schema["required"]) == {"server_id", "node_id", "geometry"}
+    assert set(schema["required"]) == {"server_id", "node_id", "geometry", "seed"}
 
     async def exercise():
         async with httpx.AsyncClient(
@@ -2590,12 +2622,31 @@ def test_saga_node_parent_is_prepared_reviewed_and_limited(at_work, saga, monkey
             work = _enroll_saga(saga, install_helper=True)
             ts1 = await node(label="TS1", charge=0, multiplicity=1)
             unset = await node(label="no state")
-            args = {"node_id": ts1, "geometry": "guess.xyz", "freeze_distance": [1, 3]}
+            ylide = await node(label="ylide", charge=0, multiplicity=1)
+            seed = {
+                "source": "frame 4 of the scan",
+                "reason": "closest to the bond forming",
+                "neighbour_ids": [ylide],
+                "atom_mapping": [1, 3, 2],
+            }
+            args = {
+                "node_id": ts1,
+                "geometry": "guess.xyz",
+                "freeze_distance": [1, 3],
+                "seed": seed,
+            }
             assert "enroll the project job descriptions" in await refused(tool.name, **args)
             marker = enable_saga_node(saga, SAGA_WORK, monkeypatch)
             assert "charge and multiplicity" in await refused(
                 tool.name, **{**args, "node_id": unset}
             )
+            for wrong, message in [
+                ({"neighbour_ids": [ts1]}, "not the node itself"),
+                ({"neighbour_ids": ["nothing"]}, "Unknown adjacent node"),
+                ({"calculation_id": "nothing"}, "Unknown seed calculation"),
+                ({"atom_mapping": [1, 1, 2]}, "each atom once"),
+            ]:
+                assert message in await refused(tool.name, **{**args, "seed": {**seed, **wrong}})
             assert "No such file" in await refused(tool.name, **args)
             (work / "geometries/guess.xyz").write_text(
                 "3\nguess\nO 0 0 0\nH 0 0.757 0.587\nH 0 -0.757 0.587\n"
@@ -2617,6 +2668,8 @@ def test_saga_node_parent_is_prepared_reviewed_and_limited(at_work, saga, monkey
                 f"Directory {stage_path}",
                 first["revision"],
                 f"{USER}@127.0.0.1",
+                "Seed: frame 4 of the scan. Why: closest to the bond forming. Adjacent nodes "
+                "ylide. Atom mapping for 3 atoms",
             ]
             status, _ = await _review_saga_node(http, bridge, first, False, expected)
             assert status == "refused" and not stage.exists()
@@ -2663,7 +2716,8 @@ def test_saga_node_parent_is_prepared_reviewed_and_limited(at_work, saga, monkey
 
 @pytest.mark.skipif(sys.platform != "linux", reason="the Saga helper uses Linux descriptors")
 def test_saga_node_ts_child_from_the_inspected_parent_mode(at_work, saga, monkeypatch):
-    """D271b, T-SSH-43: modes from the parent's copied-back files, then the reviewed TS child."""
+    """D271b, T-SSH-43: modes from the parent's copied-back files, then the reviewed TS child.
+    D271e, T-SSH-44: each finished output imports into the node once, with its provenance."""
 
     async def exercise():
         async with httpx.AsyncClient(
@@ -2696,9 +2750,12 @@ def test_saga_node_ts_child_from_the_inspected_parent_mode(at_work, saga, monkey
                 node_id=ts1,
                 geometry="guess.xyz",
                 freeze_distance=[1, 2],
+                seed={"source": "built with build_ts_guess", "reason": "no frame fits"},
             )
             ids = {"parent_attempt": parent["attempt"]}
             assert "submitted Saga parent" in await refused("inspect_preoptimization_modes", **ids)
+            importing = "import_saga_node_result"
+            assert "submitted Saga attempt" in await refused(importing, attempt=parent["attempt"])
             status, _ = await _review_saga_node(http, bridge, parent, True, ["atoms 1 and 2"])
             assert status == "done"
             stage = saga.root / parent["directory"].lstrip("/") / "submission"
@@ -2706,6 +2763,23 @@ def test_saga_node_ts_child_from_the_inspected_parent_mode(at_work, saga, monkey
             write_completed_preopt(stage, "guess", "72412", [1, 2])
 
             modes = await result("inspect_preoptimization_modes", **ids)
+            # D271e, T-SSH-44: the finished parent imports into its node, once.
+            plan = await result(importing, attempt=parent["attempt"], preview=True)
+            assert "token" not in plan and plan["steps"]
+            assert await _calculations(http, ts1) == []
+            imported = await result(importing, attempt=parent["attempt"])
+            assert imported["node_id"] == ts1 and imported["job_id"] == "72412"
+            calculations = await _calculations(http, ts1)
+            assert {c["id"] for c in calculations} == set(imported["calculation_ids"])
+            for value in [
+                f"Parent attempt {parent['attempt']} (Slurm job 72412)",
+                "atoms 1 and 2 frozen",
+                f"Node request {parent['request']}",
+                "Seed: built with build_ts_guess. Why: no frame fits",
+                "Not yet checked as a verified TS",
+            ]:
+                assert all(value in c["notes"] for c in calculations)
+            assert "imported already" in await refused(importing, attempt=parent["attempt"])
             assert modes["parent_job_id"] == "72412" and modes["freeze_distance"] == [1, 2]
             [mode] = modes["modes"]
             assert mode["eligible"] and mode["frequency_cm1"] == -425.0
@@ -2743,5 +2817,28 @@ def test_saga_node_ts_child_from_the_inspected_parent_mode(at_work, saga, monkey
             assert (staged / "guess-ts.fchk.gz").read_bytes() == (
                 stage / "guess.fchk.gz"
             ).read_bytes()
+
+            # D271e, T-SSH-44: the child imports once its wrapper log shows it completed.
+            assert "Could not copy" in await refused(importing, attempt=child["attempt"])
+            _write_ts_child_result(staged, "guess-ts", "72413", completed=False)
+            assert "wrapper log must confirm" in await refused(importing, attempt=child["attempt"])
+            _write_ts_child_result(staged, "guess-ts", "72413")
+            imported = await result(importing, attempt=child["attempt"])
+            assert imported["job_id"] == "72413"
+            assert imported["node_id"] == ts1 and imported["derived_node_id"] is None
+            notes = imported["provenance"]
+            for value in [
+                f"TS child attempt {child['attempt']} (Slurm job 72413)",
+                f"parent attempt {parent['attempt']} (Slurm job 72412)",
+                "mode 1 (-425 cm⁻¹) along atoms 1 and 2",
+                "Parent seed: built with build_ts_guess",
+                "Job description ts-project.jd",
+                "Not yet checked as a verified TS",
+            ]:
+                assert value in notes
+            for calculation_id in imported["calculation_ids"]:
+                response = await http.get(f"/api/calculations/{calculation_id}")
+                assert notes in response.json()["notes"]
+            assert "imported already" in await refused(importing, attempt=child["attempt"])
 
     anyio.run(exercise)

@@ -242,7 +242,7 @@ def completed_copyback(log: str, log_path: Path, stem: str, job_id: str) -> tupl
         or not report.copy_announced
         or start is None
     ):
-        raise ValueError("The parent wrapper log must confirm this job and its copied output.")
+        raise ValueError("The wrapper log must confirm this job and its copied output.")
     copy = f"Copying './{stem}.fchk.gz' to submission folder..."
     failure = f"File './{stem}.fchk.gz' could not be copied back home!"
     lines = {line.strip() for line in log[saga_job.START.search(log).end() :].splitlines()}

@@ -793,6 +793,13 @@ Routes for all of these are in `api/pathway.py`.
   `prepare_node_child` and `child_input` keep steps 4 and 5 of the TS job description's input,
   and `node_operation` re-reads the parent's checkpoint (`parent_results`) when submitting.
   `saga_access.check_child_preview` is the keeper's check.
+- Seed and results of a Saga node (D271e, D271f, FR-SSH-26): `SeedIn` on `PrepareNodeIn` and
+  `_seed` in `api/hpc_jobs.py` check and store the seed, which `_seed_text` puts in both
+  reviews. `import_saga_node_result` (`/attempts/{attempt}/import`) copies the attempt's log and
+  output (`_saga_finished_output`, checked with `preopt_modes.completed_copyback`), stages the
+  output with `imports.Staging` and commits it onto the request's node as an ordinary import,
+  writing `_provenance` into the new calculations' notes; `saga-node-imports/<attempt>.json` in
+  the config folder stops a second import while its calculations exist.
 
 - The local preparation pilot (D266, FR-SSH-19) connects `api/hpc_jobs.py` and
   `api/live.py` to the keeper's fixed SSH subsystem. `remote/job_pilot.py` validates
