@@ -950,7 +950,12 @@ function App() {
     buildAfterCreate.current = false
     api.createInvestigation(folder, name).then(
       (inv) => {
-        if (version !== identityVersion.current) return
+        if (version !== identityVersion.current) {
+          // The live update may open the new investigation before this answer arrives; its
+          // build dialog (D263a) is still wanted then.
+          if (build && identity.current === inv.folder) setBuilding(true)
+          return
+        }
         opened(inv)
         if (build) setBuilding(true)
       },
