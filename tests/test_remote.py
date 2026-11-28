@@ -1698,6 +1698,67 @@ def test_enrolled_saga_ts_requires_review_and_recovers_one_receipt(
     _assert_only_enrollment_sftp(saga, before_sftp, saga_access.SUBMISSION_MARKER, SAGA_TS_MARKER)
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="the Saga helper uses Linux descriptors")
+def test_replaced_saga_ts_bundle_keeps_old_attempts_readable_but_unsubmittable(
+    at_work, saga, monkeypatch
+):
+    """D270: the operator's `enroll-ts --replace` retires an attempt to status only."""
+    tool = BY_NAME["prepare_saga_ts"]
+
+    def replace(changes):
+        bundle = saga.root / SAGA_WORK.lstrip("/") / "ts-test-water"
+        review = json.loads((bundle / "review.json").read_bytes()) | changes
+        (bundle / "review.json").write_bytes(saga_prepare.review_bytes(review))
+        old = json.loads((saga.saga_control / SAGA_TS_MARKER).read_bytes())["attempt"]
+        saga_prepare.enroll_ts(bundle, replace=True)
+        sftp_control = saga.root / ".local/lib/chembook3d"
+        for name in (SAGA_TS_MARKER, f"ts-{old}.retired.json"):
+            saga_prepare.atomic_write(sftp_control / name, (saga.saga_control / name).read_bytes())
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            bridge = Bridge(APP, http=http)
+            server = {"server_id": "saga"}
+
+            async def result(name, **params):
+                answer = await bridge.call(name, {**server, **params})
+                assert not answer.is_error, answer.content
+                return json.loads(answer.content[0].text)
+
+            _enroll_saga(saga, install_helper=True)
+            enable_saga_ts(saga, SAGA_WORK, monkeypatch)
+            first = await result(tool.name)
+            autonomy = await http.put("/api/claude/autonomy", json={"on": True}, headers=ORIGIN)
+            assert autonomy.is_success
+            status, _ = await _review_saga_ts(http, bridge, first, True)
+            assert status == "done"
+            receipt = await result("get_prepared_job", attempt=first["attempt"])
+            assert receipt["state"] == "submitted" and receipt["job_id"] == "72411"
+
+            replace({"mode_index": 2})
+            second = await result(tool.name)
+            assert second["attempt"] != first["attempt"]
+            assert second["review"]["mode_index"] == 2
+            assert await result("get_prepared_job", attempt=first["attempt"]) == receipt
+
+            replace({"mode_index": 3})
+            retired = await result("get_prepared_job", attempt=second["attempt"])
+            assert retired["state"] == "rejected" and retired["job_id"] is None
+            assert retired["detail"] == "Retired by the operator before submission."
+            assert retired["directory"] == second["directory"] + "/submission"
+            before = len(saga.record.saga_ts_requests)
+            status, reply = await _review_saga_ts(http, bridge, second, True)
+            assert status == "failed" and reply.is_error
+            assert saga.record.saga_ts_requests[before:] == []
+            assert (await result(tool.name))["review"]["mode_index"] == 3
+
+    anyio.run(exercise)
+    submits = [r for r in saga.record.saga_ts_requests if r["operation"] == "submit_ts"]
+    assert [r["attempt"] for r in submits] == [submits[0]["attempt"]]
+
+
 def test_saga_enrollment_routes_agent_files_through_the_pinned_helper(at_work, saga):
     work = _enroll_saga(saga, install_helper=True)
     (work / "results").mkdir()

@@ -993,13 +993,24 @@ class Keeper:
                     )
                     reply["target"] = target
             else:
+                request = msg["request"]
+                attempt = request.get("attempt") if isinstance(request, dict) else None
+                if (
+                    ts
+                    and policy is not None
+                    and attempt != policy.attempt
+                    and request.get("operation") == "ts_status"
+                ):
+                    # D270: a TS attempt the operator replaced answers status only. Its
+                    # record holds no key, so nothing here can sign a submission for it.
+                    policy = await saga_access.retired_ts_policy(await session.files(), attempt)
                 if policy is None or msg["key_id"] != policy.key_id:
                     return {"ok": False, "error": "The Saga submission enrollment has changed."}
                 if ts and msg["directory"] != posixpath.join(
                     root, "ts-" + policy.attempt, "submission"
                 ):
                     return {"ok": False, "error": "The Saga TS destination has changed."}
-                reply = await saga_access.enrolled_job(session.conn, root, policy, msg["request"])
+                reply = await saga_access.enrolled_job(session.conn, root, policy, request)
         except (ValueError, OSError, asyncssh.Error) as exc:
             return {"ok": False, "error": _reason(exc)}
         if reply["ok"]:

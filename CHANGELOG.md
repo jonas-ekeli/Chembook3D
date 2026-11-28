@@ -6,6 +6,12 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The Saga operator can replace the enrolled TS bundle with the next validated one by
+  running the helper's `enroll-ts` with `--replace` (D270). Earlier TS attempts stay
+  readable by ID through `get_prepared_job`, keep their Slurm receipts and can never be
+  prepared or submitted again. The helper's SHA-256 changes: reinstall it on Saga and log
+  in again from the updated checkout (05 §9).
+
 - The first live Saga TS replay was followed to completion and verified: the unconstrained
   optimization converged with one imaginary mode along the intended bond (05 §9).
 

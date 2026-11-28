@@ -182,7 +182,7 @@ An operator can enroll one reviewed TS input and its starting checkpoint for the
    python3 ~/.local/lib/chembook3d/saga_prepare.py enroll-ts ~/chembook-saga-ts/enrollment
    ```
 
-   Keep the TS attempt ID it prints. Re-enrolling the same bundle preserves the attempt. A different bundle for the same pilot enrollment is refused.
+   Keep the TS attempt ID it prints. Re-enrolling the same bundle preserves the attempt. A different bundle for the same pilot enrollment is refused unless the operator adds `--replace` (D270, below).
 3. Start the matching workstation checkout. If the old keeper is still running, log out of the open Chembook HPC sessions, close the app, wait a minute, reopen it and log into Saga with 2FA. Open the test investigation. Ask the agent, “Call `prepare_saga_ts` on Saga and report the attempt ID, parent Slurm ID, imaginary frequency, atom pair, input and checkpoint digests, and destination. Stop after preparation.” Compare the result with the operator's report. This step uses zero scheduler jobs.
 4. To exercise review, ask the agent to call `submit_prepared_job` once for that attempt. Choose **Refuse**. `get_prepared_job` should still return `prepared` with no job ID. For a live calculation, request review again and choose **Submit job** only if you intend to run this molecule with the displayed allocation. The pilot uses one node, 40 cores and 24 hours. After approval use `get_prepared_job` and pass its `follow_up` arguments to `check_server_job`. A lost reply is recovered through the same attempt.
 
@@ -210,7 +210,19 @@ On Saga, the operator generated the three-atom input with the project minimum jo
 
 The project TS job description generated five steps from the HCN XYZ. For this checkpoint restart, retain steps 4 and 5 in a separate input with the same basename. Keep the Link1 separator between those two steps. Both read the checkpoint geometry, guess and basis. The workstation bundle command accepted the extracted child and all four parent files. It validated the formatted checkpoint against the parent frequency geometry and identified mode 1 on N–H with a projection of −0.762. The HCN child is ready for enrollment.
 
-A second live TS bundle needs a separate enrollment from the existing Ru attempt. The current helper refuses a second distinct bundle for the same minimum enrollment. An open scope question is whether the operator should be able to select the next validated bundle for preparation while earlier submitted attempts remain available by ID for read-only follow-up.
+#### Replacing the enrolled TS bundle (D270)
+
+The operator can replace the enrolled bundle, for example the Ru attempt with the HCN child, while earlier attempts stay readable by ID (D270, A196). The replacement needs a helper that includes D270, so the helper's SHA-256 changes. Update the workstation checkout first. Transfer its `src/chembook3d/remote/saga_prepare.py` and the new bundle as in step 2 above. In the Saga terminal, reinstall the helper with the same `install -m 600` command, then run:
+
+```bash
+python3 ~/.local/lib/chembook3d/saga_prepare.py enroll-ts ~/chembook-saga-ts/enrollment --replace
+```
+
+The helper writes the outgoing enrollment, without its signing key, to `ts-<old attempt>.retired.json` in `~/.local/lib/chembook3d`. It then enrolls the new bundle with a new signing key under a new attempt ID, which it prints. It leaves the earlier attempt's bundle copy, preparation receipt, claim and Slurm receipt unchanged. Repeating the command with the same bundle prints the same new attempt. Without `--replace`, a different bundle is still refused. Only this operator command can replace a bundle. Agent requests can neither enroll nor replace one.
+
+The running keeper pins the earlier helper, so it reports a helper SHA-256 mismatch. At a convenient time, log out of the open Chembook HPC sessions, close the app, wait at least a minute for the keeper to exit, then start the updated checkout and log into Saga with 2FA. The keeper protocol is unchanged. Continue from step 3 with the new attempt.
+
+For an earlier attempt, `get_prepared_job` still answers by its ID. A submitted attempt returns its recorded Slurm ID and `follow_up` for `check_server_job`. An attempt that never reached the wrapper reports `rejected` and no job ID, with the detail "Retired by the operator before submission." A claim without a receipt stays `uncertain`. The keeper and the helper refuse preparation and submission of a retired attempt. `prepare_saga_ts` offers only the current bundle.
 
 ### Testing access on Saga (Q101)
 

@@ -229,6 +229,14 @@ class SagaTSHelperTest(unittest.TestCase):
             message = json.loads(reply)
             self.assertIs(message["ok"], True)
             self.assertEqual(message["result"]["state"], state)
+        (self.bundle / "review.json").write_bytes(helper.review_bytes({**REVIEW, "mode_index": 2}))
+        for flag in ([], ["--force"], ["--replace", "--replace"]):
+            with self.subTest(flag=flag):
+                refused = subprocess.run([*command, *flag], capture_output=True, check=False)
+                self.assertEqual(refused.returncode, 1)
+        replaced = subprocess.check_output([*command, "--replace"])
+        self.assertNotIn(self.enabled["attempt"].encode(), replaced)
+        self.assertIn(json.loads(self.marker.read_bytes())["attempt"].encode(), replaced)
 
     def test_different_pair_or_inexact_request_rejected(self):
         self.enroll()
@@ -253,6 +261,131 @@ class SagaTSHelperTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "different minimum"):
             self.invoke("prepare_ts")
         self.assertFalse(self.folder.exists())
+
+    def replace_bundle(self, **changes):
+        (self.bundle / "review.json").write_bytes(helper.review_bytes({**REVIEW, **changes}))
+        old = self.enabled
+        self.assertNotEqual(helper.enroll_ts(self.bundle, replace=True), old["attempt"])
+        self.enroll()
+        return old
+
+    def control_files(self):
+        return {
+            path: path.read_bytes()
+            for path in self.control.rglob("*")
+            if path.is_file() and path.name != helper.TS_MARKER
+        }
+
+    def test_replacement_retires_the_attempt_for_status_only(self):
+        # D270: the old attempt keeps its receipt, and its key no longer exists anywhere.
+        self.enroll()
+        self.invoke("prepare_ts")
+        submitted = self.invoke("submit_ts")
+        self.assertEqual(submitted["job_id"], "1234")
+        before = self.control_files()
+        (self.bundle / "review.json").write_bytes(helper.review_bytes({**REVIEW, "mode_index": 2}))
+        with self.assertRaisesRegex(ValueError, "--replace"):
+            helper.enroll_ts(self.bundle)
+        old = self.replace_bundle(mode_index=2)
+        self.assertEqual(helper.enroll_ts(self.bundle, replace=True), self.attempt)
+        self.assertEqual(helper.enroll_ts(self.bundle), self.attempt)
+        retired_path = self.control / ("ts-" + old["attempt"] + ".retired.json")
+        self.assertEqual(retired_path.stat().st_mode & 0o777, 0o600)
+        retired = json.loads(retired_path.read_bytes())
+        self.assertNotIn(old["key"], retired_path.read_text())
+        self.assertEqual(
+            retired,
+            {
+                **{k: v for k, v in old.items() if k != "key"},
+                "key_id": helper.digest(bytes.fromhex(old["key"])),
+                "retired": True,
+            },
+        )
+        self.assertNotEqual(self.enabled["key"], old["key"])
+        after = self.control_files()
+        self.assertEqual({k: after[k] for k in before}, before)
+
+        current, self.enabled = self.enabled, old
+        self.assertEqual(self.invoke("ts_status"), submitted)
+        for operation in ("prepare_ts", "submit_ts"):
+            with self.subTest(operation=operation), self.assertRaisesRegex(ValueError, "retired"):
+                self.invoke(operation)
+        self.enabled = current
+        self.assertEqual(self.invoke("prepare_ts")["review"]["mode_index"], 2)
+        self.assertEqual(self.invoke("submit_ts")["state"], "submitted")
+        self.assertEqual((self.home / "calls").read_bytes(), b"call\ncall\n")
+
+    def test_retired_attempt_never_submitted_reports_rejected(self):
+        self.enroll()
+        self.invoke("prepare_ts")
+        old = self.replace_bundle(mode_index=2)
+        self.enabled, current = old, self.enabled
+        self.assertEqual(
+            self.invoke("ts_status"),
+            {
+                **{k: old[k] for k in helper.TS_IDENTITY},
+                **helper.RESOURCES,
+                "directory": str(self.root / ("ts-" + old["attempt"]) / "submission"),
+                "state": "rejected",
+                "job_id": None,
+                "detail": "Retired by the operator before submission.",
+            },
+        )
+        with self.assertRaisesRegex(ValueError, "retired"):
+            self.invoke("submit_ts")
+        self.assertFalse((self.root / ("ts-" + old["attempt"]) / "submission").exists())
+        self.assertFalse((self.control / ("ts-" + old["attempt"] + ".submit.claim")).exists())
+        # The current key cannot authorize the retired attempt either.
+        with self.assertRaises(ValueError):
+            self.invoke("submit_ts", key=current["key"])
+        self.assertFalse((self.home / "calls").exists())
+
+    def test_tampered_or_mismatched_retired_record_refused(self):
+        self.enroll()
+        old = self.replace_bundle(mode_index=2)
+        self.enabled = old
+        path = self.control / ("ts-" + old["attempt"] + ".retired.json")
+        original = json.loads(path.read_bytes())
+        for fields in (
+            {"review_sha256": "d" * 64},
+            {"revision": "c" * 64},
+            {"hours": 25},
+            {"attempt": "0" * 32},
+            {"path": "/tmp"},
+        ):
+            with self.subTest(fields=fields), self.assertRaises(ValueError):
+                self.invoke("ts_status", **fields)
+        for record in (
+            {**original, "key": old["key"]},
+            {**original, "retired": False},
+            {**original, "attempt": "0" * 32},
+            {**original, "key_id": "0"},
+            {k: v for k, v in original.items() if k != "wrapper"},
+            {**original, "minimum_sha256": "0" * 64},
+            {**original, "work_root": str(self.home)},
+        ):
+            with self.subTest(record=record), self.assertRaises(ValueError):
+                helper.atomic_write(path, json.dumps(record).encode())
+                self.invoke("ts_status")
+        helper.atomic_write(path, json.dumps(original).encode())
+        self.assertEqual(self.invoke("ts_status")["state"], "rejected")
+        path.chmod(0o640)
+        with self.assertRaisesRegex(ValueError, "private"):
+            self.invoke("ts_status")
+        path.chmod(0o600)
+        self.minimum.write_bytes(json.dumps({**self.policy, "stem": "other"}).encode())
+        with self.assertRaisesRegex(ValueError, "different minimum"):
+            self.invoke("ts_status")
+
+    def test_interrupted_replacement_can_be_repeated(self):
+        self.enroll()
+        old = self.enabled
+        (self.bundle / "review.json").write_bytes(helper.review_bytes({**REVIEW, "mode_index": 2}))
+        with patch.object(helper.secrets, "token_hex", side_effect=OSError("interrupted")):
+            with self.assertRaises(OSError):
+                helper.enroll_ts(self.bundle, replace=True)
+        self.assertEqual(json.loads(self.marker.read_bytes()), old)
+        self.assertNotEqual(helper.enroll_ts(self.bundle, replace=True), old["attempt"])
 
     def test_bad_bundle_and_directory_links_rejected(self):
         checkpoint = self.bundle / "parent.fchk.gz"
