@@ -39,6 +39,7 @@ from tests.fake_ssh_server import (
     free_display,
 )
 from tests.hpc_pilot_runner import linked_minimum_input
+from tests.preopt_fixture import write_completed_preopt
 
 APP = "http://127.0.0.1:8765"
 ORIGIN = {"origin": APP}
@@ -2643,7 +2644,10 @@ def test_saga_node_parent_is_prepared_reviewed_and_limited(at_work, saga, monkey
             status, _ = await _review_saga_node(http, bridge, second, True, ["atoms 1 and 2"])
             assert status == "done"
             status, reply = await _review_saga_node(http, bridge, third, True, ["atoms 1 and 2"])
-            assert status == "failed" and "already started 2 parents" in reply.content[0].text
+            assert (
+                status == "failed"
+                and "already started 2 constrained parents" in reply.content[0].text
+            )
             assert "started its 2 constrained parents" in await refused(tool.name, **again)
 
             changed = await http.patch(
@@ -2655,3 +2659,89 @@ def test_saga_node_parent_is_prepared_reviewed_and_limited(at_work, saga, monkey
     anyio.run(exercise)
     submits = [r for r in saga.record.saga_node_requests if r["operation"] == "submit_node"]
     assert len(submits) == 4  # lost reply, its retry, the second parent, the refused third
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the Saga helper uses Linux descriptors")
+def test_saga_node_ts_child_from_the_inspected_parent_mode(at_work, saga, monkeypatch):
+    """D271b, T-SSH-43: modes from the parent's copied-back files, then the reviewed TS child."""
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            bridge = Bridge(APP, http=http)
+            server = {"server_id": "saga"}
+
+            async def result(name, **params):
+                answer = await bridge.call(name, {**server, **params})
+                assert not answer.is_error, answer.content
+                return json.loads(answer.content[0].text)
+
+            async def refused(name, **params):
+                answer = await bridge.call(name, {**server, **params})
+                assert answer.is_error
+                return answer.content[0].text
+
+            work = _enroll_saga(saga, install_helper=True)
+            enable_saga_node(saga, SAGA_WORK, monkeypatch)
+            response = await http.post(
+                "/api/nodes", json={"label": "TS1", "charge": 0, "multiplicity": 1}, headers=ORIGIN
+            )
+            ts1 = response.json()["id"]
+            (work / "geometries/guess.xyz").write_text(
+                "3\nwater guess\nO 0 0 0\nH 0.76 0.59 0\nH -0.76 0.59 0\n"
+            )
+            parent = await result(
+                "prepare_saga_node_parent",
+                node_id=ts1,
+                geometry="guess.xyz",
+                freeze_distance=[1, 2],
+            )
+            ids = {"parent_attempt": parent["attempt"]}
+            assert "submitted Saga parent" in await refused("inspect_preoptimization_modes", **ids)
+            status, _ = await _review_saga_node(http, bridge, parent, True, ["atoms 1 and 2"])
+            assert status == "done"
+            stage = saga.root / parent["directory"].lstrip("/") / "submission"
+            assert "Could not copy" in await refused("inspect_preoptimization_modes", **ids)
+            write_completed_preopt(stage, "guess", "72412", [1, 2])
+
+            modes = await result("inspect_preoptimization_modes", **ids)
+            assert modes["parent_job_id"] == "72412" and modes["freeze_distance"] == [1, 2]
+            [mode] = modes["modes"]
+            assert mode["eligible"] and mode["frequency_cm1"] == -425.0
+            body = {**ids, "mode_index": 1, "output_sha256": modes["output_sha256"]}
+            tool = "prepare_ts_from_preoptimization"
+            assert "40 cores" in await refused(tool, **body, cores=4, hours=24)
+            assert "changed" in await refused(
+                tool, **{**body, "output_sha256": "0" * 64}, cores=40, hours=24
+            )
+            child = await result(tool, **body, cores=40, hours=24)
+            assert child["kind"] == "child" and child["parent_job_id"] == "72412"
+            assert (
+                child["checkpoint_sha256"]
+                == hashlib.sha256((stage / "guess.fchk.gz").read_bytes()).hexdigest()
+            )
+            expected = [
+                "unconstrained TS optimization and frequency guess-ts.inp for node TS1",
+                f"Parent attempt {parent['attempt']} (Slurm job 72412)",
+                "Mode 1 (-425 cm⁻¹), atoms 1 and 2",
+                f"Checkpoint guess-ts.fchk.gz SHA-256 {child['checkpoint_sha256']}",
+                f"Parent output SHA-256 {modes['output_sha256']}",
+                "Job description ts-project.jd",
+                "at most 2 TS children",
+            ]
+            status, reply = await _review_saga_node(http, bridge, child, True, expected)
+            assert status == "done", reply.content
+            receipt = await result("get_prepared_job", attempt=child["attempt"])
+            assert receipt["state"] == "submitted" and receipt["job_id"] == "72413"
+            staged = saga.root / receipt["follow_up"]["path"].lstrip("/")
+            assert sorted(p.name for p in staged.iterdir()) == [
+                "guess-ts.fchk.gz",
+                "guess-ts.inp",
+                "scheduler-calls.txt",
+            ]
+            assert (staged / "guess-ts.fchk.gz").read_bytes() == (
+                stage / "guess.fchk.gz"
+            ).read_bytes()
+
+    anyio.run(exercise)

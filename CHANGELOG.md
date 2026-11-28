@@ -6,6 +6,12 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- A finished Saga node parent can seed the TS (D271, second part): `inspect_preoptimization_modes`
+  reads its copied-back results through the pilot's scoped reads, and
+  `prepare_ts_from_preoptimization` prepares the unconstrained child from the enrolled project
+  TS job description (its steps 4 and 5), staging only the parent's own checkpoint. The helper's
+  SHA-256 changes again: reinstall it on Saga and log in again (05 §9).
+
 - The agent can prepare and submit a parent calculation on Saga for a node you name (D271,
   first part): `prepare_saga_node_parent` runs the operator-enrolled project minimum job
   description on an XYZ the agent wrote, with the node's charge and multiplicity checked in

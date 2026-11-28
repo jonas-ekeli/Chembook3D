@@ -751,11 +751,16 @@ TOOLS: list[ToolSpec] = [
         "GET",
         "/api/hpc-jobs/{server_id}/attempts/{parent_attempt}/modes",
         "Read imaginary modes from a finished constrained pre-optimization in this investigation "
-        "on the local HPC pilot. Returns the parent Slurm receipt, frozen atom pair and mode "
+        "on the local HPC pilot or a Saga node parent (prepare_saga_node_parent; its log, output "
+        "and checkpoint are copied through the pilot's scoped reads). Returns the parent Slurm "
+        "receipt, frozen atom pair and mode "
         "projections along that bond, with the SHA-256 of the inspected output. A mode is "
         "eligible when its alignment is at least 0.5 and its bond_share at least 0.25. Use the "
         "intended elementary step to interpret the motion.",
-        help={"parent_attempt": "Attempt ID from the constrained prepare_gaussian_job."},
+        help={
+            "parent_attempt": "Attempt ID from the constrained prepare_gaussian_job or "
+            "prepare_saga_node_parent."
+        },
     ),
     T(
         "prepare_ts_from_preoptimization",
@@ -767,9 +772,12 @@ TOOLS: list[ToolSpec] = [
         "inspect_preoptimization_modes whose motion fits the intended step, and pass the "
         "output digest from the same inspection. Returns a new attempt, its parent receipt, "
         "mode and checkpoint evidence, and the complete input with requested resources for "
-        "app confirmation via submit_prepared_job.",
+        "app confirmation via submit_prepared_job. For a Saga node parent the helper keeps "
+        "steps 4 and 5 of the enrolled project TS job description and stages only the parent's "
+        "own copied-back checkpoint; it uses 1 node, 40 cores and 24 h.",
         help={
-            "parent_attempt": "Attempt ID from the constrained prepare_gaussian_job.",
+            "parent_attempt": "Attempt ID from the constrained prepare_gaussian_job or "
+            "prepare_saga_node_parent.",
             "mode_index": "The selected one-based mode_index from inspect_preoptimization_modes.",
             "output_sha256": "The 64-character lowercase hex output_sha256 from the same "
             "inspect_preoptimization_modes result.",
@@ -2231,7 +2239,8 @@ CONFIRM_DESCRIPTIONS = {
     "parent and Slurm receipt, selected mode and checkpoint digest. A Saga TS submission also "
     "shows the enrolled checkpoint filename and archived review digest. A Saga node parent "
     "shows the node, its charge and multiplicity, the frozen distance, the enrolled job "
-    "description and the node request's limits.",
+    "description and the node request's limits; its TS child also shows the parent's Slurm "
+    "job, the selected mode and the checkpoint digest.",
     "delete_node": "Delete a node (or free species) with its calculations, notes and every "
     "edge touching it.",
     "delete_group": "Delete a group with its contents: its members, their calculations and "

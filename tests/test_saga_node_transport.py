@@ -285,3 +285,73 @@ def test_keeper_signs_only_for_the_current_enrollment_and_destination(
     assert reply["ok"] is (not change), reply
     if change:
         connection.run.assert_not_awaited()
+
+
+CHILD_REQUEST = {
+    "request": "3" * 32,
+    "attempt": "5" * 32,
+    "parent_attempt": "4" * 32,
+    "charge": 0,
+    "multiplicity": 1,
+    "mode_index": 1,
+    "output_sha256": "6" * 64,
+    "checkpoint_sha256": "7" * 64,
+}
+
+
+def _child_preview(state="0 1"):
+    steps = []
+    for route in ("Opt=(RecalcFC=30,MaxCycles=150,TS,NoLinear,NoEigenTest,Tight)", "Freq"):
+        steps.append(
+            f"%chk=guess-ts\n#p B3LYP/ChkBasis Geom=Check Guess=Read\n# {route}"
+            f"\n\nContinue\n\n{state}\n\n"
+        )
+    text = "--Link1--\n".join(steps)
+    return {
+        "kind": "child",
+        **CHILD_REQUEST,
+        "geometry": "guess-ts.xyz",
+        "freeze_distance": [1, 3],
+        "parent_job_id": "241",
+        "checkpoint_name": "guess-ts.fchk.gz",
+        "job_file": "ts-project.jd",
+        "job_sha256": "2" * 64,
+        "generator_sha256": "5" * 64,
+        "input_name": "guess-ts.inp",
+        "revision": hashlib.sha256(text.encode()).hexdigest(),
+        "state": "prepared",
+        "directory": ROOT + "/node-" + CHILD_REQUEST["attempt"],
+        "input": text,
+        "limits": {"parent": 2, "child": 2},
+    }
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {},
+        {"parent_attempt": "9" * 32},
+        {"checkpoint_sha256": "0" * 64},
+        {"mode_index": 2},
+        {"job_file": "min-project.jd"},
+        {"checkpoint_name": "other.fchk.gz"},
+        {"parent_job_id": "0"},
+        {"xyz_sha256": "1" * 64},
+        {"rehash": lambda r: r["input"].replace("\n0 1\n", "\n0 3\n", 1)},
+        {"rehash": lambda r: r["input"].replace("%chk=guess-ts", "%chk=other", 1)},
+        {"rehash": lambda r: r["input"] + "B 1 3 F\n"},
+    ],
+)
+def test_child_preview_echoes_parent_mode_and_digests(change):
+    result = _child_preview()
+    if "rehash" in change:
+        result = _rehash({**result, "input": change["rehash"](result)})
+    else:
+        result = {**result, **change}
+    connection = responding(result)
+    reply = asyncio.run(saga_access.prepare_node(connection, ROOT, POLICY, CHILD_REQUEST))
+    assert reply["ok"] is (not change), reply
+    assert json.loads(connection.run.await_args.kwargs["input"]) == {
+        "operation": "prepare_node_child",
+        **CHILD_REQUEST,
+    }

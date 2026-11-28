@@ -432,6 +432,14 @@ NODE_PREVIEW_FIELDS = {
     "input",
     "limits",
 }
+NODE_CHILD_FIELDS = (NODE_PREVIEW_FIELDS - {"xyz_sha256"}) | {
+    "parent_attempt",
+    "parent_job_id",
+    "mode_index",
+    "output_sha256",
+    "checkpoint_name",
+    "checkpoint_sha256",
+}
 NODE_JOB_FIELDS = {"request", "attempt", "revision", *RESOURCES, "directory", "job_id", "detail"}
 
 
@@ -519,12 +527,44 @@ def check_node_preview(result: dict, root: str, policy: NodePolicy, request: dic
         raise ValueError("The prepared input does not freeze exactly the requested distance.")
 
 
+def check_child_preview(result: dict, root: str, policy: NodePolicy, request: dict) -> None:
+    """D271b: the TS child echoes its parent, mode and digests and keeps the node's state."""
+    contents = result["input"].encode("utf-8")
+    job = policy.jobs[saga_prepare.NODE_KINDS["child"]]
+    if (
+        result.keys() != NODE_CHILD_FIELDS
+        or result["kind"] != "child"
+        or result["state"] != "prepared"
+        or any(type(result[k]) is not type(v) or result[k] != v for k, v in request.items())
+        or result["job_file"] != job["name"]
+        or result["job_sha256"] != job["sha256"]
+        or result["limits"] != saga_prepare.NODE_LIMITS
+        or not saga_prepare.XYZ_NAME.fullmatch(result["geometry"])
+        or result["input_name"] != result["geometry"][:-4] + ".inp"
+        or result["checkpoint_name"] != result["geometry"][:-4] + ".fchk.gz"
+        or result["directory"] != posixpath.join(root, "node-" + request["attempt"])
+        or not re.fullmatch(r"[1-9][0-9]{0,19}", result["parent_job_id"])
+        or not 0 < len(contents) <= saga_prepare.LIMIT
+        or hashlib.sha256(contents).hexdigest() != result["revision"]
+        or not re.fullmatch(r"[0-9a-f]{64}", result["generator_sha256"])
+    ):
+        raise ValueError("The Saga helper returned an invalid TS child preparation.")
+    saga_prepare.ts_checkpoint_directives(contents, result["input_name"])
+    if set(electrons_in_steps(result["input"])) != {
+        (request["charge"], request["multiplicity"])
+    } or any(re.fullmatch(r"\s*[A-Z]\s.*\b[FS]\s*", line) for line in result["input"].splitlines()):
+        raise ValueError("The TS child must be unconstrained, with the node's charge and spin.")
+
+
 async def prepare_node(connection, root: str, policy: NodePolicy, request: dict) -> dict:
-    answer = await _request(connection, {"operation": "prepare_node", **request})
+    child = "parent_attempt" in request
+    operation = "prepare_node_child" if child else "prepare_node"
+    answer = await _request(connection, {"operation": operation, **request})
     if not answer["ok"]:
         return answer
     try:
-        check_node_preview(answer["result"], root, policy, request)
+        check = check_child_preview if child else check_node_preview
+        check(answer["result"], root, policy, request)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     except (AttributeError, KeyError, TypeError, RecursionError):

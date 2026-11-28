@@ -43,7 +43,7 @@ CODE = "123456"
 HOME = "/cluster/home/jonas"
 SAGA_FILE_OPERATIONS = {"list_files", "read_file", "create_xyz"}
 SAGA_TS_OPERATIONS = {"prepare_ts", "submit_ts", "ts_status"}
-SAGA_NODE_OPERATIONS = {"prepare_node", "submit_node", "node_status"}
+SAGA_NODE_OPERATIONS = {"prepare_node", "prepare_node_child", "submit_node", "node_status"}
 SAGA_TS_MARKER = saga_prepare.TS_MARKER
 
 
@@ -1076,10 +1076,12 @@ def enable_saga_node(fake: FakeSaga, remote_root: str, monkeypatch) -> dict:
         b"import sys\n"
         b"from pathlib import Path\n"
         b"assert sys.argv[2:] == ['-n', '1', '-c', '40', '-t', '24']\n"
-        b"assert [p.name for p in Path('.').iterdir()] == [sys.argv[1]]\n"
+        b"names = sorted(p.name for p in Path('.').iterdir())\n"
+        b"child = sys.argv[1][:-4] + '.fchk.gz'\n"
+        b"assert names in ([sys.argv[1]], sorted([sys.argv[1], child]))\n"
         b"with open('scheduler-calls.txt', 'a') as calls:\n"
         b"    print(' '.join(sys.argv[1:]), file=calls)\n"
-        b"print('Submitted batch job 72412')\n"
+        b"print('Submitted batch job', 72413 if len(names) == 2 else 72412)\n"
     )
     wrapper.chmod(0o700)
     saga_prepare.enroll_jobs("min-project.jd", "ts-project.jd")

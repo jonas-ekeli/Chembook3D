@@ -47,7 +47,8 @@ stem = name[:-4]
 first = "%chk=" + stem + "\\n#p HF/Gen\\n# SP\\n\\nStart\\n\\n" + state + "\\n"
 first += "\\n".join(atoms) + "\\n\\nH O 0\\nS 1 1.0\\n 1.0 1.0\\n****\\n\\n"
 steps = [first]
-for job in ["SP", "Stable=(Opt,RRHF)", "Opt=Tight", "Freq"]:
+optimize = "Opt=(RecalcFC=30,MaxCycles=150,TS,NoLinear,NoEigenTest,Tight)"
+for job in ["SP", "Stable=(Opt,RRHF)", optimize if "TS" in words else "Opt=Tight", "Freq"]:
     steps.append(
         "%chk=" + stem + "\\n#p B3LYP/ChkBasis\\n# Geom=Check Guess=Read\\n# " + job
         + "\\n\\nContinue\\n\\n" + state + "\\n\\n"
