@@ -186,6 +186,30 @@ An operator can enroll one reviewed TS input and its starting checkpoint for the
 3. Start the matching workstation checkout. If the old keeper is still running, log out of the open Chembook HPC sessions, close the app, wait a minute, reopen it and log into Saga with 2FA. Open the test investigation. Ask the agent, “Call `prepare_saga_ts` on Saga and report the attempt ID, parent Slurm ID, imaginary frequency, atom pair, input and checkpoint digests, and destination. Stop after preparation.” Compare the result with the operator's report. This step uses zero scheduler jobs.
 4. To exercise review, ask the agent to call `submit_prepared_job` once for that attempt. Choose **Refuse**. `get_prepared_job` should still return `prepared` with no job ID. For a live calculation, request review again and choose **Submit job** only if you intend to run this molecule with the displayed allocation. The pilot uses one node, 40 cores and 24 hours. After approval use `get_prepared_job` and pass its `follow_up` arguments to `check_server_job`. A lost reply is recovered through the same attempt.
 
+On 2026-11-28 the operator confirmed step 3 on Saga. The agent returned the enrolled attempt ID. The parent Slurm ID, selected mode and frequency, frozen atom pair, and SHA-256 digests of the TS input and starting checkpoint matched the workstation record. The operator then chose **Refuse** in the submission review. Before and after review, `get_prepared_job` reported `prepared` with a null job ID.
+
+The operator subsequently approved the same attempt. The agent reported one submission request. It retrieved the Slurm job ID from the submitted attempt and used its follow-up arguments to find the matching wrapper start line. At that check, the wrapper had recorded no termination and the Gaussian output in scratch was outside the approved results directory. Final TS convergence and vibrational results remain unverified.
+
+#### Small molecule for repeated live TS tests
+
+Use neutral singlet HCN ⇌ HNC isomerization for the next short calculation. This three-atom system exercises hydrogen transfer and fits the pilot's single-distance constraint. Start with the following geometry in ångströms, derived from the three saddle-point distances reported by [Lee and Rendell](https://www.sciencedirect.com/science/article/abs/pii/000926149190073I).
+
+```xyz
+3
+HCN-HNC TS guess, neutral singlet
+C  0.000000  0.000000  0.000000
+N  1.194000  0.000000  0.000000
+H  0.380092  1.125555  0.000000
+```
+
+Generate the parent with the project minimum job description and `nosub`. Check the atom ordering, then freeze N–H (atoms 2 and 3 in the XYZ) in the fourth step and retain the fifth-step frequency calculation. The operator prepares this parent on Saga. After it finishes, inspect the imaginary mode and its motion along N–H before using the checkpoint for the unconstrained project TS. For the child, require convergence and one imaginary mode in which C–H shortens as N–H lengthens, or vice versa.
+
+On Saga, the operator generated the three-atom input with the project minimum job description and `nosub`. The input preserved the C, N, H order, neutral singlet and expected optimization options. For the manually submitted parent, `check_server_job` attributed the copied output to its Slurm receipt. The wrapper and all five Gaussian steps terminated normally. The constrained optimization converged in step 4. Step 5 reported three frequencies, one imaginary at −1065.4677 cm⁻¹. In the printed phase of mode 1, the bond projections computed from the step 5 input orientation and displacements were +0.265 for C–H and −0.762 for N–H. This supports selecting the constrained parent for the H-transfer TS optimization. The submission directory contained the 39,415-byte formatted checkpoint archive.
+
+The project TS job description generated five steps from the HCN XYZ. For this checkpoint restart, retain steps 4 and 5 in a separate input with the same basename. Keep the Link1 separator between those two steps. Both read the checkpoint geometry, guess and basis. The workstation bundle command accepted the extracted child and all four parent files. It validated the formatted checkpoint against the parent frequency geometry and identified mode 1 on N–H with a projection of −0.762. The HCN child is ready for enrollment.
+
+A second live TS bundle needs a separate enrollment from the existing Ru attempt. The current helper refuses a second distinct bundle for the same minimum enrollment. An open scope question is whether the operator should be able to select the next validated bundle for preparation while earlier submitted attempts remain available by ID for read-only follow-up.
+
 ### Testing access on Saga (Q101)
 
 Sigma2 documents SSH connection reuse after interactive 2FA and user installation of software in a home or project area. OpenSSH registers a named subsystem in the server configuration. Installing a helper file in a user's home directory does not register it as a subsystem. The published guidance establishes neither an installed Chembook subsystem nor an isolated agent identity on Saga. [Sigma2 2FA](https://documentation.sigma2.no/getting_help/two_factor_authentication.html) · [User software](https://documentation.sigma2.no/software/userinstallsw.html) · [OpenSSH Subsystem](https://man.openbsd.org/sshd_config#Subsystem)
