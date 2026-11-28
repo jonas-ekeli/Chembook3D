@@ -224,9 +224,9 @@ The running keeper pins the earlier helper, so it reports a helper SHA-256 misma
 
 For an earlier attempt, `get_prepared_job` still answers by its ID. A submitted attempt returns its recorded Slurm ID and `follow_up` for `check_server_job`. An attempt that never reached the wrapper reports `rejected` and no job ID, with the detail "Retired by the operator before submission." A claim without a receipt stays `uncertain`. The keeper and the helper refuse preparation and submission of a retired attempt. `prepare_saga_ts` offers only the current bundle.
 
-### Proposal: one node on Saga without hand enrollment (Q103–Q108)
+### One node on Saga without hand enrollment (D271)
 
-_Proposed 2026-11-28, awaiting Jonas. Nothing here is built until he answers Q103–Q108._
+_Proposed 2026-11-28 and confirmed by Jonas the same day (D271, answering Q103–Q108). Not built yet._
 
 The pilot replays only what the operator enrolled by hand: one manually verified minimum and one archived TS bundle. The next milestone is Jonas's representative request for one node: “Find a verified transition state for node X using this project's method.” The agent prepares and submits the calculations itself, but each submission still passes through the app's review. The local pilot already performs most of this sequence against a loopback stand-in (`prepare_gaussian_job` with `freeze_distance`, `inspect_preoptimization_modes`, `prepare_ts_from_preoptimization`). The proposal moves that sequence onto the Saga helper. The helper's independent checks stay in place, and the operator still owns everything that defines the method.
 
