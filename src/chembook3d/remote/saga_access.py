@@ -29,7 +29,7 @@ from pathlib import Path
 path = Path.home() / ".local/lib/chembook3d/saga_prepare.py"
 try:
     with path.open("rb") as stream:
-        source = stream.read(65537).replace(b"\\r\\n", b"\\n")
+        source = stream.read(262145).replace(b"\\r\\n", b"\\n")
 except OSError:
     sys.exit(3)
 if hashlib.sha256(source).hexdigest() != "{_sha}":
@@ -40,6 +40,7 @@ COMMAND = "python3 -I -S -c " + shlex.quote(LAUNCHER)
 CONTROL = ".local/lib/chembook3d/"
 SUBMISSION_MARKER = saga_prepare.SUBMIT_MARKER
 TS_SUBMISSION_MARKER = saga_prepare.TS_MARKER
+NODE_SUBMISSION_MARKER = saga_prepare.NODE_MARKER
 TS_PREVIEW_FIELDS = {
     *saga_prepare.TS_IDENTITY,
     "state",
@@ -58,7 +59,7 @@ async def _policy(sftp, name: str, private: bool = False) -> dict | None:
         return None
     if attrs.type != asyncssh.FILEXFER_TYPE_REGULAR or attrs.size is None or attrs.size > 4096:
         raise ValueError("Invalid Saga enrollment file.")
-    if (private or name in (SUBMISSION_MARKER, TS_SUBMISSION_MARKER)) and (
+    if (private or name in (SUBMISSION_MARKER, TS_SUBMISSION_MARKER, NODE_SUBMISSION_MARKER)) and (
         attrs.permissions is None or attrs.permissions & 0o077
     ):
         raise ValueError("The Saga submission policy must be private to its owner.")
@@ -78,7 +79,7 @@ async def enrolled_root(sftp, username: str) -> str | None:
     if policy is None:
         # A surviving signing key still needs protection when a preparation
         # enrollment is missing, including on a new login or saved host alias.
-        for marker in (SUBMISSION_MARKER, TS_SUBMISSION_MARKER):
+        for marker in (SUBMISSION_MARKER, TS_SUBMISSION_MARKER, NODE_SUBMISSION_MARKER):
             try:
                 await sftp.lstat(CONTROL + marker)
             except asyncssh.SFTPNoSuchFile:
@@ -409,3 +410,174 @@ async def file_request(connection, request: dict, root: str) -> dict:
         return {**result, "ok": True}
     except (AttributeError, KeyError, TypeError, ValueError, RecursionError):
         return {"ok": False, "error": "The Saga helper returned an invalid file result."}
+
+
+# ---------- D271: one node request (05 §9) ----------
+NODE_PREVIEW_FIELDS = {
+    "kind",
+    "request",
+    "attempt",
+    "geometry",
+    "charge",
+    "multiplicity",
+    "freeze_distance",
+    "job_file",
+    "job_sha256",
+    "generator_sha256",
+    "input_name",
+    "revision",
+    "xyz_sha256",
+    "state",
+    "directory",
+    "input",
+    "limits",
+}
+NODE_JOB_FIELDS = {"request", "attempt", "revision", *RESOURCES, "directory", "job_id", "detail"}
+
+
+@dataclass(frozen=True)
+class NodePolicy:
+    """The operator's enrolled job descriptions and the key that signs node submissions."""
+
+    jobs: dict
+    key: bytes = field(repr=False)
+
+    @property
+    def key_id(self) -> str:
+        return hashlib.sha256(self.key).hexdigest()
+
+
+async def node_policy(sftp) -> NodePolicy | None:
+    policy = await _policy(sftp, NODE_SUBMISSION_MARKER)
+    if policy is None:
+        return None
+    try:
+        jobs = policy["jobs"]
+        if (
+            jobs.keys() != set(saga_prepare.NODE_KINDS.values())
+            or any(
+                job.keys() != {"name", "sha256"}
+                or not saga_prepare.JD_NAME.fullmatch(job["name"])
+                or not re.fullmatch(r"[0-9a-f]{64}", job["sha256"])
+                for job in jobs.values()
+            )
+            or not re.fullmatch(r"[0-9a-f]{64}", policy["key"])
+            or not _resources_match(policy)
+            or policy["limits"] != saga_prepare.NODE_LIMITS
+        ):
+            raise ValueError
+        return NodePolicy({k: dict(v) for k, v in jobs.items()}, bytes.fromhex(policy["key"]))
+    except (AttributeError, KeyError, TypeError, ValueError):
+        raise ValueError("Invalid Saga node job enrollment.") from None
+
+
+def electrons_in_steps(text: str) -> list[tuple[int, int]]:
+    """Charge and multiplicity of each linked step, read again on the workstation (D271a)."""
+    found = []
+    for step in saga_prepare.linked_steps(text):
+        sections = re.split(r"\n(?:[ \t]*\n)+", step.strip())
+        if len(sections) < 3:
+            raise ValueError("A step has no molecule section.")
+        found.append(saga_prepare.charge_spin(sections[2].splitlines()[0]))
+    return found
+
+
+def check_node_preview(result: dict, root: str, policy: NodePolicy, request: dict) -> None:
+    """The helper's preview of a parent must echo the request and carry the node's state."""
+    contents = result["input"].encode("utf-8")
+    expected = {k: request[k] for k in ("request", "attempt", "geometry", "charge", "multiplicity")}
+    job = policy.jobs[saga_prepare.NODE_KINDS["parent"]]
+    pair = request.get("freeze_distance")
+    if (
+        result.keys() != NODE_PREVIEW_FIELDS
+        or result["kind"] != "parent"
+        or result["state"] != "prepared"
+        or any(type(result[k]) is not type(v) or result[k] != v for k, v in expected.items())
+        or result["freeze_distance"] != pair
+        or result["job_file"] != job["name"]
+        or result["job_sha256"] != job["sha256"]
+        or result["limits"] != saga_prepare.NODE_LIMITS
+        or result["input_name"] != request["geometry"][:-4] + ".inp"
+        or result["directory"] != posixpath.join(root, "node-" + request["attempt"])
+        or not 0 < len(contents) <= saga_prepare.LIMIT
+        or hashlib.sha256(contents).hexdigest() != result["revision"]
+        or not re.fullmatch(r"[0-9a-f]{64}", result["xyz_sha256"])
+        or not re.fullmatch(r"[0-9a-f]{64}", result["generator_sha256"])
+    ):
+        raise ValueError("The Saga helper returned an invalid node preparation.")
+    steps = electrons_in_steps(result["input"])
+    if len(steps) != len(saga_prepare.STAGES) or set(steps) != {
+        (request["charge"], request["multiplicity"])
+    }:
+        raise ValueError("The prepared input does not carry the node's charge and multiplicity.")
+    frozen = [
+        line.strip()
+        for line in result["input"].splitlines()
+        if re.fullmatch(r"\s*[A-Z]\s.*\b[FS]\s*", line)
+    ]
+    if frozen != ([] if pair is None else [f"B {pair[0]} {pair[1]} F"]):
+        raise ValueError("The prepared input does not freeze exactly the requested distance.")
+
+
+async def prepare_node(connection, root: str, policy: NodePolicy, request: dict) -> dict:
+    answer = await _request(connection, {"operation": "prepare_node", **request})
+    if not answer["ok"]:
+        return answer
+    try:
+        check_node_preview(answer["result"], root, policy, request)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except (AttributeError, KeyError, TypeError, RecursionError):
+        return {"ok": False, "error": "The Saga helper returned an invalid node preparation."}
+    return answer
+
+
+async def node_job(connection, root: str, policy: NodePolicy, request: dict) -> dict:
+    """Sign only a submission of a prepared node attempt with its fixed resources."""
+    if not isinstance(request, dict) or request.get("operation") not in (
+        "submit_node",
+        "node_status",
+    ):
+        return {"ok": False, "error": "Unknown Saga node job operation."}
+    submitting = request["operation"] == "submit_node"
+    fields = {"operation", "attempt", "revision"}
+    if submitting:
+        fields.update(RESOURCES)
+    if (
+        request.keys() != fields
+        or not isinstance(request["attempt"], str)
+        or not job_pilot.ATTEMPT.fullmatch(request["attempt"])
+        or not isinstance(request["revision"], str)
+        or not re.fullmatch(r"[0-9a-f]{64}", request["revision"])
+        or (submitting and not _resources_match(request))
+    ):
+        return {"ok": False, "error": "The request does not match the prepared node attempt."}
+    if submitting:
+        request = {**request, "signature": job_pilot.signature(policy.key, request)}
+    answer = await _request(connection, request)
+    if not answer["ok"]:
+        return answer
+    result = answer["result"]
+    expected_dir = posixpath.join(root, "node-" + request["attempt"], "submission")
+    try:
+        state = result["state"]
+        if (
+            result.keys() != {*NODE_JOB_FIELDS, "state"}
+            or result["attempt"] != request["attempt"]
+            or result["revision"] != request["revision"]
+            or not job_pilot.ATTEMPT.fullmatch(result["request"])
+            or result["directory"] != expected_dir
+            or not _resources_match(result)
+            or state not in ("prepared", "submitted", "rejected", "uncertain")
+            or (submitting and state == "prepared")
+            or (result["detail"] is not None and not isinstance(result["detail"], str))
+        ):
+            raise ValueError
+        if state == "submitted":
+            if not re.fullmatch(r"[1-9][0-9]{0,19}", result["job_id"]):
+                raise ValueError
+        elif result["job_id"] is not None:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        return {"ok": False, "error": "The Saga helper returned an invalid submission result."}
+    return answer

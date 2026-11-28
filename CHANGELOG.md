@@ -6,6 +6,14 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The agent can prepare and submit a parent calculation on Saga for a node you name (D271,
+  first part): `prepare_saga_node_parent` runs the operator-enrolled project minimum job
+  description on an XYZ the agent wrote, with the node's charge and multiplicity checked in
+  every generated step and one distance frozen for a TS guess. Each submission is reviewed in
+  the app; one node request starts at most 2 parents and 2 TS children. The operator enrolls
+  the job descriptions once with the helper's new `enroll-jobs`. The helper's SHA-256
+  changes: reinstall it on Saga and log in again from the updated checkout (05 §9).
+
 - The Saga operator can replace the enrolled TS bundle with the next validated one by
   running the helper's `enroll-ts` with `--replace` (D270). Earlier TS attempts stay
   readable by ID through `get_prepared_job`, keep their Slurm receipts and can never be

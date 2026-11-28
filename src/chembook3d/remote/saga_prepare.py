@@ -21,6 +21,7 @@ JOB = "min-go_PBEPBE-GD3MBJ_DZ_singlet_CONVER9.jd"
 MARKER = ".prepare-minimum.json"
 SUBMIT_MARKER = ".submit-minimum.json"
 TS_MARKER = ".submit-ts.json"
+NODE_MARKER = ".submit-node.json"
 CHECKPOINT_LIMIT = 64 * 1024 * 1024
 TS_IDENTITY = ("attempt", "revision", "checkpoint_sha256", "review_sha256")
 RESOURCES = {"nodes": 1, "cores": 40, "hours": 24}
@@ -107,12 +108,9 @@ def inputs(root, reference_dir, stem):
     ):
         raise ValueError("Expected the named geometry in the manual min-test directory.")
     baseline = root / reference_dir
-    descriptions = root.parent / "jobdescriptions"
-    if baseline.is_symlink() or descriptions.is_symlink():
+    if baseline.is_symlink():
         raise ValueError("The reference and job directories must not be links.")
-    generator = Path.home() / "tools/scripts/submit_all_DFT.sh"
-    if root in generator.resolve(strict=True).parents:
-        raise ValueError("The generator must be installed outside the pilot.")
+    descriptions, generator = project_tools(root)
     return baseline / (stem + ".xyz"), descriptions / JOB, generator
 
 
@@ -902,6 +900,591 @@ def ts_operation(request, policy):
         )
 
 
+# ---------- D271: one node request, prepared from the agent's XYZ (05 §9) ----------
+# The operator enrolls the project's job descriptions once by name and SHA-256. The agent
+# supplies only a flat XYZ in the geometries directory, the node's charge and multiplicity,
+# and optionally one distance to freeze. The pinned generator writes the input, and every
+# check below runs here, independently of the workstation.
+
+NODE_KINDS = {"parent": "minimum", "child": "ts"}
+NODE_LIMITS = {"parent": 2, "child": 2}  # Starts per node request (D271c)
+STAGES = ("SP", "SP", "STABLE", "OPT", "FREQ")
+LINK1 = r"^[ \t]*--link1--[ \t]*$"
+JD_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\.jd")
+HEX32 = re.compile(r"[0-9a-f]{32}")
+HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def project_tools(root):
+    """The operator's job directory beside the pilot and the generator in the home."""
+    descriptions = root.parent / "jobdescriptions"
+    if descriptions.is_symlink():
+        raise ValueError("The reference and job directories must not be links.")
+    generator = Path.home() / "tools/scripts/submit_all_DFT.sh"
+    if root in generator.resolve(strict=True).parents:
+        raise ValueError("The generator must be installed outside the pilot.")
+    return descriptions, generator
+
+
+def enroll_jobs(minimum, ts):
+    """Operator command: pin the project minimum and TS job descriptions (D271d)."""
+    control = checked_control()
+    with policy_lock(control, ".submit-node.lock"):
+        policy = json.loads(private_read(control / MARKER))
+        enrolled_submission(policy)
+        root = Path(policy["work_root"])
+        check_root(root)
+        descriptions, generator = project_tools(root)
+        jobs = {}
+        for kind, name in (("minimum", minimum), ("ts", ts)):
+            if not JD_NAME.fullmatch(name):
+                raise ValueError("Name a .jd file in the jobdescriptions directory: " + name)
+            jobs[kind] = {"name": name, "sha256": digest(read_file(descriptions / name))}
+        marker = control / NODE_MARKER
+        key = secrets.token_hex(32)
+        if os.path.lexists(marker):
+            # Prepared attempts keep their reviewed bytes, so re-enrollment keeps the key.
+            key = submit_policy(marker)["key"]
+        enabled = {
+            "work_root": str(root),
+            "minimum_attempt": policy["attempt"],
+            "jobs": jobs,
+            "generator_sha256": digest(read_file(generator)),
+            **RESOURCES,
+            "limits": NODE_LIMITS,
+            **submission_wrapper(root),
+            "key": key,
+        }
+        atomic_write(marker, json.dumps(enabled).encode())
+        with open_directory(control, readable=True) as directory:
+            os.fsync(directory)
+    return jobs
+
+
+def node_policy(control, policy):
+    path = control / NODE_MARKER
+    if not os.path.lexists(path):
+        raise ValueError("The operator has not enrolled the project job descriptions.")
+    enabled = submit_policy(path)
+    jobs = enabled.get("jobs")
+    if (
+        enabled.get("work_root") != policy["work_root"]
+        or enabled.get("minimum_attempt") != policy["attempt"]
+        or not isinstance(jobs, dict)
+        or set(jobs) != set(NODE_KINDS.values())
+        or any(
+            not isinstance(job, dict)
+            or set(job) != {"name", "sha256"}
+            or not isinstance(job["name"], str)
+            or not JD_NAME.fullmatch(job["name"])
+            or not isinstance(job["sha256"], str)
+            or not HEX64.fullmatch(job["sha256"])
+            for job in jobs.values()
+        )
+        or any(type(enabled.get(k)) is not int or enabled[k] != v for k, v in RESOURCES.items())
+        or enabled.get("limits") != NODE_LIMITS
+    ):
+        raise ValueError("The node job enrollment belongs to a different pilot or is invalid.")
+    return enabled
+
+
+def parse_xyz(data):
+    """Elements and coordinates of a single-frame XYZ file, all finite."""
+    try:
+        lines = data.decode("utf-8").replace("\r\n", "\n").split("\n")
+        count = int(lines[0].strip())
+    except (UnicodeDecodeError, ValueError):
+        raise ValueError("Expected an XYZ file with its atom count on the first line.") from None
+    if not 0 < count <= 2000 or len(lines) < count + 2:
+        raise ValueError("The XYZ atom count does not match its atom lines.")
+    atoms = []
+    for line in lines[2 : count + 2]:
+        fields = line.split()
+        if len(fields) != 4 or not re.fullmatch(r"[A-Z][a-z]?", fields[0]):
+            raise ValueError("Expected an element symbol and three coordinates on each atom line.")
+        try:
+            position = [float(value) for value in fields[1:]]
+        except ValueError:
+            raise ValueError("XYZ coordinates must be numbers.") from None
+        if not all(abs(value) < 1e6 for value in position):
+            raise ValueError("XYZ coordinates must be finite.")
+        atoms.append((fields[0], position))
+    if any(line.strip() for line in lines[count + 2 :]):
+        raise ValueError("Expected one geometry: the XYZ file has lines after its atoms.")
+    return atoms
+
+
+def route_words(route):
+    """Port of parsers.gaussian.split_route_words: words outside parentheses."""
+    route = re.sub(r"^\s*#[PNTpnt]?", " ", re.sub(r"\s*=\s*", "=", route))
+    words, depth, current = [], 0, ""
+    for char in route:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+        if depth == 0 and (char.isspace() or char == "#"):
+            if current:
+                words.append(current)
+            current = ""
+        else:
+            current += char
+    if current:
+        words.append(current)
+    return words
+
+
+def route_keyword(word):
+    """Port of parsers.gaussian.keyword_of: `Opt=(TS,CalcFC)` -> ('OPT', ['TS', 'CALCFC'])."""
+    match = re.match(r"^([A-Za-z0-9_\-+*]+)\s*=?\s*(.*)$", word)
+    if not match:
+        return word.upper(), []
+    name, rest = match.group(1).upper(), match.group(2).strip()
+    if rest.startswith("(") and rest.endswith(")"):
+        rest = rest[1:-1]
+    options, depth, current = [], 0, ""
+    for char in rest:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        if char == "," and depth == 0:
+            options.append(current.strip())
+            current = ""
+        else:
+            current += char
+    if current.strip():
+        options.append(current.strip())
+    return name, [option.upper() for option in options]
+
+
+def linked_steps(text):
+    return re.split(LINK1, text.replace("\r\n", "\n"), flags=re.I | re.M)
+
+
+def step_header(header, stem):
+    """The route of one step and its checkpoint, refusing other Link0 directives."""
+    lines = header.splitlines()
+    route = next((i for i, line in enumerate(lines) if line.lstrip().startswith("#")), None)
+    if route is None:
+        raise ValueError("Expected a Gaussian route in every step.")
+    checkpoint = None
+    for line in lines[:route]:
+        directive, _, value = line.strip().partition("=")
+        if directive.lower() == "%chk":
+            if checkpoint is not None or value not in (stem, stem + ".chk"):
+                raise ValueError("Every step must use the attempt's own checkpoint " + stem + ".")
+            checkpoint = value
+        elif directive.lower() not in ("%mem", "%nprocshared", "%nproc"):
+            raise ValueError("Unsupported Gaussian directive in the generated input.")
+    keywords = " ".join(lines[route:])
+    if "%" in keywords or re.search(
+        r"\b(?:TS|QST[23]|IRC|Scan|ModRedundant|Restart|AllCheck|External)\b", keywords, re.I
+    ):
+        raise ValueError("The generated input is not a fresh project minimum.")
+    if checkpoint is None:
+        raise ValueError("Every linked step must use the attempt's own checkpoint.")
+    return route_words(keywords)
+
+
+def electrons(charge, multiplicity):
+    return "charge " + str(charge) + " and multiplicity " + str(multiplicity)
+
+
+def charge_spin(line):
+    match = re.fullmatch(r"\s*([+-]?\d+)\s+([1-9]\d*)\s*", line)
+    if not match:
+        raise ValueError("Expected charge and multiplicity in every step.")
+    return int(match.group(1)), int(match.group(2))
+
+
+def check_node_input(text, atoms, stem, charge, multiplicity):
+    """Port of job_pilot._verify_input for the five-step project minimum, with the node's
+    charge and multiplicity checked in every step (D271a)."""
+    steps = linked_steps(text)
+    if len(steps) != len(STAGES):
+        raise ValueError("Expected the five-step project minimum: SP, SP, STABLE, OPT, FREQ.")
+    for index, step in enumerate(steps):
+        sections = re.split(r"\n(?:[ \t]*\n)+", step.strip())
+        if len(sections) < 3:
+            raise ValueError("Generated input lacks a Gaussian route, title or molecule.")
+        if re.search(r"^[ \t]*@", step, re.M) or any(
+            re.search(r"^[ \t]*%", section, re.M) for section in sections[1:]
+        ):
+            raise ValueError("Expected a self-contained Gaussian input.")
+        keys = {}
+        words = step_header(sections[0], stem)
+        for word in words:
+            key, options = route_keyword(word)
+            if key in ("GUESS", "GEOM") and key in keys:
+                raise ValueError("Conflicting geometry or guess directives.")
+            keys[key] = options
+        if set(keys) & set(STAGES) != {STAGES[index]}:
+            raise ValueError("Expected SP, SP, stability, optimization and frequency in order.")
+        from_checkpoint = any(w.upper().split("/")[-1] == "CHKBASIS" for w in words)
+        molecule = sections[2].splitlines()
+        found = charge_spin(molecule[0])
+        if found != (charge, multiplicity):
+            raise ValueError(
+                "Step "
+                + str(index + 1)
+                + " of the generated input has "
+                + electrons(*found)
+                + "; the node has "
+                + electrons(charge, multiplicity)
+                + "."
+            )
+        if index == 0:
+            if from_checkpoint or any(
+                option in ("CHECK", "TCHECK", "READ")
+                for key in ("GEOM", "GUESS")
+                for option in keys.get(key, [])
+            ):
+                raise ValueError("The first step must start from the XYZ coordinates.")
+            generated = parse_xyz(
+                (str(len(molecule) - 1) + "\n\n" + "\n".join(molecule[1:])).encode()
+            )
+            if len(generated) != len(atoms) or any(
+                atoms[i][0] != generated[i][0]
+                or sum((atoms[i][1][k] - generated[i][1][k]) ** 2 for k in range(3)) > 1e-10
+                for i in range(len(atoms))
+            ):
+                raise ValueError("Generated coordinates do not match the selected XYZ geometry.")
+        elif (
+            not from_checkpoint
+            or keys.get("GEOM") != ["CHECK"]
+            or keys.get("GUESS") != ["READ"]
+            or len(molecule) != 1
+            or len(sections) != 3
+        ):
+            raise ValueError("Linked steps must reuse this basis, geometry and guess.")
+
+
+def freeze_distance(text, pair):
+    """Port of job_pilot._freeze_optimization_distance: freeze one distance in step 4."""
+    links = list(re.finditer(r"^[ \t]*--link1--[ \t]*\r?\n", text, re.I | re.M))
+    if len(links) != 4:
+        raise ValueError("A distance freeze requires the five-step linked minimum.")
+    start, end = links[2].end(), links[3].start()
+    step = text[start:end]
+    route_start = re.search(r"^[ \t]*#", step, re.M).start()
+    route, rest = re.split(r"(?=\r?\n[ \t]*\r?\n)", step[route_start:], maxsplit=1)
+    words = route_words(route)
+    opt_words = [word for word in words if route_keyword(word)[0] == "OPT"]
+    matches = list(
+        re.finditer(
+            r"(?<![^\s#])(opt)(?:[ \t]*=[ \t]*(?:\(([^()\r\n]+)\)|([a-z0-9]+)))?"
+            r"(?=[\s#]|$)(?!\s*[=(])",
+            route,
+            re.I,
+        )
+    )
+    if len(matches) != 1 or opt_words != [re.sub(r"\s*=\s*", "=", matches[0].group(0))]:
+        raise ValueError("Expected one supported optimization keyword for the distance freeze.")
+    for option in route_keyword(opt_words[0])[1]:
+        if not re.fullmatch(r"TIGHT|(?:RECALCFC|MAXCYCLES)=[0-9]+", option):
+            raise ValueError("Unsupported optimization option for the distance freeze: " + option)
+    match = matches[0]
+    existing = match.group(2) or match.group(3)
+    options = "(" + existing + ",ModRedundant)" if existing else "ModRedundant"
+    route = route[: match.start()] + match.group(1) + "=" + options + route[match.end() :]
+    newline = "\r\n" if "\r\n" in step else "\n"
+    constraint = "B " + str(pair[0]) + " " + str(pair[1]) + " F"
+    revised = step[:route_start] + route + rest.rstrip(" \t\r\n") + newline * 2
+    return text[:start] + revised + constraint + newline * 2 + text[end:]
+
+
+def node_paths(control, attempt):
+    if not isinstance(attempt, str) or not HEX32.fullmatch(attempt):
+        raise ValueError("Invalid node attempt.")
+    return {
+        "claim": control / ("node-" + attempt + ".claim"),
+        "done": control / ("node-" + attempt + ".done"),
+        "submit_claim": control / ("node-" + attempt + ".submit.claim"),
+        "receipt": control / ("node-" + attempt + ".submit.done"),
+    }
+
+
+def node_request_state(control, request):
+    if not isinstance(request, str) or not HEX32.fullmatch(request):
+        raise ValueError("Invalid node request.")
+    path = control / ("node-request-" + request + ".json")
+    try:
+        state = json.loads(private_read(path, 16384), object_pairs_hook=distinct_fields)
+    except FileNotFoundError:
+        return path, None
+    if (
+        not isinstance(state, dict)
+        or set(state) != {"charge", "multiplicity", "attempts", "started"}
+        or not all(isinstance(state[k], dict) for k in ("attempts", "started"))
+    ):
+        raise ValueError("Invalid node request record.")
+    return path, state
+
+
+def started(state, kind):
+    return sum(1 for value in state["started"].values() if value == kind)
+
+
+def prepared_node(control, attempt):
+    """The receipt of a finished preparation: its reviewed fields and input digest."""
+    try:
+        record = json.loads(
+            private_read(node_paths(control, attempt)["done"], 8192),
+            object_pairs_hook=distinct_fields,
+        )
+    except FileNotFoundError:
+        raise ValueError("Unknown node attempt. Prepare it first.") from None
+    if not isinstance(record, dict) or record.get("attempt") != attempt:
+        raise ValueError("Invalid node preparation receipt.")
+    return record
+
+
+def node_fields(request):
+    fields = {"operation", "request", "attempt", "geometry", "charge", "multiplicity"}
+    if "freeze_distance" in request:
+        fields.add("freeze_distance")
+    if set(request) != fields:
+        raise ValueError("Unexpected fields for prepare_node.")
+    pair = request.get("freeze_distance")
+    if (
+        not isinstance(request["request"], str)
+        or not HEX32.fullmatch(request["request"])
+        or not isinstance(request["attempt"], str)
+        or not HEX32.fullmatch(request["attempt"])
+        or not isinstance(request["geometry"], str)
+        or not XYZ_NAME.fullmatch(request["geometry"])
+        or type(request["charge"]) is not int
+        or not -20 <= request["charge"] <= 20
+        or type(request["multiplicity"]) is not int
+        or not 1 <= request["multiplicity"] <= 20
+        or (
+            "freeze_distance" in request
+            and (
+                not isinstance(pair, list)
+                or len(pair) != 2
+                or any(type(atom) is not int or atom < 1 for atom in pair)
+                or pair[0] == pair[1]
+            )
+        )
+    ):
+        raise ValueError("Invalid node request, attempt, geometry, charge, multiplicity or pair.")
+    return pair
+
+
+def prepare_node(request, policy, enabled, control):
+    pair = node_fields(request)
+    root = Path(policy["work_root"])
+    check_root(root)
+    attempt, name = request["attempt"], request["geometry"]
+    stem = name[:-4]
+    job = enabled["jobs"][NODE_KINDS["parent"]]
+    record = {
+        "kind": "parent",
+        "request": request["request"],
+        "attempt": attempt,
+        "geometry": name,
+        "charge": request["charge"],
+        "multiplicity": request["multiplicity"],
+        "freeze_distance": pair,
+        "job_file": job["name"],
+        "job_sha256": job["sha256"],
+        "generator_sha256": enabled["generator_sha256"],
+        "input_name": stem + ".inp",
+    }
+    paths = node_paths(control, attempt)
+    folder = root / ("node-" + attempt)
+    if os.path.lexists(paths["done"]):
+        stored = prepared_node(control, attempt)
+        if {k: v for k, v in stored.items() if k not in ("revision", "xyz_sha256")} != record:
+            raise ValueError("This node attempt was prepared with different arguments.")
+        return node_preview(folder, stored)
+    with policy_lock(control, ".submit-node.lock"):
+        _, state = node_request_state(control, request["request"])
+        if state is not None:
+            if (state["charge"], state["multiplicity"]) != (
+                record["charge"],
+                record["multiplicity"],
+            ):
+                raise ValueError(
+                    "This node request was opened for "
+                    + electrons(state["charge"], state["multiplicity"])
+                    + "."
+                )
+            if started(state, "parent") >= NODE_LIMITS["parent"]:
+                raise ValueError(
+                    "This node request has started its "
+                    + str(NODE_LIMITS["parent"])
+                    + " constrained parents (D271c)."
+                )
+    descriptions, generator = project_tools(root)
+    if digest(read_file(generator)) != enabled["generator_sha256"]:
+        raise ValueError("The generator changed since the job descriptions were enrolled.")
+    if digest(read_file(descriptions / job["name"])) != job["sha256"]:
+        raise ValueError(
+            "The enrolled job description " + job["name"] + " changed. Ask the operator to "
+            "enroll it again."
+        )
+    inbox = root / "geometries"
+    if inbox.is_symlink():
+        raise ValueError("The geometries directory must be inside the pilot.")
+    xyz = read_file(inbox / name, FILE_LIMIT)
+    atoms = parse_xyz(xyz)
+    if pair is not None and max(pair) > len(atoms):
+        raise ValueError("Choose two distinct atom numbers from the XYZ geometry, from 1.")
+    try:
+        claim = os.open(str(paths["claim"]), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        raise ValueError(
+            "Preparation of this attempt is in progress or incomplete. Inspect " + str(folder)
+        ) from None
+    os.close(claim)
+    if os.path.lexists(folder):
+        raise ValueError("Existing or incomplete attempt. Inspect " + str(folder))
+    folder.mkdir(mode=0o700)
+    with (folder / name).open("xb") as stream:
+        stream.write(xyz)
+    result = subprocess.run(
+        [str(generator), str(descriptions / job["name"]), name, "nosub"],
+        cwd=str(folder),
+        timeout=90,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if result.returncode:
+        raise ValueError("The generator failed. Inspect the .accLog in " + str(folder))
+    path = folder / record["input_name"]
+    try:
+        text = read_file(path).decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("The generated input is not text. Inspect " + str(folder)) from None
+    try:
+        check_node_input(text, atoms, stem, record["charge"], record["multiplicity"])
+        if pair is not None:
+            text = freeze_distance(text, pair)
+    except ValueError as exc:
+        raise ValueError(str(exc) + " Inspect " + str(folder)) from None
+    data = text.encode("utf-8")
+    if len(data) > LIMIT:
+        raise ValueError("The constrained input is too large.")
+    atomic_write(path, data)
+    record.update(revision=digest(data), xyz_sha256=digest(xyz))
+    with policy_lock(control, ".submit-node.lock"):
+        state_path, state = node_request_state(control, record["request"])
+        if state is None:
+            state = {
+                "charge": record["charge"],
+                "multiplicity": record["multiplicity"],
+                "attempts": {},
+                "started": {},
+            }
+        elif (state["charge"], state["multiplicity"]) != (record["charge"], record["multiplicity"]):
+            raise ValueError("This node request was opened for another charge or multiplicity.")
+        state["attempts"][attempt] = "parent"
+        atomic_write(paths["done"], json.dumps(record).encode())
+        atomic_write(state_path, json.dumps(state).encode())
+        with open_directory(control, readable=True) as directory:
+            os.fsync(directory)
+    return node_preview(folder, record)
+
+
+def node_preview(folder, record):
+    with open_directory(folder) as directory:
+        data = read_file(Path("/proc/self/fd") / str(directory) / record["input_name"])
+    if digest(data) != record["revision"]:
+        raise ValueError("The prepared input changed. Prepare a new attempt for review.")
+    return {
+        **record,
+        "state": "prepared",
+        "directory": str(folder),
+        "input": data.decode("utf-8"),
+        "limits": NODE_LIMITS,
+    }
+
+
+def node_operation(request, policy):
+    control = checked_control()
+    if json.loads(private_read(control / MARKER)) != policy:
+        raise ValueError("The preparation enrollment changed.")
+    enabled = node_policy(control, policy)
+    operation = request.get("operation")
+    if operation == "prepare_node":
+        return prepare_node(request, policy, enabled, control)
+    keys = {"operation", "attempt", "revision"}
+    if operation == "submit_node":
+        keys = keys.union(RESOURCES, {"signature"})
+    elif operation != "node_status":
+        raise ValueError("Unsupported node operation.")
+    if set(request) != keys:
+        raise ValueError("Unexpected fields for " + operation + ".")
+    attempt = request["attempt"]
+    paths = node_paths(control, attempt)
+    record = prepared_node(control, attempt)
+    if (
+        type(request["revision"]) is not str
+        or request["revision"] != record["revision"]
+        or any(
+            type(request[k]) is not int or request[k] != v
+            for k, v in RESOURCES.items()
+            if k in request
+        )
+    ):
+        raise ValueError("Request must match the prepared node attempt and resources.")
+    if operation == "submit_node":
+        verify_signature(request, enabled["key"])
+    root = Path(policy["work_root"])
+    folder = root / ("node-" + attempt)
+    reply = {
+        "request": record["request"],
+        "attempt": attempt,
+        "revision": record["revision"],
+        **RESOURCES,
+        "directory": str(folder / "submission"),
+        "job_id": None,
+        "detail": None,
+    }
+    stored = saved_outcome(paths["receipt"], paths["submit_claim"])
+    if stored is not None:
+        return {**reply, **stored}
+    check_root(root)
+    snapshot = node_preview(folder, record)["input"].encode("utf-8")
+    if operation == "node_status":
+        return {**reply, "state": "prepared"}
+    pin = submission_wrapper(root)
+    if any(enabled.get(k) != v for k, v in pin.items()):
+        raise ValueError("The enrolled submission wrapper has changed.")
+    with policy_lock(control, ".submit-node.lock"):
+        if submit_policy(control / NODE_MARKER) != enabled:
+            raise ValueError("The operator changed the node enrollment. Check the attempt status.")
+        state_path, state = node_request_state(control, record["request"])
+        kind = record["kind"]
+        if state is None or state["attempts"].get(attempt) != kind:
+            raise ValueError("This attempt is not part of its node request.")
+        if attempt not in state["started"]:
+            if started(state, kind) >= NODE_LIMITS[kind]:
+                raise ValueError(
+                    "This node request has already started "
+                    + str(NODE_LIMITS[kind])
+                    + " "
+                    + kind
+                    + "s (D271c)."
+                )
+            # Count the start before the claim, so a crash cannot free the slot.
+            state["started"][attempt] = kind
+            atomic_write(state_path, json.dumps(state).encode())
+        return claim_and_submit(
+            reply,
+            paths["receipt"],
+            paths["submit_claim"],
+            folder,
+            record["input_name"],
+            snapshot,
+            pin["wrapper"],
+        )
+
+
 class Outside(ValueError):
     pass
 
@@ -1146,10 +1729,16 @@ def main():
         check_root(root)
         print(json.dumps({"ok": True, **submission_wrapper(root)}))
         return
+    if len(sys.argv) == 4 and sys.argv[1] == "enroll-jobs":
+        jobs = enroll_jobs(sys.argv[2], sys.argv[3])
+        for kind in ("minimum", "ts"):
+            print("Enrolled", kind, "job description", jobs[kind]["name"], jobs[kind]["sha256"])
+        return
     if len(sys.argv) != 1:
         raise ValueError(
             "Usage: python3 saga_prepare.py [setup /path/to/min-test-.../NAME.inp "
-            "| check-wrapper | enable-submit | enroll-ts /path/to/review-bundle [--replace]]"
+            "| check-wrapper | enable-submit | enroll-ts /path/to/review-bundle [--replace] "
+            "| enroll-jobs MINIMUM.jd TS.jd]"
         )
     request = parse_request(sys.stdin.buffer.read(JSON_LIMIT + 1))
     policy = json.loads(read_file(control_dir() / MARKER, 4096))
@@ -1166,6 +1755,12 @@ def main():
         "ts_status",
     ):
         result = ts_operation(request, policy)
+    elif isinstance(request, dict) and request.get("operation") in (
+        "prepare_node",
+        "submit_node",
+        "node_status",
+    ):
+        result = node_operation(request, policy)
     else:
         result = file_operation(request, policy)
     print(json.dumps({"ok": True, "result": result}))

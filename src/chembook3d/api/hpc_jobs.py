@@ -15,13 +15,15 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from chembook3d.api.remote import _check, _saved
 from chembook3d.api.routes import _investigation
-from chembook3d.models import InvestigationInfo
+from chembook3d.models import InvestigationInfo, Node
 from chembook3d.remote import client, job_pilot, saga_access, servers
 
 router = APIRouter(prefix="/api/hpc-jobs")
 _TS_PILOT = "local_ts"
 _SAGA_TS = "saga_ts"
-_SAGA_PILOTS = {"saga_minimum", _SAGA_TS}
+_SAGA_NODE = "saga_node"
+_SAGA_PILOTS = {"saga_minimum", _SAGA_TS, _SAGA_NODE}
+_HEX32 = r"^[a-f0-9]{32}$"
 
 
 async def _no_arguments(request: Request, detail: str):
@@ -125,6 +127,170 @@ async def _prepare_saga(server_id: str, request: Request, *, ts: bool):
             record.update({k: result[k] for k in ("review", "review_sha256", "checkpoint_sha256")})
         _store_record(attempt, record)
     return result
+
+
+class PrepareNodeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    node_id: str = Field(min_length=1, max_length=32)
+    geometry: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}\.xyz$")
+    freeze_distance: list[Annotated[int, Field(ge=1)]] | None = Field(
+        default=None, min_length=2, max_length=2
+    )
+    request_id: str | None = Field(default=None, pattern=_HEX32)
+
+    @field_validator("freeze_distance")
+    @classmethod
+    def _distinct_atoms(cls, pair: list[int] | None) -> list[int] | None:
+        if pair is not None and pair[0] == pair[1]:
+            raise ValueError("Specify two distinct atom indices.")
+        return pair
+
+
+def _node_request_path(request_id: str) -> Path:
+    if not re.fullmatch(_HEX32, request_id):
+        raise HTTPException(422, "Invalid node request ID.")
+    # Build the filename from the 128-bit ID itself, as _record_path does.
+    return servers.folder() / "saga-node-requests" / f"{int(request_id, 16):032x}.json"
+
+
+def _open_node_request(body: PrepareNodeIn, opened: dict) -> str:
+    """D271: one request per node and electronic state, the frame for the helper's limits."""
+    if body.request_id is None:
+        return secrets.token_hex(16)
+    try:
+        record = json.loads(_node_request_path(body.request_id).read_text("utf-8"))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Unknown node request. Leave request_id out to open one.") from exc
+    if any(record.get(k) != opened[k] for k in ("server_id", "target", "investigation_id")):
+        raise HTTPException(409, "Open the investigation and server of this node request.")
+    if record["node_id"] != opened["node_id"]:
+        raise HTTPException(409, "This node request belongs to another node.")
+    if (record["charge"], record["multiplicity"]) != (opened["charge"], opened["multiplicity"]):
+        raise HTTPException(
+            409,
+            "The node's charge or multiplicity changed since this request was opened. "
+            "Leave request_id out to open a new request.",
+        )
+    return body.request_id
+
+
+def _store_node_request(request_id: str, opened: dict) -> None:
+    path = _node_request_path(request_id)
+    path.parent.mkdir(exist_ok=True, parents=True)
+    try:
+        with path.open("x", encoding="utf-8") as stream:
+            json.dump({"request_id": request_id, **opened}, stream)
+    except FileExistsError:
+        pass  # Opened by an earlier parent; _open_node_request checked it.
+
+
+def _node_state(investigation, server_id: str, info) -> dict:
+    return {
+        "server_id": server_id,
+        "target": _target(server_id),
+        "investigation_id": info.uuid,
+        "folder": str(investigation.folder),
+    }
+
+
+@router.post("/{server_id}/prepare-node")
+async def prepare_saga_node(server_id: str, body: PrepareNodeIn, request: Request):
+    """D271: prepare a parent for node X from the agent's XYZ with the enrolled minimum job."""
+    _check(request, page_only=False)
+    investigation = _investigation(request)
+    info = investigation.info()
+    if info is None or not info.uuid:
+        raise HTTPException(409, "The current investigation has no ID for this preparation.")
+    opened = _node_state(investigation, server_id, info)
+    target = opened["target"]
+    with investigation.sessions.begin() as db:
+        node = db.get(Node, body.node_id)
+        if node is None:
+            raise HTTPException(404, "Unknown node.")
+        if node.charge is None or node.multiplicity is None:
+            raise HTTPException(
+                409, "Set the node's charge and multiplicity first: the helper checks them (D271a)."
+            )
+        opened.update(
+            node_id=node.id,
+            node_label=node.label,
+            charge=node.charge,
+            multiplicity=node.multiplicity,
+        )
+    request_id = _open_node_request(body, opened)
+    attempt = secrets.token_hex(16)
+    wire = {
+        "request": request_id,
+        "attempt": attempt,
+        "geometry": body.geometry,
+        "charge": opened["charge"],
+        "multiplicity": opened["multiplicity"],
+    }
+    if body.freeze_distance is not None:
+        wire["freeze_distance"] = body.freeze_distance
+    try:
+        reply = await client.call(
+            "saga_prepare_node", server=server_id, target=target, request=wire, timeout=115
+        )
+    except client.KeeperError as exc:
+        if "Unknown operation" in str(exc):
+            raise HTTPException(
+                409, "The open HPC login uses an older keeper. See the Saga test procedure."
+            ) from exc
+        raise HTTPException(409, str(exc)) from exc
+    try:
+        result = dict(reply["result"])
+        key_id = result.pop("key_id")
+        contents = result["input"]
+        if (
+            result.keys()
+            != saga_access.NODE_PREVIEW_FIELDS | {"submission_enabled", *saga_access.RESOURCES}
+            or result["submission_enabled"] is not True
+            or reply.get("target") != target
+            or not isinstance(key_id, str)
+            or not re.fullmatch(r"[a-f0-9]{64}", key_id)
+            or any(result[k] != v for k, v in wire.items())
+            or result["freeze_distance"] != body.freeze_distance
+            or hashlib.sha256(contents.encode()).hexdigest() != result["revision"]
+            or any(
+                type(result[k]) is not int or result[k] != n
+                for k, n in saga_access.RESOURCES.items()
+            )
+            or not re.fullmatch(
+                rf"/cluster/projects/[A-Za-z0-9_-]+/{re.escape(target[2])}/chembook3d-pilot/"
+                rf"node-{attempt}",
+                result["directory"],
+            )
+            or set(saga_access.electrons_in_steps(contents))
+            != {(opened["charge"], opened["multiplicity"])}
+        ):
+            raise ValueError
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(409, "The keeper returned an invalid Saga node preparation.") from exc
+    _store_node_request(request_id, opened)
+    record = {
+        **opened,
+        "pilot": _SAGA_NODE,
+        "key_id": key_id,
+        "request_id": request_id,
+        "directory": result["directory"] + "/submission",
+        **{
+            k: result[k]
+            for k in (
+                "input_name",
+                "revision",
+                "input",
+                "geometry",
+                "freeze_distance",
+                "job_file",
+                "job_sha256",
+                "limits",
+                *saga_access.RESOURCES,
+            )
+        },
+    }
+    _store_record(attempt, record)
+    return {**result, "node_id": opened["node_id"]}
 
 
 class PrepareIn(BaseModel):
@@ -307,7 +473,31 @@ def _record(
     return record, key
 
 
+def _node_summary(record: dict) -> str:
+    host, port, username = record["target"]
+    if pair := record.get("freeze_distance"):
+        what = (
+            f"Constrained parent from {record['geometry']}: freeze the distance between atoms "
+            f"{pair[0]} and {pair[1]} at its starting value"
+        )
+    else:
+        what = f"Unconstrained project minimum from {record['geometry']}"
+    limits = record["limits"]
+    return (
+        f"Submit {record['input_name']} for node {record['node_label'] or record['node_id']} "
+        f"(charge {record['charge']}, multiplicity {record['multiplicity']}) on "
+        f"{record['server_id']} ({username}@{host}, port {port}), {record['nodes']} node, "
+        f"{record['cores']} cores, {record['hours']} h. {what}. Job description "
+        f"{record['job_file']} SHA-256 {record['job_sha256']}. Node request "
+        f"{record['request_id']}: at most {limits['parent']} parents and {limits['child']} TS "
+        f"children are started. Directory {record['directory']}. Prepared input SHA-256 "
+        f"{record['revision']}"
+    )
+
+
 def _summary(record: dict) -> str:
+    if record.get("pilot") == _SAGA_NODE:
+        return _node_summary(record)
     if record.get("pilot") in _SAGA_PILOTS:
         host, port, username = record["target"]
         summary = (
@@ -377,13 +567,15 @@ async def _call(
     try:
         if key is None:
             ts = request["operation"] in {"submit_ts", "ts_status"}
+            node = request["operation"] in {"submit_node", "node_status"}
+            op = "saga_node_job" if node else "saga_ts_job" if ts else "saga_minimum_job"
             response = await client.call(
-                "saga_ts_job" if ts else "saga_minimum_job",
+                op,
                 server=server_id,
                 target=target,
                 key_id=key_id,
                 request=request,
-                **({"directory": directory} if ts else {}),
+                **({"directory": directory} if ts or node else {}),
                 timeout=115,
             )
         else:
@@ -393,7 +585,7 @@ async def _call(
             )
     except client.KeeperError as exc:
         detail = str(exc)
-        if request["operation"] in {"submit", "submit_minimum", "submit_ts"}:
+        if request["operation"] in {"submit", "submit_minimum", "submit_ts", "submit_node"}:
             detail += " Check the same prepared attempt after reconnecting."
         raise HTTPException(409, detail) from exc
     result = response.get("result")
@@ -555,7 +747,13 @@ async def _action(request: Request, server_id: str, attempt: str, operation: str
         payload.update({k: record[k] for k in ("revision", "cores", "hours")})
         if record.get("pilot") == _TS_PILOT:
             payload["checkpoint_sha256"] = record["checkpoint_sha256"]
-    if record.get("pilot") in _SAGA_PILOTS:
+    if record.get("pilot") == _SAGA_NODE:
+        payload["revision"] = record["revision"]
+        if operation == "submit":
+            payload.update(operation="submit_node", **saga_access.RESOURCES)
+        else:
+            payload["operation"] = "node_status"
+    elif record.get("pilot") in _SAGA_PILOTS:
         ts = record["pilot"] == _SAGA_TS
         if operation == "submit":
             payload.update(operation="submit_ts" if ts else "submit_minimum", nodes=record["nodes"])
@@ -579,6 +777,15 @@ async def _action(request: Request, server_id: str, attempt: str, operation: str
         )
     ):
         raise HTTPException(409, "The returned Saga TS attempt no longer matches its preparation.")
+    if record.get("pilot") == _SAGA_NODE and (
+        result.get("request") != record["request_id"]
+        or any(
+            result.get(k) != record[k] for k in ("directory", "revision", *saga_access.RESOURCES)
+        )
+    ):
+        raise HTTPException(
+            409, "The returned Saga node attempt no longer matches its preparation."
+        )
     if record.get("pilot") == _TS_PILOT and any(
         record[k] != v for k, v in _ts_details(result).items()
     ):

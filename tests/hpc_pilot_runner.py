@@ -28,6 +28,34 @@ def linked_minimum_input(stem: str, atoms: list[str]) -> str:
     return "--Link1--\n".join(steps)
 
 
+# D271: a stand-in for the project generator on Saga. It takes the electronic state from the
+# first two words of its job description and writes the five-step minimum for the XYZ.
+NODE_GENERATOR = b"""#!/usr/bin/env python3
+import sys
+from pathlib import Path
+jd, name, flag = sys.argv[1:]
+assert flag == "nosub"
+with open(Path.home() / "generator-calls", "a") as calls:
+    print(name, file=calls)
+words = Path(jd).read_text().split()
+state = words[0] + " " + words[1]
+lines = Path(name).read_text().splitlines()
+atoms = lines[2 : 2 + int(lines[0])]
+if "perturb" in words:
+    atoms[0] = "O 0 0 0.1"
+stem = name[:-4]
+first = "%chk=" + stem + "\\n#p HF/Gen\\n# SP\\n\\nStart\\n\\n" + state + "\\n"
+first += "\\n".join(atoms) + "\\n\\nH O 0\\nS 1 1.0\\n 1.0 1.0\\n****\\n\\n"
+steps = [first]
+for job in ["SP", "Stable=(Opt,RRHF)", "Opt=Tight", "Freq"]:
+    steps.append(
+        "%chk=" + stem + "\\n#p B3LYP/ChkBasis\\n# Geom=Check Guess=Read\\n# " + job
+        + "\\n\\nContinue\\n\\n" + state + "\\n\\n"
+    )
+Path(stem + ".inp").write_text("--Link1--\\n".join(steps))
+"""
+
+
 def checkpoint_ts_input(stem: str) -> str:
     steps = []
     for route in ("Opt=(RecalcFC=30,MaxCycles=150,TS,NoLinear,NoEigenTest,Tight)", "Freq"):

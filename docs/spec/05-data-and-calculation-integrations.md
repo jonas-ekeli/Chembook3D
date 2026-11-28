@@ -226,7 +226,7 @@ For an earlier attempt, `get_prepared_job` still answers by its ID. A submitted 
 
 ### One node on Saga without hand enrollment (D271)
 
-_Proposed 2026-11-28 and confirmed by Jonas the same day (D271, answering Q103–Q108). Not built yet._
+_Proposed 2026-11-28 and confirmed by Jonas the same day (D271, answering Q103–Q108). The parent is built (FR-SSH-24); the mode choice, the TS child and the import into the node follow._
 
 The pilot replays only what the operator enrolled by hand: one manually verified minimum and one archived TS bundle. The next milestone is Jonas's representative request for one node: “Find a verified transition state for node X using this project's method.” The agent prepares and submits the calculations itself, but each submission still passes through the app's review. The local pilot already performs most of this sequence against a loopback stand-in (`prepare_gaussian_job` with `freeze_distance`, `inspect_preoptimization_modes`, `prepare_ts_from_preoptimization`). The proposal moves that sequence onto the Saga helper. The helper's independent checks stay in place, and the operator still owns everything that defines the method.
 
@@ -240,6 +240,23 @@ The pilot replays only what the operator enrolled by hand: one manually verified
 | Follow up | `check_server_job` and `get_prepared_job` as now. The verdict uses the child's own convergence, normal termination and exactly one imaginary mode that matches the step. Automatic verification and the single point are step 2. | A missing receipt still blocks resubmission. |
 
 The operator's limits (Q105) bound how many parents and children one request may start, and the resources of each. Results attach to X as ordinary imported calculations with their provenance (Q107). Scans, IRC, revised angle or torsion constraints, parallel nodes and the single point stay in later steps. Tests follow the existing pattern: the loopback stand-in and the Linux helper tests cover generation, freeze, refusal, a lost reply, a stale or foreign checkpoint, and limits that are reached.
+
+#### Enrolling the project job descriptions and preparing a parent (D271, FR-SSH-24)
+
+The first part of D271 lets the agent prepare and submit the constrained parent. The helper with D271 has a new SHA-256, so update the workstation checkout first, transfer its `src/chembook3d/remote/saga_prepare.py` as in step 2 of the TS acceptance test and reinstall it with the same `install -m 600` command. Then enroll the project's minimum and TS job descriptions by their names in the `jobdescriptions` directory beside the pilot:
+
+```bash
+python3 ~/.local/lib/chembook3d/saga_prepare.py enroll-jobs \
+  min-go_PBEPBE-GD3MBJ_DZ_singlet_CONVER9.jd ts-go_PBEPBE-GD3MBJ_DZ_singlet_CONVER9.jd
+```
+
+The helper prints each name with its SHA-256 and writes `.submit-node.json`, private to the operator, with those digests, the generator's digest, the wrapper pin, the fixed resources, the request limits and a signing key. Running the command again after a job description changes records the new digest and keeps the key. Until then the helper refuses to prepare with the changed file. Restart the keeper as for a bundle replacement: log out of the open HPC sessions, close the app, wait a minute, start the updated checkout and log into Saga with 2FA.
+
+The agent writes its guess as a new XYZ in the pilot's `geometries` directory and calls `prepare_saga_node_parent` with the node's ID, the file name and, for a TS guess, `freeze_distance`. The app takes the node's charge and multiplicity from the notebook and opens a node request. The helper copies the XYZ into a fresh `node-<attempt>` directory, runs the pinned generator there with the enrolled minimum job description and `nosub`, and checks the input as the local pilot does. It requires five linked steps (SP, SP, stability, optimization, frequency), only `%chk`, `%mem` and `%nproc` directives with the attempt's own checkpoint, the XYZ's atoms and coordinates in the first step, checkpoint geometry, guess and basis in the later steps, and the node's charge and multiplicity in every step. It then adds `ModRedundant` and `B i j F` to step 4. How the project generator receives the charge and multiplicity is still being confirmed. Whatever the answer, a node whose state does not appear in every generated step is refused before review. The keeper checks the preview again and adds only the digest of the signing key. The app shows the node, its charge and multiplicity, the frozen atoms, the job description and its digest, the request's limits, the destination and the complete input.
+
+Each submission needs **Submit job** in the app. The helper counts starts per node request before it claims the wrapper and refuses a third parent, and a new preparation after two have started. A lost reply is recovered with `get_prepared_job` on the same attempt. A second parent for the same node passes the returned `request_id`. The app refuses it for another node or after the node's charge or multiplicity changed. The mode choice, the TS child and the import into the node follow in the next parts of D271.
+
+For the first live check, use a test investigation with an HCN ⇌ HNC TS node set to charge 0 and multiplicity 1. Ask the agent to write the HCN guess above as a new XYZ in the geometries directory, prepare the parent with atoms 2 and 3 frozen and stop after preparation. Compare the input with the operator's manual HCN parent, then choose **Refuse** in the review. Choose **Submit job** only for a live calculation with the displayed allocation.
 
 ### Testing access on Saga (Q101)
 
