@@ -58,7 +58,10 @@ def _export_bundle(
     )
     mode = next((m for m in evidence["modes"] if m["mode_index"] == mode_index), None)
     if mode is None or not mode["eligible"]:
-        raise ValueError("Select an imaginary mode with motion along the frozen bond.")
+        raise ValueError(
+            "Select an imaginary mode along the frozen bond: alignment at least 0.5 and "
+            "bond share at least 0.25 (D269)."
+        )
     checkpoint, _ = checkpoint_ts.read_snapshot(
         parent.with_suffix(".fchk.gz"), checkpoint_ts.CHECKPOINT_LIMIT
     )

@@ -168,6 +168,7 @@ class _ModeEvidence(BaseModel):
     bond_projection: float
     relative_displacement: float = Field(ge=0)
     alignment: float = Field(ge=0, le=1)
+    bond_share: float | None = Field(default=None, ge=0)  # D269; absent in older records
     eligible: bool
 
 
@@ -337,7 +338,13 @@ def _summary(record: dict) -> str:
             f"Directory {record['directory']}. Parent attempt {record['parent_attempt']} "
             f"(Slurm job {record['parent_job_id']}). Mode {record['mode_index']} "
             f"({mode['frequency_cm1']:g} cm⁻¹), atoms {first} and {second}, "
-            f"bond projection {mode['bond_projection']:g}. Parent output SHA-256 "
+            f"bond projection {mode['bond_projection']:g}"
+            + (
+                f", alignment {mode['alignment']:g}, bond share {mode['bond_share']:g}"
+                if mode.get("bond_share") is not None
+                else ""
+            )
+            + ". Parent output SHA-256 "
             f"{mode['output_sha256']}. "
             f"Checkpoint {record['checkpoint_name']} SHA-256 {record['checkpoint_sha256']}. "
             f"Prepared input SHA-256 {record['revision']}"
