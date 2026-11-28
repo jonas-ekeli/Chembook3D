@@ -24,6 +24,16 @@ TS_MARKER = ".submit-ts.json"
 CHECKPOINT_LIMIT = 64 * 1024 * 1024
 TS_IDENTITY = ("attempt", "revision", "checkpoint_sha256", "review_sha256")
 RESOURCES = {"nodes": 1, "cores": 40, "hours": 24}
+# A replaced TS enrollment keeps every field but its signing key (D270).
+TS_RETIRED_FIELDS = (
+    "work_root",
+    "minimum_attempt",
+    "minimum_sha256",
+    *TS_IDENTITY,
+    *RESOURCES,
+    "wrapper",
+    "wrapper_sha256",
+)
 WRAPPER = "tools/uibkvant-tools/runnable/submit_job_g16-C.01"
 OUTPUT_LIMIT = 65_536
 SUBMIT_TIMEOUT = 60
@@ -649,7 +659,49 @@ def ts_bundle(directory, private=False):
     return review, data, checkpoint
 
 
-def enroll_ts(source):
+def retired_ts_path(control, attempt):
+    if not isinstance(attempt, str) or not re.fullmatch(r"[0-9a-f]{32}", attempt):
+        raise ValueError("Invalid TS attempt.")
+    return control / ("ts-" + attempt + ".retired.json")
+
+
+def retire_ts(control, current):
+    """Keep the outgoing enrollment for status only: its fields and key digest, never its key."""
+    path = retired_ts_path(control, current.get("attempt"))
+    if any(k not in current for k in TS_RETIRED_FIELDS):
+        raise ValueError("Invalid TS enrollment.")
+    retired = {k: current[k] for k in TS_RETIRED_FIELDS}
+    retired.update(key_id=digest(bytes.fromhex(current["key"])), retired=True)
+    if os.path.lexists(path):
+        # Only an interrupted replacement leaves this record beside its own marker.
+        if retired_ts_policy(control, current["attempt"]) != retired:
+            raise ValueError("A different retired record exists for this TS attempt.")
+        return
+    atomic_write(path, json.dumps(retired).encode())
+    with open_directory(control, readable=True) as directory:
+        os.fsync(directory)
+
+
+def retired_ts_policy(control, attempt):
+    try:
+        retired = json.loads(
+            private_read(retired_ts_path(control, attempt)), object_pairs_hook=distinct_fields
+        )
+    except FileNotFoundError:
+        raise ValueError("Request must match the enrolled TS review and resources.") from None
+    if (
+        not isinstance(retired, dict)
+        or set(retired) != {*TS_RETIRED_FIELDS, "key_id", "retired"}
+        or retired["retired"] is not True
+        or retired["attempt"] != attempt
+        or not isinstance(retired["key_id"], str)
+        or not re.fullmatch(r"[0-9a-f]{64}", retired["key_id"])
+    ):
+        raise ValueError("Invalid retired TS enrollment.")
+    return retired
+
+
+def enroll_ts(source, replace=False):
     control = checked_control()
     review, data, checkpoint = ts_bundle(source.absolute())
     with policy_lock(control, ".submit-ts.lock"):
@@ -672,15 +724,22 @@ def enroll_ts(source):
         if os.path.lexists(marker):
             current = submit_policy(marker)
             if current.get("minimum_attempt") == expected["minimum_attempt"]:
-                if any(current.get(k) != v for k, v in expected.items()):
-                    raise ValueError("A different TS pair or wrapper is enrolled for this pilot.")
-                if not re.fullmatch(r"[0-9a-f]{32}", current["attempt"]):
+                if not re.fullmatch(r"[0-9a-f]{32}", current.get("attempt", "")):
                     raise ValueError("Invalid TS enrollment.")
-                # Retrying enrollment cannot repair or replace an existing authorization.
-                original, _, _ = ts_bundle(control / ("ts-" + current["attempt"]), private=True)
-                if review != original:
-                    raise ValueError("The enrolled TS review changed.")
-                return current["attempt"]
+                if any(current.get(k) != v for k, v in expected.items()):
+                    if not replace:
+                        raise ValueError(
+                            "A different TS pair or wrapper is enrolled for this pilot. "
+                            "Run enroll-ts with --replace to retire it."
+                        )
+                    # D270: the old attempt stays readable for status and loses its key.
+                    retire_ts(control, current)
+                else:
+                    # Retrying enrollment cannot repair or replace an existing authorization.
+                    original, _, _ = ts_bundle(control / ("ts-" + current["attempt"]), private=True)
+                    if review != original:
+                        raise ValueError("The enrolled TS review changed.")
+                    return current["attempt"]
         attempt = secrets.token_hex(16)
         folder = control / ("ts-" + attempt)
         folder.mkdir(mode=0o700)
@@ -749,6 +808,18 @@ def ts_operation(request, policy):
     if not os.path.lexists(control / TS_MARKER):
         raise ValueError("The operator has not enrolled a Saga TS replay.")
     enabled = submit_policy(control / TS_MARKER)
+    operation = request["operation"]
+    retired = request.get("attempt") != enabled.get("attempt")
+    if retired:
+        # D270: an attempt the operator replaced answers status only, without its key.
+        if operation != "ts_status":
+            if os.path.lexists(retired_ts_path(control, request.get("attempt"))):
+                raise ValueError(
+                    "The operator retired this TS attempt. It cannot be prepared or submitted; "
+                    "use get_prepared_job for its status."
+                )
+            raise ValueError("Request must match the enrolled TS review and resources.")
+        enabled = retired_ts_policy(control, request["attempt"])
     minimum = private_read(control / MARKER)
     root = Path(policy["work_root"])
     if (
@@ -770,7 +841,6 @@ def ts_operation(request, policy):
     }
     claim = control / ("ts-" + attempt + ".submit.claim")
     receipt = control / ("ts-" + attempt + ".submit.done")
-    operation = request["operation"]
     stored = saved_outcome(receipt, claim)
     if stored is not None:
         if operation == "prepare_ts":
@@ -778,6 +848,12 @@ def ts_operation(request, policy):
                 "Submission has already been claimed. Use get_prepared_job for " + attempt
             )
         return {**record, **stored}
+    if retired:
+        return {
+            **record,
+            "state": "rejected",
+            "detail": "Retired by the operator before submission.",
+        }
     review, data, checkpoint = ts_bundle(control / ("ts-" + attempt), private=True)
     if (
         digest(review_bytes(review)) != identity["review_sha256"]
@@ -809,16 +885,21 @@ def ts_operation(request, policy):
     pin = submission_wrapper(root)
     if any(enabled.get(k) != v for k, v in pin.items()):
         raise ValueError("The enrolled submission wrapper has changed.")
-    return claim_and_submit(
-        record,
-        receipt,
-        claim,
-        folder,
-        name,
-        snapshot,
-        pin["wrapper"],
-        (review["checkpoint_name"], checkpoint),
-    )
+    # A replacement retires the attempt under this lock, so it cannot slip between the
+    # authorization above and the claim (D270).
+    with policy_lock(control, ".submit-ts.lock"):
+        if submit_policy(control / TS_MARKER) != enabled:
+            raise ValueError("The operator changed the TS enrollment. Check the attempt status.")
+        return claim_and_submit(
+            record,
+            receipt,
+            claim,
+            folder,
+            name,
+            snapshot,
+            pin["wrapper"],
+            (review["checkpoint_name"], checkpoint),
+        )
 
 
 class Outside(ValueError):
@@ -1049,8 +1130,15 @@ def main():
     if sys.argv[1:] == ["enable-submit"]:
         print("Enabled minimum submission for preparation", enable_submit())
         return
-    if len(sys.argv) == 3 and sys.argv[1] == "enroll-ts":
-        print("Enrolled archived TS replay", enroll_ts(Path(sys.argv[2])))
+    if (
+        len(sys.argv) in (3, 4)
+        and sys.argv[1] == "enroll-ts"
+        and sys.argv[3:] in ([], ["--replace"])
+    ):
+        print(
+            "Enrolled archived TS replay",
+            enroll_ts(Path(sys.argv[2]), replace=sys.argv[3:] == ["--replace"]),
+        )
         return
     if sys.argv[1:] == ["check-wrapper"]:
         policy = json.loads(private_read(checked_control() / MARKER))
@@ -1061,7 +1149,7 @@ def main():
     if len(sys.argv) != 1:
         raise ValueError(
             "Usage: python3 saga_prepare.py [setup /path/to/min-test-.../NAME.inp "
-            "| check-wrapper | enable-submit | enroll-ts /path/to/review-bundle]"
+            "| check-wrapper | enable-submit | enroll-ts /path/to/review-bundle [--replace]]"
         )
     request = parse_request(sys.stdin.buffer.read(JSON_LIMIT + 1))
     policy = json.loads(read_file(control_dir() / MARKER, 4096))

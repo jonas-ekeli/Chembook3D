@@ -50,7 +50,7 @@ TS_PREVIEW_FIELDS = {
 }
 
 
-async def _policy(sftp, name: str) -> dict | None:
+async def _policy(sftp, name: str, private: bool = False) -> dict | None:
     marker = CONTROL + name
     try:
         attrs = await sftp.lstat(marker)
@@ -58,7 +58,7 @@ async def _policy(sftp, name: str) -> dict | None:
         return None
     if attrs.type != asyncssh.FILEXFER_TYPE_REGULAR or attrs.size is None or attrs.size > 4096:
         raise ValueError("Invalid Saga enrollment file.")
-    if name in (SUBMISSION_MARKER, TS_SUBMISSION_MARKER) and (
+    if (private or name in (SUBMISSION_MARKER, TS_SUBMISSION_MARKER)) and (
         attrs.permissions is None or attrs.permissions & 0o077
     ):
         raise ValueError("The Saga submission policy must be private to its owner.")
@@ -122,6 +122,26 @@ class TSSubmissionPolicy(SubmissionPolicy):
         }
 
 
+@dataclass(frozen=True)
+class RetiredTSPolicy:
+    """A TS enrollment the operator replaced (D270): its pins and key digest, never a key.
+    It identifies the attempt for status and cannot sign a submission."""
+
+    attempt: str
+    revision: str
+    checkpoint_sha256: str
+    review_sha256: str
+    key_id: str
+
+    def pins(self) -> dict:
+        return {
+            "attempt": self.attempt,
+            "revision": self.revision,
+            "checkpoint_sha256": self.checkpoint_sha256,
+            "review_sha256": self.review_sha256,
+        }
+
+
 RESOURCES = saga_prepare.RESOURCES
 
 
@@ -149,6 +169,36 @@ async def submission_policy(sftp, *, ts: bool = False) -> SubmissionPolicy | Non
         return SubmissionPolicy(*args)
     except (KeyError, ValueError, TypeError):
         raise ValueError("Invalid Saga submission enrollment.") from None
+
+
+async def retired_ts_policy(sftp, attempt: str) -> RetiredTSPolicy | None:
+    """Read the operator's record of a replaced TS attempt, as private as the live policy."""
+    if not isinstance(attempt, str) or not job_pilot.ATTEMPT.fullmatch(attempt):
+        raise ValueError("Invalid Saga TS attempt.")
+    policy = await _policy(sftp, "ts-" + attempt + ".retired.json", private=True)
+    if policy is None:
+        return None
+    try:
+        if (
+            policy.keys() != {*saga_prepare.TS_RETIRED_FIELDS, "key_id", "retired"}
+            or policy["retired"] is not True
+            or policy["attempt"] != attempt
+            or any(
+                not re.fullmatch(r"[0-9a-f]{64}", policy[k])
+                for k in ("revision", "checkpoint_sha256", "review_sha256", "key_id")
+            )
+            or not _resources_match(policy)
+        ):
+            raise ValueError
+        return RetiredTSPolicy(
+            attempt,
+            policy["revision"],
+            policy["checkpoint_sha256"],
+            policy["review_sha256"],
+            policy["key_id"],
+        )
+    except (KeyError, ValueError, TypeError):
+        raise ValueError("Invalid retired Saga TS enrollment.") from None
 
 
 async def _request(connection, request: dict) -> dict:
@@ -251,9 +301,11 @@ async def prepare_ts(connection, root: str, policy: TSSubmissionPolicy) -> dict:
         return {"ok": False, "error": "The Saga helper returned an invalid TS preparation result."}
 
 
-async def enrolled_job(connection, root: str, policy: SubmissionPolicy, request: dict) -> dict:
+async def enrolled_job(
+    connection, root: str, policy: SubmissionPolicy | RetiredTSPolicy, request: dict
+) -> dict:
     """Sign only the fixed submit operation for this enrollment. Status needs no signature."""
-    ts = isinstance(policy, TSSubmissionPolicy)
+    ts = isinstance(policy, (TSSubmissionPolicy, RetiredTSPolicy))
     submit_op, status_op, prefix = (
         ("submit_ts", "ts_status", "ts-")
         if ts
@@ -262,6 +314,8 @@ async def enrolled_job(connection, root: str, policy: SubmissionPolicy, request:
     if not isinstance(request, dict) or request.get("operation") not in (submit_op, status_op):
         return {"ok": False, "error": "Unknown Saga job operation."}
     submitting = request["operation"] == submit_op
+    if submitting and isinstance(policy, RetiredTSPolicy):
+        return {"ok": False, "error": "The operator retired this Saga TS attempt."}
     pins = policy.pins()
     fields = {"operation", *pins}
     if submitting:

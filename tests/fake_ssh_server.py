@@ -111,10 +111,11 @@ class _SFTPServer(asyncssh.SFTPServer):
 
     def lstat(self, path):
         attrs = super().lstat(path)
-        if sys.platform == "win32" and posixpath.basename(path) in {
-            b".submit-minimum.json",
-            SAGA_TS_MARKER.encode(),
-        }:
+        name = posixpath.basename(path)
+        if sys.platform == "win32" and (
+            name in {b".submit-minimum.json", SAGA_TS_MARKER.encode()}
+            or name.endswith(b".retired.json")
+        ):
             # A Linux Saga account exposes POSIX mode bits, including on this Windows fixture.
             attrs = asyncssh.SFTPAttrs.from_local(attrs)
             attrs.permissions &= ~0o077

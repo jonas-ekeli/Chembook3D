@@ -764,6 +764,12 @@ Routes for all of these are in `api/pathway.py`.
   helper's operator-only `enroll-ts` command stores the reviewed files privately.
   `prepare_saga_ts` uses the authenticated keeper and the existing app submission
   review. The site helper checks digests again when staging the receiving checkpoint.
+  `enroll-ts --replace` (D270) writes the outgoing enrollment without its key as
+  `ts-<attempt>.retired.json` (`saga_prepare.retire_ts`); `ts_operation` answers only
+  `ts_status` for such an attempt. The keeper loads it with
+  `saga_access.retired_ts_policy` (a keyless `RetiredTSPolicy`) in `keeper._saga_job`.
+  Tests: `tests/test_saga_ts_helper.py`, `tests/test_saga_ts_transport.py` and the
+  replaced-bundle scenario in `tests/test_remote.py`.
 
 - The local preparation pilot (D266, FR-SSH-19) connects `api/hpc_jobs.py` and
   `api/live.py` to the keeper's fixed SSH subsystem. `remote/job_pilot.py` validates

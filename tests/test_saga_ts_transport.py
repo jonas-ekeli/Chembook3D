@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, MagicMock, call
 
 import asyncssh
 import pytest
@@ -210,3 +210,171 @@ def test_group_readable_ts_marker_refused_before_reading_signing_key():
     with pytest.raises(ValueError, match="private to its owner"):
         asyncio.run(saga_access.submission_policy(sftp, ts=True))
     sftp.open.assert_not_called()
+
+
+def _retired_record(policy) -> dict:
+    return {
+        "work_root": ROOT,
+        "minimum_attempt": "1" * 32,
+        "minimum_sha256": "3" * 64,
+        **policy.pins(),
+        **saga_access.RESOURCES,
+        "wrapper": "/home/operator/wrapper",
+        "wrapper_sha256": "4" * 64,
+        "key_id": policy.key_id,
+        "retired": True,
+    }
+
+
+def _sftp(record: dict, permissions=0o600):
+    data = json.dumps(record).encode()
+    sftp = AsyncMock()
+    sftp.lstat.return_value = SimpleNamespace(
+        type=asyncssh.FILEXFER_TYPE_REGULAR, size=len(data), permissions=permissions
+    )
+    stream = AsyncMock()
+    stream.read.return_value = data
+    sftp.open = MagicMock()
+    sftp.open.return_value.__aenter__.return_value = stream
+    return sftp
+
+
+def test_retired_ts_policy_has_pins_and_key_id_but_no_key(archive):
+    policy, _ = archive
+    sftp = _sftp(_retired_record(policy))
+    retired = asyncio.run(saga_access.retired_ts_policy(sftp, policy.attempt))
+    assert retired.pins() == policy.pins() and retired.key_id == policy.key_id
+    assert not hasattr(retired, "key")
+    assert sftp.lstat.await_args == call(
+        saga_access.CONTROL + "ts-" + policy.attempt + ".retired.json"
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"key": "6b" * 32},
+        {"retired": False},
+        {"attempt": "f" * 32},
+        {"key_id": "short"},
+        {"hours": 25},
+        {"review_sha256": None},
+    ],
+)
+def test_retired_ts_policy_must_be_the_exact_keyless_record(archive, change):
+    policy, _ = archive
+    sftp = _sftp(_retired_record(policy) | change)
+    with pytest.raises(ValueError, match="retired"):
+        asyncio.run(saga_access.retired_ts_policy(sftp, policy.attempt))
+
+
+def test_retired_ts_policy_checks_attempt_privacy_and_absence(archive):
+    policy, _ = archive
+    sftp = _sftp(_retired_record(policy), permissions=0o640)
+    with pytest.raises(ValueError, match="private to its owner"):
+        asyncio.run(saga_access.retired_ts_policy(sftp, policy.attempt))
+    sftp.open.assert_not_called()
+    for attempt in ("../" + "a" * 29, "A" * 32, None):
+        with pytest.raises(ValueError, match="attempt"):
+            asyncio.run(saga_access.retired_ts_policy(sftp, attempt))
+    sftp.lstat.side_effect = asyncssh.SFTPNoSuchFile("missing")
+    assert asyncio.run(saga_access.retired_ts_policy(sftp, policy.attempt)) is None
+
+
+def _retired(policy):
+    return saga_access.RetiredTSPolicy(
+        policy.attempt,
+        policy.revision,
+        policy.checkpoint_sha256,
+        policy.review_sha256,
+        policy.key_id,
+    )
+
+
+def test_retired_policy_reads_status_and_cannot_sign(archive):
+    policy, prepared = archive
+    retired = _retired(policy)
+    submit = {"operation": "submit_ts", **policy.pins(), **saga_access.RESOURCES}
+    connection = AsyncMock()
+    reply = asyncio.run(saga_access.enrolled_job(connection, ROOT, retired, submit))
+    assert not reply["ok"] and "retired" in reply["error"]
+    connection.run.assert_not_awaited()
+    status = {"operation": "ts_status", **policy.pins()}
+    connection = responding(
+        {
+            **policy.pins(),
+            **saga_access.RESOURCES,
+            "directory": prepared["directory"] + "/submission",
+            "state": "rejected",
+            "job_id": None,
+            "detail": "Retired by the operator before submission.",
+        }
+    )
+    reply = asyncio.run(saga_access.enrolled_job(connection, ROOT, retired, status))
+    assert reply["ok"] and reply["result"]["state"] == "rejected"
+    assert json.loads(connection.run.await_args.kwargs["input"]) == status
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {},
+        {"key_id": "0" * 64},
+        {"directory": ROOT + "/ts-" + "c" * 32 + "/submission"},
+        {"operation": "submit_ts"},
+        {"missing": True},
+    ],
+)
+def test_keeper_sends_only_unsigned_status_for_a_retired_attempt(
+    tmp_path, monkeypatch, archive, change
+):
+    old, prepared = archive
+    current = saga_access.TSSubmissionPolicy(
+        "c" * 32, old.revision, b"n" * 32, old.checkpoint_sha256, "5" * 64
+    )
+    worker = keeper.Keeper(tmp_path)
+    connection = responding(
+        {
+            **old.pins(),
+            **saga_access.RESOURCES,
+            "directory": prepared["directory"] + "/submission",
+            "state": "submitted",
+            "job_id": "241",
+            "detail": None,
+        }
+    )
+    worker.sessions["saga"] = keeper.Session(
+        dict(zip(("host", "port", "username"), TARGET, strict=True)),
+        connection,
+        since=0.0,
+        used=0.0,
+        saga_work=ROOT,
+    )
+    lookup = AsyncMock(return_value=None if change.get("missing") else _retired(old))
+    monkeypatch.setattr(keeper, "refresh_saga_scope", AsyncMock())
+    monkeypatch.setattr(saga_access, "submission_policy", AsyncMock(return_value=current))
+    monkeypatch.setattr(saga_access, "retired_ts_policy", lookup)
+    monkeypatch.setattr(keeper.Session, "files", AsyncMock())
+    operation = change.get("operation", "ts_status")
+    request = {"operation": operation, **old.pins()}
+    if operation == "submit_ts":
+        request.update(saga_access.RESOURCES)
+    msg = {
+        "op": "saga_ts_job",
+        "token": worker.token,
+        "server": "saga",
+        "target": TARGET,
+        "key_id": change.get("key_id", old.key_id),
+        "directory": change.get("directory", prepared["directory"] + "/submission"),
+        "request": request,
+    }
+    reply = asyncio.run(worker.dispatch(msg["op"], msg))
+    assert reply["ok"] is (not change), reply
+    if not change:
+        assert lookup.await_args.args[1] == old.attempt
+        assert json.loads(connection.run.await_args.kwargs["input"]) == request
+        assert reply["result"]["job_id"] == "241"
+    else:
+        connection.run.assert_not_awaited()
+    if operation == "submit_ts":
+        lookup.assert_not_awaited()
