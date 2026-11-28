@@ -260,6 +260,23 @@ Each parent names its seed (D271f): `prepare_saga_node_parent` requires the fram
 
 For the first live check, use a test investigation with an HCN ⇌ HNC TS node set to charge 0 and multiplicity 1. Ask the agent to write the HCN guess above as a new XYZ in the geometries directory, prepare the parent with atoms 2 and 3 frozen and stop after preparation. Compare the input with the operator's manual HCN parent, then choose **Refuse** in the review. Choose **Submit job** only for a live calculation with the displayed allocation.
 
+### Toward a node completed on its own (scoping, Q109–Q115)
+
+_Proposed 2026-11-28 after Jonas's goal: "The overarching goal is to have the agent able to complete nodes completely on its own. We should work towards that." Nothing here is built; Q109–Q115 hold the choices._
+
+With D271 the agent can prepare a parent, choose a mode, prepare the TS child and import both into the node. Four things still need Jonas for every node:
+
+| Gap | Today | Proposal |
+|---|---|---|
+| Submission | Every Saga submission waits for **Submit job** in the app (D271c). | A standing budget under "Work on its own" (Q109, Q110). The operator sets it on Saga, the helper enforces it independently of the app, and the app shows each submission with a way to stop. |
+| Following jobs | The agent checks on demand (`check_server_job`, Q102). Keep going (D231) waits only for local jobs and cloud sessions. | While the app is open and the keeper's Saga login is live, the app checks the agent's Saga jobs at a fixed interval, imports what finished, and wakes Claude when a job ends or fails (Q115). |
+| Verification | The TS stays "not yet verified" after import (D271e). Minimum nodes have no verdict. | The app marks a TS or minimum verified from fixed criteria and records the evidence (Q112, Q113). |
+| Completing the node | No single point on Saga, and only the minimum and TS job descriptions are enrolled. | Enroll the project single-point job description and run it on the verified geometry (Q114). After a failure, a bounded retry with the same method (Q111, with the log markers of Q100). |
+
+**What stays as it is.** Saga still needs Jonas's 2FA login in the keeper. When that session drops, the agent pauses until he logs in again, and nothing tries to avoid the login. The method stays the operator's: only enrolled job descriptions by digest, fixed resources, and no route edits. A missing Slurm receipt still blocks resubmission, and a cancellation stops the node. The agent still writes only new files where the write toggle allows it (D126). Turning "Work on its own" off, closing the app or opening another investigation stops new submissions; jobs already running on Saga continue.
+
+**Proposed build order once the questions are answered.** (1) The watcher, automatic import and wake (Q115). (2) Verification and the single point (Q112–Q114). (3) Failure classification and retries (Q100, Q111). (4) The standing budget (Q109, Q110), last, because it removes the click and should follow live tests of (1)–(3). Each part keeps the loopback stand-in and Linux helper tests, and each needs a reinstall of the helper on Saga when its SHA-256 changes. Scans, IRC, revised angle or torsion constraints and reaction-wide sets stay in later steps.
+
 ### Testing access on Saga (Q101)
 
 Sigma2 documents SSH connection reuse after interactive 2FA and user installation of software in a home or project area. OpenSSH registers a named subsystem in the server configuration. Installing a helper file in a user's home directory does not register it as a subsystem. The published guidance establishes neither an installed Chembook subsystem nor an isolated agent identity on Saga. [Sigma2 2FA](https://documentation.sigma2.no/getting_help/two_factor_authentication.html) · [User software](https://documentation.sigma2.no/software/userinstallsw.html) · [OpenSSH Subsystem](https://man.openbsd.org/sshd_config#Subsystem)
