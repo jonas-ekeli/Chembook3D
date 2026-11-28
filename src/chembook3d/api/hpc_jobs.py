@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from chembook3d.api.remote import _check, _saved
 from chembook3d.api.routes import _investigation
 from chembook3d.models import InvestigationInfo, Node
-from chembook3d.remote import client, job_pilot, saga_access, servers
+from chembook3d.remote import checkpoint_ts, client, job_pilot, preopt_modes, saga_access, servers
 
 router = APIRouter(prefix="/api/hpc-jobs")
 _TS_PILOT = "local_ts"
@@ -475,6 +475,25 @@ def _record(
 
 def _node_summary(record: dict) -> str:
     host, port, username = record["target"]
+    if record.get("kind") == "child":
+        mode = record["mode_evidence"]
+        first, second = mode["freeze_distance"]
+        return (
+            f"Submit the unconstrained TS optimization and frequency {record['input_name']} "
+            f"for node {record['node_label'] or record['node_id']} (charge {record['charge']}, "
+            f"multiplicity {record['multiplicity']}) on {record['server_id']} "
+            f"({username}@{host}, port {port}), {record['nodes']} node, {record['cores']} "
+            f"cores, {record['hours']} h. Parent attempt {record['parent_attempt']} (Slurm job "
+            f"{record['parent_job_id']}). Mode {record['mode_index']} "
+            f"({mode['frequency_cm1']:g} cm⁻¹), atoms {first} and {second}, bond projection "
+            f"{mode['bond_projection']:g}, alignment {mode['alignment']:g}, bond share "
+            f"{mode['bond_share']:g}. Parent output SHA-256 {record['output_sha256']}. "
+            f"Checkpoint {record['checkpoint_name']} SHA-256 {record['checkpoint_sha256']}. "
+            f"Job description {record['job_file']} SHA-256 {record['job_sha256']}, steps 4 and "
+            f"5. Node request {record['request_id']}: at most {record['limits']['child']} TS "
+            f"children are started. Directory {record['directory']}. Prepared input SHA-256 "
+            f"{record['revision']}"
+        )
     if pair := record.get("freeze_distance"):
         what = (
             f"Constrained parent from {record['geometry']}: freeze the distance between atoms "
@@ -655,15 +674,88 @@ def _preoptimization(request: Request, server_id: str, parent_attempt: str) -> t
         info.uuid if info else None,
         require_identity=True,
     )
-    if key is None or parent.get("pilot") is not None or not parent.get("freeze_distance"):
-        raise HTTPException(409, "Choose a constrained pre-optimization on the local pilot.")
+    saga = parent.get("pilot") == _SAGA_NODE and parent.get("kind", "parent") == "parent"
+    if not parent.get("freeze_distance") or not (
+        saga or (key is not None and parent.get("pilot") is None)
+    ):
+        raise HTTPException(
+            409, "Choose a constrained pre-optimization on the local pilot or a Saga node parent."
+        )
     return parent, key
+
+
+async def _saga_parent_evidence(
+    server_id: str, attempt: str, parent: dict, folder: Path
+) -> tuple[dict, str]:
+    """D271b: copy the Saga parent's results through the scoped helper reads and inspect them
+    as the local pilot does. The copies keep the remote modification times, which tie the
+    output and checkpoint to the wrapper log of the recorded Slurm job."""
+    status = await _call(
+        server_id,
+        {"operation": "node_status", "attempt": attempt, "revision": parent["revision"]},
+        parent["target"],
+        None,
+        parent["key_id"],
+        parent["directory"],
+    )
+    job_id = status.get("job_id")
+    if status.get("state") != "submitted" or not job_id:
+        raise HTTPException(409, "Choose a submitted Saga parent with a recorded Slurm receipt.")
+    stem = parent["input_name"][:-4]
+    submission = folder / "submission"
+    submission.mkdir()
+    names = [stem + suffix for suffix in (".log", ".out", ".fchk.gz")]
+    try:
+        reply = await client.call(
+            "download",
+            server=server_id,
+            paths=[f"{parent['directory']}/{name}" for name in names],
+            folder=str(submission),
+            within=True,
+            timeout=600,
+        )
+    except client.KeeperError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if reply.get("failed"):
+        failure = reply["failed"][0]
+        raise HTTPException(409, f"Could not copy {failure['path']}: {failure['reason']}")
+    copied = {Path(item["local"]).name: item for item in reply.get("files", [])}
+    if set(copied) != set(names):
+        raise HTTPException(409, "The parent's log, output and checkpoint were not all copied.")
+    for item in copied.values():
+        local = Path(item["local"])
+        if local.parent != submission or type(item.get("modified")) is not int:
+            raise HTTPException(409, "The keeper returned an invalid copy of the parent files.")
+        os.utime(local, (item["modified"], item["modified"]))
+    try:
+        inspection = preopt_modes.inspect_preoptimization(
+            submission,
+            stem,
+            job_id,
+            parent["freeze_distance"],
+            submitted_input=parent["input"].encode(),
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return inspection, job_id
 
 
 @router.get("/{server_id}/attempts/{parent_attempt}/modes")
 async def inspect_preoptimization_modes(server_id: str, parent_attempt: str, request: Request):
     parent, key = _preoptimization(request, server_id, parent_attempt)
     await _no_arguments(request, "Only the server ID and parent attempt are accepted.")
+    if parent.get("pilot") == _SAGA_NODE:
+        with tempfile.TemporaryDirectory(prefix="chembook3d-parent-") as folder:
+            inspection, job_id = await _saga_parent_evidence(
+                server_id, parent_attempt, parent, Path(folder)
+            )
+        return _InspectedModes.model_validate(
+            {
+                "attempt": parent_attempt,
+                "parent_job_id": job_id,
+                **{k: inspection[k] for k in ("freeze_distance", "output_sha256", "modes")},
+            }
+        ).model_dump()
     result = await _call(
         server_id, {"operation": "inspect_modes", "attempt": parent_attempt}, parent["target"], key
     )
@@ -689,6 +781,8 @@ async def prepare_ts_from_preoptimization(
         raise HTTPException(
             422, "Pass the mode index, output digest, cores and hours in the request body."
         )
+    if parent.get("pilot") == _SAGA_NODE:
+        return await _prepare_saga_child(server_id, parent_attempt, parent, body)
     attempt = secrets.token_hex(16)
     result = await _call(
         server_id,
@@ -813,3 +907,120 @@ async def submit(server_id: str, attempt: str, request: Request):
     ):
         raise HTTPException(403, "Confirm this prepared revision in the app to submit it.")
     return await _action(request, server_id, attempt, "submit", approval)
+
+
+async def _prepare_saga_child(server_id: str, parent_attempt: str, parent: dict, body):
+    """D271b: the unconstrained TS child of a Saga node parent, from a mode the agent chose."""
+    if (body.cores, body.hours) != (saga_access.RESOURCES["cores"], saga_access.RESOURCES["hours"]):
+        raise HTTPException(422, "Saga node calculations use 1 node, 40 cores and 24 hours.")
+    with tempfile.TemporaryDirectory(prefix="chembook3d-parent-") as folder:
+        inspection, job_id = await _saga_parent_evidence(
+            server_id, parent_attempt, parent, Path(folder)
+        )
+        if body.output_sha256 != inspection["output_sha256"]:
+            raise HTTPException(409, "The parent output changed. Inspect the modes again.")
+        mode = next((m for m in inspection["modes"] if m["mode_index"] == body.mode_index), None)
+        if not mode or not mode["eligible"]:
+            raise HTTPException(
+                409,
+                "Select an imaginary mode along the frozen bond: alignment at least 0.5 and "
+                "bond share at least 0.25 (D269).",
+            )
+        stem = parent["input_name"][:-4]
+        _atoms, _pair, charge_spin, settings = checkpoint_ts.parent_geometry(parent["input"], stem)
+        try:
+            checkpoint = checkpoint_ts.checkpoint_bytes(
+                Path(folder) / "submission" / (stem + ".fchk.gz"), inspection, charge_spin
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+    evidence = {**mode, "output_sha256": inspection["output_sha256"]}
+    evidence["freeze_distance"] = inspection["freeze_distance"]
+    attempt = secrets.token_hex(16)
+    wire = {
+        "request": parent["request_id"],
+        "attempt": attempt,
+        "parent_attempt": parent_attempt,
+        "charge": parent["charge"],
+        "multiplicity": parent["multiplicity"],
+        "mode_index": body.mode_index,
+        "output_sha256": body.output_sha256,
+        "checkpoint_sha256": hashlib.sha256(checkpoint).hexdigest(),
+    }
+    try:
+        reply = await client.call(
+            "saga_prepare_node",
+            server=server_id,
+            target=parent["target"],
+            request=wire,
+            timeout=115,
+        )
+    except client.KeeperError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    child_stem = stem[:77] + "-ts"
+    try:
+        result = dict(reply["result"])
+        key_id = result.pop("key_id")
+        contents = result["input"]
+        if (
+            result.keys()
+            != saga_access.NODE_CHILD_FIELDS | {"submission_enabled", *saga_access.RESOURCES}
+            or result["submission_enabled"] is not True
+            or reply.get("target") != parent["target"]
+            or key_id != parent["key_id"]
+            or any(result[k] != v for k, v in wire.items())
+            or result["parent_job_id"] != job_id
+            or result["input_name"] != child_stem + ".inp"
+            or result["checkpoint_name"] != child_stem + ".fchk.gz"
+            or result["directory"]
+            != parent["directory"].removesuffix(f"node-{parent_attempt}/submission")
+            + f"node-{attempt}"
+            or hashlib.sha256(contents.encode()).hexdigest() != result["revision"]
+        ):
+            raise ValueError
+        checkpoint_ts.verify_ts_input(contents, child_stem, charge_spin, settings)
+    except ValueError as exc:
+        raise HTTPException(409, f"The keeper returned an invalid Saga TS child: {exc}") from exc
+    except (AttributeError, KeyError, TypeError) as exc:
+        raise HTTPException(409, "The keeper returned an invalid Saga TS child.") from exc
+    record = {
+        **{
+            k: parent[k]
+            for k in (
+                "server_id",
+                "target",
+                "investigation_id",
+                "folder",
+                "node_id",
+                "node_label",
+                "charge",
+                "multiplicity",
+                "key_id",
+                "request_id",
+                "limits",
+            )
+        },
+        "pilot": _SAGA_NODE,
+        "kind": "child",
+        "directory": result["directory"] + "/submission",
+        "parent_attempt": parent_attempt,
+        "parent_job_id": job_id,
+        "mode_index": body.mode_index,
+        "mode_evidence": _SelectedMode.model_validate(evidence).model_dump(),
+        **{
+            k: result[k]
+            for k in (
+                "input_name",
+                "revision",
+                "input",
+                "job_file",
+                "job_sha256",
+                "checkpoint_name",
+                "checkpoint_sha256",
+                "output_sha256",
+                *saga_access.RESOURCES,
+            )
+        },
+    }
+    _store_record(attempt, record)
+    return {**result, "mode_evidence": record["mode_evidence"], "node_id": parent["node_id"]}

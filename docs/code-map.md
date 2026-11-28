@@ -783,7 +783,16 @@ Routes for all of these are in `api/pathway.py`.
   (`check_node_input`, a stdlib port of `job_pilot._verify_input`), freezes the distance
   (`freeze_distance`, a port of `job_pilot._freeze_optimization_distance`) and counts starts
   per request (`node-request-<id>.json`, D271c). Tests: `tests/test_saga_node_helper.py`,
-  `tests/test_saga_node_transport.py` and the node scenario in `tests/test_remote.py`.
+  `tests/test_saga_node_transport.py` and the node scenarios in `tests/test_remote.py`.
+- The TS child of a Saga node parent (D271b, FR-SSH-25) reuses `inspect_preoptimization_modes`
+  and `prepare_ts_from_preoptimization`: for a `saga_node` parent, `_saga_parent_evidence` in
+  `api/hpc_jobs.py` copies the parent's log, output and `.fchk.gz` with the keeper's scoped
+  `download`, keeps the remote modification times and runs `preopt_modes.inspect_preoptimization`;
+  `_prepare_saga_child` checks the mode and checkpoint (`checkpoint_ts.checkpoint_bytes`), sends
+  `prepare_node_child` and checks the result with `checkpoint_ts.verify_ts_input`. In the helper,
+  `prepare_node_child` and `child_input` keep steps 4 and 5 of the TS job description's input,
+  and `node_operation` re-reads the parent's checkpoint (`parent_results`) when submitting.
+  `saga_access.check_child_preview` is the keeper's check.
 
 - The local preparation pilot (D266, FR-SSH-19) connects `api/hpc_jobs.py` and
   `api/live.py` to the keeper's fixed SSH subsystem. `remote/job_pilot.py` validates

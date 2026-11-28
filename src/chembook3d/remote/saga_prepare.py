@@ -908,6 +908,7 @@ def ts_operation(request, policy):
 
 NODE_KINDS = {"parent": "minimum", "child": "ts"}
 NODE_LIMITS = {"parent": 2, "child": 2}  # Starts per node request (D271c)
+PLURAL = {"parent": "constrained parents", "child": "TS children"}
 STAGES = ("SP", "SP", "STABLE", "OPT", "FREQ")
 LINK1 = r"^[ \t]*--link1--[ \t]*$"
 JD_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\.jd")
@@ -1272,6 +1273,93 @@ def node_fields(request):
     return pair
 
 
+def generate(folder, claim_path, command, name, xyz):
+    """Run the pinned generator once in a fresh attempt directory on a copy of the XYZ."""
+    try:
+        claim = os.open(str(claim_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        raise ValueError(
+            "Preparation of this attempt is in progress or incomplete. Inspect " + str(folder)
+        ) from None
+    os.close(claim)
+    if os.path.lexists(folder):
+        raise ValueError("Existing or incomplete attempt. Inspect " + str(folder))
+    folder.mkdir(mode=0o700)
+    with (folder / name).open("xb") as stream:
+        stream.write(xyz)
+    result = subprocess.run(
+        command + [name, "nosub"],
+        cwd=str(folder),
+        timeout=90,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if result.returncode:
+        raise ValueError("The generator failed. Inspect the .accLog in " + str(folder))
+    try:
+        return read_file(folder / (name[:-4] + ".inp")).decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("The generated input is not text. Inspect " + str(folder)) from None
+
+
+def commit_node(control, paths, record):
+    """Publish the preparation receipt and add the attempt to its node request."""
+    with policy_lock(control, ".submit-node.lock"):
+        state_path, state = node_request_state(control, record["request"])
+        if state is None:
+            state = {
+                "charge": record["charge"],
+                "multiplicity": record["multiplicity"],
+                "attempts": {},
+                "started": {},
+            }
+        elif (state["charge"], state["multiplicity"]) != (record["charge"], record["multiplicity"]):
+            raise ValueError("This node request was opened for another charge or multiplicity.")
+        state["attempts"][record["attempt"]] = record["kind"]
+        atomic_write(paths["done"], json.dumps(record).encode())
+        atomic_write(state_path, json.dumps(state).encode())
+        with open_directory(control, readable=True) as directory:
+            os.fsync(directory)
+
+
+def check_request_open(control, request, charge, multiplicity, kind):
+    with policy_lock(control, ".submit-node.lock"):
+        _, state = node_request_state(control, request)
+    if state is None:
+        if kind == "child":
+            raise ValueError("Unknown node request.")
+        return
+    if (state["charge"], state["multiplicity"]) != (charge, multiplicity):
+        raise ValueError(
+            "This node request was opened for "
+            + electrons(state["charge"], state["multiplicity"])
+            + "."
+        )
+    if started(state, kind) >= NODE_LIMITS[kind]:
+        raise ValueError(
+            "This node request has started its "
+            + str(NODE_LIMITS[kind])
+            + " "
+            + PLURAL[kind]
+            + " (D271c)."
+        )
+
+
+def enrolled_tools(root, enabled, kind):
+    descriptions, generator = project_tools(root)
+    job = enabled["jobs"][NODE_KINDS[kind]]
+    if digest(read_file(generator)) != enabled["generator_sha256"]:
+        raise ValueError("The generator changed since the job descriptions were enrolled.")
+    if digest(read_file(descriptions / job["name"])) != job["sha256"]:
+        raise ValueError(
+            "The enrolled job description " + job["name"] + " changed. Ask the operator to "
+            "enroll it again."
+        )
+    return [str(generator), str(descriptions / job["name"])]
+
+
 def prepare_node(request, policy, enabled, control):
     pair = node_fields(request)
     root = Path(policy["work_root"])
@@ -1299,32 +1387,10 @@ def prepare_node(request, policy, enabled, control):
         if {k: v for k, v in stored.items() if k not in ("revision", "xyz_sha256")} != record:
             raise ValueError("This node attempt was prepared with different arguments.")
         return node_preview(folder, stored)
-    with policy_lock(control, ".submit-node.lock"):
-        _, state = node_request_state(control, request["request"])
-        if state is not None:
-            if (state["charge"], state["multiplicity"]) != (
-                record["charge"],
-                record["multiplicity"],
-            ):
-                raise ValueError(
-                    "This node request was opened for "
-                    + electrons(state["charge"], state["multiplicity"])
-                    + "."
-                )
-            if started(state, "parent") >= NODE_LIMITS["parent"]:
-                raise ValueError(
-                    "This node request has started its "
-                    + str(NODE_LIMITS["parent"])
-                    + " constrained parents (D271c)."
-                )
-    descriptions, generator = project_tools(root)
-    if digest(read_file(generator)) != enabled["generator_sha256"]:
-        raise ValueError("The generator changed since the job descriptions were enrolled.")
-    if digest(read_file(descriptions / job["name"])) != job["sha256"]:
-        raise ValueError(
-            "The enrolled job description " + job["name"] + " changed. Ask the operator to "
-            "enroll it again."
-        )
+    check_request_open(
+        control, record["request"], record["charge"], record["multiplicity"], "parent"
+    )
+    command = enrolled_tools(root, enabled, "parent")
     inbox = root / "geometries"
     if inbox.is_symlink():
         raise ValueError("The geometries directory must be inside the pilot.")
@@ -1332,34 +1398,7 @@ def prepare_node(request, policy, enabled, control):
     atoms = parse_xyz(xyz)
     if pair is not None and max(pair) > len(atoms):
         raise ValueError("Choose two distinct atom numbers from the XYZ geometry, from 1.")
-    try:
-        claim = os.open(str(paths["claim"]), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        raise ValueError(
-            "Preparation of this attempt is in progress or incomplete. Inspect " + str(folder)
-        ) from None
-    os.close(claim)
-    if os.path.lexists(folder):
-        raise ValueError("Existing or incomplete attempt. Inspect " + str(folder))
-    folder.mkdir(mode=0o700)
-    with (folder / name).open("xb") as stream:
-        stream.write(xyz)
-    result = subprocess.run(
-        [str(generator), str(descriptions / job["name"]), name, "nosub"],
-        cwd=str(folder),
-        timeout=90,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-    if result.returncode:
-        raise ValueError("The generator failed. Inspect the .accLog in " + str(folder))
-    path = folder / record["input_name"]
-    try:
-        text = read_file(path).decode("utf-8")
-    except UnicodeDecodeError:
-        raise ValueError("The generated input is not text. Inspect " + str(folder)) from None
+    text = generate(folder, paths["claim"], command, name, xyz)
     try:
         check_node_input(text, atoms, stem, record["charge"], record["multiplicity"])
         if pair is not None:
@@ -1369,24 +1408,160 @@ def prepare_node(request, policy, enabled, control):
     data = text.encode("utf-8")
     if len(data) > LIMIT:
         raise ValueError("The constrained input is too large.")
-    atomic_write(path, data)
+    atomic_write(folder / record["input_name"], data)
     record.update(revision=digest(data), xyz_sha256=digest(xyz))
-    with policy_lock(control, ".submit-node.lock"):
-        state_path, state = node_request_state(control, record["request"])
-        if state is None:
-            state = {
-                "charge": record["charge"],
-                "multiplicity": record["multiplicity"],
-                "attempts": {},
-                "started": {},
-            }
-        elif (state["charge"], state["multiplicity"]) != (record["charge"], record["multiplicity"]):
-            raise ValueError("This node request was opened for another charge or multiplicity.")
-        state["attempts"][attempt] = "parent"
-        atomic_write(paths["done"], json.dumps(record).encode())
-        atomic_write(state_path, json.dumps(state).encode())
-        with open_directory(control, readable=True) as directory:
-            os.fsync(directory)
+    commit_node(control, paths, record)
+    return node_preview(folder, record)
+
+
+def child_fields(request):
+    fields = {
+        "operation",
+        "request",
+        "attempt",
+        "parent_attempt",
+        "charge",
+        "multiplicity",
+        "mode_index",
+        "output_sha256",
+        "checkpoint_sha256",
+    }
+    if set(request) != fields:
+        raise ValueError("Unexpected fields for prepare_node_child.")
+    if (
+        any(
+            not isinstance(request[k], str) or not HEX32.fullmatch(request[k])
+            for k in ("request", "attempt", "parent_attempt")
+        )
+        or request["attempt"] == request["parent_attempt"]
+        or any(
+            not isinstance(request[k], str) or not HEX64.fullmatch(request[k])
+            for k in ("output_sha256", "checkpoint_sha256")
+        )
+        or type(request["mode_index"]) is not int
+        or request["mode_index"] < 1
+        or type(request["charge"]) is not int
+        or type(request["multiplicity"]) is not int
+    ):
+        raise ValueError("Invalid node request, attempts, mode or digests.")
+
+
+def parent_results(root, control, parent):
+    """The parent's own copied-back output and checkpoint, read by descriptor (D271b)."""
+    paths = node_paths(control, parent["attempt"])
+    outcome = saved_outcome(paths["receipt"], paths["submit_claim"])
+    if outcome is None or outcome["state"] != "submitted":
+        raise ValueError("Choose a submitted parent with a recorded Slurm receipt.")
+    stem = parent["input_name"][:-4]
+    submission = root / ("node-" + parent["attempt"]) / "submission"
+    with open_directory(submission) as directory:
+        base = Path("/proc/self/fd") / str(directory)
+        output = read_file(base / (stem + ".out"), CHECKPOINT_LIMIT)
+        checkpoint = read_file(base / (stem + ".fchk.gz"), CHECKPOINT_LIMIT)
+    return outcome["job_id"], digest(output), checkpoint
+
+
+def child_input(text, stem, charge, multiplicity):
+    """Steps 4 and 5 of the generated TS input with their Link1 separator (D271b)."""
+    steps = linked_steps(text)
+    if len(steps) != len(STAGES):
+        raise ValueError("Expected five steps from the project TS job description.")
+    for index, step in enumerate(steps):
+        sections = re.split(r"\n(?:[ \t]*\n)+", step.strip())
+        if len(sections) < 3:
+            raise ValueError("Generated TS input lacks a route, title or molecule.")
+        if charge_spin(sections[2].splitlines()[0]) != (charge, multiplicity):
+            raise ValueError(
+                "Step " + str(index + 1) + " of the generated TS input does not have the "
+                "node's " + electrons(charge, multiplicity) + "."
+            )
+    links = list(re.finditer(r"^[ \t]*--link1--[ \t]*\r?\n", text, re.I | re.M))
+    child = text[links[2].end() :]
+    ts_checkpoint_directives(child.encode("utf-8"), stem + ".inp")
+    first, second = linked_steps(child)
+    for step, stage in ((first, "OPT"), (second, "FREQ")):
+        sections = re.split(r"\n(?:[ \t]*\n)+", step.strip())
+        header = sections[0].splitlines()
+        route = next(i for i, line in enumerate(header) if line.lstrip().startswith("#"))
+        keys = dict(route_keyword(word) for word in route_words(" ".join(header[route:])))
+        if (
+            stage not in keys
+            or (stage == "OPT" and "TS" not in keys["OPT"])
+            or keys.get("GEOM") != ["CHECK"]
+            or keys.get("GUESS") != ["READ"]
+            or "MODREDUNDANT" in " ".join(keys.get("OPT", []))
+            or len(sections) != 3
+            or len(sections[2].splitlines()) != 1
+        ):
+            raise ValueError(
+                "Expected an unconstrained TS optimization and a frequency step that read the "
+                "checkpoint geometry and guess."
+            )
+    return child
+
+
+def prepare_node_child(request, policy, enabled, control):
+    child_fields(request)
+    root = Path(policy["work_root"])
+    check_root(root)
+    parent = prepared_node(control, request["parent_attempt"])
+    if (
+        parent.get("kind") != "parent"
+        or parent["request"] != request["request"]
+        or not parent["freeze_distance"]
+        or (parent["charge"], parent["multiplicity"])
+        != (request["charge"], request["multiplicity"])
+    ):
+        raise ValueError("Choose a constrained parent of this node request.")
+    job = enabled["jobs"][NODE_KINDS["child"]]
+    stem = parent["input_name"][:-4][:77] + "-ts"
+    attempt = request["attempt"]
+    record = {
+        "kind": "child",
+        "request": request["request"],
+        "attempt": attempt,
+        "parent_attempt": parent["attempt"],
+        "geometry": stem + ".xyz",
+        "charge": parent["charge"],
+        "multiplicity": parent["multiplicity"],
+        "freeze_distance": parent["freeze_distance"],
+        "mode_index": request["mode_index"],
+        "output_sha256": request["output_sha256"],
+        "checkpoint_name": stem + ".fchk.gz",
+        "checkpoint_sha256": request["checkpoint_sha256"],
+        "job_file": job["name"],
+        "job_sha256": job["sha256"],
+        "generator_sha256": enabled["generator_sha256"],
+        "input_name": stem + ".inp",
+    }
+    paths = node_paths(control, attempt)
+    folder = root / ("node-" + attempt)
+    if os.path.lexists(paths["done"]):
+        stored = prepared_node(control, attempt)
+        if {k: v for k, v in stored.items() if k not in ("revision", "parent_job_id")} != record:
+            raise ValueError("This node attempt was prepared with different arguments.")
+        return node_preview(folder, stored)
+    check_request_open(
+        control, record["request"], record["charge"], record["multiplicity"], "child"
+    )
+    job_id, output, checkpoint = parent_results(root, control, parent)
+    if output != record["output_sha256"]:
+        raise ValueError("The parent output changed. Inspect the modes again.")
+    if digest(checkpoint) != record["checkpoint_sha256"]:
+        raise ValueError("The parent checkpoint differs from the reviewed one.")
+    command = enrolled_tools(root, enabled, "child")
+    with open_directory(root / ("node-" + parent["attempt"])) as directory:
+        xyz = read_file(Path("/proc/self/fd") / str(directory) / parent["geometry"], FILE_LIMIT)
+    if digest(xyz) != parent["xyz_sha256"]:
+        raise ValueError("The parent's copy of its XYZ changed.")
+    text = generate(folder, paths["claim"], command, record["geometry"], xyz)
+    try:
+        data = child_input(text, stem, record["charge"], record["multiplicity"]).encode("utf-8")
+    except ValueError as exc:
+        raise ValueError(str(exc) + " Inspect " + str(folder)) from None
+    atomic_write(folder / record["input_name"], data)
+    record.update(revision=digest(data), parent_job_id=job_id)
+    commit_node(control, paths, record)
     return node_preview(folder, record)
 
 
@@ -1412,6 +1587,8 @@ def node_operation(request, policy):
     operation = request.get("operation")
     if operation == "prepare_node":
         return prepare_node(request, policy, enabled, control)
+    if operation == "prepare_node_child":
+        return prepare_node_child(request, policy, enabled, control)
     keys = {"operation", "attempt", "revision"}
     if operation == "submit_node":
         keys = keys.union(RESOURCES, {"signature"})
@@ -1452,6 +1629,15 @@ def node_operation(request, policy):
     snapshot = node_preview(folder, record)["input"].encode("utf-8")
     if operation == "node_status":
         return {**reply, "state": "prepared"}
+    checkpoint = None
+    if record["kind"] == "child":
+        # Only the parent's own copied-back checkpoint, unchanged since review, is staged.
+        _, output, data = parent_results(
+            root, control, prepared_node(control, record["parent_attempt"])
+        )
+        if output != record["output_sha256"] or digest(data) != record["checkpoint_sha256"]:
+            raise ValueError("The parent output or checkpoint changed since the TS preparation.")
+        checkpoint = (record["checkpoint_name"], data)
     pin = submission_wrapper(root)
     if any(enabled.get(k) != v for k, v in pin.items()):
         raise ValueError("The enrolled submission wrapper has changed.")
@@ -1468,8 +1654,8 @@ def node_operation(request, policy):
                     "This node request has already started "
                     + str(NODE_LIMITS[kind])
                     + " "
-                    + kind
-                    + "s (D271c)."
+                    + PLURAL[kind]
+                    + " (D271c)."
                 )
             # Count the start before the claim, so a crash cannot free the slot.
             state["started"][attempt] = kind
@@ -1482,6 +1668,7 @@ def node_operation(request, policy):
             record["input_name"],
             snapshot,
             pin["wrapper"],
+            checkpoint,
         )
 
 
@@ -1757,6 +1944,7 @@ def main():
         result = ts_operation(request, policy)
     elif isinstance(request, dict) and request.get("operation") in (
         "prepare_node",
+        "prepare_node_child",
         "submit_node",
         "node_status",
     ):

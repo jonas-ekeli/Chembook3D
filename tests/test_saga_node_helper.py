@@ -20,7 +20,7 @@ ATOMS = [("O", [0.0, 0.0, 0.0]), ("H", [0.0, 0.757, 0.587]), ("H", [0.0, -0.757,
 WRAPPER = (
     b"#!/bin/sh\n"
     b'echo "$*" >> "$HOME/wrapper-calls"\n'
-    b'set -- ./*; [ "$#" = 1 ] || exit 1\n'
+    b'set -- ./*; [ "$#" -le 2 ] || exit 1\n'
     b'echo "Submitted batch job 4321"\n'
 )
 
@@ -301,7 +301,7 @@ def test_signed_submission_runs_once_and_counts_toward_the_limit(pilot):
     second = prepare(pilot, attempt="4" * 32)
     third = prepare(pilot, attempt="5" * 32)
     assert submit(pilot, second)["state"] == "submitted"
-    with pytest.raises(ValueError, match="already started 2 parents"):
+    with pytest.raises(ValueError, match="already started 2 constrained parents"):
         submit(pilot, third)
     with pytest.raises(ValueError, match="started its 2 constrained parents"):
         prepare(pilot, attempt="6" * 32)
@@ -352,3 +352,105 @@ def test_node_enrollment_must_belong_to_this_pilot(pilot):
     os.chmod(marker, 0o640)
     with pytest.raises(ValueError, match="private"):
         prepare(pilot)
+
+
+def _finish(pilot, prepared, output=b"synthetic parent output", checkpoint=b"synthetic fchk"):
+    """What the wrapper copies back into the parent's submission directory."""
+    submission = Path(prepared["directory"]) / "submission"
+    (submission / "guess.out").write_bytes(output)
+    (submission / "guess.fchk.gz").write_bytes(checkpoint)
+    return helper.digest(output), helper.digest(checkpoint)
+
+
+def child(pilot, parent, output, checkpoint, attempt="8" * 32, **changes):
+    fields = {
+        "operation": "prepare_node_child",
+        "request": parent["request"],
+        "attempt": attempt,
+        "parent_attempt": parent["attempt"],
+        "charge": 0,
+        "multiplicity": 1,
+        "mode_index": 1,
+        "output_sha256": output,
+        "checkpoint_sha256": checkpoint,
+        **changes,
+    }
+    return helper.node_operation(fields, pilot.policy)
+
+
+@linux
+def test_ts_child_keeps_steps_four_and_five_and_stages_the_parent_checkpoint(pilot):
+    helper.enroll_jobs("min-project.jd", "ts-project.jd")
+    parent = prepare(pilot)
+    with pytest.raises(ValueError, match="submitted parent"):
+        child(pilot, parent, "0" * 64, "0" * 64)
+    submit(pilot, parent)
+    output, checkpoint = _finish(pilot, parent)
+    prepared = child(pilot, parent, output, checkpoint)
+    assert prepared["kind"] == "child" and prepared["parent_job_id"] == "4321"
+    assert prepared["input_name"] == "guess-ts.inp"
+    assert prepared["checkpoint_name"] == "guess-ts.fchk.gz"
+    assert prepared["freeze_distance"] == [1, 3] and prepared["job_file"] == "ts-project.jd"
+    steps = helper.linked_steps(prepared["input"])
+    assert len(steps) == 2
+    assert "Opt=(RecalcFC=30,MaxCycles=150,TS,NoLinear,NoEigenTest,Tight)" in steps[0]
+    assert "# Freq" in steps[1] and "ModRedundant" not in prepared["input"]
+    assert prepared["input"].count("%chk=guess-ts\n") == 2
+    assert child(pilot, parent, output, checkpoint) == prepared
+    assert _calls(pilot.home / "generator-calls") == ["guess.xyz", "guess-ts.xyz"]
+    with pytest.raises(ValueError, match="different arguments"):
+        child(pilot, parent, output, checkpoint, mode_index=2)
+    receipt = submit(pilot, prepared)
+    assert receipt["state"] == "submitted"
+    staged = Path(receipt["directory"])
+    assert sorted(p.name for p in staged.iterdir()) == ["guess-ts.fchk.gz", "guess-ts.inp"]
+    assert (staged / "guess-ts.fchk.gz").read_bytes() == b"synthetic fchk"
+    assert (staged / "guess-ts.inp").read_text() == prepared["input"]
+    assert _calls(pilot.home / "wrapper-calls")[-1] == "guess-ts.inp -n 1 -c 40 -t 24"
+
+
+@linux
+def test_ts_child_refuses_stale_foreign_or_unconstrained_parents(pilot):
+    helper.enroll_jobs("min-project.jd", "ts-project.jd")
+    parent = prepare(pilot)
+    submit(pilot, parent)
+    output, checkpoint = _finish(pilot, parent)
+    with pytest.raises(ValueError, match="output changed"):
+        child(pilot, parent, "0" * 64, checkpoint)
+    with pytest.raises(ValueError, match="checkpoint differs"):
+        child(pilot, parent, output, "0" * 64)
+    with pytest.raises(ValueError, match="constrained parent of this node request"):
+        child(pilot, parent, output, checkpoint, request="9" * 32)
+    with pytest.raises(ValueError, match="constrained parent of this node request"):
+        child(pilot, parent, output, checkpoint, multiplicity=3)
+    loose = prepare(pilot, attempt="4" * 32, freeze_distance=None)
+    submit(pilot, loose)
+    with pytest.raises(ValueError, match="constrained parent"):
+        child(pilot, loose, output, checkpoint)
+    with pytest.raises(ValueError, match="Invalid node request"):
+        child(pilot, parent, output, checkpoint, attempt=parent["attempt"])
+    (pilot.jobs / "ts-project.jd").write_text("0 1 project TS changed\n")
+    with pytest.raises(ValueError, match="enroll it again"):
+        child(pilot, parent, output, checkpoint)
+
+
+@linux
+def test_changed_checkpoint_blocks_child_submission_and_children_are_limited(pilot):
+    helper.enroll_jobs("min-project.jd", "ts-project.jd")
+    parent = prepare(pilot)
+    submit(pilot, parent)
+    output, checkpoint = _finish(pilot, parent)
+    first = child(pilot, parent, output, checkpoint)
+    (Path(parent["directory"]) / "submission/guess.fchk.gz").write_bytes(b"other")
+    with pytest.raises(ValueError, match="changed since the TS preparation"):
+        submit(pilot, first)
+    assert status(pilot, first)["state"] == "prepared"
+    _finish(pilot, parent)
+    second = child(pilot, parent, output, checkpoint, attempt="9" * 32)
+    third = child(pilot, parent, output, checkpoint, attempt="a" * 32)
+    assert submit(pilot, first)["state"] == "submitted"
+    assert submit(pilot, second)["state"] == "submitted"
+    with pytest.raises(ValueError, match="already started 2 TS children"):
+        submit(pilot, third)
+    with pytest.raises(ValueError, match="started its 2 TS children"):
+        child(pilot, parent, output, checkpoint, attempt="b" * 32)
