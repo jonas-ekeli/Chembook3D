@@ -226,7 +226,7 @@ For an earlier attempt, `get_prepared_job` still answers by its ID. A submitted 
 
 ### One node on Saga without hand enrollment (D271)
 
-_Proposed 2026-11-28 and confirmed by Jonas the same day (D271, answering Q103–Q108). Not built yet._
+_Proposed 2026-11-28 and confirmed by Jonas the same day (D271, answering Q103–Q108). The parent is built (FR-SSH-24); the mode choice, the TS child and the import into the node follow._
 
 The pilot replays only what the operator enrolled by hand: one manually verified minimum and one archived TS bundle. The next milestone is Jonas's representative request for one node: “Find a verified transition state for node X using this project's method.” The agent prepares and submits the calculations itself, but each submission still passes through the app's review. The local pilot already performs most of this sequence against a loopback stand-in (`prepare_gaussian_job` with `freeze_distance`, `inspect_preoptimization_modes`, `prepare_ts_from_preoptimization`). The proposal moves that sequence onto the Saga helper. The helper's independent checks stay in place, and the operator still owns everything that defines the method.
 

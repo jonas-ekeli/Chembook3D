@@ -2646,7 +2646,9 @@ def test_saga_node_parent_is_prepared_reviewed_and_limited(at_work, saga, monkey
             assert status == "failed" and "already started 2 parents" in reply.content[0].text
             assert "started its 2 constrained parents" in await refused(tool.name, **again)
 
-            changed = await http.patch(f"/api/nodes/{ts1}", json={"multiplicity": 3}, headers=ORIGIN)
+            changed = await http.patch(
+                f"/api/nodes/{ts1}", json={"multiplicity": 3}, headers=ORIGIN
+            )
             assert changed.is_success, changed.text
             assert "charge or multiplicity changed" in await refused(tool.name, **again)
 
