@@ -162,12 +162,15 @@ When asked to submit that TS, use submit_prepared_job with the returned attempt 
 can review the full input, checkpoint, parent evidence, destination and fixed resources.
 To find a transition state for a node on Saga (D271), write the guess as a new XYZ in the
 pilot's geometries directory, then use prepare_saga_node_parent with the node's ID, the XYZ
-name and freeze_distance for the forming or breaking bond. Say which frame or calculation the
-guess comes from and why; with none, build one from the adjacent intermediates with the guess
-tools. Use submit_prepared_job for the returned attempt. Pass the returned request_id for a
-second parent of the same node; a node request starts at most 2 parents and 2 TS children.
+name and freeze_distance for the forming or breaking bond. Pass seed: which frame or
+calculation the guess comes from and why; with none, build one from the adjacent intermediates
+with the guess tools and name them. Use submit_prepared_job for the returned attempt. Pass the
+returned request_id for a second parent of the same node; a node request starts at most 2
+parents and 2 TS children.
 When the parent has finished, inspect_preoptimization_modes and
 prepare_ts_from_preoptimization work on it as on the local pilot, with 40 cores and 24 hours.
+When a parent or TS child has finished, import_saga_node_result brings its output into the
+node with its provenance; preview it first. Do not call the TS verified after the import.
 Use full paths inside the enrolled pilot for file tools. Its geometries directory accepts new
 XYZ files when the user enables writing. The scope stays fixed when the terminal changes directory.
 For the configured local HPC pilot, prepare_gaussian_job returns the input for review.

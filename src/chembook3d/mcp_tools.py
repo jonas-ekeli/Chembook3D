@@ -730,6 +730,12 @@ TOOLS: list[ToolSpec] = [
             "frozen; leave out for an unconstrained minimum.",
             "request_id": "The request_id of an earlier parent for this node; leave out to open "
             "a new node request.",
+            "seed": "Where the XYZ came from (D271f), shown in the review and kept with the "
+            "results: {source: the frame or calculation you used, or the guess tool you built "
+            "it with from the adjacent intermediates; reason: why; calculation_id: optional "
+            "seed calculation; neighbour_ids: the adjacent nodes used, if any; atom_mapping: "
+            "optional, for each XYZ atom from 1 its number in the neighbours' common "
+            "numbering}.",
         },
     ),
     T(
@@ -791,6 +797,27 @@ TOOLS: list[ToolSpec] = [
         "Read the state of an enrolled Saga or local HPC pilot attempt, including after a lost "
         "submission reply. A receipt includes the arguments for check_server_job. "
         "For an uncertain attempt reconcile it with the scheduler before any new submission.",
+    ),
+    T(
+        "import_saga_node_result",
+        "write",
+        "POST",
+        "/api/hpc-jobs/{server_id}/attempts/{attempt}/import",
+        "Import a finished Saga node parent or TS child (D271e) into its request's node as an "
+        "ordinary calculation. The app copies the attempt's wrapper log and output through "
+        "the pilot's scoped reads and refuses unless the log shows this Slurm job completed "
+        "with a normally terminated output copied home. The new calculations' notes record "
+        "the node request, seed, parent attempt, mode and Slurm IDs. preview true answers "
+        "with the ordinary import plan and writes nothing; commit with the same choices. An "
+        "attempt imports once. Importing never marks a TS as verified.",
+        help={
+            **{k: IMPORT_HELP[k] for k in ("duplicate_action", "step")},
+            "attempt": "Attempt ID from prepare_saga_node_parent or "
+            "prepare_ts_from_preoptimization on a Saga node parent.",
+            "preview": "true: only the import plan, nothing is written.",
+            "create_derived": "Default false: the TS child continues the parent's geometry on "
+            "the node. true makes a derived node instead, as an ordinary import does.",
+        },
     ),
     T(
         "check_server_job",

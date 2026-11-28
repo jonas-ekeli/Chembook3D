@@ -1,22 +1,26 @@
 """D266 Gaussian jobs. Bind each app confirmation to the prepared input and destination."""
 
+import asyncio
 import hashlib
 import json
 import os
 import re
 import secrets
 import tempfile
+import threading
 import time
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from chembook3d.api import routes
 from chembook3d.api.remote import _check, _saved
 from chembook3d.api.routes import _investigation
-from chembook3d.models import InvestigationInfo, Node
+from chembook3d.models import Calculation, InvestigationInfo, Node
 from chembook3d.remote import checkpoint_ts, client, job_pilot, preopt_modes, saga_access, servers
+from chembook3d.services import imports, irc_ends
 
 router = APIRouter(prefix="/api/hpc-jobs")
 _TS_PILOT = "local_ts"
@@ -129,6 +133,28 @@ async def _prepare_saga(server_id: str, request: Request, *, ts: bool):
     return result
 
 
+class SeedIn(BaseModel):
+    """D271f: the frame or calculation the agent started from, or how it built the guess."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source: str = Field(min_length=1, max_length=300)
+    reason: str = Field(min_length=1, max_length=1000)
+    calculation_id: str | None = Field(default=None, min_length=1, max_length=32)
+    neighbour_ids: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(
+        default_factory=list, max_length=8
+    )
+    atom_mapping: list[Annotated[int, Field(ge=1)]] | None = Field(
+        default=None, min_length=1, max_length=5000
+    )
+
+    @field_validator("atom_mapping")
+    @classmethod
+    def _permutation(cls, mapping: list[int] | None) -> list[int] | None:
+        if mapping is not None and sorted(mapping) != list(range(1, len(mapping) + 1)):
+            raise ValueError("The atom mapping must number each atom once, from 1.")
+        return mapping
+
+
 class PrepareNodeIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     node_id: str = Field(min_length=1, max_length=32)
@@ -137,6 +163,7 @@ class PrepareNodeIn(BaseModel):
         default=None, min_length=2, max_length=2
     )
     request_id: str | None = Field(default=None, pattern=_HEX32)
+    seed: SeedIn
 
     @field_validator("freeze_distance")
     @classmethod
@@ -184,6 +211,38 @@ def _store_node_request(request_id: str, opened: dict) -> None:
         pass  # Opened by an earlier parent; _open_node_request checked it.
 
 
+def _seed(db, node: Node, seed: SeedIn) -> dict:
+    """D271f: the seed as the review and the imported calculations name it."""
+    if seed.calculation_id is not None and db.get(Calculation, seed.calculation_id) is None:
+        raise HTTPException(404, "Unknown seed calculation.")
+    if len(set(seed.neighbour_ids)) != len(seed.neighbour_ids) or node.id in seed.neighbour_ids:
+        raise HTTPException(422, "Name each adjacent node once, and not the node itself.")
+    neighbours = []
+    for neighbour_id in seed.neighbour_ids:
+        neighbour = db.get(Node, neighbour_id)
+        if neighbour is None:
+            raise HTTPException(404, "Unknown adjacent node.")
+        neighbours.append({"id": neighbour.id, "label": neighbour.label})
+    return {
+        "source": seed.source,
+        "reason": seed.reason,
+        "calculation_id": seed.calculation_id,
+        "neighbours": neighbours,
+        "atom_mapping": seed.atom_mapping,
+    }
+
+
+def _seed_text(seed: dict, lead: str = "Seed") -> str:
+    text = f"{lead}: {seed['source']}. Why: {seed['reason']}"
+    if seed["calculation_id"]:
+        text += f". Seed calculation {seed['calculation_id']}"
+    if seed["neighbours"]:
+        text += ". Adjacent nodes " + ", ".join(n["label"] or n["id"] for n in seed["neighbours"])
+    if seed["atom_mapping"]:
+        text += f". Atom mapping for {len(seed['atom_mapping'])} atoms"
+    return text
+
+
 def _node_state(investigation, server_id: str, info) -> dict:
     return {
         "server_id": server_id,
@@ -217,6 +276,7 @@ async def prepare_saga_node(server_id: str, body: PrepareNodeIn, request: Reques
             charge=node.charge,
             multiplicity=node.multiplicity,
         )
+        seed = _seed(db, node, body.seed)
     request_id = _open_node_request(body, opened)
     attempt = secrets.token_hex(16)
     wire = {
@@ -274,6 +334,7 @@ async def prepare_saga_node(server_id: str, body: PrepareNodeIn, request: Reques
         "key_id": key_id,
         "request_id": request_id,
         "directory": result["directory"] + "/submission",
+        "seed": seed,
         **{
             k: result[k]
             for k in (
@@ -491,8 +552,8 @@ def _node_summary(record: dict) -> str:
             f"Checkpoint {record['checkpoint_name']} SHA-256 {record['checkpoint_sha256']}. "
             f"Job description {record['job_file']} SHA-256 {record['job_sha256']}, steps 4 and "
             f"5. Node request {record['request_id']}: at most {record['limits']['child']} TS "
-            f"children are started. Directory {record['directory']}. Prepared input SHA-256 "
-            f"{record['revision']}"
+            f"children are started. {_seed_text(record['seed'], 'Parent seed')}. Directory "
+            f"{record['directory']}. Prepared input SHA-256 {record['revision']}"
         )
     if pair := record.get("freeze_distance"):
         what = (
@@ -509,8 +570,8 @@ def _node_summary(record: dict) -> str:
         f"{record['cores']} cores, {record['hours']} h. {what}. Job description "
         f"{record['job_file']} SHA-256 {record['job_sha256']}. Node request "
         f"{record['request_id']}: at most {limits['parent']} parents and {limits['child']} TS "
-        f"children are started. Directory {record['directory']}. Prepared input SHA-256 "
-        f"{record['revision']}"
+        f"children are started. {_seed_text(record['seed'])}. Directory {record['directory']}. "
+        f"Prepared input SHA-256 {record['revision']}"
     )
 
 
@@ -998,6 +1059,7 @@ async def _prepare_saga_child(server_id: str, parent_attempt: str, parent: dict,
                 "key_id",
                 "request_id",
                 "limits",
+                "seed",
             )
         },
         "pilot": _SAGA_NODE,
@@ -1024,3 +1086,208 @@ async def _prepare_saga_child(server_id: str, parent_attempt: str, parent: dict,
     }
     _store_record(attempt, record)
     return {**result, "mode_evidence": record["mode_evidence"], "node_id": parent["node_id"]}
+
+
+class SagaImportIn(BaseModel):
+    """D271e: the ordinary import choices for a Saga node output; the node is the request's."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    preview: bool = False
+    step: int | None = Field(default=None, ge=1)
+    # D271e: into node X, so the TS child continues the parent's geometry there by default.
+    create_derived: bool = False
+    beside: bool | None = None
+    duplicate_action: Literal["attach", "new"] | None = None
+    duplicate_node_id: str | None = Field(default=None, max_length=32)
+    basis_names: dict[str, str] = Field(default_factory=dict)
+    dispersion_names: dict[str, str] = Field(default_factory=dict)
+
+
+_importing = threading.Lock()  # two calls for one attempt import it once
+
+
+def _import_marker(attempt: str) -> Path:
+    if not job_pilot.ATTEMPT.fullmatch(attempt):
+        raise HTTPException(422, "Invalid prepared attempt ID.")
+    return servers.folder() / "saga-node-imports" / f"{int(attempt, 16):032x}.json"
+
+
+def _imported(db, attempt: str) -> list[str]:
+    """The calculations an earlier import of this attempt made that are still there."""
+    try:
+        marker = json.loads(_import_marker(attempt).read_text("utf-8"))
+    except FileNotFoundError:
+        return []
+    return [c for c in marker["calculation_ids"] if db.get(Calculation, c) is not None]
+
+
+async def _saga_finished_output(
+    server_id: str, attempt: str, record: dict, folder: Path
+) -> tuple[str, Path]:
+    """D271e: copy a finished attempt's wrapper log and output through the scoped helper
+    reads. The log must name this Slurm job, report it completed with a normally terminated
+    output copied home, and the output must date from the run."""
+    status = await _call(
+        server_id,
+        {"operation": "node_status", "attempt": attempt, "revision": record["revision"]},
+        record["target"],
+        None,
+        record["key_id"],
+        record["directory"],
+    )
+    job_id = status.get("job_id")
+    if (
+        status.get("state") != "submitted"
+        or not job_id
+        or status.get("request") != record["request_id"]
+        or status.get("directory") != record["directory"]
+    ):
+        raise HTTPException(409, "Choose a submitted Saga attempt with a recorded Slurm receipt.")
+    stem = record["input_name"][:-4]
+    submission = folder / "submission"
+    submission.mkdir()
+    names = [stem + ".log", stem + ".out"]
+    try:
+        reply = await client.call(
+            "download",
+            server=server_id,
+            paths=[f"{record['directory']}/{name}" for name in names],
+            folder=str(submission),
+            within=True,
+            timeout=600,
+        )
+    except client.KeeperError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if reply.get("failed"):
+        failure = reply["failed"][0]
+        raise HTTPException(409, f"Could not copy {failure['path']}: {failure['reason']}")
+    copied = {Path(item["local"]).name: item for item in reply.get("files", [])}
+    if set(copied) != set(names):
+        raise HTTPException(409, "The wrapper log and output were not both copied.")
+    for item in copied.values():
+        local = Path(item["local"])
+        if local.parent != submission or type(item.get("modified")) is not int:
+            raise HTTPException(409, "The keeper returned an invalid copy of the attempt files.")
+        os.utime(local, (item["modified"], item["modified"]))
+    log_path, output = submission / names[0], submission / names[1]
+    try:
+        contents, log_meta = checkpoint_ts.read_snapshot(log_path, 1024**2)
+        log = contents.decode("utf-8").replace("\r\n", "\n")
+        start, _ = preopt_modes.completed_copyback(log, log_path, stem, job_id)
+        _, meta = checkpoint_ts.read_snapshot(output, 64 * 1024**2)
+        if not start <= meta.st_mtime <= log_meta.st_mtime:
+            raise ValueError("Cannot attribute the copied output's modification time to this job.")
+    except (UnicodeError, OSError) as exc:
+        raise HTTPException(409, "The wrapper log or output is missing or unreadable.") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return job_id, output
+
+
+def _provenance(attempt: str, job_id: str, record: dict) -> str:
+    """D271e: what the imported calculations record about where they came from."""
+    if record.get("kind") == "child":
+        mode = record["mode_evidence"]
+        what = (
+            f"TS child attempt {attempt} (Slurm job {job_id}) of parent attempt "
+            f"{record['parent_attempt']} (Slurm job {record['parent_job_id']}), mode "
+            f"{record['mode_index']} ({mode['frequency_cm1']:g} cm⁻¹) along atoms "
+            f"{mode['freeze_distance'][0]} and {mode['freeze_distance'][1]}"
+        )
+        seed = _seed_text(record["seed"], "Parent seed")
+    else:
+        what = f"Parent attempt {attempt} (Slurm job {job_id})"
+        if pair := record.get("freeze_distance"):
+            what += f", distance between atoms {pair[0]} and {pair[1]} frozen"
+        seed = _seed_text(record["seed"])
+    return (
+        f"Saga node calculation (D271). {what}. Node request {record['request_id']}. {seed}. "
+        f"Job description {record['job_file']} SHA-256 {record['job_sha256']}. Not yet checked "
+        "as a verified TS."
+    )
+
+
+@router.post("/{server_id}/attempts/{attempt}/import")
+async def import_saga_node_result(
+    server_id: str, attempt: str, request: Request, body: SagaImportIn | None = None
+):
+    """D271e: import a finished Saga node parent or TS child into the request's node as an
+    ordinary calculation, with its provenance in the calculations' notes. `preview` answers
+    with the ordinary import plan and writes nothing."""
+    _check(request, page_only=False)
+    body = body or SagaImportIn()
+    investigation = _investigation(request)
+    info = investigation.info()
+    record, _ = _record(
+        server_id,
+        attempt,
+        investigation.folder,
+        info.uuid if info else None,
+        require_identity=True,
+    )
+    if record.get("pilot") != _SAGA_NODE:
+        raise HTTPException(409, "Only a Saga node parent or TS child imports here (D271e).")
+    with investigation.sessions.begin() as db:
+        if _imported(db, attempt):
+            raise HTTPException(409, "This attempt's output is imported already.")
+        if db.get(Node, record["node_id"]) is None:
+            raise HTTPException(409, "The node of this request is gone.")
+    server = _saved(server_id)
+    with tempfile.TemporaryDirectory(prefix="chembook3d-saga-node-") as folder:
+        job_id, output = await _saga_finished_output(server_id, attempt, record, Path(folder))
+        provenance = _provenance(attempt, job_id, record)
+        options = routes._options(
+            routes.ImportOptionsIn(
+                target_node_id=record["node_id"],
+                **body.model_dump(exclude={"preview"}),
+            )
+        )
+
+        def stage_and_import():
+            staging = imports.Staging()
+            try:
+                staged = staging.add(
+                    output.read_bytes(),
+                    output.name,
+                    servers.origin_path(server, f"{record['directory']}/{output.name}"),
+                    beside=output.parent,
+                    device=server.name,
+                )
+                if body.preview:
+                    with investigation.sessions.begin() as db:
+                        found = irc_ends.plan(db, investigation.folder, staged, options)
+                    found.pop("token", None)  # this route stages again; commit_import is not used
+                    return found
+                with _importing, investigation.sessions.begin() as db:
+                    if _imported(db, attempt):
+                        raise HTTPException(409, "This attempt's output is imported already.")
+                    routed, _ = irc_ends.routed(db, investigation.folder, staged, options)
+                    committed = imports.commit(db, investigation.folder, staged, routed)
+                    for calculation_id in committed.calculation_ids:
+                        calculation = db.get(Calculation, calculation_id)
+                        calculation.notes = "\n\n".join(
+                            n for n in (calculation.notes, provenance) if n
+                        )
+                    db.flush()
+                    marker = _import_marker(attempt)
+                    marker.parent.mkdir(exist_ok=True, parents=True)
+                    marker.write_text(
+                        json.dumps({"calculation_ids": list(committed.calculation_ids)}),
+                        encoding="utf-8",
+                    )
+                return {
+                    "attempt": attempt,
+                    "job_id": job_id,
+                    "node_id": committed.node_id,
+                    "derived_node_id": committed.derived_node_id,
+                    "calculation_ids": list(committed.calculation_ids),
+                    "provenance": provenance,
+                }
+            except imports.ImportBlocked as exc:
+                raise HTTPException(422, {"blockers": exc.blockers, "message": str(exc)}) from exc
+            except imports.ImportFailed as exc:
+                raise HTTPException(422, str(exc)) from exc
+            finally:
+                staging.clear()
+
+        return await asyncio.to_thread(stage_and_import)
