@@ -1,5 +1,5 @@
 """Following a TS's imaginary mode both ways on this computer (D263c, A184, FR-LOC-20,
-T-LOC-51 to T-LOC-54).
+FR-LOC-21, T-LOC-51 to T-LOC-57).
 
 The TS is a synthetic Gaussian frequency job (any level may be followed): two carbons 2.0 Å
 apart, each with a hydrogen, the imaginary mode stretching the C1–C2 distance. The job runs with
@@ -437,9 +437,41 @@ def test_a_soft_modes_end_takes_the_nearest_minimum_within_one_angstrom(open_cli
 
 
 @pytest.mark.usefixtures("stub_tools")
-def test_a_hard_modes_end_keeps_the_narrow_window(open_client):
-    """T-LOC-56 (A191): the same minimum, with the mode at 500i cm⁻¹, is no match."""
-    make_node(open_client, "far", shifted(1.9))
+def test_any_end_takes_another_conformer_and_makes_no_node_of_it(open_client):
+    """T-LOC-57 (A193): the same minimum, with the mode at 500i cm⁻¹, matches nothing within
+    0.5 Å but has the + end's bonds within 1.0 Å: another conformer of that molecule, taken
+    (medium, flagged); making a node from that end is refused unless asked anyway; an end with
+    no such minimum still becomes one; a node of no role at the TS's structure is a TS."""
+    far = make_node(open_client, "far", shifted(1.9))
     ts_id, _ = import_ts(open_client)
-    hard = ends(open_client, follow(open_client, ts_id)["id"])
-    assert hard["ends"]["+"]["matches"] == [] and "settled" not in hard["ends"]["+"]
+    done = follow(open_client, ts_id)
+    hard = ends(open_client, done["id"])
+    plus = hard["ends"]["+"]
+    assert plus["settled"]["as"] == "conformer" and plus["settled"]["node_id"] == far
+    assert plus["matches"] == [{**plus["matches"][0], "conformer": True}]
+    assert 0.5 <= plus["matches"][0]["rmsd"] < 1.0
+    assert hard["outcome"] == "one_end" and hard["confidence"] is None
+    assert any("another conformer" in f and "1.0 Å" in f for f in hard["flags"])
+    refused = open_client.post(f"/api/local/jobs/{done['id']}/ends/+/node")
+    assert refused.status_code == 422 and "another conformer" in refused.json()["detail"]
+    assert "“far”" in refused.json()["detail"]
+    anyway = open_client.post(f"/api/local/jobs/{done['id']}/ends/+/node", json={"anyway": True})
+    assert anyway.status_code == 201, anyway.text
+    minus = open_client.post(f"/api/local/jobs/{done['id']}/ends/-/node")
+    assert minus.status_code == 201, minus.text  # nothing with the − end's bonds
+
+    # A node of no role at the TS's structure (a single point on it) counts as the TS.
+    sp = make_node(open_client, "sp", TS)
+    with open_client.app.state.investigation.sessions.begin() as session:
+        roles = {
+            c.entry["node_id"]: c.entry["role"]
+            for c in follow_mode._node_candidates(session, ts_id)
+        }
+    assert roles[sp] == "transition_state" and roles[far] != "transition_state"
+
+    b_id = make_node(open_client, "B", shifted(-0.5))
+    open_client.delete(f"/api/nodes/{anyway.json()['node_id']}")
+    open_client.delete(f"/api/nodes/{minus.json()['node_id']}")
+    linked = ends(open_client, done["id"])
+    assert linked["outcome"] == "links" and linked["confidence"] == "medium"
+    assert [m["node_id"] for m in linked["links"]] == [far, b_id]

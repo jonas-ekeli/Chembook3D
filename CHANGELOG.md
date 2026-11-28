@@ -18,6 +18,27 @@ artifacts and publishes nothing.
 - In the local HPC pilot, the agent can freeze one distance in a five-step Gaussian
   pre-optimization. The app shows the selected atom pair and revised input for approval.
 
+- Building from a folder, from what validation run 6 showed (A194): two optimizations at one
+  level that end on one structure are two runs, kept as two nodes in one conformer group
+  (`group_structures` names them in `runs`, the merge preview too, and Claude's own merge of
+  them is refused unless `anyway`); each association `find_direct_links` lists carries the edge
+  to propose, a grouped end as its group; a conformer search's structure, or a node only at xTB
+  or another lower kind of method under a DFT TS, is a weaker match (`other_level`; a
+  mode-follow link through one is low). The playbook proposes every association listed and a
+  "one side" TS's candidate at low, and no longer asks the person to open a page for Tidy.
+
+- A mirror image is another molecule (D267): no mechanism tool counts a match that turns a
+  stereocentre into its mirror image as the same structure or a link (`find_ts_partners`, A184's
+  bond check, mode-follow and IRC end matching, `find_direct_links`, `group_structures`, the
+  duplicate checks). A TS side or end that fits a node only reflected says "mirror image of …:
+  the matching minimum is not in the investigation", `find_gaps` lists it as
+  `missing_mirror_image`, and build_structure's new `mirror` step makes it. A doubt only from
+  centres with like neighbours (a methyl's hydrogens) no longer holds the bond check back.
+
+- An IRC end's optimization goes into its TS's IRC from the single import too (D268, confirming
+  A192): the import dialog and Claude's import tools plan it there, say so, and offer "Make a
+  new node instead".
+
 - The Saga pilot can submit one operator-enabled Gaussian minimum after the user
   reviews the input, account and resources in the app. Looking up the same
   attempt recovers its Slurm receipt after a lost reply. The submission workflow
@@ -36,6 +57,16 @@ artifacts and publishes nothing.
   and XYZ geometry. The app shows the input and resources for approval and retains the
   attempt so a lost submission reply can be checked without submitting twice (D266).
 
+- Building from a folder, from what validation run 5 showed (A193): `find_direct_links` no
+  longer offers a metallacyclobutane as an olefin association (a bond between the species and a
+  non-metal atom of the core is a cycloaddition, which has a TS) and lists one line per pair of
+  molecules, the nearest conformers with `other_pairs` counting the rest; on the run's playground
+  after the import it gave 13 lines where it gave 433. `group_structures` names each member's node
+  and marks a TS, and the playbook makes the conformer groups right after the import, before any
+  linking, and proposes the direct links rated medium without waiting for a chemistry choice. A
+  mode-follow end that matches nothing within 0.5 Å but has the bonds of a node within 1.0 Å is
+  taken as another conformer of it (medium), and no node is made from it unless asked anyway;
+  a node of no role at a TS's structure (a single point on it) is never an end's match.
 - Building from a folder, from what validation run 4 showed (A190–A192): `find_direct_links`
   lists the steps between minima with no TS (a free species joining or leaving, ranked by the
   RMSD of the complex without it; a coordination or conformation change, "no TS: direct

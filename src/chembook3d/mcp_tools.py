@@ -105,6 +105,9 @@ IMPORT_HELP = {
     "irc_direction. Left out, the file is imported as an ordinary calculation.",
     "irc_direction": "With irc_part 'end': 'forward' or 'reverse', the side of the path the "
     "end point belongs to.",
+    "irc_end": "D268: an optimization or frequency job whose name, up to IRC, is a TS's IRC "
+    "file's and whose first or final structure is that IRC's end point goes into that TS's "
+    "IRC by itself (the plan's irc_end says so); false imports it as a node of its own.",
     "path_edge_id": "A scan imported as a new node: the transition (edge) the scan was run "
     "for, so its chip shows on that edge (D121, D137).",
     "on_edge_only": "With path_edge_id: true shows the scan only as the chip on its edge, with "
@@ -581,7 +584,9 @@ TOOLS: list[ToolSpec] = [
         "To go on from an answer, pass its build_id. A molecule or SMILES binds to a metal's "
         "open site at `value` Å from its donors, where it has the most room; when no site has "
         "room the step fails and says what is in the way (free a site first rather than forcing "
-        "it in for Minimize). Use this rather than writing new coordinates yourself.",
+        "it in for Minimize). The step mirror gives the whole structure's mirror image "
+        "(D267, find_gaps' missing_mirror_image). Use this rather than writing new coordinates "
+        "yourself.",
     ),
     T(
         "check_structure",
@@ -1314,7 +1319,12 @@ TOOLS: list[ToolSpec] = [
         "(atom-matched RMSD; for a sum over the larger species; energies are never read), "
         "with level, group and `ref` to pass on; then `check`: "
         "A184's bond check of the best pairs as compare_structures with ts gives it (links, "
-        "unclear or does not link, with reasons), and `next`. Several TSs at once (A187): "
+        "unclear or does not link, with reasons), and `next`. D267: a mirror image is another "
+        "molecule, so a candidate whose match turns a stereocentre into its mirror image is "
+        "never one (`other_stereoisomers` counts them); one that fits only reflected is listed "
+        "as `mirror_images`, and a side it fits best says `mirror_of` (verdict `mirror image`: "
+        "the matching minimum is not in the investigation; find_gaps lists it). Several TSs at "
+        "once (A187): "
         '`tss`, or `all_ts` ("unlinked": every TS missing an edge on a side; "all"), '
         "answered in a few lines per TS (the mode's bonds, the nearest candidate per side "
         "with its RMSD, the verdict and why), as many as fit, then `more` with the offset to "
@@ -1343,7 +1353,11 @@ TOOLS: list[ToolSpec] = [
         "aside, then matched atom by atom), then by atom-matched RMSD. Gives per formula its "
         "molecules, per molecule its conformers, per conformer its members (index in the "
         "list, label, RMSD to the first), and `near_cut`: pairs that could have gone either "
-        "way. Up to 300 structures. Changes nothing.",
+        "way. D267: mirror images and other stereoisomers are other molecules (a molecule "
+        "that is another's mirror image says `mirror_image_of`, that molecule's number in its "
+        "formula). A conformer's `runs`: members that each hold an optimization at one "
+        "level, separate runs of one structure kept as separate nodes, never merged (A194). "
+        "Up to 300 structures. Changes nothing.",
         help={
             "structures": "The structures, each " + STRUCTURE_HELP,
             "all_nodes": "Add every node and free species with coordinates.",
@@ -1388,9 +1402,11 @@ TOOLS: list[ToolSpec] = [
         "The holes in the mechanism you are building (D265), most useful first, each with a "
         "stable id, its kind, the nodes in it, the bonds that change and a suggested fill: "
         "ts_end (a TS with no edge on a side; what lies there from its finished mode-follow "
-        "or its IRC, else only the bonds its mode moves), missing_ts (two minima an edge or "
-        "the steps' order links, one to three bonds apart, with no TS), unbalanced (an edge "
-        "whose sides differ in atoms with no free species to balance them), "
+        "or its IRC, else only the bonds its mode moves), missing_mirror_image (D267: a TS "
+        "side's minimum is the mirror image of a node there is: made exactly by "
+        "build_structure's mirror step on that node, then refined), missing_ts (two minima "
+        "an edge or the steps' order links, one to three bonds apart, with no TS), "
+        "unbalanced (an edge whose sides differ in atoms with no free species to balance them), "
         "missing_intermediate (linked minima more than one step apart) and cycle (the last "
         "minimum of the steps does not give back the first's catalyst). Only what edges and "
         "steps already link is looked at. Also how many holes you filled in this run (at most "
@@ -1404,7 +1420,8 @@ TOOLS: list[ToolSpec] = [
         "Pairs of minima a step with no TS may join (FR-MCP-27, A190), for the steps "
         "find_ts_partners cannot find: `association` (minimum B has the atoms of minimum A and "
         "one free species together, and B's bonds are theirs but for the species' bonds to A's "
-        "atoms, A181; read as A + species → B, or B → A + species when it leaves), ranked by "
+        "metal, A181, A193: a bond to another atom of A is a cycloaddition, with a TS; read "
+        "as A + species → B, or B → A + species when it leaves), ranked by "
         "the atom-matched RMSD of A against B without the species (`core_rmsd`), with a "
         "suggested confidence (medium when that RMSD is small, else low); and `same_atoms` "
         "(the same atoms, bonds differing only at a metal or not at all: a coordination mode "
@@ -1412,7 +1429,8 @@ TOOLS: list[ToolSpec] = [
         "closed-shell molecule imported as an ordinary node counts as a species and is named "
         "in `make_species`: make it a free species (set_node_kind) before proposing. Pairs an "
         "edge or one TS already joins, and pairs in one group, are left out; per pair of "
-        "groups the nearest members. As many as fit in about 20,000 characters, then `more` "
+        "molecules (a group counts as its own) only the nearest conformers, `other_pairs` "
+        "counting the rest (A193). As many as fit in about 20,000 characters, then `more` "
         "with the offset to call again with. Changes nothing.",
     ),
     T(
@@ -1873,8 +1891,10 @@ TOOLS: list[ToolSpec] = [
         "lies on) and `returned_to_ts` (its distances along the mode still the TS's: it "
         "matches nothing); with `verdict`: links two structures (both ends each match "
         "exactly one: high confidence), one end matches, no end matches, both ends returned to "
-        "a TS, or both ends match the same structure (flagged). A TS left unsettled is "
-        "flagged, never guessed. Changes nothing.",
+        "a TS, or both ends match the same structure (flagged). D267: no match is a mirror "
+        "image; an end that matches a node only reflected says `mirror_of` (that minimum is "
+        "missing; find_gaps lists it). A TS left unsettled is flagged, never guessed. Changes "
+        "nothing.",
     ),
     T(
         "make_node_from_end",
@@ -1884,8 +1904,9 @@ TOOLS: list[ToolSpec] = [
         "Make a node from an end of a mode-follow job that matches nothing (D263c): its "
         "coordinates only (a partial relaxation is a guess, so no calculation), a planned "
         "minimum labelled '<TS> end +' or 'end −' beside the TS on its canvas, with the TS's "
-        "charge and multiplicity. Refused when the end matches a node (it names it) unless "
-        "anyway is true. Only when get_follow_mode_ends says the end matches nothing and the "
+        "charge and multiplicity. Refused when the end matches a node, or has a node's bonds "
+        "within 1.0 Å (another conformer of it, A193), naming it, unless anyway is true. "
+        "Only when get_follow_mode_ends says the end matches nothing and the "
         "mechanism needs it.",
         help={"end": "+ or - (plus or minus)."},
     ),
@@ -1916,8 +1937,9 @@ TOOLS: list[ToolSpec] = [
         "What merging node_id into into_id would do (D262): why it is refused, what it warns "
         "about (real bond changes, geometries at one level further apart than the duplicate "
         "tolerance), the atom match, both nodes' values at each level they share and which "
-        "count, the geometry the kept node shows, and the calculations, edges and records that "
-        "move. Changes nothing; merge_nodes asks the user to confirm the merge.",
+        "count, `runs` (levels both optimized at: two runs, A194), the geometry the kept "
+        "node shows, and the calculations, edges and records that move. Changes nothing; "
+        "merge_nodes asks the user to confirm the merge.",
     ),
     T(
         "get_node_geometries",
@@ -2207,9 +2229,11 @@ CONFIRM_DESCRIPTIONS = {
     "numbered otherwise), edges and records moving onto it. At a level both have, the lower "
     "energy's calculations count and the other's are set aside. Refused for different "
     "molecules, a TS with a minimum, or a mirror image; warned (pass anyway once the user has "
-    "seen it) for a real bond change or geometries apart at one level. See preview_node_merge "
-    "first; pairs, branch and anyway are as there. In a playground, while you work on your "
-    "own, two nodes you made yourself and nobody changed since merge without asking (D264c).",
+    "seen it) for a real bond change or geometries apart at one level, and refused without "
+    "anyway when both hold an optimization at one level (`runs` in the preview: two runs of "
+    "one structure, kept as two nodes, A194). See preview_node_merge first; pairs, branch "
+    "and anyway are as there. In a playground, while you work on your own, two nodes you "
+    "made yourself and nobody changed since merge without asking (D264c).",
     "replace_with_local_result": "Import a finished local job's result onto its node, "
     "replacing the node's geometry at the job's level (D260): the job's replace_offer lists "
     "the optimizations there and the calculations sitting on them, which are removed for good; "

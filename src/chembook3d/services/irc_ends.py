@@ -11,13 +11,15 @@ file is plainly the optimization of an IRC's end when
   tolerance (D62), whatever the atom order.
 
 The batch import sends such a file into its TS's IRC as that direction's end point
-(`batch_ends`, `node_end`); a node made from one before (`end_nodes`) is never offered as a
-partner of another TS (`find_ts_partners`, a mode-follow's ends), and neither is a folder file
-of this kind (`folder_survey.final_structures`).
+(`batch_ends`, `node_end`); D268: so does the single import (`routed`, `plan`), the app's
+dialog and Claude's import tools alike, unless `irc_end` is false (a node of its own). A node
+made from one before (`end_nodes`) is never offered as a partner of another TS
+(`find_ts_partners`, a mode-follow's ends), and neither is a folder file of this kind
+(`folder_survey.final_structures`).
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePath
 from typing import Any
 
@@ -25,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from chembook3d.models import Node, Role
 from chembook3d.parsers.common import ParsedStep
-from chembook3d.services import imports
+from chembook3d.services import imports, thermo_settings
 from chembook3d.services import nodes as node_service
 from chembook3d.services import structure_compare as compare
 from chembook3d.services.geometry import Rows
@@ -215,3 +217,43 @@ def end_nodes(session: Session, folder: Path, tolerance: float) -> dict[str, str
                 out[node.id] = hit.id
                 break
     return out
+
+
+REASON = "optimized from its IRC end"  # A192: the batch row's words for `irc_end`
+
+
+def routed(
+    session: Session, folder: Path, staged: Any, options: imports.ImportOptions
+) -> tuple[imports.ImportOptions, dict[str, Any] | None]:
+    """D268, A192: a single file that is plainly the end point's job of an IRC a TS node holds
+    goes into that TS's IRC (D131's end_opt and end_freq): the options for it, and what the
+    plan says of it (`irc_end`: the TS, the direction and why). Unchanged when the options name
+    an IRC part already, another node, a free species, or `irc_end` false (a node of its own)."""
+    if options.irc_part is not None or options.irc_end is False or options.kind == "species":
+        return options, None
+    steps = getattr(staged.parsed, "steps", None)
+    name = staged.original_name
+    if not steps or stem(name) is None or not is_end_job(steps):
+        return options, None
+    tolerance = thermo_settings.settings(session).duplicate_tolerance
+    found = node_end(name, steps, ts_ircs(session, folder), tolerance)
+    if found is None:
+        return options, None
+    node, direction = found
+    if options.target_node_id not in (None, node.id):
+        return options, None
+    chosen = replace(options, irc_part="end", irc_direction=direction, target_node_id=node.id)
+    return chosen, {
+        "node_id": node.id,
+        "label": node.label,
+        "direction": direction,
+        "reason": REASON,
+    }
+
+
+def plan(session: Session, folder: Path, staged: Any, options: imports.ImportOptions) -> dict:
+    """D268: a single import's plan, an IRC end's file planned into its TS's IRC (`routed`)."""
+    chosen, irc_end = routed(session, folder, staged, options)
+    found = imports.plan(session, staged, chosen).as_dict()
+    found["irc_end"] = irc_end
+    return found

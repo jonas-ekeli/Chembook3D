@@ -309,6 +309,9 @@ class ImportOptions:
     # path in `irc_direction`, "forward" or "reverse").
     irc_part: str | None = None
     irc_direction: str | None = None
+    # D268, A192: None lets a single import's IRC end file go into its TS's IRC
+    # (`irc_ends.routed`); False imports it as any other file, a node of its own.
+    irc_end: bool | None = None
     # CREST ensembles (FR-IMP-10): how many of the lowest conformers to keep, or exactly which
     # (file positions); the method that made the energies; charge and multiplicity (A16).
     conformer_count: int | None = None

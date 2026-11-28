@@ -15,13 +15,17 @@ whose distances along the mode are still the TS's (`structure_compare._side` "no
 to the TS and matches nothing. A191: an end matching several members of one group stands for
 the group, one matching several conformers of one molecule otherwise for the nearest (a
 medium link); a soft mode (below 100 cm⁻¹) whose end changes no bond and matches nothing
-within 0.5 Å takes the nearest minimum with its bonds within 1.0 Å (medium). A192: a node or
-folder file made from another TS's IRC end optimization is never an end's match.
+within 0.5 Å takes the nearest minimum with its bonds within 1.0 Å (medium); A193: so does any
+other end that left the TS (`_wider`, "conformer": another conformer of a molecule there is,
+medium), and `make_node` refuses it. A192: a node or folder file made from another TS's IRC
+end optimization is never an end's match. D267: no match turns a stereocentre into its mirror
+image (`end_match`); an end that matches nothing but a node reflected (`atom_matching.mirrored`,
+within 0.5 Å) says `mirror_of`: that node's mirror image is missing.
 
 The verdict: both ends each matching one structure links them (high confidence, A184); both
 matching the same one is flagged; both returned to a TS is said; an end that matches nothing
-may become a node of its own (`make_node`), coordinates only: a partial relaxation is a guess,
-never a result.
+even within 1.0 Å may become a node of its own (`make_node`), coordinates only: a partial
+relaxation is a guess, never a result.
 """
 
 import threading
@@ -34,12 +38,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from chembook3d import local_jobs, xyz
-from chembook3d.models import GroupNode, Node, Role, Status
+from chembook3d.models import GroupNode, LevelOfTheory, Node, Role, Status
 from chembook3d.services import (
     atom_matching,
     batch_import,
     folder_survey,
     irc_ends,
+    levels,
     thermo_settings,
 )
 from chembook3d.services import nodes as node_service
@@ -92,7 +97,8 @@ def _matches(
     candidates: list[_Candidate],
     window: float = compare.END_RMSD,
 ) -> list[dict[str, Any]]:
-    """The candidates the end matches (A184; within `window`, A191), nearest first."""
+    """The candidates the end matches (A184; within `window`, A191), nearest first, those at
+    another level than the TS's after the others (A194)."""
     formula = _formula(rows)
     shape = (compare.signature(rows), compare._bond_counts(rows))
     found = []
@@ -116,7 +122,7 @@ def _matches(
         if same.mapping is not None:
             entry["renumbered"] = True
         found.append(entry)
-    found.sort(key=lambda m: m["rmsd"])
+    found.sort(key=lambda m: (bool(m.get("other_level")), m["rmsd"]))
     return found
 
 
@@ -128,19 +134,32 @@ HELD = ("scan path", "scan or constrained geometry", "imaginary frequency")
 
 
 def _node_candidates(
-    session: Session, exclude: str | None, folder: Path | None = None
+    session: Session,
+    exclude: str | None,
+    folder: Path | None = None,
+    level: tuple[str, int] | None = None,
 ) -> list[_Candidate]:
     """Every node with coordinates but `exclude` (the TS followed), those A186 shows are no
     minimum (a scan path, a scan or constrained geometry, an imaginary frequency: A188) and,
     with the investigation's `folder`, the nodes made from another TS's IRC end optimization
-    (A192); TS nodes among them are told apart by `_is_ts` and never an end's match."""
+    (A192); TS nodes among them are told apart by `_is_ts` and never an end's match, nor is a
+    node of no role at a TS node's structure (a single point on it, A193 as A188's files).
+    A194: a node whose structure is only at levels of a lower kind of method than the TS's
+    geometry level `level` (id, `levels.method_rank`), an xTB conformer search's member under
+    a DFT TS, say, is marked `other_level`."""
     from chembook3d.services import ts_partners  # it imports gaps, which imports this module
 
     tolerance = thermo_settings.settings(session).duplicate_tolerance
     ends = irc_ends.end_nodes(session, folder, tolerance) if folder is not None else {}
     groups = {g.id: g.label for g in session.scalars(select(GroupNode))}
+    every = node_service.list_nodes(session, with_calculations=True)
+    at_ts = [
+        [list(r) for r in n.geometry]
+        for n in every
+        if n.role == Role.TRANSITION_STATE and n.geometry
+    ]
     out = []
-    for node in node_service.list_nodes(session, with_calculations=True):
+    for node in every:
         if not node.geometry or node.id == exclude:
             continue
         if ts_partners.left_out(node, tolerance) in HELD:
@@ -148,10 +167,16 @@ def _node_candidates(
         if ends.get(node.id, exclude) != exclude:  # A192: another TS's IRC end optimization
             continue
         rows = [list(r) for r in node.geometry]
+        role = str(node.role) if node.role else None
+        if role in (None, Role.UNSPECIFIED.value) and any(
+            _formula(ts) == _formula(rows) and compare.same_structure(ts, rows, tolerance)
+            for ts in at_ts
+        ):
+            role = Role.TRANSITION_STATE.value
         entry = {
             "node_id": node.id,
             "label": node.label or "Untitled node",
-            "role": str(node.role) if node.role else None,
+            "role": role,
             "formula": _formula(rows),
         }
         if node.kind != "node":
@@ -159,6 +184,14 @@ def _node_candidates(
         if node.group_id is not None:
             entry["group_id"] = node.group_id
             entry["group"] = groups.get(node.group_id) or "Untitled group"
+        held = ts_partners.held_levels(node) if level is not None else {}
+        if (
+            level is not None
+            and held
+            and level[0] not in held
+            and max(levels.method_rank(levels.fields_of(lv)) for lv in held.values()) < level[1]
+        ):
+            entry["other_level"] = True
         out.append(_Candidate(rows, node.charge, node.multiplicity, entry))
     return out
 
@@ -333,6 +366,8 @@ def _settle(entry: dict[str, Any]) -> None:
                 "as": "group",
                 "members": len(matches),
             }
+            if all(m.get("other_level") for m in matches):
+                entry["settled"]["other_level"] = True
         else:
             entry["settled"] = {**matches[0], "as": "nearest", "others": len(matches) - 1}
         return
@@ -409,6 +444,14 @@ def _verdict(ends: dict[str, dict[str, Any]], ts_label: str) -> dict[str, Any]:
                 f"change) matches nothing within 0.5 Å; the nearest minimum with its bonds, "
                 f"{_name(found)} ({found['rmsd']:.2f} Å, within {SOFT_RMSD} Å), is taken (A191).",
             )
+        elif found["as"] == "conformer":
+            flags.insert(
+                0,
+                f"The {SHOWN[n]} end matches nothing within 0.5 Å but has the bonds of "
+                f"{_name(found)} ({found['rmsd']:.2f} Å, within {SOFT_RMSD} Å): another "
+                "conformer of that molecule, which is taken (A193); link it or its group, and "
+                "make no node from this end.",
+            )
     head = f"Followed the mode of “{ts_label}”"
     if all(keys[n] for n in ENDS):
         a, b = settled["+"], settled["-"]
@@ -421,18 +464,39 @@ def _verdict(ends: dict[str, dict[str, Any]], ts_label: str) -> dict[str, Any]:
                 "flags": flags,
             }
         exact = all(settled[n]["as"] in ("one", "group") for n in ENDS)
+        elsewhere = [n for n in ENDS if settled[n].get("other_level")]
+        for n in elsewhere:
+            flags.insert(
+                0,
+                f"The {SHOWN[n]} end matches {_name(settled[n])}, a structure only at a lower "
+                "kind of method than the TS's geometry level (an xTB conformer search's under a "
+                "DFT TS, say): a weak end, so the link is low (A194).",
+            )
         return {
             "outcome": "links",
             "verdict": f"{head}: links {_name(a)} and {_name(b)}",
-            # A184: a mode-follow whose two ends each match one structure; A191: medium when
-            # an end took the nearest of several conformers or a soft mode's wider match.
-            "confidence": "high" if exact else "medium",
+            # A184: a mode-follow whose two ends each match one structure; A191, A193: medium
+            # when an end took the nearest of several conformers or a wider match; A194: low
+            # when an end is at another level than the TS's only.
+            "confidence": "low" if elsewhere else "high" if exact else "medium",
             "flags": flags,
             "links": [a, b],
         }
     parts = []
     for n in ENDS:
-        if keys[n] is None:
+        image = ends[n].get("mirror_of")
+        if keys[n] is None and image is not None:
+            parts.append(
+                f"{SHOWN[n]} end is the mirror image of “{image['label']}” ({image['rmsd']:.2f} "
+                "Å reflected): the matching minimum is not in the investigation"
+            )
+            flags.insert(
+                0,
+                f"The {SHOWN[n]} end matches “{image['label']}” only reflected: a mirror image "
+                "is another molecule (D267), so its minimum is missing. Make it from that node "
+                "(find_gaps: missing_mirror_image) rather than from this end.",
+            )
+        elif keys[n] is None:
             parts.append(f"{SHOWN[n]} end matches nothing")
         else:
             parts.append(f"{SHOWN[n]} end matches {_name(settled[n])} ({settled[n]['rmsd']:.2f} Å)")
@@ -445,6 +509,15 @@ def _verdict(ends: dict[str, dict[str, Any]], ts_label: str) -> dict[str, Any]:
         "confidence": None,
         "flags": flags,
     }
+
+
+def _wider(
+    rows: Rows, charge: int | None, multiplicity: int | None, nodes: list[_Candidate]
+) -> list[dict[str, Any]]:
+    """A191, A193: the minima with the end's bonds within SOFT_RMSD, nearest first: an end
+    that matches nothing within 0.5 Å but has the bonds of a molecule the folder holds is
+    another conformer of it (a MACE end beside a DFT minimum often is), never a new node."""
+    return [m for m in _matches(rows, charge, multiplicity, nodes, SOFT_RMSD) if not _is_ts(m)]
 
 
 def _no_bond_change(ts_rows: Rows, rows: Rows) -> bool:
@@ -469,7 +542,21 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
     nearest first) and the files of the job's folder it matches; with the verdict."""
     found = _read(session, folder, job_id)
     charge, multiplicity = found.job["charge"], found.job["multiplicity"]
-    nodes = _node_candidates(session, found.ts_node.id if found.ts_node else None, folder)
+    from chembook3d.services import ts_partners  # it imports gaps, which imports this module
+
+    level = ts_partners.ts_level(
+        session,
+        {"node_id": found.ts_node.id}
+        if found.ts_node is not None
+        else {"calculation_id": found.follow.get("calculation_id")},
+    )
+    held = session.get(LevelOfTheory, level.id) if level is not None else None
+    nodes = _node_candidates(
+        session,
+        found.ts_node.id if found.ts_node else None,
+        folder,
+        (held.id, levels.method_rank(levels.fields_of(held))) if held is not None else None,
+    )
     notes: list[str] = []
     files: list[_Candidate] | None = None
     where = found.follow.get("folder")
@@ -524,15 +611,23 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
                 entry["files"] = []
         else:
             _settle(entry)
-            if "settled" not in entry and soft and _no_bond_change(found.ts_rows, rows):
-                near = [
-                    m
-                    for m in _matches(rows, charge, multiplicity, nodes, SOFT_RMSD)
-                    if not _is_ts(m)
-                ]
-                if near:  # A191: the single nearest, said to be a soft mode's wider match
+            if "settled" not in entry:
+                near = _wider(rows, charge, multiplicity, nodes)
+                if near and soft and _no_bond_change(found.ts_rows, rows):
+                    # A191: the single nearest, said to be a soft mode's wider match
                     entry["matches"] = [{**near[0], "soft": True}]
                     entry["settled"] = {**near[0], "as": "soft"}
+                elif near:  # A193: another conformer of a molecule the folder has
+                    entry["matches"] = [{**near[0], "conformer": True}]
+                    entry["settled"] = {**near[0], "as": "conformer"}
+                else:  # D267: a minimum it matches only reflected is another molecule
+                    image = [
+                        m
+                        for m in _matches(atom_matching.mirrored(rows), charge, multiplicity, nodes)
+                        if not _is_ts(m)
+                    ]
+                    if image:
+                        entry["mirror_of"] = image[0]
         if name in made:
             entry["node_made"] = made[name]
         out_ends[name] = entry
@@ -562,10 +657,14 @@ def ends(session: Session, folder: Path, job_id: str) -> dict[str, Any]:
             "the folder's outputs whose final structure matches; returned_to_ts: the end "
             "still matches the TS it started from, so it matches nothing (A188); settled: "
             "the one structure the end stands for (A191: `as` one, group when its matches are "
-            "one group's members, nearest of several conformers of one molecule, or soft: a "
-            "soft mode's nearest minimum with its bonds within 1.0 Å; nearest and soft make a "
-            "link medium). Energies are the job's own method's, never for comparison. An end "
-            "that matches nothing can become a node with make_node_from_end."
+            "one group's members, nearest of several conformers of one molecule, soft: a "
+            "soft mode's nearest minimum with its bonds within 1.0 Å, or conformer: any other "
+            "end's, another conformer of that molecule; nearest, soft and conformer make a "
+            "link medium). mirror_of: the node an end that matches nothing fits only "
+            "reflected within 0.5 Å (D267: a mirror image is another molecule, so that minimum "
+            "is missing). Energies are the job's own method's, never for comparison. An end "
+            "that matches nothing, not even within 1.0 Å, can become a node with "
+            "make_node_from_end."
         ),
     }
 
@@ -588,12 +687,21 @@ def make_node(
     rows = _end_rows(found, name)
     charge, multiplicity = found.job["charge"], found.job["multiplicity"]
     ts = found.ts_node
-    matches = _matches(rows, charge, multiplicity, _node_candidates(session, ts.id if ts else None))
+    candidates = _node_candidates(session, ts.id if ts else None)
+    matches = _matches(rows, charge, multiplicity, candidates)
     if matches and not anyway:
         names = ", ".join(f"{_name(m)} ({m['rmsd']:.2f} Å)" for m in matches[:4])
         raise local_jobs.LocalJobError(
             f"The {SHOWN[name]} end matches {names}: use that node, or pass anyway to make a "
             "node all the same"
+        )
+    near = [] if anyway else _wider(rows, charge, multiplicity, candidates)
+    if near:  # A193: another conformer of a molecule the investigation has
+        names = ", ".join(f"{_name(m)} ({m['rmsd']:.2f} Å)" for m in near[:4])
+        raise local_jobs.LocalJobError(
+            f"The {SHOWN[name]} end has the bonds of {names}, within {SOFT_RMSD} Å: another "
+            "conformer of that molecule (A193). Link that node or its group, or pass anyway "
+            "to make a node all the same"
         )
     state = found.ends[name]
     fields: dict[str, Any] = {

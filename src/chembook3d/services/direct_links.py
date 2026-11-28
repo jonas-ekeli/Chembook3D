@@ -8,7 +8,9 @@ changes nothing:
 
 - `association`: minimum B has the atoms of minimum A and one free species S together (charge
   added; S closed shell), and B's bonds are A's and S's but for S's bonds to the core (A181's
-  rule, metal–hydrogen contacts weak): S's atoms are found in B by their bonds (`_embeddings`),
+  rule, metal–hydrogen contacts weak), each to a metal of the core (A193: a bond between S and
+  a non-metal atom of the core is a cycloaddition or the like, a step with a TS, never an
+  association): S's atoms are found in B by their bonds (`_embeddings`),
   the rest of B (the core) must be A's molecule, matched whatever its atom order (the same
   numbering, by position, then Match atoms ended at the first match keeping every bond), and
   the pair is ranked by the core's atom-matched RMSD. Read either way: A + S → B (association)
@@ -19,11 +21,11 @@ changes nothing:
   in different units, each with its nearest such partners only (`SAME_PER_UNIT`).
 
 Pairs already joined (by an edge, through one TS, or through one minimum with the same atoms as
-one of them) and pairs inside one group are left out; for
-each pair of units (a group stands for its members) the nearest pair of members is given, and
-the pairs of the same molecules (conformers not grouped) are listed round by round: every pair
-of molecules' nearest first, then their second, so one family does not fill the answer. The
-answer is cut at `MAX_ANSWER` characters with `more`. Energies are never read.
+one of them) and pairs inside one group are left out; for each pair of units (a group stands
+for its members) the nearest pair of members is kept, and of those only the nearest per pair of
+molecules (A193: conformers not grouped are one molecule, a group its own), with the number of
+other conformer pairs, so the answer is a line per step. It is cut at `MAX_ANSWER` characters
+with `more`. Energies are never read.
 """
 
 import json
@@ -308,11 +310,14 @@ def _associations(
                 continue
             places = _embeddings(s, b)
             cores = []
+            elements = geometry.elements(b.rows)
             for mapping in places:
                 inside = set(mapping)
                 cut = _bonds_to_core(b, inside)
                 if len(cut) > SPECIES_BONDS:
                     continue
+                if any(elements[i] not in METALS and elements[j] not in METALS for i, j in cut):
+                    continue  # A193: a bond to a non-metal of the core is no association
                 kept = [j for j in range(len(b.rows)) if j not in inside]
                 core = [b.rows[j] for j in kept]
                 cores.append((cut, kept, core, compare._bond_counts(core)))
@@ -324,8 +329,8 @@ def _associations(
                     if not compare._could_be_same(a.counts(), counts, False):
                         continue
                     mapping = _core_mapping(a, core)
-                    if mapping is None:
-                        continue
+                    if mapping is None or atom_matching.stereo_flips(a.rows, core, mapping):
+                        continue  # D267: a mirror image (another stereoisomer) is no partner
                     rmsd = geometry.aligned_rmsd(a.rows, [core[j] for j in mapping])
                     if rmsd is None or (best is not None and rmsd >= best.rmsd):
                         continue
@@ -420,6 +425,8 @@ def _coordination(a: _Item, b: _Item, tolerance: float) -> _Found | None:
         if metal_only(matched.mapping) is None:
             return None
         mapping = matched.mapping
+    if atom_matching.stereo_flips(a.rows, b.rows, mapping):
+        return None  # D267: a mirror image (another stereoisomer) is another molecule
     changed = metal_only(mapping) or []
     rmsd = geometry.aligned_rmsd(a.rows, [b.rows[j] for j in mapping])
     if rmsd is None or rmsd <= tolerance:
@@ -442,7 +449,19 @@ def _end(item: _Item) -> dict[str, Any]:
     out: dict[str, Any] = {"label": item.label, "node_id": item.node.id}
     if item.group:
         out["group"] = item.group
+        out["group_id"] = item.node.group_id
     return out
+
+
+def _edge(found: _Found) -> dict[str, Any]:
+    """A194: the association as propose_mechanism takes it, A + S → B, a grouped end as its
+    group (the pair stands for the nearest members of the two units)."""
+    assert found.species is not None
+    return {
+        "source_id": found.a.unit,
+        "target_id": found.b.unit,
+        "species": [{"species_id": found.species.node.id, "direction": "joins"}],
+    }
 
 
 def _entry(found: _Found) -> dict[str, Any]:
@@ -459,6 +478,7 @@ def _entry(found: _Found) -> dict[str, Any]:
         out["core_rmsd"] = round(found.rmsd, 3)
         out["bonds_to_core"] = found.bonds
         out["confidence"] = "medium" if small else "low"
+        out["edge"] = _edge(found)
     else:
         out["b"] = _end(found.b)
         out["rmsd"] = round(found.rmsd, 3)
@@ -472,8 +492,14 @@ def _entry(found: _Found) -> dict[str, Any]:
 
 
 def _molecules(found: _Found, table: dict) -> tuple:
+    """A193: the pair's molecules: a grouped end is its group, any other its molecule (the
+    metal-free bond print, so its conformers are one), with the species."""
+
+    def molecule(item: _Item) -> Any:
+        return ("group", item.unit) if item.group else item.print_(table)
+
     species = found.species.print_(table) if found.species is not None else ()
-    return (found.kind, found.a.print_(table), found.b.print_(table), species)
+    return (found.kind, *sorted((molecule(found.a), molecule(found.b)), key=repr), species)
 
 
 def find(
@@ -498,9 +524,8 @@ def find(
         found += _same_atoms(minima, joined, tolerance, table)
     found.sort(key=_Found.key)
 
-    # The nearest pair of members per pair of units (and species); then, so conformers of
-    # one pair of molecules do not fill the answer, each pair of molecules' nearest first,
-    # then each one's second, and so on (A190).
+    # The nearest pair of members per pair of units (and species) (A190); then only the
+    # nearest per pair of molecules, with the number of other conformer pairs (A193).
     by_units: dict[tuple, _Found] = {}
     for f in found:
         key = (f.kind, *sorted((f.a.unit, f.b.unit)), f.species.unit if f.species else None)
@@ -508,16 +533,11 @@ def find(
     alike: dict[tuple, list[_Found]] = defaultdict(list)
     for f in by_units.values():
         alike[_molecules(f, table)].append(f)
-    ranked = []
-    for group in alike.values():
-        for rank, f in enumerate(group):
-            ranked.append(((KINDS.index(f.kind), rank, *f.key()[1:]), f, rank, len(group)))
-    ranked.sort(key=lambda r: r[0])
     entries = []
-    for _, f, rank, size in ranked:
-        entry = _entry(f)
-        if size > 1:
-            entry["alike"] = [rank + 1, size]
+    for pairs in alike.values():  # each list nearest first, as `found`
+        entry = _entry(pairs[0])
+        if len(pairs) > 1:
+            entry["other_pairs"] = len(pairs) - 1
         entries.append(entry)
 
     page: list[dict[str, Any]] = []
@@ -550,22 +570,27 @@ def find(
         out["make_species"] = to_make
     out["summary"] = _summary(counts, to_make)
     out["next"] = (
-        "Propose each association you accept as an edge between the two minima with the "
-        "species joining (A + S → B) or leaving (B → A + S): medium when `confidence` says so "
-        "(the bonds balance and the core RMSD is small), else low, naming the core RMSD in the "
-        "evidence. A species marked make_species is an ordinary node: make it a free species "
-        "first (set_node_kind, kind species). same_atoms pairs are low, and only where no TS "
-        "you have links them (a rotation TS would: find_ts_partners)."
+        "Propose every association listed, at the `confidence` it gives (medium when the "
+        "bonds balance and the core RMSD is small, else low), with its `edge` as it stands "
+        "(A + S → B; reverse source and target for the species leaving, B → A + S): the atoms "
+        "fix the species, so this needs no chemistry choice. A grouped end is its group "
+        "(`group_id`, A194): the pair stands for the nearest members of the two groups, so "
+        "never link the two nodes named instead. Name the core RMSD and the bonds to the core "
+        "in the evidence. other_pairs: other conformers of the same two molecules; group the "
+        "conformers (group_structures) rather than linking each. A species marked "
+        "make_species is an ordinary node: make it "
+        "a free species first (set_node_kind, kind species). same_atoms pairs are low, and "
+        "only where no TS you have links them (a rotation TS would: find_ts_partners)."
     )
     out["key"] = (
         "association: B has A's and the species' atoms, and B's bonds are theirs but for "
-        "bonds_to_core (the species' bonds to A's atoms, in B's numbering); core_rmsd: A "
+        "bonds_to_core (the species' bonds to A's metal, in B's numbering; a bond to another "
+        "atom of A is a cycloaddition, left out: it needs a TS); core_rmsd: A "
         "against B without the species, atoms matched. same_atoms: the same atoms, bonds "
         "differing only at a metal (metal_bonds) or not at all, further apart than the "
         "duplicate tolerance. Pairs an edge or one TS joins, and pairs in one group, are left "
-        "out; per pair of groups or nodes the nearest members; alike [n, of]: the n-th nearest "
-        "of the pairs of these molecules (other conformers), each molecule pair's nearest "
-        "listed first. other_level: their geometries are at "
+        "out; per pair of molecules (a group counts as its own) the nearest pair of "
+        "conformers, other_pairs the number of others. other_level: their geometries are at "
         "different levels. Nothing was changed."
     )
     return out
