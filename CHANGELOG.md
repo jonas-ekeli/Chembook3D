@@ -6,6 +6,9 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- The first live Saga TS replay was followed to completion and verified: the unconstrained
+  optimization converged with one imaginary mode along the intended bond (05 §9).
+
 - An imaginary mode of a constrained pre-optimization can be chosen for a TS only when its
   motion lies within 60° of the frozen bond and the stretch is at least a quarter of the
   mode's largest atom motion (D269). Mode inspection reports both numbers.
