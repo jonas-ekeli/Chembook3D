@@ -34,6 +34,7 @@ from tests.fake_ssh_server import (
     FakeXServer,
     enable_job_pilot,
     enable_saga_minimum,
+    enable_saga_node,
     enable_saga_ts,
     free_display,
 )
@@ -1695,7 +1696,13 @@ def test_enrolled_saga_ts_requires_review_and_recovers_one_receipt(
     assert saga.record.logins == 1 and saga.record.answers == [[PASSWORD], [CODE]]
     assert set(saga.record.commands[before_exec:]) == {saga_access.COMMAND}
     assert saga.record.saga_minimum_requests == []
-    _assert_only_enrollment_sftp(saga, before_sftp, saga_access.SUBMISSION_MARKER, SAGA_TS_MARKER)
+    _assert_only_enrollment_sftp(
+        saga,
+        before_sftp,
+        saga_access.SUBMISSION_MARKER,
+        SAGA_TS_MARKER,
+        saga_access.NODE_SUBMISSION_MARKER,
+    )
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="the Saga helper uses Linux descriptors")
@@ -2520,3 +2527,129 @@ def test_a_joined_scan_is_saved_to_the_server_never_over_a_file(at_work, saga):
     response = at_work.post(url, json={**body, "text": "3\nwater\n"}, headers=ORIGIN)
     assert response.status_code == 422
     assert at_work.post(url, json=body).status_code == 403  # the app's own page only
+
+
+async def _review_saga_node(http, bridge, job, confirm, expected):
+    params = {"server_id": "saga", "attempt": job["attempt"]}
+    task = asyncio.create_task(bridge.call("submit_prepared_job", params))
+    try:
+        with anyio.fail_after(10):
+            while not (pending := (await http.get("/api/live")).json()["confirmations"]):
+                if task.done():
+                    pytest.fail(str((await task).content))
+                await asyncio.sleep(0.02)
+        [dialog] = pending
+        assert dialog["preview"] == job["input"]
+        for value in expected:
+            assert value in dialog["summary"], dialog["summary"]
+        answer = f"/api/confirmations/{dialog['id']}/answer"
+        response = await http.post(answer, json={"confirm": confirm}, headers=ORIGIN)
+        assert response.is_success, response.text
+        return response.json()["status"], await task
+    finally:
+        task.cancel()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the Saga helper uses Linux descriptors")
+def test_saga_node_parent_is_prepared_reviewed_and_limited(at_work, saga, monkeypatch):
+    """D271, T-SSH-42: the agent prepares parents for one node; each start needs a review."""
+    tool = BY_NAME["prepare_saga_node_parent"]
+    schema = input_schema(tool)
+    assert set(schema["properties"]) == {
+        "server_id",
+        "node_id",
+        "geometry",
+        "freeze_distance",
+        "request_id",
+    }
+    assert set(schema["required"]) == {"server_id", "node_id", "geometry"}
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=at_work.app), base_url=APP
+        ) as http:
+            bridge = Bridge(APP, http=http)
+            server = {"server_id": "saga"}
+
+            async def result(name, **params):
+                answer = await bridge.call(name, {**server, **params})
+                assert not answer.is_error, answer.content
+                return json.loads(answer.content[0].text)
+
+            async def refused(name, **params):
+                answer = await bridge.call(name, {**server, **params})
+                assert answer.is_error
+                return answer.content[0].text
+
+            async def node(**fields):
+                response = await http.post("/api/nodes", json=fields, headers=ORIGIN)
+                assert response.is_success, response.text
+                return response.json()["id"]
+
+            work = _enroll_saga(saga, install_helper=True)
+            ts1 = await node(label="TS1", charge=0, multiplicity=1)
+            unset = await node(label="no state")
+            args = {"node_id": ts1, "geometry": "guess.xyz", "freeze_distance": [1, 3]}
+            assert "enroll the project job descriptions" in await refused(tool.name, **args)
+            marker = enable_saga_node(saga, SAGA_WORK, monkeypatch)
+            assert "charge and multiplicity" in await refused(
+                tool.name, **{**args, "node_id": unset}
+            )
+            assert "No such file" in await refused(tool.name, **args)
+            (work / "geometries/guess.xyz").write_text(
+                "3\nguess\nO 0 0 0\nH 0 0.757 0.587\nH 0 -0.757 0.587\n"
+            )
+            first = await result(tool.name, **args)
+            assert first["state"] == "prepared" and first["submission_enabled"] is True
+            assert first["node_id"] == ts1 and first["charge"] == 0
+            assert "\nB 1 3 F\n" in first["input"]
+            assert marker["key"] not in json.dumps(first) and "key_id" not in first
+            request_id = first["request"]
+            stage_path = first["directory"] + "/submission"
+            stage = saga.root / stage_path.lstrip("/")
+            expected = [
+                "for node TS1 (charge 0, multiplicity 1)",
+                "1 node, 40 cores, 24 h",
+                "freeze the distance between atoms 1 and 3",
+                f"Job description min-project.jd SHA-256 {marker['jobs']['minimum']['sha256']}",
+                f"Node request {request_id}: at most 2 parents and 2 TS children",
+                f"Directory {stage_path}",
+                first["revision"],
+                f"{USER}@127.0.0.1",
+            ]
+            status, _ = await _review_saga_node(http, bridge, first, False, expected)
+            assert status == "refused" and not stage.exists()
+            ids = {"attempt": first["attempt"]}
+            assert (await result("get_prepared_job", **ids))["state"] == "prepared"
+
+            saga.drop_submit_reply = True
+            status, reply = await _review_saga_node(http, bridge, first, True, expected)
+            assert status == "failed" and reply.is_error
+            receipt = await result("get_prepared_job", **ids)
+            assert receipt["state"] == "submitted" and receipt["job_id"] == "72412"
+            assert receipt["follow_up"] == {**server, "job_id": "72412", "path": stage_path}
+            status, reply = await _review_saga_node(http, bridge, first, True, expected)
+            assert status == "done" and not reply.is_error
+            assert (stage / "scheduler-calls.txt").read_text().splitlines() == [
+                "guess.inp -n 1 -c 40 -t 24"
+            ]
+
+            again = {**args, "request_id": request_id, "freeze_distance": [1, 2]}
+            other = await node(label="other", charge=0, multiplicity=1)
+            assert "another node" in await refused(tool.name, **{**again, "node_id": other})
+            second = await result(tool.name, **again)
+            assert second["request"] == request_id
+            third = await result(tool.name, **again)
+            status, _ = await _review_saga_node(http, bridge, second, True, ["atoms 1 and 2"])
+            assert status == "done"
+            status, reply = await _review_saga_node(http, bridge, third, True, ["atoms 1 and 2"])
+            assert status == "failed" and "already started 2 parents" in reply.content[0].text
+            assert "started its 2 constrained parents" in await refused(tool.name, **again)
+
+            changed = await http.patch(f"/api/nodes/{ts1}", json={"multiplicity": 3}, headers=ORIGIN)
+            assert changed.is_success, changed.text
+            assert "charge or multiplicity changed" in await refused(tool.name, **again)
+
+    anyio.run(exercise)
+    submits = [r for r in saga.record.saga_node_requests if r["operation"] == "submit_node"]
+    assert len(submits) == 4  # lost reply, its retry, the second parent, the refused third

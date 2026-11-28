@@ -43,6 +43,7 @@ CODE = "123456"
 HOME = "/cluster/home/jonas"
 SAGA_FILE_OPERATIONS = {"list_files", "read_file", "create_xyz"}
 SAGA_TS_OPERATIONS = {"prepare_ts", "submit_ts", "ts_status"}
+SAGA_NODE_OPERATIONS = {"prepare_node", "submit_node", "node_status"}
 SAGA_TS_MARKER = saga_prepare.TS_MARKER
 
 
@@ -57,6 +58,7 @@ class Record:
     saga_prepare_requests: list[bytes] = field(default_factory=list)
     saga_minimum_requests: list[dict] = field(default_factory=list)
     saga_ts_requests: list[dict] = field(default_factory=list)
+    saga_node_requests: list[dict] = field(default_factory=list)
     saga_file_requests: list[dict] = field(default_factory=list)
     sftp_paths: list[str] = field(default_factory=list)
 
@@ -131,6 +133,7 @@ class FakeSaga:
         self.saga_prepare_reply: dict | None = None
         self.saga_minimum: Callable[[dict], dict] | None = None
         self.saga_ts: Callable[[dict], dict] | None = None
+        self.saga_node: Callable[[dict], dict] | None = None
         self.saga_file_error: str | None = None
         self.port = port
         self.x11 = x11
@@ -232,6 +235,11 @@ class FakeSaga:
                     process.stdout.write(json.dumps(self.saga_prepare_reply).encode())
                     process.exit(0)
                     return
+            if self.saga_node and isinstance(operation, str) and operation in SAGA_NODE_OPERATIONS:
+                self.record.saga_node_requests.append(envelope)
+                if self._installed_saga_source() is not None:
+                    await self._saga_job(process, self.saga_node, envelope)
+                    return
             if self.saga_ts and isinstance(operation, str) and operation in SAGA_TS_OPERATIONS:
                 self.record.saga_ts_requests.append(envelope)
                 if self._installed_saga_source() is not None:
@@ -286,7 +294,11 @@ class FakeSaga:
     ) -> None:
         try:
             result = await asyncio.to_thread(handler, request)
-            if self.drop_submit_reply and request["operation"] in {"submit_minimum", "submit_ts"}:
+            if self.drop_submit_reply and request["operation"] in {
+                "submit_minimum",
+                "submit_ts",
+                "submit_node",
+            }:
                 self.drop_submit_reply = False
                 process.exit(1)  # receipt is durable, but no bytes reached the keeper
                 return
@@ -1031,3 +1043,54 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def enable_saga_node(fake: FakeSaga, remote_root: str, monkeypatch) -> dict:
+    """D271: enroll the project job descriptions and run the real helper (Linux only)."""
+    from tests.hpc_pilot_runner import NODE_GENERATOR
+
+    work = fake.root / remote_root.lstrip("/")
+    home = fake.root / HOME.lstrip("/")
+    control = fake.saga_control
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(saga_prepare, "PROJECTS", work.parents[2])
+    policy = {
+        "work_root": str(work),
+        "stem": "water",
+        "attempt": "18" * 16,
+        "reference_sha256": "60" * 32,
+    }
+    saga_prepare.atomic_write(control / saga_prepare.MARKER, json.dumps(policy).encode())
+    jobs = work.parent / "jobdescriptions"
+    jobs.mkdir(exist_ok=True)
+    (jobs / "min-project.jd").write_text("0 1 project minimum\n")
+    (jobs / "ts-project.jd").write_text("0 1 project TS\n")
+    generator = home / "tools/scripts/submit_all_DFT.sh"
+    generator.parent.mkdir(parents=True, exist_ok=True)
+    generator.write_bytes(NODE_GENERATOR)
+    generator.chmod(0o700)
+    wrapper = home / saga_prepare.WRAPPER
+    wrapper.parent.mkdir(parents=True, exist_ok=True)
+    wrapper.write_bytes(
+        b"#!/usr/bin/env python3\n"
+        b"import sys\n"
+        b"from pathlib import Path\n"
+        b"assert sys.argv[2:] == ['-n', '1', '-c', '40', '-t', '24']\n"
+        b"assert [p.name for p in Path('.').iterdir()] == [sys.argv[1]]\n"
+        b"with open('scheduler-calls.txt', 'a') as calls:\n"
+        b"    print(' '.join(sys.argv[1:]), file=calls)\n"
+        b"print('Submitted batch job 72412')\n"
+    )
+    wrapper.chmod(0o700)
+    saga_prepare.enroll_jobs("min-project.jd", "ts-project.jd")
+    marker = control / saga_prepare.NODE_MARKER
+
+    def operation(request):
+        result = saga_prepare.node_operation(request, policy)
+        return {**result, "directory": result["directory"].removeprefix(str(fake.root))}
+
+    saga_prepare.atomic_write(
+        fake.root / ".local/lib/chembook3d" / saga_prepare.NODE_MARKER, marker.read_bytes()
+    )
+    fake.saga_node = operation
+    return json.loads(marker.read_bytes())

@@ -771,6 +771,20 @@ Routes for all of these are in `api/pathway.py`.
   Tests: `tests/test_saga_ts_helper.py`, `tests/test_saga_ts_transport.py` and the
   replaced-bundle scenario in `tests/test_remote.py`.
 
+- One node on Saga (D271, FR-SSH-24): `prepare_saga_node_parent` in `mcp_tools.py` calls
+  `prepare_saga_node` in `api/hpc_jobs.py`, which reads node X's charge and multiplicity,
+  opens or continues a node request (`saga-node-requests/<id>.json` in the app's config
+  folder) and stores the preview as pilot `saga_node`. The keeper's `_saga_node` reads the
+  operator's `.submit-node.json` with `saga_access.node_policy`, checks the preview again
+  (`check_node_preview`: echoed request, every step's charge and multiplicity, the one frozen
+  distance) and signs `submit_node`. In `remote/saga_prepare.py`, the operator command
+  `enroll-jobs` (`enroll_jobs`) pins the project minimum and TS job descriptions, and
+  `node_operation` runs the pinned generator on the agent's XYZ (`prepare_node`), checks it
+  (`check_node_input`, a stdlib port of `job_pilot._verify_input`), freezes the distance
+  (`freeze_distance`, a port of `job_pilot._freeze_optimization_distance`) and counts starts
+  per request (`node-request-<id>.json`, D271c). Tests: `tests/test_saga_node_helper.py`,
+  `tests/test_saga_node_transport.py` and the node scenario in `tests/test_remote.py`.
+
 - The local preparation pilot (D266, FR-SSH-19) connects `api/hpc_jobs.py` and
   `api/live.py` to the keeper's fixed SSH subsystem. `remote/job_pilot.py` validates
   files, applies an optional one-distance freeze to the linked optimization step,

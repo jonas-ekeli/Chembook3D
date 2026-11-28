@@ -709,6 +709,30 @@ TOOLS: list[ToolSpec] = [
         "recovers its receipt or reports uncertainty.",
     ),
     T(
+        "prepare_saga_node_parent",
+        "write",
+        "POST",
+        "/api/hpc-jobs/{server_id}/prepare-node",
+        "Prepare a parent calculation on Saga for one node of this investigation (D271): the "
+        "operator's enrolled project minimum job description runs on an XYZ you wrote in the "
+        "pilot's geometries directory, with nosub, in a fresh attempt directory. The helper "
+        "checks the five linked steps, the coordinates against the XYZ and the node's charge "
+        "and multiplicity in every step, and with freeze_distance freezes that one distance in "
+        "the optimization step (a constrained pre-optimization, the TS guess). Returns the "
+        "complete input, its SHA-256, the attempt and the node request for submit_prepared_job. "
+        "One node request starts at most 2 parents and 2 TS children; pass its request_id for "
+        "a second parent of the same node.",
+        help={
+            "node_id": "The node the calculation is for; its charge and multiplicity are used.",
+            "geometry": "File name of the XYZ in the pilot's geometries directory, e.g. "
+            "'ts-guess.xyz' (write it first with write_server_file).",
+            "freeze_distance": "Two distinct 1-based atom numbers of the XYZ whose distance is "
+            "frozen; leave out for an unconstrained minimum.",
+            "request_id": "The request_id of an earlier parent for this node; leave out to open "
+            "a new node request.",
+        },
+    ),
+    T(
         "prepare_gaussian_job",
         "write",
         "POST",
@@ -2205,7 +2229,9 @@ CONFIRM_DESCRIPTIONS = {
     "or local HPC pilot. The app shows the input, destination and resources for confirmation. "
     "A constrained pre-optimization shows the frozen distance. A TS follow-on shows its "
     "parent and Slurm receipt, selected mode and checkpoint digest. A Saga TS submission also "
-    "shows the enrolled checkpoint filename and archived review digest.",
+    "shows the enrolled checkpoint filename and archived review digest. A Saga node parent "
+    "shows the node, its charge and multiplicity, the frozen distance, the enrolled job "
+    "description and the node request's limits.",
     "delete_node": "Delete a node (or free species) with its calculations, notes and every "
     "edge touching it.",
     "delete_group": "Delete a group with its contents: its members, their calculations and "

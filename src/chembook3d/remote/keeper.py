@@ -868,6 +868,8 @@ class Keeper:
             return reply
         if op in {"saga_prepare_minimum", "saga_prepare_ts", "saga_minimum_job", "saga_ts_job"}:
             return await self._saga_job(op, msg)
+        if op in {"saga_prepare_node", "saga_node_job"}:
+            return await self._saga_node(op, msg)
         if op == "job_pilot":
             session = self.sessions.get(str(msg.get("server")))
             if session is None:
@@ -1011,6 +1013,56 @@ class Keeper:
                 ):
                     return {"ok": False, "error": "The Saga TS destination has changed."}
                 reply = await saga_access.enrolled_job(session.conn, root, policy, request)
+        except (ValueError, OSError, asyncssh.Error) as exc:
+            return {"ok": False, "error": _reason(exc)}
+        if reply["ok"]:
+            session.used = time.monotonic()
+        return reply
+
+    async def _saga_node(self, op: str, msg: dict) -> dict:
+        """D271: a parent the agent prepares for one node request, and its signed submission."""
+        fields = {"op", "token", "server", "target", "request"}
+        if op == "saga_node_job":
+            fields.update(("key_id", "directory"))
+        if msg.keys() != fields or not isinstance(msg["request"], dict):
+            return {"ok": False, "error": "Invalid fields for the Saga node request."}
+        session = self.sessions.get(str(msg.get("server")))
+        if session is None or not saga_access.is_saga(session.server["host"]):
+            return {"ok": False, "error": "Connect to the enrolled Saga server in the HPC tab."}
+        target = [session.server[k] for k in ("host", "port", "username")]
+        if msg["target"] != target:
+            return {"ok": False, "error": "The connected Saga target has changed."}
+        request = msg["request"]
+        try:
+            await refresh_saga_scope(session)
+            root = session.saga_work
+            if root is None:
+                return {"ok": False, "error": "Enroll the Saga pilot directory first."}
+            policy = await saga_access.node_policy(await session.files())
+            if policy is None:
+                return {
+                    "ok": False,
+                    "error": "Ask the operator to enroll the project job descriptions on Saga "
+                    "(saga_prepare.py enroll-jobs).",
+                }
+            if op == "saga_prepare_node":
+                if "operation" in request:
+                    return {"ok": False, "error": "Invalid fields for the Saga node request."}
+                reply = await saga_access.prepare_node(session.conn, root, policy, request)
+                if reply["ok"]:
+                    reply["result"].update(
+                        submission_enabled=True, key_id=policy.key_id, **saga_access.RESOURCES
+                    )
+                    reply["target"] = target
+            else:
+                attempt = request.get("attempt")
+                if msg["key_id"] != policy.key_id:
+                    return {"ok": False, "error": "The Saga submission enrollment has changed."}
+                if not isinstance(attempt, str) or msg["directory"] != posixpath.join(
+                    root, "node-" + attempt, "submission"
+                ):
+                    return {"ok": False, "error": "The Saga node destination has changed."}
+                reply = await saga_access.node_job(session.conn, root, policy, request)
         except (ValueError, OSError, asyncssh.Error) as exc:
             return {"ok": False, "error": _reason(exc)}
         if reply["ok"]:
