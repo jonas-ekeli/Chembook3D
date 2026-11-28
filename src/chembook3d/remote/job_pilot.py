@@ -396,7 +396,10 @@ class JobPilot:
             raise ValueError("The parent output changed. Inspect the modes again.")
         mode = next((m for m in inspection["modes"] if m["mode_index"] == mode_index), None)
         if not mode or not mode["eligible"]:
-            raise ValueError("Select an imaginary mode aligned with the parent's frozen distance.")
+            raise ValueError(
+                "Select an imaginary mode along the frozen bond: alignment at least 0.5 and "
+                "bond share at least 0.25 (D269)."
+            )
         evidence = {
             **mode,
             **{key: inspection[key] for key in ("output_sha256", "freeze_distance")},

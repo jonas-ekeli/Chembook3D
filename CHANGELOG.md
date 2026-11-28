@@ -6,6 +6,10 @@ artifacts and publishes nothing.
 
 ## Unreleased
 
+- An imaginary mode of a constrained pre-optimization can be chosen for a TS only when its
+  motion lies within 60° of the frozen bond and the stretch is at least a quarter of the
+  mode's largest atom motion (D269). Mode inspection reports both numbers.
+
 - Building from a folder, from what the gap-filling validation run showed (A195): `find_gaps`
   orders its holes by usefulness across kinds (an edge alone, certain fills, one TS guess,
   evidence first, choices) instead of kind by kind, keeps each kind's first places in a

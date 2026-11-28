@@ -728,7 +728,8 @@ TOOLS: list[ToolSpec] = [
         "/api/hpc-jobs/{server_id}/attempts/{parent_attempt}/modes",
         "Read imaginary modes from a finished constrained pre-optimization in this investigation "
         "on the local HPC pilot. Returns the parent Slurm receipt, frozen atom pair and mode "
-        "projections along that bond, with the SHA-256 of the inspected output. Use the "
+        "projections along that bond, with the SHA-256 of the inspected output. A mode is "
+        "eligible when its alignment is at least 0.5 and its bond_share at least 0.25. Use the "
         "intended elementary step to interpret the motion.",
         help={"parent_attempt": "Attempt ID from the constrained prepare_gaussian_job."},
     ),

@@ -191,3 +191,22 @@ def test_rejects_link_to_other_result(parent, tmp_path):
         pytest.skip("This filesystem does not permit hard links.")
     with pytest.raises(ValueError, match="linked"):
         inspect(parent)
+
+
+def test_pair_motion_mostly_across_the_bond_is_ineligible(parent):
+    # D269: the pair's relative motion must lie within 60° of the bond (alignment >= 0.5).
+    replace(parent / "water.out", " 0.38   0.29   0.00", " 0.38   0.29   1.80")
+    (mode,) = inspect(parent)["modes"]
+    assert abs(mode["bond_projection"]) > 0.9 and mode["bond_share"] > 0.25
+    assert mode["alignment"] < 0.5 and not mode["eligible"]
+
+
+@pytest.mark.parametrize(("z", "eligible"), [("4.00", False), ("3.50", True)])
+def test_bond_stretch_must_be_a_real_part_of_the_mode(parent, z, eligible):
+    # D269: a third atom moving four times further than the bond stretches (a methyl twist,
+    # say) leaves the bond a small part of the mode.
+    row = "     3   1   0.00   0.00   "
+    replace(parent / "water.out", row + "0.00", row + z)
+    (mode,) = inspect(parent)["modes"]
+    assert mode["alignment"] > 0.999
+    assert (mode["bond_share"] >= 0.25) is eligible and mode["eligible"] is eligible

@@ -16,6 +16,10 @@ from chembook3d.thermochem import LINEAR_POINT_GROUPS
 _NORMAL_END = re.compile(r"^ Normal termination of Gaussian [^\r\n]+", re.M)
 _MODE_LINE = re.compile(r"^ Frequencies\s+--\s+(.+)$")
 _STAGES = ("SP", "SP", "STABLE", "OPT", "FREQ")
+# D269: floor for a mode the agent may pick as a TS guess. The pair's relative motion lies
+# within 60° of the bond, and the stretch is at least a quarter of the largest atom's motion.
+MIN_ALIGNMENT = 0.5
+MIN_BOND_SHARE = 0.25
 
 
 def _frequency_frame(lines: list[str], elements: list[str]) -> list[list[float]]:
@@ -48,8 +52,14 @@ def _frequency_frame(lines: list[str], elements: list[str]) -> list[list[float]]
 
 
 def _projection(
-    index: int, frequency: float, unit: list[float], first: list[str], second: list[str]
+    index: int,
+    frequency: float,
+    unit: list[float],
+    first: list[str],
+    second: list[str],
+    largest: float,
 ) -> dict:
+    """Bond evidence for one imaginary mode; `largest` is its largest atom displacement."""
     delta = [float(b) - float(a) for a, b in zip(first, second, strict=True)]
     length = math.hypot(*delta)
     projection = math.fsum(d * u for d, u in zip(delta, unit, strict=True))
@@ -60,13 +70,18 @@ def _projection(
         for value in (a, b):
             decimals = len(value.partition(".")[2])
             resolution += abs(u) * 0.5 * 10.0**-decimals
+    alignment = min(1.0, abs(projection) / length) if length else 0.0
+    share = abs(projection) / largest if largest else 0.0
     return {
         "mode_index": index,
         "frequency_cm1": frequency,
         "relative_displacement": length,
         "bond_projection": projection,
-        "alignment": min(1.0, abs(projection) / length) if length else 0.0,
-        "eligible": abs(projection) > resolution,
+        "alignment": alignment,
+        "bond_share": share,
+        "eligible": abs(projection) > resolution
+        and alignment >= MIN_ALIGNMENT
+        and share >= MIN_BOND_SHARE,
     }
 
 
@@ -147,7 +162,10 @@ def _frequency_evidence(
             count += 1
             if frequency < 0:
                 col = slice(3 * offset, 3 * offset + 3)
-                modes.append(_projection(count, frequency, unit, rows[i][col], rows[j][col]))
+                largest = max(math.hypot(*map(float, row[col])) for row in rows)
+                modes.append(
+                    _projection(count, frequency, unit, rows[i][col], rows[j][col], largest)
+                )
     if not count:
         raise ValueError("The final step did not print frequencies and displacements.")
     expected = _mode_count(coordinates, point_group)
